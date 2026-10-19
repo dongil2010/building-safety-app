@@ -13,13 +13,13 @@ const app = fs.readFileSync(path.join(__dirname, '..', 'app.js'), 'utf8').replac
 const COLORS = { defectBad: '#dc2626', defectGood: '#2563eb', priorityManage: '#16a34a', defectGoodGrade3: '#000000', defectExistingGrade3: '#ff0000', defectNewGrade3: '#0000ff' };
 function makeCtx(o) {
     const ctx = {
-        state: { currentBuilding: { id: 'B' }, currentBuildingId: 'B', locationMapLegend: o.legend || null, defects: o.defects || {} },
+        state: { currentBuilding: { id: 'B' }, currentBuildingId: 'B', currentFloor: o.floor || '1F', locationMapLegend: o.legend || null, defects: o.defects || {} },
         isGrade3Building: () => !!o.grade3,
         getStyleColor: (k) => (o.colors || COLORS)[k]
     };
     vm.createContext(ctx);
     vm.runInContext(['normalizeHexColor', 'hexToLegendColorName', 'resolveLegendColorName', 'getDefaultLocationMapLegend',
-        'legendStyleKeyByLabel', 'normalizeLegendLabelKey', 'resolveLegendItemStyleKey', 'buildingHasPriorityManageMarking',
+        'legendStyleKeyByLabel', 'normalizeLegendLabelKey', 'resolveLegendItemStyleKey', 'floorHasPriorityManageMarking',
         'getLocationMapLegendDrawItems', 'enrichLocationMapLegendItem', 'getActiveLocationMapLegend']
         .map((n) => extractFunction(app, 'function ' + n + '(')).join('\n') + '\nthis.items = getLocationMapLegendDrawItems; this.defaults = getDefaultLocationMapLegend;', ctx);
     return ctx;
@@ -52,6 +52,11 @@ const simple = (items) => J(items.map((i) => [i.label, i.color, i.colorName]));
 {
     const pri = { B_1F: [{ id: 'a', isPriorityManage: true }], X_1F: [] };
     assert.deepStrictEqual(J(makeCtx({ defects: pri }).items().map((i) => i.label)), ['결함발생', '상태양호', '중점관리'], '중점관리 마킹 있으면 줄');
+    // 2026-10-20 층(도면) 단위 — 중점관리가 없는 층 도면에는 줄을 안 붙인다
+    const two = { B_1F: [{ id: 'a', isPriorityManage: true }], B_2F: [{ id: 'b' }] };
+    assert.strictEqual(makeCtx({ defects: two, floor: '2F' }).items().length, 2, '지금 층(2F)엔 중점관리 없음');
+    assert.strictEqual(makeCtx({ defects: two, floor: '2F' }).items('1F').length, 3, '출력은 그 층(1F) 기준');
+    assert.strictEqual(makeCtx({ defects: two, floor: '1F' }).items('2F').length, 2, '출력은 그 층(2F) 기준');
     assert.strictEqual(makeCtx({ defects: pri }).items()[2].color, '#16a34a');
     assert.strictEqual(makeCtx({ defects: { B_1F: [{ id: 'a' }], X_1F: [{ isPriorityManage: true }] } }).items().length, 2, '다른 건물 것은 안 셈');
     assert.strictEqual(makeCtx({ defects: { B_1F: [{ isPriorityManage: true, mapUnregistered: true }] } }).items().length, 2, '도면에 없는 것은 안 셈');
@@ -61,7 +66,7 @@ const simple = (items) => J(items.map((i) => [i.label, i.color, i.colorName]));
 }
 
 // 연결: 화면·보고서·벡터 PDF·범위 맞춤이 같은 줄을 쓴다
-assert.strictEqual((app.match(/const items = getLocationMapLegendDrawItems\(\);/g) || []).length, 3);
+assert.strictEqual((app.match(/const items = getLocationMapLegendDrawItems\((?:legendOpts && legendOpts\.floorCode|floorCode)\);/g) || []).length, 3, "그리는 층을 넘김");
 assert.strictEqual((app.match(/getActiveLocationMapLegend\(\)\.map\(enrichLocationMapLegendItem\)/g) || []).length, 1, 'getLocationMapLegendDrawItems 안에서만');
 assert.ok(/items\[idx\]\.colorCustom = true;/.test(extractFunction(app, 'window.recolorLocationMapLegendItem = function(')), '직접 고른 색 표시');
 assert.ok(/drawCanvas\(\)/.test(extractFunction(app, 'window.renameLocationMapLegendItem = function(')), '이름 바꾸면 다시 그림');

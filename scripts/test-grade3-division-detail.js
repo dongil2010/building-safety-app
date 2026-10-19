@@ -16,7 +16,7 @@ const ctx = {
     getDefectLocationFloorLabel: (fc) => LABELS[fc] || fc
 };
 vm.createContext(ctx);
-vm.runInContext(['getGrade3FloorPrefix', 'isExteriorFloorCode', 'extractDefectLocationDetail', 'isGrade3OutsideDrawing',
+vm.runInContext(['getGrade3RoofPrefix', 'getGrade3FloorPrefix', 'isExteriorFloorCode', 'extractDefectLocationDetail', 'isGrade3OutsideDrawing',
     'grade3LocationDetailOnly', 'grade3DivisionText']
     .map((n) => extractFunction(app, 'function ' + n + '(')).join('\n') + '\nthis.g = grade3DivisionText;', ctx);
 

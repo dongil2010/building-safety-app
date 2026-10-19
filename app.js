@@ -42589,13 +42589,40 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
     // 3종 상태조사표 번호(예: B1-1, 1-3, R-2, O-1)용 층코드→접두사 매핑.
     // 범례: B{n}F→B{n}(지하n층), {n}F→{n}(지상n층), ROOF→R(옥상/옥탑), EXT/EXT_*→O(외부)
     // (hwpx_priority_compare_grade3.hwpx 범례: O-외부 — A 아님)
+    // 2026-10-20 지붕 쪽 층은 서로 다른 층 — 접두사도 겹치지 않게(예전엔 옥상층·옥상지붕층이 둘 다 R,
+    // 옥탑층·옥탑1층·옥탑2층·옥탑 지붕층이 모두 RT라 번호(R-1 등)가 두 층에 겹쳤다):
+    //   옥상층 R · 옥상지붕층 RR · 지붕층 RF · 옥탑층 RT · 옥탑N층 RT{N} · 옥탑 지붕층 RTR (옥탑N층은 N층이 아님)
+    function getGrade3RoofPrefix(raw) {
+        const t = String(raw || '').trim();
+        if (!t) return '';
+        const c = t.toUpperCase();
+        if ((t.includes('옥탑') && t.includes('지붕')) || /PH[\s_-]*ROOF|ROOF[\s_-]*PH/.test(c)) return 'RTR';
+        const rooftop = t.includes('옥탑') || c.includes('PENTHOUSE')
+            || /(^|[^A-Z0-9])PH([^A-Z0-9]|$)/.test(c)
+            || /(^|[^A-Z0-9])(?:PH|RF)[\s_-]*[0-9]{1,2}(?![0-9])/.test(c);
+        if (rooftop) {
+            const n = (typeof window.parseRooftopIndex === 'function') ? window.parseRooftopIndex(t) : null;
+            return n ? `RT${n}` : 'RT';
+        }
+        if (t.includes('옥상') && t.includes('지붕')) return 'RR';
+        if (/^지붕\s*층?(?:\s*\(.*\))?$/.test(t)) return 'RF';
+        if (t.includes('옥상') || c === 'ROOF' || /(^|[^A-Z0-9])ROOF([^A-Z0-9]|$)/.test(c)) return 'R';
+        return '';
+    }
+
     function getGrade3FloorPrefix(floorCode) {
         const raw = String(floorCode || '');
         const c = raw.toUpperCase().trim();
-        // 옥상층/옥탑층/옥탑 지붕층은 코드(ROOF/PH/PH_ROOF)뿐 아니라 "옥상층"처럼 직접 입력된 이름도 인식
-        if (raw.includes('옥탑') && raw.includes('지붕')) return 'RT';
-        if (raw.includes('옥탑') || c === 'PH' || c === 'PH_ROOF' || c.includes('PH')) return 'RT';
-        if (raw.includes('옥상') || c === 'ROOF') return 'R';
+        // 옥상층/옥탑층/옥탑 지붕층은 코드(ROOF/PH/PH_ROOF)뿐 아니라 "옥상층"처럼 직접 입력된 이름도 인식.
+        // 코드로 모르면 등록된 층 이름(예: 코드 PH + 이름 「옥탑2층」)으로 본다.
+        const byCode = getGrade3RoofPrefix(raw);
+        if (byCode) {
+            if (byCode !== 'RT') return byCode;
+            let label = '';
+            try { label = (typeof window.getFloorLabelFromCode === 'function') ? String(window.getFloorLabelFromCode(raw) || '') : ''; } catch (_e) { label = ''; }
+            const byLabel = getGrade3RoofPrefix(label.replace(/\s*\([^)]*\)\s*$/, ''));
+            return (byLabel && byLabel.indexOf('RT') === 0) ? byLabel : byCode;
+        }
         const bMatch = c.match(/^B(\d+)F$/);
         if (bMatch) return `B${bMatch[1]}`;
         const fMatch = c.match(/^(\d+)F$/);
@@ -45028,23 +45055,26 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
         return byLabel;
     }
     /** 이 건물에 도면에 놓인 중점관리 마킹이 있나(1·2종 범례에 중점관리 줄을 붙일지) */
-    function buildingHasPriorityManageMarking(bldgId) {
+    /**
+     * 그 층 도면에 놓인 중점관리 마킹이 있나(1·2종 범례에 중점관리 줄을 붙일지).
+     * 2026-10-20 건물 단위로 보던 것을 층(도면) 단위로 — 중점관리가 없는 층 도면에도 줄이 붙던 것.
+     */
+    function floorHasPriorityManageMarking(floorCode, bldgId) {
         const id = bldgId || state.currentBuildingId;
-        if (!id || !state.defects) return false;
-        const prefix = `${id}_`;
-        return Object.keys(state.defects).some((k) => k.indexOf(prefix) === 0
-            && (state.defects[k] || []).some((d) => d && d.isPriorityManage && !d.mapUnregistered));
+        const fc = floorCode || state.currentFloor;
+        if (!id || !fc || !state.defects) return false;
+        return (state.defects[`${id}_${fc}`] || []).some((d) => d && d.isPriorityManage && !d.mapUnregistered);
     }
     /**
      * 도면에 그릴 범례 줄(화면·보고서/PDF·한글 그림·벡터 PDF·범위 맞춤 공용).
      * 1·2종도 중점관리 마킹은 녹색으로 그려지는데 기본 범례엔 그 줄이 없었다 → 중점관리 마킹이 있으면 줄을 붙인다.
      */
-    function getLocationMapLegendDrawItems() {
+    function getLocationMapLegendDrawItems(floorCode) {
         const items = getActiveLocationMapLegend().map(enrichLocationMapLegendItem);
         if (!isGrade3Building()) {
             const hasRow = items.some((it) => resolveLegendItemStyleKey(it) === 'priorityManage'
                 || normalizeLegendLabelKey(it.label) === '중점관리');
-            if (!hasRow && buildingHasPriorityManageMarking()) {
+            if (!hasRow && floorHasPriorityManageMarking(floorCode)) {
                 items.push(enrichLocationMapLegendItem({ label: '중점관리', color: getStyleColor('priorityManage'), styleKey: 'priorityManage', auto: true }));
             }
         }
@@ -45441,7 +45471,8 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
     // 결함위치도에 색상 범례를 그린다. 위치(x,y)는 도면 원본 픽셀 좌표(좌상단)이며,
     // counterRotateDeg로 도면 회전과 반대로 돌려 글자·표가 항상 수평으로 보이게 한다.
     function drawLocationMapLegend(ctx, imgW, imgH, interactive, counterRotateDeg, legendOpts) {
-        const items = getLocationMapLegendDrawItems();
+        // legendOpts.floorCode: 그리는 도면의 층(출력은 층마다 다르다 — 화면은 지금 층)
+        const items = getLocationMapLegendDrawItems(legendOpts && legendOpts.floorCode);
         if (!items.length) {
             if (interactive) lastLegendBoxBounds = null;
             return;
@@ -45461,7 +45492,9 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
             };
         const boxX = origin.x;
         const boxY = origin.y;
-        if (!(legendOpts && legendOpts.box)
+        // 2026-10-20 저장된 범례 박스에 비율을 찍는 것은 화면(지금 층 도면)에서만 — 출력 중 다른 층 도면 크기로
+        // 찍히면 다음 층부터 범례 자리가 그 층 기준으로 어긋났다
+        if (interactive && !(legendOpts && legendOpts.box)
             && state.locationMapLegendBox && (state.locationMapLegendBox.nx == null || state.locationMapLegendBox.ny == null)
             && _legendLayout && typeof _legendLayout.stampNormalized === 'function') {
             state.locationMapLegendBox.x = boxX;
@@ -45556,8 +45589,8 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
     }
 
     /** 결함위치도 범례 표 → 벡터 PDF용 (화면 drawLocationMapLegend와 동일 치수) */
-    window.buildVectorLegendDrawPlan = function(measureCtx, imgW, imgH) {
-        const items = getLocationMapLegendDrawItems();
+    window.buildVectorLegendDrawPlan = function(measureCtx, imgW, imgH, floorCode) {
+        const items = getLocationMapLegendDrawItems(floorCode);
         if (!items.length) return null;
         const box = state.locationMapLegendBox || {};
         const scale = resolveLocationMapLegendDrawScale(box, imgW, imgH);
@@ -45675,7 +45708,7 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
                         _mapStyleRenderContext = prevStyleCtx;
                     }
                     drawMemosForReport(ctx, currentBldgId, floorCode, imgW, imgH);   // 「메모 출력」 켰을 때만
-                    drawLocationMapLegend(ctx, imgW, imgH);
+                    drawLocationMapLegend(ctx, imgW, imgH, false, 0, { floorCode });   // 그 층 도면의 범례
                     ctx.restore();
 
                     return canvas.toDataURL('image/png');
@@ -45773,8 +45806,8 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
     }
 
     /** 범위 안에 그릴 범례의 크기(범위 좌표). 범례 항목이 없으면 null. */
-    function measureLegendForPrintCrop(crop) {
-        const items = getLocationMapLegendDrawItems();
+    function measureLegendForPrintCrop(crop, floorCode) {
+        const items = getLocationMapLegendDrawItems(floorCode);
         if (!items.length || !crop) return null;
         const scale = resolveLocationMapLegendDrawScale(state.locationMapLegendBox || {}, crop.w, crop.h);
         const dims = measureLocationMapLegendTable(document.createElement('canvas').getContext('2d'), items, scale);
@@ -45785,12 +45818,12 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
      * 범위 안에 범례를 다시 놓기 위한 임시 박스(저장된 범례 박스는 건드리지 않는다).
      * crop.lc(구석)가 있으면 그 구석에, 없으면 도면 전체에서의 상대 위치를 범위 안에서도 그대로.
      */
-    function legendBoxForPrintCrop(imgW, imgH, crop) {
+    function legendBoxForPrintCrop(imgW, imgH, crop, floorCode) {
         const box = Object.assign({}, state.locationMapLegendBox || {});
         if (box.nx == null && box.x !== undefined && imgW > 0) box.nx = box.x / imgW;
         if (box.ny == null && box.y !== undefined && imgH > 0) box.ny = box.y / imgH;
         if (crop && crop.lc) {
-            const d = measureLegendForPrintCrop(crop);
+            const d = measureLegendForPrintCrop(crop, floorCode);
             if (d) {
                 const o = printCropApi().cornerOrigin(crop.lc, crop.w, crop.h, d.boxW, d.boxH, d.margin);
                 box.nx = o.x / crop.w;
@@ -45872,7 +45905,7 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
         drawMemosForReport(ctx, buildingId, floorCode, imgW, imgH);   // 「메모 출력」 켰을 때만
         // 범례는 범위 안의 같은 구석에 — 도면 구석에 그대로 두면 범위 밖이라 잘려 나간다
         ctx.translate(crop.x, crop.y);
-        drawLocationMapLegend(ctx, crop.w, crop.h, false, 0, { box: legendBoxForPrintCrop(imgW, imgH, crop) });
+        drawLocationMapLegend(ctx, crop.w, crop.h, false, 0, { box: legendBoxForPrintCrop(imgW, imgH, crop, floorCode), floorCode });
         ctx.restore();
         return canvas;
     }

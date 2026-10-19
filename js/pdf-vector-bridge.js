@@ -793,7 +793,7 @@
     const measureCanvas = document.createElement('canvas');
     const measureCtx = measureCanvas.getContext('2d');
     const legendPlan = (typeof window.buildVectorLegendDrawPlan === 'function')
-      ? window.buildVectorLegendDrawPlan(measureCtx, imgW, imgH)
+      ? window.buildVectorLegendDrawPlan(measureCtx, imgW, imgH, floorCode)
       : null;
     return window.exportFloorPlanVectorPdf(pdfDataUrl, defects, imgW, imgH, { legendPlan });
   };
