@@ -42,9 +42,9 @@ assert.deepStrictEqual(sk.listFor(A, 'F')[0].strokes.map((x) => x.i).sort(), ['f
 // ---- app.js 연결 ----
 const app = fs.readFileSync(path.join(root, 'app.js'), 'utf8').replace(/\r\n/g, '\n');
 assert.ok(/openSketchMemo\(\{ latest: true \}\)/.test(app) && !/openSketchMemo\(\{ fresh: true \}\)/.test(app), '메모 버튼은 새 종이가 아님');
-assert.ok(/api\.pickInitialSheet\(window\.state, floorKey, me\)/.test(app), '열 때 최근 메모');
+assert.ok(/api\.pickInitialForBuilding\(window\.state, sketchUi\.bldgId, sketchMe\(\)\)/.test(app), '열 때 내 최근 메모(2026-10-20 건물 통합·계정별)');
 assert.ok(/else if \(a === 'new'\) \{ sketchSave\(false\); sketchOpenSheet\(null\); \}/.test(app), '새 메모는 「＋ 새 메모」로만');
-assert.ok(/data-sk-tabs role="tablist"/.test(app) && /api\.sheetTabs\(window\.state, sketchUi\.floorKey, me\)/.test(app), '메모 탭 목록');
+assert.ok(/data-sk-tabs role="tablist"/.test(app) && /api\.buildingTabs\(window\.state, sketchUi\.bldgId, me\)/.test(app), '메모 탭 목록');
 assert.ok(/b\.dataset\.skTab !== undefined/.test(app), '탭 누르면 그 메모 열기');
 assert.ok(!/data-sk-sheets/.test(app), '숨은 드롭다운 대신 보이는 탭');
 assert.ok(/Object\.assign\(\{ c: s\.c, w: s\.w, e: s\.e, p: s\.p\.slice\(\) \}, s\.i \? \{ i: s\.i \} : \{\}\)/.test(app), '열 때 획 ID 지킴');

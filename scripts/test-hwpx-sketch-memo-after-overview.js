@@ -14,18 +14,19 @@ const ctx = { window: { BSA: { sketchMemo: sketch } } };
 vm.createContext(ctx);
 vm.runInContext(extractFunction(app, 'function collectBuildingSketchMemos(') + '\nthis.collect = collectBuildingSketchMemos;', ctx);
 
-const S = (id, t, strokes) => ({ id, createdAt: t, w: 100, h: 50, strokes });
+// 2026-10-20 층 구분 없이 건물 전체 · 계정(작성자)별 — 자세한 규칙은 test-sketch-memo-building-account.js
+const S = (id, t, strokes, by, byUid) => Object.assign({ id, createdAt: t, w: 100, h: 50, strokes }, by ? { by } : {}, byUid ? { byUid } : {});
 const ink = [{ c: '#111827', w: 3, e: 0, p: [1, 1, 50, 9, 9, 50] }];
 const st = {
     sketchMemos: {
-        B_2F: [S('c', 5, ink)],
-        B_1F: [S('b', 9, ink), S('a', 2, ink), S('e', 1, [{ c: '#000', w: 3, e: 1, p: [1, 1, 50] }]), S('f', 3, [])],
-        BB_1F: [S('x', 1, ink)]
+        B_2F: [S('c', 5, ink, '김', 'u1')],
+        B_1F: [S('b', 9, ink, '이', 'u2'), S('a', 2, ink, '김', 'u1'), S('e', 1, [{ c: '#000', w: 3, e: 1, p: [1, 1, 50] }], '김', 'u1'), S('f', 3, [], '김', 'u1'), S('o', 4, ink)],
+        BB_1F: [S('x', 1, ink, '김', 'u1')]
     }
 };
-const bldg = { id: 'B', floorsList: [{ floorCode: '1F' }, { floorCode: '2F' }] };
-const got = JSON.parse(JSON.stringify(ctx.collect(st, bldg))).map((m) => `${m.floorCode}:${m.rec.id}`);
-assert.deepStrictEqual(got, ['1F:a', '1F:b', '2F:c'], '층 순서·만든 순서, 다른 건물·빈 장·지우개만 뺌');
+const bldg = { id: 'B' };
+const got = JSON.parse(JSON.stringify(ctx.collect(st, bldg))).map((m) => `${m.label}:${m.rec.id}`);
+assert.deepStrictEqual(got, ['김 메모-1:a', '김 메모-2:c', '이 메모-1:b', '이전 메모-1:o'], '층 없이 작성자별, 이전 메모는 맨 뒤, 다른 건물·빈 장·지우개만 뺌');
 assert.strictEqual(ctx.collect({}, bldg).length, 0);
 assert.strictEqual(ctx.collect(st, null).length, 0);
 
@@ -42,5 +43,5 @@ for (const tail of parts.slice(1)) {
 const fn = extractFunction(app, 'async function appendHwpxSketchMemoSection(');
 assert.ok(/if \(!memos\.length\) return imgCounter;/.test(fn), '메모 없으면 안 넣음');
 assert.ok(/o\.setPicImage\(pic, imgId, png\.w, png\.h, MAX_W, MAX_H\)/.test(fn), '쪽 폭에 맞추고 비율 유지(setPicImage)');
-assert.ok(fn.includes('손글씨 메모-${perFloor[floorCode]}'));
+assert.ok(fn.includes('const { rec, label } = memos[i];') && fn.includes('const caption = `${label}${rec.title ? ` (${rec.title})` : \'\'}`;'), '층 이름 없이 작성자 이름표');
 console.log('test-hwpx-sketch-memo-after-overview: ok');

@@ -26372,6 +26372,25 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
         if (typeof scheduleSyncToFirebase === 'function') scheduleSyncToFirebase();
         syncDrawingMemoOverlay();
     }
+    /** 2026-10-20 손글씨 메모 계정: { uid, name } — 메모는 계정별 */
+    function sketchMe() {
+        let uid = '';
+        try {
+            const u = (typeof firebase !== 'undefined' && firebase.auth && firebase.auth().currentUser) || null;
+            uid = (u && u.uid) || '';
+        } catch (_e) { uid = ''; }
+        return { uid: String(uid || window.state.userUid || ''), name: memoAuthorName() };
+    }
+    /** 이 메모가 있는 층키(없으면 새 메모를 둘 건물 기본 층) */
+    function sketchKeyFor(id) {
+        const api = sketchApi();
+        const b = sketchUi.bldgId || state.currentBuildingId;
+        const hit = (api && id) ? api.floorKeyOf(window.state, b, id) : '';
+        if (hit) return hit;
+        const bldg = (state.buildings || []).find((x) => x && x.id === b) || state.currentBuilding;
+        const codes = (bldg && typeof buildingFloorCodesForBackup === 'function') ? buildingFloorCodesForBackup(bldg) : [];
+        return (api && api.homeFloorKey(b, codes, state.currentFloor)) || currentMemoFloorKey();
+    }
     function memoAuthorName() {
         try {
             const u = (typeof firebase !== 'undefined' && firebase.auth && firebase.auth().currentUser) || null;
@@ -26820,7 +26839,7 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
                     <button type="button" class="sk-btn sk-new" data-sk="new" title="새 메모 만들기">＋ 새 메모</button>
                     <button type="button" class="sk-btn" data-sk="close" title="닫기(저장)">✕</button>
                 </div>
-                <div class="sk-tabs" data-sk-tabs role="tablist" aria-label="이 층 손글씨 메모"></div>
+                <div class="sk-tabs" data-sk-tabs role="tablist" aria-label="내 손글씨 메모"></div>
                 <div class="sk-tools">
                     <button type="button" class="sk-btn sk-tool active" data-sk-tool="pen" title="펜"><i class="fa-solid fa-pen"></i></button>
                     <button type="button" class="sk-btn sk-tool" data-sk-tool="eraser" title="지우개"><i class="fa-solid fa-eraser"></i></button>
@@ -26849,7 +26868,7 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
                 const id = b.dataset.skTab;
                 if (sketchUi.sheet && id === (sketchUi.sheet.id || '')) return;
                 sketchSave(false);
-                const rec = sketchApi().listFor(window.state, sketchUi.floorKey).find((r) => r.id === id);
+                const rec = id ? sketchApi().findInBuilding(window.state, sketchUi.bldgId, id) : null;
                 sketchOpenSheet(rec || null);
                 return;
             }
@@ -26991,18 +27010,19 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
         const api = sketchApi();
         const box = sketchUi.el && sketchUi.el.querySelector('[data-sk-tabs]');
         if (!api || !box) return;
-        const me = (typeof memoAuthorName === 'function') ? memoAuthorName() : '';
+        const me = sketchMe();
         const esc = (t) => String(t).replace(/[<>&"]/g, '');
         const curId = (sketchUi.sheet && sketchUi.sheet.id) || '';
-        const tabs = api.sheetTabs(window.state, sketchUi.floorKey, me);
+        // 2026-10-20 층 구분 없이 건물 전체 · 내 계정 메모(+ 작성자 모르는 이전 메모)
+        const tabs = api.buildingTabs(window.state, sketchUi.bldgId, me);
         const html = tabs.map((t) => `<button type="button" role="tab" class="sk-tab${t.id === curId ? ' active' : ''}${t.mine ? ' mine' : ''}" data-sk-tab="${esc(t.id)}" aria-selected="${t.id === curId}" title="${esc((t.by || '작성자 없음') + (t.title ? ' · ' + t.title : ''))}">`
             + `<span class="sk-tab-name">${esc(t.label)}</span>${t.title ? `<span class="sk-tab-sub">${esc(t.title)}</span>` : ''}</button>`);
         if (!curId || !tabs.some((t) => t.id === curId)) {
-            html.push(`<button type="button" role="tab" class="sk-tab sk-tab-new active" data-sk-tab="" aria-selected="true"><span class="sk-tab-name">새 ${esc(api.labelFor(window.state, sketchUi.floorKey, '', me))}</span><span class="sk-tab-sub">작성 중</span></button>`);
+            html.push(`<button type="button" role="tab" class="sk-tab sk-tab-new active" data-sk-tab="" aria-selected="true"><span class="sk-tab-name">새 ${esc(api.nextMineLabel(window.state, sketchUi.bldgId, me))}</span><span class="sk-tab-sub">작성 중</span></button>`);
         }
         box.innerHTML = html.join('');
         const cnt = sketchUi.el.querySelector('[data-sk-count]');
-        if (cnt) cnt.textContent = tabs.length ? `이 층 메모 ${tabs.length}개` : '';
+        if (cnt) cnt.textContent = tabs.length ? `내 메모 ${tabs.length}개` : '';
         const act = box.querySelector('.sk-tab.active');
         if (act && typeof act.scrollIntoView === 'function') {
             try { act.scrollIntoView({ block: 'nearest', inline: 'nearest' }); } catch (_e) { /* ignore */ }
@@ -27018,6 +27038,7 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
     }
 
     function sketchOpenSheet(rec) {
+        sketchUi.floorKey = sketchKeyFor(rec && rec.id);
         const wrap = sketchUi.el.querySelector('.sk-paper-wrap');
         const r = wrap ? wrap.getBoundingClientRect() : { width: 900, height: 1200 };
         // 새 장 종이 크기 = 지금 화면 칸 비율(가로·세로 그대로), 긴 변 1600 기준
@@ -27057,7 +27078,9 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
         const rec = api.saveSheet(window.state, sketchUi.floorKey, {
             id: sketchUi.sheet.id, title: sketchUi.sheet.title, w: sketchUi.sheet.w, h: sketchUi.sheet.h,
             x: sketchUi.sheet.x, y: sketchUi.sheet.y,
-            strokes: (typeof sketchStrokesToSave === 'function') ? sketchStrokesToSave() : sketchUi.strokes, by: (typeof memoAuthorName === 'function') ? memoAuthorName() : ''
+            strokes: (typeof sketchStrokesToSave === 'function') ? sketchStrokesToSave() : sketchUi.strokes,
+            // 작성자는 새 메모에만(이전 메모를 이어 써도 남의 것으로 바뀌지 않게)
+            by: sketchUi.sheet.id ? '' : sketchMe().name, byUid: sketchUi.sheet.id ? '' : sketchMe().uid
         });
         if (!rec) return null;
         sketchUi.sheet.id = rec.id;
@@ -27076,8 +27099,7 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
         if (!ok) return;
         api.deleteSheet(window.state, sketchUi.floorKey, sketchUi.sheet.id);
         commitMemoChange(sketchUi.floorKey);
-        const list = api.listFor(window.state, sketchUi.floorKey);
-        sketchOpenSheet(list.length ? list[list.length - 1] : null);
+        sketchOpenSheet(api.pickInitialForBuilding(window.state, sketchUi.bldgId, sketchMe()));
     }
 
     async function sketchClose() {
@@ -27091,20 +27113,19 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
     window.openSketchMemo = function(opts) {
         const api = sketchApi();
         const floorKey = currentMemoFloorKey();
-        if (!api || !floorKey) { window.showToast('층(도면)을 먼저 고르세요', 'info', 2000); return false; }
+        if (!api || !state.currentBuildingId) { window.showToast('건물을 먼저 고르세요', 'info', 2000); return false; }
         sketchBuildDom();
-        sketchUi.floorKey = floorKey;
+        sketchUi.bldgId = state.currentBuildingId;
+        sketchUi.floorKey = sketchKeyFor('') || floorKey;
         sketchUi.penSeen = false;
         sketchUi.el.hidden = false;
         document.documentElement.classList.add('bsa-sketch-open');
-        const list = api.listFor(window.state, floorKey);
-        const want = opts && opts.id ? list.find((r) => r.id === opts.id) : null;
+        const want = opts && opts.id ? api.findInBuilding(window.state, sketchUi.bldgId, opts.id) : null;
         sketchUi.newAt = (opts && opts.at) ? { x: Math.round(opts.at.x), y: Math.round(opts.at.y) } : null;
         // 2026-10-19 「기존에 작성한거 부터 보여줘야지 계속 새 손글씨 보이면 안됨」: 내가 마지막으로 고친 메모
         // (내 것이 없으면 이 층 최근 메모)부터 연다. 새 종이는 「＋ 새 메모」(또는 opts.fresh)로만.
-        const me = (typeof memoAuthorName === 'function') ? memoAuthorName() : '';
-        const first = want || ((opts && opts.fresh) ? null
-            : (typeof api.pickInitialSheet === 'function' ? api.pickInitialSheet(window.state, floorKey, me) : (list[list.length - 1] || null)));
+        // 2026-10-20 건물 전체에서 내 계정이 마지막으로 고친 메모(없으면 새 종이)
+        const first = want || ((opts && opts.fresh) ? null : api.pickInitialForBuilding(window.state, sketchUi.bldgId, sketchMe()));
         requestAnimationFrame(() => sketchOpenSheet(first || null));
         return true;
     };
@@ -49717,22 +49738,10 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
     const HWPX_SKETCH_TBL_PARA_XML = '<hp:p id="0" paraPrIDRef="13" styleIDRef="0" pageBreak="1" columnBreak="0" merged="0"><hp:run charPrIDRef="53"><hp:tbl id="TBL_ID" zOrder="11" numberingType="TABLE" textWrap="TOP_AND_BOTTOM" textFlow="BOTH_SIDES" lock="0" dropcapstyle="None" pageBreak="NONE" repeatHeader="1" rowCnt="2" colCnt="1" cellSpacing="0" borderFillIDRef="5" noAdjust="0"><hp:sz width="41821" widthRelTo="ABSOLUTE" height="64087" heightRelTo="ABSOLUTE" protect="0"/><hp:pos treatAsChar="1" affectLSpacing="0" flowWithText="1" allowOverlap="0" holdAnchorAndSO="0" vertRelTo="PARA" horzRelTo="COLUMN" vertAlign="TOP" horzAlign="LEFT" vertOffset="0" horzOffset="0"/><hp:outMargin left="140" right="140" top="140" bottom="140"/><hp:inMargin left="140" right="140" top="140" bottom="140"/><hp:tr><hp:tc name="" header="0" hasMargin="0" protect="0" editable="0" dirty="0" borderFillIDRef="15"><hp:subList id="" textDirection="HORIZONTAL" lineWrap="BREAK" vertAlign="CENTER" linkListIDRef="0" linkListNextIDRef="0" textWidth="0" textHeight="0" hasTextRef="0" hasNumRef="0"><hp:p id="2147483648" paraPrIDRef="4" styleIDRef="0" pageBreak="0" columnBreak="0" merged="0"><hp:run charPrIDRef="6"><hp:pic id="PIC_ID" zOrder="36" numberingType="PICTURE" textWrap="TOP_AND_BOTTOM" textFlow="BOTH_SIDES" lock="0" dropcapstyle="None" thumbnailBinIDRef="" href="" groupLevel="0" instid="PIC_INSTID" reverse="0"><hp:offset x="0" y="0"/><hp:orgSz width="768540" height="969540"/><hp:curSz width="41541" height="52405"/><hp:flip horizontal="0" vertical="0"/><hp:rotationInfo angle="0" centerX="20770" centerY="26202" rotateimage="1"/><hp:renderingInfo><hc:transMatrix e1="1" e2="0" e3="0" e4="0" e5="1" e6="0"/><hc:scaMatrix e1="0.054052" e2="0" e3="0" e4="0" e5="0.054051" e6="0"/><hc:rotMatrix e1="1" e2="0" e3="0" e4="0" e5="1" e6="0"/></hp:renderingInfo><hc:img binaryItemIDRef="" bright="0" contrast="0" effect="REAL_PIC" alpha="0"/><hp:imgRect><hc:pt0 x="0" y="0"/><hc:pt1 x="768540" y="0"/><hc:pt2 x="768540" y="969540"/><hc:pt3 x="0" y="969540"/></hp:imgRect><hp:imgClip left="0" right="648540" top="0" bottom="818100"/><hp:inMargin left="0" right="0" top="0" bottom="0"/><hp:imgDim dimwidth="648540" dimheight="818100"/><hp:effects/><hp:sz width="41541" widthRelTo="ABSOLUTE" height="52405" heightRelTo="ABSOLUTE" protect="0"/><hp:pos treatAsChar="0" affectLSpacing="0" flowWithText="1" allowOverlap="0" holdAnchorAndSO="0" vertRelTo="PARA" horzRelTo="COLUMN" vertAlign="TOP" horzAlign="LEFT" vertOffset="0" horzOffset="0"/><hp:outMargin left="0" right="0" top="0" bottom="0"/></hp:pic><hp:t/></hp:run><hp:linesegarray><hp:lineseg textpos="0" vertpos="0" vertsize="1100" textheight="1100" baseline="935" spacing="1320" horzpos="0" horzsize="0" flags="393216"/></hp:linesegarray></hp:p></hp:subList><hp:cellAddr colAddr="0" rowAddr="0"/><hp:cellSpan colSpan="1" rowSpan="1"/><hp:cellSz width="41821" height="60813"/><hp:cellMargin left="141" right="141" top="141" bottom="141"/></hp:tc></hp:tr><hp:tr><hp:tc name="" header="0" hasMargin="0" protect="0" editable="0" dirty="0" borderFillIDRef="16"><hp:subList id="" textDirection="HORIZONTAL" lineWrap="BREAK" vertAlign="CENTER" linkListIDRef="0" linkListNextIDRef="0" textWidth="0" textHeight="0" hasTextRef="0" hasNumRef="0"><hp:p id="2147483648" paraPrIDRef="1" styleIDRef="16" pageBreak="0" columnBreak="0" merged="0"><hp:run charPrIDRef="43"><hp:t>CAPTION</hp:t></hp:run><hp:linesegarray><hp:lineseg textpos="0" vertpos="0" vertsize="1000" textheight="1000" baseline="850" spacing="600" horzpos="0" horzsize="41540" flags="393216"/></hp:linesegarray></hp:p></hp:subList><hp:cellAddr colAddr="0" rowAddr="1"/><hp:cellSpan colSpan="1" rowSpan="1"/><hp:cellSz width="41821" height="3274"/><hp:cellMargin left="141" right="141" top="141" bottom="141"/></hp:tc></hp:tr></hp:tbl><hp:t/></hp:run><hp:linesegarray><hp:lineseg textpos="0" vertpos="0" vertsize="64367" textheight="64367" baseline="54712" spacing="960" horzpos="0" horzsize="42520" flags="393216"/></hp:linesegarray></hp:p>';
     /** 이 건물의 손글씨 메모 목록 — 층 순서(floorsList)대로, 층 안에서는 만든 순서 */
     function collectBuildingSketchMemos(st, bldg) {
+        // 2026-10-20 층 구분 없이 건물 전체 · 계정(작성자)별 「홍길동 메모-1」, 작성자 모름은 「이전 메모-1」
         const api = window.BSA && window.BSA.sketchMemo;
-        if (!api || !st || !bldg || !bldg.id || !st.sketchMemos) return [];
-        const prefix = `${bldg.id}_`;
-        const codes = Object.keys(st.sketchMemos).filter((k) => k.indexOf(prefix) === 0).map((k) => k.slice(prefix.length));
-        const order = (Array.isArray(bldg.floorsList) ? bldg.floorsList : []).map((f) => f && f.floorCode).filter(Boolean);
-        codes.sort((a, b) => {
-            const ia = order.indexOf(a), ib = order.indexOf(b);
-            return (ia < 0 ? 1e9 : ia) - (ib < 0 ? 1e9 : ib);
-        });
-        const out = [];
-        codes.forEach((code) => {
-            api.listFor(st, prefix + code).forEach((rec) => {
-                if (rec && Array.isArray(rec.strokes) && rec.strokes.some((x) => x && !x.e)) out.push({ floorCode: code, rec });
-            });
-        });
-        return out;
+        if (!api || !st || !bldg || !bldg.id) return [];
+        return api.outputGroups(st, bldg.id);
     }
     /** 메모 한 장 → 흰 바탕 PNG(지우개 획은 투명 층에서 지운 뒤 흰 종이 위에 얹는다) */
     function renderSketchMemoPng(rec, maxSide) {
@@ -49763,11 +49772,9 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
         o.sec.appendChild(parse('<hp:p id="0" paraPrIDRef="13" styleIDRef="0" pageBreak="1" columnBreak="0" merged="0"><hp:run charPrIDRef="53"><hp:t>손글씨 메모</hp:t></hp:run><hp:linesegarray><hp:lineseg textpos="0" vertpos="0" vertsize="1100" textheight="1100" baseline="935" spacing="600" horzpos="0" horzsize="41540" flags="393216"/></hp:linesegarray></hp:p>'));
         const MAX_W = 41821 - 141 - 141;
         const MAX_H = 60813 - 141 - 141;
-        const perFloor = {};
         for (let i = 0; i < memos.length; i++) {
-            const { floorCode, rec } = memos[i];
-            perFloor[floorCode] = (perFloor[floorCode] || 0) + 1;
-            const caption = `${o.getFloorLabel ? o.getFloorLabel(floorCode) : floorCode} 손글씨 메모-${perFloor[floorCode]}${rec.title ? ` (${rec.title})` : ''}`;
+            const { rec, label } = memos[i];
+            const caption = `${label}${rec.title ? ` (${rec.title})` : ''}`;
             const png = renderSketchMemoPng(rec, 2000);
             imgCounter++;
             const para = parse(HWPX_SKETCH_TBL_PARA_XML

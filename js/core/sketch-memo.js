@@ -65,9 +65,12 @@
             x: pickNum(sheet.x, cur && cur.x),
             y: pickNum(sheet.y, cur && cur.y),
             by: sheet.by || (cur && cur.by) || '',
+            // 2026-10-20 개인 계정별 메모 — 계정 uid(이름이 같아도 다른 계정이면 다른 사람)
+            byUid: String(sheet.byUid || (cur && cur.byUid) || '').slice(0, 128),
             createdAt: (cur && cur.createdAt) || Number(sheet.createdAt) || t,
             updatedAt: Math.max(t, ((cur && cur.updatedAt) || 0) + 1)
         };
+        if (!rec.byUid) delete rec.byUid;
         if (rec.x == null) delete rec.x;
         if (rec.y == null) delete rec.y;
         if (cur) list[list.indexOf(cur)] = rec; else list.push(rec);
@@ -169,6 +172,7 @@
         return {
             items: listFor(st, floorKey).map(function (m) {
                 var o = { id: m.id, title: m.title || '', w: m.w, h: m.h, strokes: m.strokes || [], by: m.by || '', createdAt: m.createdAt || 0, updatedAt: m.updatedAt || 0 };
+                if (m.byUid) o.byUid = m.byUid;
                 if (m.x != null && m.y != null) { o.x = m.x; o.y = m.y; }
                 return o;
             }),
@@ -259,6 +263,108 @@
         ctx.restore();
     }
 
+    // ---- 2026-10-20 「메모는 층을 분류하지 말고 그냥 통합 · 기본은 개인 계정별 · 출력하면 각자 쓴 것들」 ----
+    // 저장·동기화는 그대로 층 묶음(층키)에 실린다(획 합집합·묘비 병합 그대로, 서버 형식 안 바뀜). 보이는 것·출력은 건물 전체를
+    // 한데 모아 계정(작성자)별로 본다. 새 메모는 건물의 기본 층(homeFloorKey)에 저장, 고친 메모는 원래 있던 층키에 그대로.
+    // 옛 층별 메모: 작성자(by)가 있으면 그 사람 것, 없으면 「이전 메모」.
+    var LEGACY_LABEL = '이전 메모';
+    function normMe(me) {
+        if (me && typeof me === 'object') return { uid: String(me.uid || '').trim(), name: String(me.name || '').trim() };
+        return { uid: '', name: String(me || '').trim() };
+    }
+    /** 작성자 묶음 키: 계정 uid → 없으면 이름 → 둘 다 없으면 '' (이전 메모) */
+    function ownerKey(rec) {
+        if (!rec) return '';
+        if (rec.byUid) return 'u:' + String(rec.byUid);
+        var n = authorKey(rec);
+        return n ? 'n:' + n : '';
+    }
+    function isMine(rec, me) {
+        var m = normMe(me);
+        if (!rec) return false;
+        if (rec.byUid) return !!m.uid && rec.byUid === m.uid;
+        var n = authorKey(rec);
+        return !!n && !!m.name && n === m.name;
+    }
+    /** 건물의 모든 메모 [{ floorKey, rec }] — 만든 순서 */
+    function listForBuilding(st, bldgId) {
+        if (!st || !bldgId || !st.sketchMemos) return [];
+        var prefix = String(bldgId) + '_';
+        var out = [];
+        Object.keys(st.sketchMemos).forEach(function (k) {
+            if (k.indexOf(prefix) !== 0) return;
+            (st.sketchMemos[k] || []).forEach(function (r) { if (r && r.id) out.push({ floorKey: k, rec: r }); });
+        });
+        out.sort(function (a, b) { return ((a.rec.createdAt || 0) - (b.rec.createdAt || 0)) || (a.rec.id < b.rec.id ? -1 : a.rec.id > b.rec.id ? 1 : 0); });
+        return out;
+    }
+    function floorKeyOf(st, bldgId, id) {
+        var hit = listForBuilding(st, bldgId).find(function (x) { return x.rec.id === id; });
+        return hit ? hit.floorKey : '';
+    }
+    function findInBuilding(st, bldgId, id) {
+        var hit = listForBuilding(st, bldgId).find(function (x) { return x.rec.id === id; });
+        return hit ? hit.rec : null;
+    }
+    /** 창에 보이는 메모 — 내 것 + 이전 메모(작성자 모름). 남의 계정 메모는 출력에만 */
+    function visibleForMe(st, bldgId, me) {
+        return listForBuilding(st, bldgId).filter(function (x) { return isMine(x.rec, me) || !ownerKey(x.rec); });
+    }
+    function buildingTabs(st, bldgId, me) {
+        var mineN = 0, oldN = 0;
+        return visibleForMe(st, bldgId, me).map(function (x) {
+            var r = x.rec;
+            var mine = isMine(r, me);
+            return {
+                id: r.id, title: r.title || '', by: authorKey(r), mine: mine,
+                label: mine ? '메모-' + (++mineN) : LEGACY_LABEL + '-' + (++oldN),
+                updatedAt: r.updatedAt || r.createdAt || 0, strokes: (r.strokes || []).length
+            };
+        });
+    }
+    function nextMineLabel(st, bldgId, me) {
+        return '메모-' + (listForBuilding(st, bldgId).filter(function (x) { return isMine(x.rec, me); }).length + 1);
+    }
+    /** 처음 보일 장 — 내가 마지막으로 고친 메모. 내 것이 없으면 null(새 종이) */
+    function pickInitialForBuilding(st, bldgId, me) {
+        var mine = listForBuilding(st, bldgId).filter(function (x) { return isMine(x.rec, me); }).map(function (x) { return x.rec; });
+        if (!mine.length) return null;
+        return mine.slice().sort(function (a, b) {
+            return ((b.updatedAt || b.createdAt || 0) - (a.updatedAt || a.createdAt || 0)) || ((b.createdAt || 0) - (a.createdAt || 0));
+        })[0];
+    }
+    /** 한글 출력 — 모든 계정 메모를 작성자별로(처음 쓴 순서), 「홍길동 메모-1」, 작성자 모름은 「이전 메모-1」(맨 뒤) */
+    function outputGroups(st, bldgId) {
+        var groups = [];
+        var byKey = {};
+        var all = listForBuilding(st, bldgId);
+        // 옛 메모(이름만)는 같은 이름 계정 메모와 한 묶음
+        var nameToUid = {};
+        all.forEach(function (x) { var n = authorKey(x.rec); if (x.rec.byUid && n && !nameToUid[n]) nameToUid[n] = x.rec.byUid; });
+        all.forEach(function (x) {
+            var r = x.rec;
+            if (!Array.isArray(r.strokes) || !r.strokes.some(function (s) { return s && !s.e; })) return;
+            var k = ownerKey(r);
+            if (k.indexOf('n:') === 0 && nameToUid[authorKey(r)]) k = 'u:' + nameToUid[authorKey(r)];
+            if (!byKey[k]) { byKey[k] = { key: k, name: k ? (authorKey(r) || '작성자') : LEGACY_LABEL, items: [] }; groups.push(byKey[k]); }
+            byKey[k].items.push(r);
+        });
+        groups.sort(function (a, b) { return (a.key ? 0 : 1) - (b.key ? 0 : 1); });
+        var out = [];
+        groups.forEach(function (g) {
+            g.items.forEach(function (r, i) {
+                out.push({ rec: r, author: g.name, label: (g.key ? g.name + ' 메모-' : LEGACY_LABEL + '-') + (i + 1) });
+            });
+        });
+        return out;
+    }
+    /** 새 메모를 저장할 층키 — 건물 층 목록의 첫 층(늘 동기화되는 층), 없으면 지금 층 */
+    function homeFloorKey(bldgId, floorCodes, currentFloor) {
+        var codes = (floorCodes || []).filter(Boolean);
+        var code = codes.length ? codes[0] : currentFloor;
+        return (bldgId && code) ? String(bldgId) + '_' + code : '';
+    }
+
     var api = {
         MAX_POINTS: MAX_POINTS,
         COLORS: COLORS,
@@ -278,7 +384,19 @@
         packFor: packFor,
         packHasContent: packHasContent,
         mergePackIntoState: mergePackIntoState,
-        drawStroke: drawStroke
+        drawStroke: drawStroke,
+        LEGACY_LABEL: LEGACY_LABEL,
+        ownerKey: ownerKey,
+        isMine: isMine,
+        listForBuilding: listForBuilding,
+        floorKeyOf: floorKeyOf,
+        findInBuilding: findInBuilding,
+        visibleForMe: visibleForMe,
+        buildingTabs: buildingTabs,
+        nextMineLabel: nextMineLabel,
+        pickInitialForBuilding: pickInitialForBuilding,
+        outputGroups: outputGroups,
+        homeFloorKey: homeFloorKey
     };
     if (typeof module !== 'undefined' && module.exports) module.exports = api;
     if (root) {
