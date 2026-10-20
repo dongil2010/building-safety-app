@@ -10855,7 +10855,8 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
     let ndtActivePointerIsTouch = false;
     let ndtMarqueeSelectEnabled = false;
     let ndtAddSelectEnabled = false;
-    const NDT_TOUCH_LONG_PRESS_MS = 500; // 모바일·태블릿: 0.5초 홀딩 후 드래그
+    // 2026-10-20 결함위치도와 같게: 0.3초 꾹 누른 뒤 끌면 이동(예전 0.5초). PC 마우스는 그대로.
+    const NDT_TOUCH_LONG_PRESS_MS = 300;
     let isDraggingNdtPinGroup = false;
     let ndtGroupDragLastX = 0;
     let ndtGroupDragLastY = 0;
@@ -10873,6 +10874,33 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
 
     function ndtDispSelKey(groupId) {
         return `disp_${groupId}`;
+    }
+
+    /**
+     * 2026-10-20 비파괴 도면 터치 탭 — 결함위치도와 같은 규칙.
+     * 'open' = 이미 선택된 것을 다시 탭 → 수정창 / 'select' = 처음 탭 → 선택만 / 'toggle' = 추가 선택 모드 /
+     * 'none' = 0.3초 이상 꾹 눌렀다 그냥 뗌(이동 준비만, 탭 아님)
+     */
+    function ndtTouchTapAction(pend, armed, addMode) {
+        if (!pend) return 'none';
+        if (armed) return 'none';
+        if (addMode) return 'toggle';
+        return pend.wasSelected ? 'open' : 'select';
+    }
+    window.__bsaNdtTouchTapAction = ndtTouchTapAction;
+
+    function applyNdtTouchTapSelection(act, key) {
+        if (!key) return;
+        if (act === 'toggle') {
+            if (selectedNdtIds.has(key)) selectedNdtIds.delete(key);
+            else selectedNdtIds.add(key);
+        } else if (act === 'select' || act === 'open') {
+            if (!selectedNdtIds.has(key) || selectedNdtIds.size > 1) selectedNdtIds = new Set([key]);
+        } else {
+            return;
+        }
+        updateNdtSelectionBar();
+        drawNdtCanvas();
     }
 
     function clearPendingNdtLongPress() {
@@ -11342,7 +11370,9 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
                 bestBox = { item, part: 'box' };
             }
         }
-        // 측정점(화살표/원)이 박스와 겹쳐도 TIP(target) 우선
+        // 2026-10-20 터치(폰·태블릿): 결함위치도처럼 점과 박스가 겹치면 박스 먼저(박스를 잡아 옮기기 쉽게)
+        if (ndtActivePointerIsTouch && bestBox) return bestBox;
+        // PC 마우스: 측정점(화살표/원)이 박스와 겹쳐도 TIP(target) 우선
         if (bestTarget) return { item: bestTarget.item, part: 'target' };
         if (bestBox) return bestBox;
         return null;
@@ -13129,7 +13159,8 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
     window.placeNdtDisplacementMarkAt = placeNdtDisplacementMarkAt;
 
     // 수직변위/부재변위 그룹의 라벨 박스/포인트 원 히트테스트
-    function findNdtDisplacementHit(vx, vy) {
+    function findNdtDisplacementHit(vx, vy, opts) {
+        const boxOnly = !!(opts && opts.boxOnly);
         const groups = getCurrentFloorDisplacementGroups(currentNdtCategory);
         const viewScale = getMapCanvasViewScale();
         const minMouseRadiusImg = 18 / viewScale; // 화면상 최소 18px 반경 (지름 36px 클릭 영역 확보)
@@ -13142,8 +13173,8 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
             const pinScale = groupSize.pin || 1;
             const ptHitRadius = Math.max(16 * pinScale, minMouseRadiusImg);
 
-            // 포인트 원과 (01) 번호 라벨 히트테스트 (포인트 우선)
-            for (let j = group.points.length - 1; j >= 0; j--) {
+            // 포인트 원과 (01) 번호 라벨 히트테스트 (포인트 우선) — boxOnly(터치 박스 먼저)면 건너뜀
+            for (let j = boxOnly ? -1 : group.points.length - 1; j >= 0; j--) {
                 const p = group.points[j];
                 const distDot = Math.hypot(vx - p.x, vy - p.y);
                 
@@ -15147,28 +15178,27 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
                 if (hitPin) {
                     if (e.cancelable) e.preventDefault();
                     const id = hitPin.item && hitPin.item.id;
-                    if (id) {
-                        if (ndtAddSelectEnabled) {
-                            if (selectedNdtIds.has(id)) selectedNdtIds.delete(id);
-                            else selectedNdtIds.add(id);
-                        } else if (!selectedNdtIds.has(id) || selectedNdtIds.size <= 1) {
-                            selectedNdtIds = new Set([id]);
-                        }
-                        updateNdtSelectionBar();
-                        drawNdtCanvas();
-                    }
+                    // 2026-10-20 결함위치도와 같게: 누르는 순간엔 선택을 바꾸지 않는다(그대로 밀면 도면 팬, 선택 유지).
+                    // 떼면(탭) 선택 → 이미 선택된 것을 다시 탭하면 수정창. 0.3초 꾹 누르면 선택하고 끌어 이동.
                     pendingNdtPinHit = {
                         item: hitPin.item,
                         part: hitPin.part,
                         grabX: vx,
-                        grabY: vy
+                        grabY: vy,
+                        wasSelected: !!(id && selectedNdtIds.has(id)),
+                        startedAt: Date.now()
                     };
                     pendingNdtPinIsTouch = true;
-                    // 모바일·태블릿: 0.5초 홀딩 후 드래그 (살짝 밀면 도면 팬)
                     pendingNdtPinArmed = false;
                     pendingNdtLongPressTimer = setTimeout(() => {
                         if (!pendingNdtPinHit || !pendingNdtPinIsTouch) return;
                         pendingNdtPinArmed = true;
+                        const hid = pendingNdtPinHit.item && pendingNdtPinHit.item.id;
+                        if (hid && !selectedNdtIds.has(hid)) {
+                            if (ndtAddSelectEnabled) selectedNdtIds.add(hid);
+                            else selectedNdtIds = new Set([hid]);
+                            updateNdtSelectionBar();
+                        }
                         try { if (navigator.vibrate) navigator.vibrate(12); } catch (_e) { /* ignore */ }
                         drawNdtCanvas();
                         refreshNdtLoupe(ndtStartMouseX, ndtStartMouseY);
@@ -15177,16 +15207,23 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
                 }
 
                 if (currentNdtCategory === '변위' || currentNdtCategory === '부재변위') {
-                    const hitDisp = findNdtDisplacementHit(vx, vy);
+                    // 터치: 지점 원과 구역 박스가 겹치면 박스 먼저
+                    const hitDisp = findNdtDisplacementHit(vx, vy, { boxOnly: true }) || findNdtDisplacementHit(vx, vy);
                     if (hitDisp) {
                         if (e.cancelable) e.preventDefault();
-                        pendingNdtDispHit = { hit: hitDisp, grabX: vx, grabY: vy };
+                        const dispKey = hitDisp.group && hitDisp.group.id ? ndtDispSelKey(hitDisp.group.id) : '';
+                        pendingNdtDispHit = { hit: hitDisp, grabX: vx, grabY: vy, wasSelected: !!(dispKey && selectedNdtIds.has(dispKey)) };
                         pendingNdtDispIsTouch = true;
                         pendingNdtDispArmed = false;
-                        // 모바일: 0.5초 홀딩 후 드래그 (바로 밀면 도면 팬)
+                        // 0.3초 꾹 누른 뒤 끌면 이동 (바로 밀면 도면 팬)
                         pendingNdtLongPressTimer = setTimeout(() => {
                             if (!pendingNdtDispHit || !pendingNdtDispIsTouch) return;
                             pendingNdtDispArmed = true;
+                            if (dispKey && !selectedNdtIds.has(dispKey)) {
+                                if (ndtAddSelectEnabled) selectedNdtIds.add(dispKey);
+                                else selectedNdtIds = new Set([dispKey]);
+                                updateNdtSelectionBar();
+                            }
                             try { if (navigator.vibrate) navigator.vibrate(12); } catch (_e) { /* ignore */ }
                             drawNdtCanvas();
                         }, NDT_TOUCH_LONG_PRESS_MS);
@@ -15517,16 +15554,28 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
                 return;
             }
             if (pendingNdtPinHit && !isDraggingNdtPin && !isDraggingNdtPinGroup) {
-                const item = pendingNdtPinHit.item;
-                const part = pendingNdtPinHit.part;
+                const pend = pendingNdtPinHit;
+                const armed = pendingNdtPinArmed;
                 pendingNdtPinHit = null;
-                if (part === 'rotate') return;
-                if (item) openNdtItemEditor(item);
+                pendingNdtPinArmed = false;
+                if (pend.part === 'rotate') return;
+                const act = ndtTouchTapAction(pend, armed, ndtAddSelectEnabled);
+                applyNdtTouchTapSelection(act, pend.item && pend.item.id);
+                if (act === 'open' && pend.item) openNdtItemEditor(pend.item);
                 return;
             }
             if (pendingNdtDispHit && !isDraggingNdtDisplacement) {
-                const hit = pendingNdtDispHit.hit;
+                const pendD = pendingNdtDispHit;
+                const hit = pendD.hit;
+                const armedD = pendingNdtDispArmed;
                 pendingNdtDispHit = null;
+                pendingNdtDispArmed = false;
+                const actD = ndtTouchTapAction(pendD, armedD, ndtAddSelectEnabled);
+                applyNdtTouchTapSelection(actD, hit.group && hit.group.id ? ndtDispSelKey(hit.group.id) : '');
+                if (actD !== 'open') {
+                    if (hit.group) setActiveNdtDispGroup(hit.group);
+                    return;
+                }
                 if (hit.type === 'point') {
                     setActiveNdtDispGroup(hit.group);
                     openNdtDisplacementModal(hit.point.x, hit.point.y, hit.group, hit.point);
