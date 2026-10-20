@@ -42631,6 +42631,40 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
         return floorCode || '';
     }
 
+    /**
+     * 2026-10-20 중점관리 비교사진 끝의 「※ 범례」 줄을 표에 실제로 찍힌 번호 접두사로 만든다.
+     * 예전엔 양식(칠산타워 표본)의 글자 「B1-지하1층 / 2-지상1층 / 3-지상2층 / O-외부」를 그대로 붙여
+     * 지상층 번호가 하나씩 밀려 보였고, 건물에 없는 층까지 나왔다(번호는 1F→1-, 2F→2- 로 찍힌다).
+     * items: [{ prefix, label }] (나온 순서). 같은 접두사는 한 번만. 지하 → 지상 → 지붕쪽 → 외부 순.
+     */
+    function buildGrade3PrefixLegendText(items) {
+        const seen = new Map();
+        (items || []).forEach((it) => {
+            const p = String((it && it.prefix) || '').trim();
+            if (!p || seen.has(p)) return;
+            let label;
+            let m;
+            if ((m = p.match(/^B(\d+)$/))) label = `지하${m[1]}층`;
+            else if ((m = p.match(/^(\d+)$/))) label = `지상${m[1]}층`;
+            else if (p === 'O') label = '외부';
+            else label = String((it && it.label) || p).replace(/\s*\([^)]*\)\s*$/, '').trim() || p;
+            seen.set(p, label);
+        });
+        const rank = (p) => {
+            let m;
+            if ((m = p.match(/^B(\d+)$/))) return [0, -Number(m[1])];
+            if ((m = p.match(/^(\d+)$/))) return [1, Number(m[1])];
+            if (p === 'O') return [3, 0];
+            return [2, 0];
+        };
+        const keys = Array.from(seen.keys());
+        const order = keys.map((p, i) => ({ p, i, r: rank(p) }))
+            .sort((a, b) => (a.r[0] - b.r[0]) || (a.r[1] - b.r[1]) || (a.i - b.i));
+        if (!order.length) return '';
+        return '※ 범례 : ' + order.map((o) => `${o.p}-${seen.get(o.p)}`).join(' / ');
+    }
+    window.buildGrade3PrefixLegendText = buildGrade3PrefixLegendText;
+
     // 3종 상태조사표 "구분" 칸에 쓸 층 표시명 — 등록된 floorsList의 라벨을 우선 쓰고,
     // hwpx 내보내기와 동일하게 코드 접미사((B1F) 등)와 숫자 앞 띄어쓰기를 정리한다.
     function isExteriorFloorCode(code) {
@@ -51701,6 +51735,7 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
 
                         let compareDefectsOnPage = 0;
                         let comparePairIndex = 0;
+                        const compareLegendItems = []; // 범례: 실제로 찍힌 표의 층 접두사
                         for (let ci = 0; ci < allPriorityCompareEntries.length; ci++) {
                             const { d, floorCode: cmpFloorCode } = allPriorityCompareEntries[ci];
                             const prevSrc = getDefectPrevOutputPhotos(d)[0];
@@ -51743,13 +51778,23 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
                             }
 
                             appendComparePara(tblPara);
+                            compareLegendItems.push({ prefix: getGrade3FloorPrefix(cmpFloorCode), label: getFloorLabel(cmpFloorCode) });
                             compareDefectsOnPage++;
                             comparePairIndex++;
                         }
 
                         if (grade3CompareTableStamp.legendPara) {
                             const legendP = cloneCompareStampPara(grade3CompareTableStamp.legendPara);
-                            if (legendP) appendComparePara(legendP);
+                            const legendText = buildGrade3PrefixLegendText(compareLegendItems);
+                            if (legendP && legendText) {
+                                // 양식 글자(표본 건물 층) 대신 이 건물 표에 찍힌 번호로
+                                const ts = Array.from(legendP.getElementsByTagNameNS(HP_NS, 't'));
+                                ts.forEach((t, i) => { t.textContent = i === 0 ? legendText : ''; });
+                                Array.from(legendP.getElementsByTagNameNS(HP_NS, 'linesegarray')).forEach((la) => {
+                                    Array.from(la.getElementsByTagNameNS(HP_NS, 'lineseg')).slice(1).forEach((x) => la.removeChild(x));
+                                });
+                                appendComparePara(legendP);
+                            }
                         }
                     }
                 } catch (cmpErr) {
