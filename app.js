@@ -26439,15 +26439,40 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
         } catch (_e) { uid = ''; }
         return { uid: String(uid || window.state.userUid || ''), name: memoAuthorName() };
     }
-    /** 이 메모가 있는 층키(없으면 새 메모를 둘 건물 기본 층) */
-    function sketchKeyFor(id) {
+    /** 2026-10-20 손글씨 메모는 회차 자리(층 아님) — 이 회차 건물의 예약 층키 */
+    function sketchKeyFor(_id) {
         const api = sketchApi();
         const b = sketchUi.bldgId || state.currentBuildingId;
-        const hit = (api && id) ? api.floorKeyOf(window.state, b, id) : '';
-        if (hit) return hit;
-        const bldg = (state.buildings || []).find((x) => x && x.id === b) || state.currentBuilding;
-        const codes = (bldg && typeof buildingFloorCodesForBackup === 'function') ? buildingFloorCodesForBackup(bldg) : [];
-        return (api && api.homeFloorKey(b, codes, state.currentFloor)) || currentMemoFloorKey();
+        return api ? api.roundKeyFor(b) : '';
+    }
+    /** 옛 층별 메모 → 회차 자리 복사(원본 유지). 바뀌면 회차 자리를 올릴 것으로 표시 */
+    function migrateSketchMemosForBuilding(bldgId) {
+        const api = sketchApi();
+        if (!api || !bldgId) return 0;
+        const n = api.migrateFloorMemosToRound(window.state, bldgId);
+        if (n) commitMemoChange(api.roundKeyFor(bldgId));
+        return n;
+    }
+    /** 서버의 회차 메모 묶음을 받아 합친다(층 묶음과 같은 길·같은 병합). 오프라인·로그인 전이면 조용히 건너뜀 */
+    async function pullRoundSketchMemos(bldg) {
+        const api = sketchApi();
+        if (!api || !bldg || !bldg.id || !db || !window.state.companyId) return false;
+        if (typeof navigator !== 'undefined' && navigator.onLine === false) return false;
+        const rk = api.roundKeyFor(bldg.id);
+        try {
+            const bundle = await readFloorBundleStrict(bldg, api.ROUND_CODE);
+            if (!bundle || !bundle.sketches) return false;
+            api.mergePackIntoState(window.state, rk, bundle.sketches, window.BSA.syncMerge.mergeNdtDataMaps);
+            ['defects', 'ndtData', 'ndtDisplacementGroups'].forEach((m) => {
+                const map = window.state[m];
+                if (map && Array.isArray(map[rk]) && !map[rk].length) delete map[rk];
+            });
+            if (typeof saveStateToLocalStorage === 'function') saveStateToLocalStorage();
+            return true;
+        } catch (e) {
+            console.warn('회차 손글씨 메모 받기 실패(기기 것으로 계속):', e);
+            return false;
+        }
     }
     function memoAuthorName() {
         try {
@@ -27174,7 +27199,13 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
         if (!api || !state.currentBuildingId) { window.showToast('건물을 먼저 고르세요', 'info', 2000); return false; }
         sketchBuildDom();
         sketchUi.bldgId = state.currentBuildingId;
+        migrateSketchMemosForBuilding(sketchUi.bldgId);
         sketchUi.floorKey = sketchKeyFor('') || floorKey;
+        // 다른 계정·기기가 이 회차에 쓴 메모를 받아 탭을 다시 그린다(창의 획은 그대로)
+        const pullFor = sketchUi.bldgId;
+        void pullRoundSketchMemos(state.currentBuilding).then((ok) => {
+            if (ok && sketchUi.el && !sketchUi.el.hidden && sketchUi.bldgId === pullFor) sketchFillSheetSelect();
+        });
         sketchUi.penSeen = false;
         sketchUi.el.hidden = false;
         document.documentElement.classList.add('bsa-sketch-open');
@@ -49799,6 +49830,7 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
         // 2026-10-20 층 구분 없이 건물 전체 · 계정(작성자)별 「홍길동 메모-1」, 작성자 모름은 「이전 메모-1」
         const api = window.BSA && window.BSA.sketchMemo;
         if (!api || !st || !bldg || !bldg.id) return [];
+        if (st === window.state) migrateSketchMemosForBuilding(bldg.id);
         return api.outputGroups(st, bldg.id);
     }
     /** 메모 한 장 → 흰 바탕 PNG(지우개 획은 투명 층에서 지운 뒤 흰 종이 위에 얹는다) */
@@ -49821,6 +49853,7 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
     }
     /** 한글 문서 끝(전경사진 뒤)에 「손글씨 메모」 제목 + 메모 한 장씩. 반환: 늘어난 imgCounter */
     async function appendHwpxSketchMemoSection(o) {
+        await pullRoundSketchMemos(o.bldg);   // 이 회차의 모든 계정 메모
         const memos = collectBuildingSketchMemos(window.state, o.bldg);
         let imgCounter = o.imgCounter;
         if (!memos.length) return imgCounter;
@@ -61597,6 +61630,7 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
                 if (code) codes.add(code);
             });
         });
+        codes.delete('ROUND_SKETCH_MEMO');   // 회차 손글씨 메모 자리는 층이 아님
         return Array.from(codes);
     }
 
@@ -61629,7 +61663,7 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
 
     async function readBuildingBundlesFromServer(bldg) {
         const out = [];
-        for (const code of buildingFloorCodesForBackup(bldg)) {
+        for (const code of buildingFloorCodesForBackup(bldg).concat(['ROUND_SKETCH_MEMO'])) {
             out.push({ floorCode: code, bundle: await readFloorBundleStrict(bldg, code) });
         }
         return out;
@@ -61661,6 +61695,8 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
         const failed = [];
         let merged = 0;
         const codesAll = buildingFloorCodesForBackup(bldg);
+        // 2026-10-20 회차 손글씨 메모 자리도 같이 받는다(층 목록에는 안 넣음)
+        if (typeof pullRoundSketchMemos === 'function') { try { await pullRoundSketchMemos(bldg); } catch (_e) { /* 메모만 실패 */ } }
         let codeIdx = 0;
         const tellProgress = (n) => { if (typeof o.onProgress === 'function') { try { o.onProgress(n, codesAll.length); } catch (_e) { /* ignore */ } } };
         for (const code of codesAll) {
@@ -61737,7 +61773,7 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
             }
             // 1) 층 데이터
             const floorCodes = prep.uniqueFloorCodes(
-                buildingFloorCodesForBackup(bldg).concat(((bldg.floorsList) || []).map((f) => f && f.floorCode))
+                buildingFloorCodesForBackup(bldg).concat(((bldg.floorsList) || []).map((f) => f && f.floorCode), ['ROUND_SKETCH_MEMO'])
             );
             rec.floors.total = floorCodes.length;
             const urlsById = {};

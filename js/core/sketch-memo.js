@@ -173,6 +173,7 @@
             items: listFor(st, floorKey).map(function (m) {
                 var o = { id: m.id, title: m.title || '', w: m.w, h: m.h, strokes: m.strokes || [], by: m.by || '', createdAt: m.createdAt || 0, updatedAt: m.updatedAt || 0 };
                 if (m.byUid) o.byUid = m.byUid;
+                if (m.fromFloor) o.fromFloor = m.fromFloor;
                 if (m.x != null && m.y != null) { o.x = m.x; o.y = m.y; }
                 return o;
             }),
@@ -286,15 +287,55 @@
         var n = authorKey(rec);
         return !!n && !!m.name && n === m.name;
     }
-    /** 건물의 모든 메모 [{ floorKey, rec }] — 만든 순서 */
+    // 2026-10-20 「메모는 회차에 붙게」: 메모는 층이 아니라 회차(= 회차별 건물 기록)에 붙는다.
+    // 저장 자리 = 그 건물의 예약 층키 `${건물id}_ROUND_SKETCH_MEMO` — 서버에서도 같은 회차 경로
+    // (sites/…/rounds/{회차}/…/floors/ROUND_SKETCH_MEMO, 기존 규칙이 허용하는 자리)에 층 묶음과 같은 방식으로 실린다.
+    // 실제 층이 아니므로 층을 지워도 메모는 안 지워진다.
+    var ROUND_CODE = 'ROUND_SKETCH_MEMO';
+    function roundKeyFor(bldgId) { return bldgId ? String(bldgId) + '_' + ROUND_CODE : ''; }
+    /**
+     * 옛 층별 메모를 회차 자리로 복사(원본은 그대로 둔다 — 확인 뒤 정리). 몇 번 불러도 같다.
+     * 같은 id가 이미 있으면 획 합집합·나중 시각, 회차 자리에서 지운 메모(묘비)는 다시 넣지 않는다. 반환: 바뀐 장 수
+     */
+    function migrateFloorMemosToRound(st, bldgId) {
+        if (!st || !bldgId || !st.sketchMemos) return 0;
+        ensureMaps(st);
+        var rk = roundKeyFor(bldgId);
+        var prefix = String(bldgId) + '_';
+        var dead = new Set((st.deletedSketchIds[rk] || []).map(String));
+        var list = st.sketchMemos[rk] || [];
+        var byId = {};
+        list.forEach(function (r) { if (r && r.id) byId[r.id] = r; });
+        var changed = 0;
+        Object.keys(st.sketchMemos).forEach(function (k) {
+            if (k === rk || k.indexOf(prefix) !== 0) return;
+            (st.sketchMemos[k] || []).forEach(function (r) {
+                if (!r || !r.id || dead.has(String(r.id))) return;
+                var cur = byId[r.id];
+                if (!cur) {
+                    var copy = JSON.parse(JSON.stringify(r));
+                    copy.fromFloor = k.slice(prefix.length);
+                    list.push(copy);
+                    byId[r.id] = copy;
+                    changed++;
+                    return;
+                }
+                var merged = unionStrokes(cur.strokes, r.strokes);
+                if (merged.length !== (cur.strokes || []).length) {
+                    cur.strokes = merged;
+                    cur.updatedAt = Math.max(Number(cur.updatedAt) || 0, Number(r.updatedAt) || 0) + 1;
+                    changed++;
+                }
+            });
+        });
+        if (changed) st.sketchMemos[rk] = list;
+        return changed;
+    }
+    /** 이 회차(건물)의 메모 [{ floorKey, rec }] — 만든 순서 */
     function listForBuilding(st, bldgId) {
         if (!st || !bldgId || !st.sketchMemos) return [];
-        var prefix = String(bldgId) + '_';
-        var out = [];
-        Object.keys(st.sketchMemos).forEach(function (k) {
-            if (k.indexOf(prefix) !== 0) return;
-            (st.sketchMemos[k] || []).forEach(function (r) { if (r && r.id) out.push({ floorKey: k, rec: r }); });
-        });
+        var k = roundKeyFor(bldgId);
+        var out = (st.sketchMemos[k] || []).filter(function (r) { return r && r.id; }).map(function (r) { return { floorKey: k, rec: r }; });
         out.sort(function (a, b) { return ((a.rec.createdAt || 0) - (b.rec.createdAt || 0)) || (a.rec.id < b.rec.id ? -1 : a.rec.id > b.rec.id ? 1 : 0); });
         return out;
     }
@@ -396,7 +437,10 @@
         nextMineLabel: nextMineLabel,
         pickInitialForBuilding: pickInitialForBuilding,
         outputGroups: outputGroups,
-        homeFloorKey: homeFloorKey
+        homeFloorKey: homeFloorKey,
+        ROUND_CODE: ROUND_CODE,
+        roundKeyFor: roundKeyFor,
+        migrateFloorMemosToRound: migrateFloorMemosToRound
     };
     if (typeof module !== 'undefined' && module.exports) module.exports = api;
     if (root) {

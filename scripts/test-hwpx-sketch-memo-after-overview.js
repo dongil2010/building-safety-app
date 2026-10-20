@@ -24,6 +24,8 @@ const st = {
         BB_1F: [S('x', 1, ink, '김', 'u1')]
     }
 };
+sketch.migrateFloorMemosToRound(st, 'B');
+sketch.migrateFloorMemosToRound(st, 'BB');
 const bldg = { id: 'B' };
 const got = JSON.parse(JSON.stringify(ctx.collect(st, bldg))).map((m) => `${m.label}:${m.rec.id}`);
 assert.deepStrictEqual(got, ['김 메모-1:a', '김 메모-2:c', '이 메모-1:b', '이전 메모-1:o'], '층 없이 작성자별, 이전 메모는 맨 뒤, 다른 건물·빈 장·지우개만 뺌');
