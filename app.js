@@ -3600,6 +3600,8 @@ document.addEventListener('DOMContentLoaded', () => {
             // 원격이 옛 floorsList(1층만)를 갖고 와도, 로컬에서 추가한 층이 사라지지 않게 합친다
             const localFloorOrderWins = preferLocalFloorOrder(localMatch, b);
             merged.floorsList = mergeFloorMetaLists(localMatch?.floorsList, b.floorsList, localFloorOrderWins);
+            // 2026-10-20 층 이름 바꾸기: 이름 바꾼 시각(floorLabelAt)이 더 늦은 쪽 이름을 따른다(층 구성·묘비는 그대로)
+            if (window.BSA && window.BSA.floorRename) window.BSA.floorRename.applyLabelMerge(merged, localMatch, b);
             // 순서를 가져온 쪽의 "직접 정한 순서" 표시·시각도 같이 따라가야 한다
             const floorOrderSource = localFloorOrderWins ? localMatch : b;
             if (floorOrderSource) {
@@ -6537,6 +6539,57 @@ document.addEventListener('DOMContentLoaded', () => {
         return String(code).trim();
     };
 
+    /**
+     * 층 표시 이름 바꾸기 — floorCode(내부 키)는 그대로, floorsList 이름만 바꾼다.
+     * 도면 삭제 묘비·다시 넣기 로직을 부르지 않는다. 동기화는 floorLabelAt 시각으로 병합.
+     */
+    window.renameFloorDisplayName = async function(bldgOrId, floorCode, newLabel) {
+        const bldg = typeof bldgOrId === 'string'
+            ? (window.state.buildings || []).find((b) => b && b.id === bldgOrId)
+            : bldgOrId;
+        const fr = window.BSA && window.BSA.floorRename;
+        if (!bldg || !floorCode || !fr) return false;
+        const codes = (window.getBuildingAvailableFloors(bldg) || []).map((f) => f.floorCode);
+        const curLabel = window.getFloorLabelFromCode(floorCode, bldg);
+        let label = newLabel;
+        if (label == null) {
+            label = await window.appPrompt(`새 층 이름을 입력하세요.\n(도면·결함·사진 등은 그대로 이 층에 남습니다)`, curLabel, { title: '층 이름 바꾸기' });
+            if (label == null) return false;
+        }
+        const res = fr.rename(bldg, floorCode, label, { codes, lookup: (c, b) => window.getFloorLabelFromCode(c, b) });
+        if (!res.ok) { window.showToast(res.reason, 'warning', 4000); return false; }
+        if (!res.changed) return false;
+        // 같은 건물 객체가 여러 곳에 있으면 맞춘다(state.buildings / currentBuilding / currentEditingBuilding)
+        [ (window.state.buildings || []).find((b) => b && b.id === bldg.id), window.state.currentBuilding, window.currentEditingBuilding ]
+            .forEach((o) => {
+                if (!o || o === bldg || o.id !== bldg.id) return;
+                o.floorsList = bldg.floorsList;
+                o.floorLabelAt = bldg.floorLabelAt;
+            });
+        bldg._pendingCloudSync = true;
+        if (typeof markBuildingMetaDirty === 'function') markBuildingMetaDirty(bldg);
+        saveStateToLocalStorage();
+        if (typeof syncStateToFirebase === 'function') syncStateToFirebase();
+        if (window.state.currentBuildingId === bldg.id) {
+            populateFloorSelectDropdown(window.state.currentBuilding || bldg);
+            if (typeof drawCanvas === 'function') drawCanvas();
+            if (typeof renderDefectListPanel === 'function') renderDefectListPanel();
+        }
+        window.showToast(`층 이름을 "${res.label}"(으)로 바꿨습니다.`, 'success');
+        return true;
+    };
+    (function wireFloorRenameButton() {
+        if (typeof document === 'undefined' || typeof document.getElementById !== 'function') return;
+        const btn = document.getElementById('btnRenameFloor');
+        if (!btn || typeof btn.addEventListener !== 'function') return;
+        btn.addEventListener('click', () => {
+            const b = window.state.currentBuilding;
+            const code = window.state.currentFloor;
+            if (!b || !code) { window.showToast('층을 먼저 선택해 주세요.', 'warning'); return; }
+            window.renameFloorDisplayName(b, code);
+        });
+    })();
+
     window.getBuildingAvailableFloors = function(bldg) {
         if (!bldg) return [];
         const extras = [];
@@ -8718,6 +8771,9 @@ document.addEventListener('DOMContentLoaded', () => {
                                 ? '<span class="edit-floor-drawing-badge">✓ 도면 · 눌러서 보기</span>'
                                 : '<span class="edit-floor-drawing-badge">눌러서 도면 불러오기</span>'}
                         </span>
+                        <button type="button" class="btn btn-sm btn-outline edit-floor-drawing-rename" data-floor-code="${safeCode}" title="층 이름 바꾸기 (도면·결함은 그대로)">
+                            <i class="fa-solid fa-pen"></i> 이름
+                        </button>
                         <button type="button" class="btn btn-sm btn-outline edit-floor-drawing-delete" style="border-color:#ef4444; color:#ef4444; font-size:0.72rem; padding:0.1rem 0.4rem;" data-floor-code="${safeCode}">
                             <i class="fa-solid fa-trash"></i> 도면 삭제
                         </button>
@@ -8740,7 +8796,7 @@ document.addEventListener('DOMContentLoaded', () => {
                 }
             };
             row.addEventListener('click', (e) => {
-                if (e.target.closest('.edit-floor-drawing-delete')) return;
+                if (e.target.closest('.edit-floor-drawing-delete') || e.target.closest('.edit-floor-drawing-rename')) return;
                 if (e.target.closest('.add-drawing-drag-handle')) return;
                 openView();
             });
@@ -8752,6 +8808,13 @@ document.addEventListener('DOMContentLoaded', () => {
             });
         });
         if (existingFloors.length) markDrawinglessFloorsInEditPreview(bldg, existingFloors);
+        preview.querySelectorAll('.edit-floor-drawing-rename').forEach((btn) => {
+            btn.addEventListener('click', async (e) => {
+                e.stopPropagation();
+                const code = btn.getAttribute('data-floor-code');
+                if (code && await window.renameFloorDisplayName(window.currentEditingBuilding, code)) renderEditDrawingPreview();
+            });
+        });
         preview.querySelectorAll('.edit-floor-drawing-delete').forEach((btn) => {
             btn.addEventListener('click', (e) => {
                 e.stopPropagation();

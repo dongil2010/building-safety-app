@@ -17769,3 +17769,7 @@ input.ndt-mo-locked { background: var(--bg-secondary, #f2f2f2); color: var(--tex
 .dong-name-row .form-control.is-invalid { border-color:#dc2626; }
 .dong-name-add-btn { margin:2px 0 6px; padding:6px 12px; font-size:0.85rem; }
 #addBuildingDongGroup > small { display:block; }
+
+/* 층 이름 바꾸기 */
+.floor-rename-btn { padding:0.2rem 0.45rem; margin-left:4px; font-size:0.78rem; line-height:1; }
+.edit-floor-drawing-rename { font-size:0.72rem; padding:0.1rem 0.4rem; margin-right:4px; flex-shrink:0; }
