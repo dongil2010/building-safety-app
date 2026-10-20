@@ -17688,3 +17688,21 @@ input.ndt-mo-locked { background: var(--bg-secondary, #f2f2f2); color: var(--tex
     #editBuildingModal .edit-building-footer-actions { flex: 1 1 100%; }
     #editBuildingModal .edit-building-footer .btn { flex: 1 1 auto; padding: 0.5rem 0.5rem; font-size: 0.78rem; white-space: normal; }
 }
+/* 2026-10-20 보고서 미리보기 — 한글 출력 전 규칙 검토 결과(app.js renderReportReview) */
+.report-review-panel{max-height:38vh;overflow-y:auto;border-bottom:1px solid #e5e5e5;background:#fffbeb;padding:.6rem 1rem;color:#1f2937;font-size:.86rem}
+.report-review-panel[hidden]{display:none}
+.report-review-head{display:flex;align-items:center;gap:.35rem;flex-wrap:wrap;margin-bottom:.4rem}
+.report-review-head .rr-error{color:#b91c1c;font-weight:700}
+.report-review-head .rr-warn{color:#b45309;font-weight:700}
+.report-review-head .rr-info{color:#475569}
+.report-review-head .rr-ok{color:#15803d;font-weight:700}
+.report-review-close{margin-left:auto;border:0;background:transparent;font-size:1rem;cursor:pointer;color:#6b7280;padding:.1rem .4rem}
+.report-review-list{list-style:none;margin:0;padding:0;display:flex;flex-direction:column;gap:2px}
+.report-review-list button{display:flex;gap:.5rem;align-items:baseline;width:100%;text-align:left;border:1px solid transparent;background:#fff;border-radius:6px;padding:.3rem .5rem;cursor:pointer;color:inherit;font:inherit}
+.report-review-list button:hover{border-color:#f59e0b}
+.report-review-list .rr-where{flex:0 0 auto;font-weight:700;min-width:6.5em;color:#111827}
+.report-review-list .rr-msg{flex:1 1 auto}
+.report-review-list li.rr-error .rr-msg{color:#991b1b}
+.report-review-list li.rr-info .rr-msg{color:#475569}
+.report-review-foot{margin-top:.45rem;font-size:.76rem;color:#6b7280}
+#btnModalReportReview .rr-badge{display:inline-block;min-width:1.3em;padding:0 .3em;margin-left:.2em;border-radius:999px;background:#dc2626;color:#fff;font-size:.75em;line-height:1.4}

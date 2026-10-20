@@ -55289,6 +55289,93 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
         }
     }
 
+    /* ---------------- 한글 출력 전 규칙 검토(2026-10-20) ----------------
+     * 미리보기 「검토」 → 모든 층 상태조사표 행(getSurveyRowsForReport, 한글과 같은 행)을 js/core/report-review.js 로 훑어
+     * 원인 빠짐·균열폭 단위·같은 말 두 번·빈칸·복사 중복 등을 목록으로 보여 준다. 고치지는 않고, 줄을 누르면 그 결함으로 간다. */
+    function reportReviewFloorCodes(bldg) {
+        if (bldg && bldg.id && typeof listNdtFloorCodesForBuilding === 'function') return listNdtFloorCodesForBuilding(bldg.id);
+        if (typeof window.getBuildingAvailableFloors === 'function') return (window.getBuildingAvailableFloors(bldg) || []).map((f) => f && f.floorCode).filter(Boolean);
+        return [state.currentFloor].filter(Boolean);
+    }
+    function collectReportReviewRows() {
+        const bldg = state.currentBuilding;
+        if (!bldg) return [];
+        const bId = bldg.id || state.currentBuildingId;
+        const rows = [];
+        reportReviewFloorCodes(bldg).forEach((fc) => {
+            const defects = state.defects[`${bId}_${fc}`] || (state.currentFloor === fc ? getCurrentFloorDefects() : []);
+            if (!defects.length) return;
+            const floorLabel = stripFloorCodeSuffix(window.getFloorLabelFromCode(fc));
+            getSurveyRowsForReport(defects).forEach((d) => {
+                const ms = Array.isArray(d.crackMeasures) && d.crackMeasures.length ? d.crackMeasures : null;
+                rows.push({
+                    id: d.id,
+                    floorCode: fc,
+                    floorLabel,
+                    no: d.no,
+                    good: isGoodDefectType(d.defectType),
+                    // 위치는 한글에 나가는 글자로(3종은 비면 층·부재를 채운다)
+                    location: getSurveyCellText('location', d, { floorCode: fc }),
+                    component: d.component || '',
+                    defectType: d.defectType || '',
+                    cause: d.cause || '',
+                    widths: getDefectCrackWidthParts(d),
+                    crackLength: ms ? ms.map((m) => (m && m.length != null ? m.length : '')).filter((v) => String(v).trim()).join('/') : (d.crackLength || ''),
+                    itemCount: ms ? ms.map((m) => (m && m.count != null ? m.count : '')).filter((v) => String(v).trim()).join('/') : (d.itemCount || ''),
+                    sizeText: d.size || ''
+                });
+            });
+        });
+        return rows;
+    }
+    function renderReportReview() {
+        const panel = document.getElementById('reportReviewPanel');
+        const R = window.BsaReportReview;
+        if (!panel || !R) return;
+        const rows = collectReportReviewRows();
+        const issues = R.reviewRows(rows);
+        // 층(보고서 순서)·번호 순으로 묶어 보여 준다
+        const floorOrder = [];
+        rows.forEach((r) => { if (floorOrder.indexOf(r.floorCode) < 0) floorOrder.push(r.floorCode); });
+        const noKey = (n) => { const m = String(n || '').match(/^(\d+)(?:-(\d+))?/); return m ? (+m[1]) * 1000 + (+(m[2] || 0)) : 1e9; };
+        issues.sort((a, b) => (floorOrder.indexOf(a.floorCode) - floorOrder.indexOf(b.floorCode)) || (noKey(a.no) - noKey(b.no)));
+        const cnt = { error: 0, warn: 0, info: 0 };
+        issues.forEach((it) => { cnt[it.level]++; });
+        const esc = (t) => String(t == null ? '' : t).replace(/[&<>"]/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]));
+        const icon = { error: '⛔', warn: '⚠️', info: 'ℹ️' };
+        let html = '<div class="report-review-head"><b>검토 결과</b> <span>조사표 ' + rows.length + '행</span>'
+            + (issues.length ? ' · <span class="rr-error">확인 필요 ' + cnt.error + '</span> · <span class="rr-warn">주의 ' + cnt.warn + '</span> · <span class="rr-info">참고 ' + cnt.info + '</span>' : ' · <span class="rr-ok">이상한 곳을 찾지 못했습니다</span>')
+            + '<button type="button" class="report-review-close" data-rr-close title="닫기">✕</button></div>';
+        if (issues.length) {
+            html += '<ul class="report-review-list">' + issues.map((it) =>
+                '<li class="rr-' + it.level + '"><button type="button" data-rr-id="' + esc(it.id) + '" title="결함위치도에서 이 결함 보기">'
+                + '<span class="rr-icon">' + icon[it.level] + '</span><span class="rr-where">' + esc(it.floorLabel) + ' ' + esc(it.no) + (it.no ? '번' : '') + '</span>'
+                + '<span class="rr-msg">' + esc(it.msg) + '</span></button></li>').join('') + '</ul>';
+        }
+        html += '<div class="report-review-foot">규칙으로만 훑습니다(오타·문맥은 못 잡음). 상태양호·보수완료 행은 원인·균열폭 검사에서 뺍니다. 고치는 건 직접 — 줄을 누르면 그 결함으로 갑니다.</div>';
+        panel.innerHTML = html;
+        panel.hidden = false;
+        const btn = document.getElementById('btnModalReportReview');
+        if (btn) btn.innerHTML = '<i class="fa-solid fa-list-check"></i> 검토' + (cnt.error + cnt.warn ? ' <b class="rr-badge">' + (cnt.error + cnt.warn) + '</b>' : '');
+    }
+    (function bindReportReview() {
+        const btn = document.getElementById('btnModalReportReview');
+        const panel = document.getElementById('reportReviewPanel');
+        if (!btn || !panel) return;
+        btn.addEventListener('click', () => {
+            if (!panel.hidden) { panel.hidden = true; return; }
+            try { renderReportReview(); } catch (err) { window.showToast?.('검토하지 못했습니다: ' + (err && err.message ? err.message : err), 'error', 4000); }
+        });
+        panel.addEventListener('click', (e) => {
+            if (e.target.closest('[data-rr-close]')) { panel.hidden = true; return; }
+            const b = e.target.closest('[data-rr-id]');
+            if (!b || !b.dataset.rrId) return;
+            const modal = document.getElementById('reportPreviewModal');
+            if (modal) { modal.style.display = 'none'; modal.classList.remove('open'); }
+            if (typeof window.viewDefectOnMapFromSurvey === 'function') window.viewDefectOnMapFromSurvey(b.dataset.rrId);
+        });
+    })();
+
     window.deleteDefectById = async function(id, options) {
         if (window.__bsaEvalMapOn === true) { notifyEvalMarkingLock(); return false; }
         if (!options?.skipConfirm && !await window.confirmDelete('이 결함을 삭제할까요?')) return false;
