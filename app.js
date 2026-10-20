@@ -2015,10 +2015,19 @@ document.addEventListener('DOMContentLoaded', () => {
                 return false;
             }
         }
+        const wasDeleted = options.force && isDeletedDrawingFloor(bldg, floorCode);
         if (typeof _drawingFloorTombstone.forgetDeletedDrawingFloor === 'function') {
-            _drawingFloorTombstone.forgetDeletedDrawingFloor(bldg, floorCode, _sessionDeletedDrawingKeys);
+            // 2026-10-13 사용자가 직접 다시 넣은 것(force)은 「다시 넣은 시각」을 남긴다 — 서버·다른 기기의 옛 묘비가
+            // 합집합 병합으로 돌아와 새 도면을 다시 지우던 문제(삭제 → 같은 층 새 도면 → 동기화하면 사라짐)
+            _drawingFloorTombstone.forgetDeletedDrawingFloor(bldg, floorCode, _sessionDeletedDrawingKeys,
+                options.force ? Date.now() : 0);
         }
         if (inflightKey) _sessionDeletingDrawingFloors.delete(inflightKey);
+        // 다시 넣은 층은 층 묶음을 바로 올려 옛 표시 묘비가 서버·다른 기기에 닿게 한다
+        // (지운 층은 올릴 목록에서 빠져 묘비가 안 올라가 다른 기기에 옛 결함·가이드가 남았다)
+        if (wasDeleted && inflightKey && typeof markFloorKeyDirty === 'function') {
+            try { markFloorKeyDirty(inflightKey); } catch (_e) { /* ignore */ }
+        }
         return true;
     }
 
@@ -3530,6 +3539,17 @@ document.addEventListener('DOMContentLoaded', () => {
                     b?.deletedDrawingFloorAt
                 )
                 : Object.assign({}, b?.deletedDrawingFloorAt, localMatch?.deletedDrawingFloorAt);
+            // 2026-10-20 다시 넣은 시각도 양쪽 중 나중 것 → 삭제보다 나중에 다시 넣은 층은 묘비를 푼다(어느 기기에서 합쳐도 같은 결과)
+            if (typeof _drawingFloorTombstone.mergeDrawingFloorRevivedAt === 'function') {
+                const rv = _drawingFloorTombstone.mergeDrawingFloorRevivedAt(localMatch?.drawingFloorRevivedAt, b?.drawingFloorRevivedAt);
+                if (Object.keys(rv).length) merged.drawingFloorRevivedAt = rv;
+                else delete merged.drawingFloorRevivedAt;
+                const revivedCodes = _drawingFloorTombstone.applyDrawingFloorRevivals(merged, null);
+                if (revivedCodes.length) {
+                    // 세션 묘비(이 기기에서 지운 기록)도 다시 넣은 것이 이기면 푼다
+                    revivedCodes.forEach((c) => _sessionDeletedDrawingKeys.delete(`${merged.id}_${c}`));
+                }
+            }
             // 병합의 증거(payloadEvidence·locallyResurrected)는 전부 내 기기 로컬에서 나온 것이다.
             // 원격이 그 층 묘비를 들고 있으면 0 → 삭제 시각이 있는 묘비는 로컬 증거로 풀지 않는다.
             // (옛 데이터를 든 기기가 접속하면 지운 층을 다시 올리던 문제, 2026-09-21 지하1층 주차장-2)
@@ -9021,6 +9041,12 @@ document.addEventListener('DOMContentLoaded', () => {
             releaseStrengthPhotosOfItems(bldg.id, removedGroups, { keepLocal: true, deferCloudFloorKey: floorKey });
         }
 
+        // 가이드·개수 점·메모·부재·평가 구역도 묘비와 함께 지운다 — 같은 층에 새 도면을 넣으면
+        // 옛 표시가 새 도면 위에 엉뚱하게 되살아났다(2026-10-13)
+        try {
+            window.BSA?.drawingResize?.purgeFloorMarkings?.(window.state, floorKey, window.BSA, Date.now());
+        } catch (e) { console.warn('층 표시 정리 실패:', floorKey, e); }
+
         if (bldg.floorsList) {
             bldg.floorsList = bldg.floorsList.filter((f) => f.floorCode !== floorCode);
         }
@@ -9223,9 +9249,10 @@ document.addEventListener('DOMContentLoaded', () => {
                                 if (prepared && prepared.pdfDataUrl && bldg.floorDrawingPdfs) {
                                     delete bldg.floorDrawingPdfs[item.floorCode];
                                 }
+                                let rasterUploaded = false;
                                 if (prepared && prepared.rasterDataUrl) {
                                     bldg.floorDrawings[item.floorCode] = prepared.rasterDataUrl;
-                                    await uploadFloorDrawing(bldg.id, item.floorCode, prepared.rasterDataUrl);
+                                    rasterUploaded = await uploadFloorDrawing(bldg.id, item.floorCode, prepared.rasterDataUrl);
                                 }
                                 if (prepared && prepared.tiers) {
                                     if (!bldg.floorDrawingTiers) bldg.floorDrawingTiers = {};
@@ -9253,6 +9280,9 @@ document.addEventListener('DOMContentLoaded', () => {
                                 } else if (prepared && prepared.rasterDataUrl) {
                                     // PDF 없는 그림으로 바꿈 — 옛 PDF가 남으면 그 층 핀이 옛 PDF 비율로 어긋난다
                                     await markFloorPdfRemoved(bldg, item.floorCode);
+                                    // 2026-10-20 그림(PNG·JPG) 도면으로 바꿔도 「다시 넣은 시각」을 찍는다 — 예전엔 PDF일 때만 찍어서
+                                    // 다른 기기가 기기에 받아 둔 옛 그림(IndexedDB)을 계속 보여 줬다(지우고 새 도면 넣어도 옛 도면이 보임)
+                                    if (rasterUploaded) stampFloorDrawingUpdated(bldg, item.floorCode);
                                 }
                                 
                                 bumpDrawingEpoch(bldg, item.floorCode);
@@ -40303,6 +40333,7 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
         const G = gridLib();
         if (!G) return;
         resolvePendingGridScaleForCurrentFloor(); // 다른 층에서 복사해 온 선 → 이 층 도면 크기에 맞춤(한 번)
+        checkFloorDrawingSizeChange();
         scheduleGridLocFreshness();
         const ge = window.BSA_gridEdit;
         const editing = !!(ge && ge.active);
@@ -41856,6 +41887,44 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
      * 지금 층 선에 도면 크기 기록(refW/refH — 다음에 이 층으로 복사해 올 때 비율 계산용)과,
      * 복사해 온 선(pendingScale)을 이 층 도면 크기에 맞춤. 맞출 것이 남아 있으면 false
      */
+    /**
+     * 2026-10-20 같은 층 도면을 크기가 다른 도면으로 바꿨는지(이 기기가 전에 본 크기와 비교) — 바뀌었고 마킹이 있으면
+     * 「새 도면 비율에 맞춰 옮길까요?」를 한 번 묻는다. 지우지 않는다(그대로 두기도 가능).
+     */
+    const _drawingSizeAsked = new Set();
+    function checkFloorDrawingSizeChange() {
+        const R = window.BSA && window.BSA.drawingResize;
+        const dims = getGridReliableDims();
+        if (!R || !dims) return;
+        const key = `${state.currentBuildingId}_${state.currentFloor}`;
+        // 같은 도면인데 기기·해상도 차이로 크기가 달라 보이는 것은 묻지 않는다 — 도면을 다시 넣은 표시가 바뀌었을 때만
+        const bl = state.currentBuilding;
+        const sig = `${floorPdfUpdatedAtOf(bl, state.currentFloor)}|${(bl && bl.drawingFloorRevivedAt && bl.drawingFloorRevivedAt[state.currentFloor]) || 0}`;
+        const change = R.noteDims(typeof localStorage !== 'undefined' ? localStorage : null, 'bsa_floor_drawing_dims_v1', key, dims.w, dims.h, sig);
+        if (!change || _drawingSizeAsked.has(key)) return;
+        _drawingSizeAsked.add(key);
+        const list = (state.defects && state.defects[key]) || [];
+        if (!list.length) return;
+        const sx = change.to.w / change.from.w;
+        const sy = change.to.h / change.from.h;
+        setTimeout(async () => {
+            const ok = typeof window.appConfirm === 'function'
+                ? await window.appConfirm(`이 층 도면이 크기가 다른 도면으로 바뀌었습니다 (${change.from.w}×${change.from.h} → ${change.to.w}×${change.to.h}).\n\n기존 마킹 ${list.length}개를 새 도면 비율에 맞춰 옮길까요?\n(취소하면 마킹 위치를 그대로 둡니다 — 필요 없으면 목록에서 선택해 지울 수 있습니다)`)
+                : false;
+            if (!ok) return;
+            if (`${state.currentBuildingId}_${state.currentFloor}` !== key) return;
+            if (typeof pushDefectHistory === 'function') pushDefectHistory([key]);
+            (state.defects[key] || []).forEach((d) => {
+                if (R.scaleDefect(d, sx, sy) && typeof touchDefectPositionUpdatedAt === 'function') touchDefectPositionUpdatedAt(d);
+            });
+            if (typeof markFloorKeyDirty === 'function') markFloorKeyDirty(key);
+            if (typeof saveStateToLocalStorage === 'function') saveStateToLocalStorage();
+            if (typeof drawCanvas === 'function') drawCanvas();
+            if (typeof renderDefectListPanel === 'function') renderDefectListPanel();
+            if (typeof window.showToast === 'function') window.showToast('마킹을 새 도면 비율에 맞췄습니다. (되돌리기로 취소 가능)', 'success', 4000);
+        }, 300);
+    }
+
     function resolvePendingGridScaleForCurrentFloor() {
         const G = gridLib();
         const grid = getCurrentFloorGrid(false);

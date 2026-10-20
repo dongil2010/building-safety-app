@@ -135,7 +135,9 @@
             if (!bldg.deletedDrawingFloorAt || typeof bldg.deletedDrawingFloorAt !== 'object') {
                 bldg.deletedDrawingFloorAt = {};
             }
-            bldg.deletedDrawingFloorAt[code] = at;
+            // 다시 넣은 뒤 또 지우면 이번 삭제가 이겨야 한다(시계가 조금 뒤처져도)
+            const rv = getDrawingFloorRevivedAt(bldg, code);
+            bldg.deletedDrawingFloorAt[code] = Math.max(at, rv + 1);
         }
         if (bldg.id && sessionKeys && typeof sessionKeys.add === 'function') {
             sessionKeys.add(drawingFloorKey(bldg.id, code));
@@ -143,9 +145,52 @@
         return bldg;
     }
 
-    function forgetDeletedDrawingFloor(bldg, floorCode, sessionKeys) {
+    /**
+     * 2026-10-20 「잘못 넣은 도면 지우고 같은 층에 새 도면」 — 다시 넣은 시각(drawingFloorRevivedAt[층]).
+     * 묘비는 합칠 때 합집합이라, 다시 넣은 기기가 자기 묘비만 지워도 서버·다른 기기의 묘비(삭제 시각 포함)가
+     * 다음 동기화에서 돌아와 새 도면을 지웠다. 다시 넣은 시각이 삭제 시각보다 나중이면 그 묘비는 무효(나중 것이 이김).
+     */
+    function getDrawingFloorRevivedAt(bldg, floorCode) {
+        const code = asCode(floorCode);
+        if (!bldg || !code) return 0;
+        const map = bldg.drawingFloorRevivedAt;
+        if (!map || typeof map !== 'object') return 0;
+        const n = Number(map[code]);
+        return Number.isFinite(n) && n > 0 ? n : 0;
+    }
+
+    function mergeDrawingFloorRevivedAt(localAt, remoteAt) {
+        return mergeDeletedDrawingFloorAt(localAt, remoteAt);
+    }
+
+    /** 다시 넣은 시각이 삭제 시각보다 나중인 묘비를 지운다. returns 지운 층 코드 목록 */
+    function applyDrawingFloorRevivals(bldg, sessionKeys) {
+        const out = [];
+        if (!bldg) return out;
+        const revived = bldg.drawingFloorRevivedAt;
+        if (!revived || typeof revived !== 'object') return out;
+        uniqueCodes([bldg.deletedDrawingFloorCodes]).forEach(function (code) {
+            const rv = getDrawingFloorRevivedAt(bldg, code);
+            if (!rv) return;
+            const del = getDeletedDrawingFloorAt(bldg, code);
+            if (rv > del) {
+                forgetDeletedDrawingFloor(bldg, code, sessionKeys);
+                out.push(code);
+            }
+        });
+        return out;
+    }
+
+    function forgetDeletedDrawingFloor(bldg, floorCode, sessionKeys, revivedAtMs) {
         if (!bldg || !floorCode) return bldg;
         const code = asCode(floorCode);
+        // 실제로 묘비가 있던 층을 다시 넣을 때만 시각을 남긴다(안 지운 층에 찍으면 다른 기기의 나중 삭제를 못 이기게 될 수 있음)
+        const rv = Number(revivedAtMs);
+        if (code && Number.isFinite(rv) && rv > 0 && isDeletedDrawingFloor(bldg, code, sessionKeys)) {
+            if (!bldg.drawingFloorRevivedAt || typeof bldg.drawingFloorRevivedAt !== 'object') bldg.drawingFloorRevivedAt = {};
+            const del = getDeletedDrawingFloorAt(bldg, code);
+            bldg.drawingFloorRevivedAt[code] = Math.max(rv, del + 1);
+        }
         bldg.deletedDrawingFloorCodes = (bldg.deletedDrawingFloorCodes || []).filter(function (c) {
             return asCode(c) !== code;
         });
@@ -318,7 +363,10 @@
         forgetTombstonesWithDrawingEvidence: forgetTombstonesWithDrawingEvidence,
         collectRemotelyAliveFloorCodes: collectRemotelyAliveFloorCodes,
         forgetTombstonesClearedByRemoteMeta: forgetTombstonesClearedByRemoteMeta,
-        filterFloorCodes: filterFloorCodes
+        filterFloorCodes: filterFloorCodes,
+        getDrawingFloorRevivedAt: getDrawingFloorRevivedAt,
+        mergeDrawingFloorRevivedAt: mergeDrawingFloorRevivedAt,
+        applyDrawingFloorRevivals: applyDrawingFloorRevivals
     };
 
     root.BSA = root.BSA || {};
