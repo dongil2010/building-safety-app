@@ -20,9 +20,9 @@ assert.ok(hwpxStart > 0 && hwpxEnd > hwpxStart);
 const shared = ['function paginateSurveyDefects(', 'function formatSurveyReportNo(', 'function getReportSurveyRowValues(']
     .map((h) => extractFunction(app, h)).join('\n');
 const FP = {
-    "hwpxExport": "62abbbc19cf86616",
+    "hwpxExport": "aef70f4e87c93d60",
     "sharedRows": "dbaace2b6b9c4ea7",
-    "hwpx-survey-row-fit.js": "610b7400c508e21b",
+    "hwpx-survey-row-fit.js": "3d22dcdf170a4bc4",
     "hwpx-font-8pt.js": "792b4169159c5676",
     "korean-text-wrap.js": "89a43af61acc9888"
 };
@@ -89,16 +89,19 @@ assert.deepStrictEqual(JSON.parse(JSON.stringify(L.page)), { width: 59528, heigh
 assert.strictEqual(L.grade12.fontPt, 8);
 assert.strictEqual(L.grade3.fontPt, 8);
 assert.strictEqual(ctx.reportHwpxBodyHeight(), 64836);
-// 행 높이: 1·2종 양식 3809(15행), 넘치면 그 쪽에 맞춤 / 3종 한글 행 맞춤과 같은 값
-assert.strictEqual(ctx.reportHwpxSurveyRowHeight(false, 15, true), 3809);
-const r17 = ctx.reportHwpxSurveyRowHeight(false, 17, true);
-assert.ok(r17 < 3809 && 3000 + 3950 + 280 + 17 * r17 <= 64836, '1·2종 17행도 한 쪽');
+// 행 높이(2026-10-20): 1·2종·3종 모두 한글 행 맞춤과 같은 값 — 15행 + 1행 여유, 16·17행이면 그 쪽에 맞게 줄임
 const fit = ctx.window.BSA.shared.hwpxSurveyRowFit;
-[15, 16, 17].forEach((n) => {
-    const want = fit.planRows({ bodyH: 64836, reserveH: 3000, headerH: 4298, tableMarginV: 280, needs: new Array(n).fill(0) }).rowH;
-    assert.strictEqual(ctx.reportHwpxSurveyRowHeight(true, n, true), want, '3종 ' + n + '행 = 한글');
+assert.strictEqual(L.titleH, fit.STD_RESERVE_H, 'PDF 제목 높이 = 한글 제목 한 줄');
+[[false, 3950], [true, 4298]].forEach(([g3, headH]) => {
+    [15, 16, 17].forEach((n) => {
+        const want = fit.planRows({ bodyH: 64836, reserveH: 2640, headerH: headH, tableMarginV: 280, stdReserveH: 2640, needs: new Array(n).fill(0) }).rowH;
+        assert.strictEqual(ctx.reportHwpxSurveyRowHeight(g3, n, true), want, (g3 ? '3종 ' : '1·2종 ') + n + '행 = 한글');
+        assert.ok(2640 + headH + 280 + n * want <= 64836, n + '행 한 쪽');
+    });
+    // 기본: 16행 몫(15행 + 1행 여유), 제목 없는 다음 쪽도 같은 높이
+    assert.strictEqual(ctx.reportHwpxSurveyRowHeight(g3, 15, true), Math.floor((64836 - 2640 - headH - 280 - 400) / 16));
+    assert.strictEqual(ctx.reportHwpxSurveyRowHeight(g3, 15, false), ctx.reportHwpxSurveyRowHeight(g3, 15, true));
 });
-assert.strictEqual(ctx.reportHwpxSurveyRowHeight(true, 15, true), Math.floor((64836 - 3000 - 4298 - 280 - 400) / 16));
 
 // 표 HTML: colgroup 폭(mm) = 양식 칸 폭, 8pt·자간 0, 외곽 좌우 선 없음
 const tableFn = extractFunction(app, 'function buildReportSurveyTableHtml(');

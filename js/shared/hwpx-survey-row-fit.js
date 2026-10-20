@@ -13,6 +13,9 @@
     var SAFETY = 400;     // 테두리·반올림 여유
     var MIN_ROW_H = 1600; // 8pt 한 줄 + 여백보다 작게는 줄이지 않는다
     var FONT_HEIGHT = 800; // 8pt
+    // 2026-10-20 표 위 「N) 층」 제목 한 줄(12pt 1200 + 줄 간격 1440). 기본 행 높이는 모든 쪽이 이 기준으로 같다
+    // — 첫 쪽에 다른 글이 더 있거나 제목이 없는 다음 쪽이어도 행 높이가 쪽마다 달라지지 않게(넘칠 때만 줄임)
+    var STD_RESERVE_H = 2640;
 
     function int(v, d) { var n = Math.round(Number(v)); return Number.isFinite(n) ? n : d; }
 
@@ -34,7 +37,8 @@
         var area = rowsArea(o);
         var per = int(o.baseRows, BASE_ROWS) + int(o.spareRows, SPARE_ROWS);
         var minH = int(o.minRowH, MIN_ROW_H);
-        var defArea = o.defaultAreaH != null ? int(o.defaultAreaH, area) : area;
+        var defArea = o.defaultAreaH != null ? int(o.defaultAreaH, area)
+            : (o.stdReserveH != null ? rowsArea({ bodyH: o.bodyH, reserveH: o.stdReserveH, headerH: o.headerH, tableMarginV: o.tableMarginV, safety: o.safety }) : area);
         var defaultH = Math.max(minH, Math.floor(defArea / Math.max(1, per)));
         var totalAt = function (h) {
             return needs.reduce(function (s, nd) { return s + Math.max(nd, h); }, 0);
@@ -78,7 +82,7 @@
     }
 
     var api = {
-        BASE_ROWS: BASE_ROWS, SPARE_ROWS: SPARE_ROWS, SAFETY: SAFETY, MIN_ROW_H: MIN_ROW_H, FONT_HEIGHT: FONT_HEIGHT,
+        BASE_ROWS: BASE_ROWS, SPARE_ROWS: SPARE_ROWS, SAFETY: SAFETY, MIN_ROW_H: MIN_ROW_H, FONT_HEIGHT: FONT_HEIGHT, STD_RESERVE_H: STD_RESERVE_H,
         rowsArea: rowsArea, planRows: planRows, lineNeed: lineNeed, paraHeight: paraHeight, bodyHeight: bodyHeight
     };
     if (typeof module !== 'undefined' && module.exports) module.exports = api;

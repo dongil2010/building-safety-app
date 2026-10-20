@@ -43358,7 +43358,7 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
     const REPORT_HWPX_LAYOUT = Object.freeze({
         // 쪽: A4(59528×83340), 여백 위 5669·머리말 4331·아래 4252·꼬리말 4252·좌우 8504
         page: Object.freeze({ width: 59528, height: 83340, left: 8504, right: 8504, top: 5669, bottom: 4252, header: 4331, footer: 4252 }),
-        titleH: 3000,          // 표 위 「N) 층」 제목 문단(한글 행 맞춤 계산과 같은 값)
+        titleH: 2640,          // 표 위 「N) 층」 제목 한 줄(12pt 1200 + 줄 간격 1440 — 한글 행 맞춤 STD_RESERVE_H와 같은 값)
         tableMarginV: 280,     // 표 바깥 여백 위·아래 140
         border: Object.freeze({ thin: 0.12, thick: 0.5 }),   // mm
         grade12: Object.freeze({
@@ -43402,10 +43402,11 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
         const n = Math.max(1, Number(rowCount) || 0);
         const reserveH = hasTitle ? L.titleH : 0;
         const fit = window.BSA && window.BSA.shared && window.BSA.shared.hwpxSurveyRowFit;
-        if (isGrade3 && fit && typeof fit.planRows === 'function') {
+        // 2026-10-20 한글과 같게 1·2종도 행 맞춤(15행 + 1행 여유, 16·17행이면 그 쪽에 맞게 줄임, 모든 쪽 같은 기본 높이)
+        if (fit && typeof fit.planRows === 'function') {
             return fit.planRows({
                 bodyH: reportHwpxBodyHeight(), reserveH, headerH: spec.headH,
-                tableMarginV: L.tableMarginV, needs: new Array(n).fill(0)
+                tableMarginV: L.tableMarginV, stdReserveH: fit.STD_RESERVE_H, needs: new Array(n).fill(0)
             }).rowH;
         }
         const area = reportHwpxBodyHeight() - reserveH - spec.headH - L.tableMarginV - 400;
@@ -47020,7 +47021,7 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
                             return { floorCode: surveyFloorCode, photoRemark: pRemark, floorDisplayLabel: surveyFloorLabel };
                         }, grade3Report, { hasTitle });
                         reportPagesHtml += reportHwpxPageOpen(`data-role="survey-page" data-floor="${escapeReportHtml(surveyFloorCode)}"`, reportTitleHeader)
-                            + (hasTitle ? `<div class="report-hwpx-title" style="height:${hwpxUnitToMm(REPORT_HWPX_LAYOUT.titleH)}mm; flex:0 0 auto; display:flex; align-items:center; font-size:10pt; font-weight:700; color:#000;">${escapeReportHtml(hwpxTitleText)}</div>` : '')
+                            + (hasTitle ? `<div class="report-hwpx-title" style="height:${hwpxUnitToMm(REPORT_HWPX_LAYOUT.titleH)}mm; flex:0 0 auto; display:flex; align-items:center; font-size:12pt; font-weight:700; color:#000;">${escapeReportHtml(hwpxTitleText)}</div>` : '')
                             + surveyTableHtml
                             + reportHwpxPageClose(compName);
                     });
@@ -48947,6 +48948,167 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
             });
         }
     };
+    // 2026-10-20 「N) 층」 제목 문단: 표본 문서 앞쪽에 27pt 빈 글자(run)가 남아 있어 그 줄이 27pt 높이로 잡혔다
+    // (12pt 제목인데 한 줄이 27pt+줄 간격 만큼 자리를 먹어 표가 밀림). 글자 없는 run은 제목 글자 크기로 맞추고,
+    // 줄 배치(lineseg)도 제목 글자 크기로 다시 적는다. 표·그림·글자가 든 run은 건드리지 않는다.
+    const _hwpxCharPrHeightsByZip = new WeakMap();
+    async function hwpxCharPrHeightsFromZip(zip) {
+        if (!zip) return {};
+        if (_hwpxCharPrHeightsByZip.has(zip)) return _hwpxCharPrHeightsByZip.get(zip);
+        const map = {};
+        try {
+            const f = zip.file('Contents/header.xml');
+            const hdr = f ? await f.async('string') : '';
+            const re = /<hh:charPr\b[^>]*>/g;
+            let m;
+            while ((m = re.exec(hdr))) {
+                const idM = /\bid="(\d+)"/.exec(m[0]);
+                const hM = /\bheight="(\d+)"/.exec(m[0]);
+                if (idM && hM) map[idM[1]] = parseInt(hM[1], 10) || 0;
+            }
+        } catch (_e) { /* 없으면 줄 배치만 그대로 */ }
+        _hwpxCharPrHeightsByZip.set(zip, map);
+        return map;
+    }
+    function normalizeHwpxTitleParaFont(titlePara, textT, charHeights) {
+        if (!titlePara || !textT || !charHeights) return false;
+        let textRun = textT.parentNode;
+        while (textRun && textRun.localName !== 'run') textRun = textRun.parentNode;
+        if (!textRun || textRun.parentNode !== titlePara) return false;
+        const cp = textRun.getAttribute('charPrIDRef');
+        const H = charHeights[cp] || 0;
+        if (!H) return false;
+        let changed = false;
+        Array.from(titlePara.children).forEach((r) => {
+            if (r.localName !== 'run' || r === textRun) return;
+            const hasBody = Array.from(r.getElementsByTagName('*')).some((el) => el.localName === 'tbl' || el.localName === 'pic'
+                || (el.localName === 't' && String(el.textContent || '').trim()));
+            if (hasBody) return;
+            const h = charHeights[r.getAttribute('charPrIDRef')] || 0;
+            if (h > H) { r.setAttribute('charPrIDRef', cp); changed = true; }
+        });
+        const arr = Array.from(titlePara.children).find((c) => c.localName === 'linesegarray');
+        const segs = arr ? Array.from(arr.children).filter((c) => c.localName === 'lineseg') : [];
+        const seg = segs[0];
+        const vs = seg ? (parseInt(seg.getAttribute('vertsize'), 10) || 0) : 0;
+        // 첫 줄이 제목 글자보다 크고, 표 줄(수만 단위)이 아닐 때만
+        if (seg && vs > H && vs < H * 4) {
+            const sp = parseInt(seg.getAttribute('spacing'), 10) || 0;
+            const newSp = Math.round(sp * H / vs);
+            const delta = (vs + sp) - (H + newSp);
+            seg.setAttribute('vertsize', String(H));
+            seg.setAttribute('textheight', String(H));
+            seg.setAttribute('baseline', String(Math.round(H * 0.85)));
+            seg.setAttribute('spacing', String(newSp));
+            segs.slice(1).forEach((sg) => {
+                const vp = parseInt(sg.getAttribute('vertpos'), 10) || 0;
+                if (vp >= delta) sg.setAttribute('vertpos', String(vp - delta));
+            });
+            changed = true;
+        }
+        return changed;
+    }
+
+    /**
+     * 2026-10-20 1·2종 상태조사표 한 쪽 행 높이(3종과 같은 규칙, js/shared/hwpx-survey-row-fit.js):
+     * 기본은 15행 + 1행쯤 여유(모든 쪽 같은 높이), 16·17행이면 그 쪽에 다 들어가게 줄인다. 예전엔 양식 3809 고정이라
+     * 15행이 딱 맞고 16·17행은 다음 쪽으로 넘쳤다.
+     */
+    function fitHwpxSurveyTablePage12(destTbl, pageRows, env) {
+        const fit = window.BSA && window.BSA.shared && window.BSA.shared.hwpxSurveyRowFit;
+        if (!fit || !destTbl || !pageRows.length) return null;
+        const HP = env.HP_NS;
+        const kids = (el, name) => Array.from(el.children).filter((c) => c.localName === name);
+        const segsOf = (p) => {
+            const arr = kids(p, 'linesegarray')[0];
+            return arr ? kids(arr, 'lineseg').map((sg) => ({
+                vertpos: parseInt(sg.getAttribute('vertpos'), 10) || 0,
+                vertsize: parseInt(sg.getAttribute('vertsize'), 10) || 0,
+                spacing: parseInt(sg.getAttribute('spacing'), 10) || 0
+            })) : [];
+        };
+        let p = destTbl.parentNode;
+        while (p && p.localName !== 'p') p = p.parentNode;
+        let reserve = 0;
+        if (p) {
+            const ownText = kids(p, 'run').some((r) => !r.getElementsByTagNameNS(HP, 'tbl').length && String(r.textContent || '').trim());
+            if (ownText) {
+                // 같은 문단 안 제목 줄: 표 줄의 시작 위치(vertpos)가 곧 제목 높이
+                const segs = segsOf(p);
+                const tblSeg = segs.find((sg) => sg.vertsize > 20000);
+                reserve += tblSeg && tblSeg.vertpos > 0 ? tblSeg.vertpos : fit.STD_RESERVE_H;
+            } else {
+                // 다음 쪽(제목 글자를 지운 복제 문단): 남은 제목 줄 배치를 지우고 표 줄을 맨 위(0)로
+                const arr = kids(p, 'linesegarray')[0];
+                const sgs = arr ? kids(arr, 'lineseg') : [];
+                const tblIdx = sgs.findIndex((sg) => (parseInt(sg.getAttribute('vertsize'), 10) || 0) > 20000);
+                if (tblIdx > 0) {
+                    sgs.slice(0, tblIdx).forEach((sg) => arr.removeChild(sg));
+                    sgs.slice(tblIdx).forEach((sg) => { sg.setAttribute('vertpos', '0'); sg.setAttribute('textpos', '0'); });
+                }
+            }
+            if (p.getAttribute('pageBreak') !== '1') {
+                let q = p.previousElementSibling;
+                let guard = 0;
+                while (q && q.localName === 'p' && guard++ < 12) {
+                    if (q.getElementsByTagNameNS(HP, 'tbl').length || q.getElementsByTagNameNS(HP, 'pic').length) break;
+                    reserve += fit.paraHeight(segsOf(q)) || 1500;
+                    if (q.getAttribute('pageBreak') === '1') break;
+                    q = q.previousElementSibling;
+                }
+            }
+        }
+        const trs = kids(destTbl, 'tr').slice(0, env.HEADER_ROW_COUNT);
+        let headerH = 0;
+        let spanMax = 0;
+        trs.forEach((tr, ri) => {
+            let m = 0;
+            Array.from(tr.getElementsByTagNameNS(HP, 'tc')).forEach((tc) => {
+                const span = tc.getElementsByTagNameNS(HP, 'cellSpan')[0];
+                const rs = span ? (parseInt(span.getAttribute('rowSpan'), 10) || 1) : 1;
+                const sz = tc.getElementsByTagNameNS(HP, 'cellSz')[0];
+                const h = sz ? (parseInt(sz.getAttribute('height'), 10) || 0) : 0;
+                if (rs === 1) m = Math.max(m, h);
+                else if (ri === 0 && rs >= env.HEADER_ROW_COUNT) spanMax = Math.max(spanMax, h);
+            });
+            headerH += m;
+        });
+        headerH = Math.max(headerH, spanMax);
+        const outM = kids(destTbl, 'outMargin')[0];
+        const tableMarginV = outM ? (parseInt(outM.getAttribute('top'), 10) || 0) + (parseInt(outM.getAttribute('bottom'), 10) || 0) : 280;
+        const pagePrEl = env.xmlDoc.getElementsByTagNameNS(HP, 'pagePr')[0];
+        const marginEl = pagePrEl ? kids(pagePrEl, 'margin')[0] : null;
+        const n = (el, k) => { const v = el ? parseInt(el.getAttribute(k), 10) : NaN; return Number.isFinite(v) ? v : undefined; };
+        const bodyH = fit.bodyHeight({ height: n(pagePrEl, 'height'), top: n(marginEl, 'top'), bottom: n(marginEl, 'bottom'), header: n(marginEl, 'header'), footer: n(marginEl, 'footer') });
+        const plan = fit.planRows({ bodyH, reserveH: reserve, headerH, tableMarginV, stdReserveH: fit.STD_RESERVE_H, needs: pageRows.map((r) => r.need) });
+        if (!plan.fits) console.warn(`${env.floorCode} 상태조사표: 줄이 많은 행 때문에 한 쪽을 넘을 수 있습니다(필요 ${plan.total}, 쪽 ${plan.area}).`);
+        pageRows.forEach((r, i) => {
+            Array.from(r.row.getElementsByTagNameNS(HP, 'tc')).forEach((tc) => {
+                const span = tc.getElementsByTagNameNS(HP, 'cellSpan')[0];
+                if (span && parseInt(span.getAttribute('rowSpan'), 10) > 1) return;
+                const sz = tc.getElementsByTagNameNS(HP, 'cellSz')[0];
+                if (sz) sz.setAttribute('height', String(plan.heights[i]));
+            });
+            Array.from(r.row.getElementsByTagNameNS(HP, 'tc')).forEach(env.centerCellContent);
+        });
+        const tblSz = kids(destTbl, 'sz')[0];
+        if (tblSz) tblSz.setAttribute('height', String(headerH + plan.total));
+        // 표를 담은 문단의 표 줄 높이도 새 표 높이로
+        if (p) {
+            const arr = kids(p, 'linesegarray')[0];
+            (arr ? kids(arr, 'lineseg') : []).forEach((sg) => {
+                const vs = parseInt(sg.getAttribute('vertsize'), 10) || 0;
+                if (vs > 20000) {
+                    const tH = headerH + plan.total + tableMarginV;
+                    sg.setAttribute('vertsize', String(tH));
+                    sg.setAttribute('textheight', String(tH));
+                    sg.setAttribute('baseline', String(Math.round(tH * 0.85)));
+                }
+            });
+        }
+        return plan;
+    }
+
     window.exportHwpxSurveyTable = async function() {
         const bldg = window.state.currentBuilding;
         const bldgId = (bldg && bldg.id) || window.state.currentBuildingId;
@@ -50064,6 +50226,7 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
                         const extCombined = !!(floorsData[slotIdx] && floorsData[slotIdx].exteriorCombined);
                         const titleFloor = extCombined ? '건축물 외부' : getFloorLabel(floorCode);
                         t.textContent = `${slotIdx + 1}) ${titleFloor} 상태조사표 `; // 제목 글자와 표 사이 스페이스 1
+                        normalizeHwpxTitleParaFont(slot.titlePara, t, await hwpxCharPrHeightsFromZip(zip));
                     }
                     if (slotIdx === 0) {
                         // 첫 페이지 표 제목 바로 위에 표본 문서의 "A동" 같은 동 이름 문단 + 빈 문단
@@ -50197,6 +50360,7 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
                         reserveH: surveyReserveAbove(destTbl),
                         headerH,
                         tableMarginV,
+                        stdReserveH: rowFitApi.STD_RESERVE_H,
                         needs: pageRows.map((r) => r.need)
                     });
                     if (!plan.fits) console.warn(`${floorCode} 상태조사표: 줄이 많은 행 때문에 한 쪽을 넘을 수 있습니다(필요 ${plan.total}, 쪽 ${plan.area}).`);
@@ -52711,6 +52875,7 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
                         const extCombined = !!(floorsData[slotIdx] && floorsData[slotIdx].exteriorCombined);
                         const titleFloor = extCombined ? '건축물 외부' : getFloorLabel(floorCode);
                         t.textContent = `${slotIdx + 1}) ${titleFloor} `; // 제목 글자와 표 사이 스페이스 1
+                        normalizeHwpxTitleParaFont(slot.titlePara, t, await hwpxCharPrHeightsFromZip(zip));
                     }
                     if (slotIdx === 0) {
                         const dongPara = slot.titlePara.previousElementSibling;
@@ -52829,6 +52994,8 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
 
                 surveyPages.forEach((pageItems, pageIdx) => {
                     const destTbl = pageTbls[pageIdx];
+                    const fitRows12 = [];
+                    const canFit12 = !!(window.BSA && window.BSA.shared && window.BSA.shared.hwpxSurveyRowFit);
                     pageItems.forEach((d, localIdx) => {
                         const isLastOnPage = localIdx === pageItems.length - 1;
                         const rowCtx = {
@@ -52876,12 +53043,22 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
                                 }
                             }
                         });
-                        // 템플릿 행 높이 유지. 4줄 이상일 때만 확장(자간·줄나눔·상하 강제 축소/확대 없음).
-                        applyRowHeightFromLines(newRow, rowMaxLines, rowLineMetric, 2800);
-                        Array.from(newRow.getElementsByTagNameNS(HP_NS, 'tc')).forEach(centerCellContent);
+                        if (canFit12) {
+                            // 높이는 쪽 단위로 fitHwpxSurveyTablePage12가 정한다(이 행에 필요한 최소 높이만 적어 둔다)
+                            const fitApi = window.BSA.shared.hwpxSurveyRowFit;
+                            const need = rowLineMetric
+                                ? fitApi.lineNeed(rowMaxLines, rowLineMetric.vertsize, rowLineMetric.spacing, rowLineMetric.marginV)
+                                : 0;
+                            fitRows12.push({ row: newRow, need });
+                        } else {
+                            // 템플릿 행 높이 유지. 4줄 이상일 때만 확장(자간·줄나눔·상하 강제 축소/확대 없음).
+                            applyRowHeightFromLines(newRow, rowMaxLines, rowLineMetric, 2800);
+                            Array.from(newRow.getElementsByTagNameNS(HP_NS, 'tc')).forEach(centerCellContent);
+                        }
                         destTbl.appendChild(newRow);
                     });
                     destTbl.setAttribute('rowCnt', String(HEADER_ROW_COUNT + pageItems.length));
+                    if (fitRows12.length) fitHwpxSurveyTablePage12(destTbl, fitRows12, { xmlDoc, HP_NS, HEADER_ROW_COUNT, centerCellContent, floorCode });
                 });
 
                 // ---- 결함 사진 갤러리 ----
