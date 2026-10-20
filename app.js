@@ -55268,6 +55268,105 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
         btnExportExcel.addEventListener('click', window.exportToExcel);
     }
 
+    /**
+     * 2026-10-20 「상태조사표 엑셀 전체층 다 탭으로 묶어서 한 파일로」.
+     * 한 층 엑셀과 같은 열·글자·색으로, 층마다 시트 하나(지하 → 지상 → 옥상·옥탑 → 외부 순).
+     * 안 열어 본 층도 빠지지 않게 한글 보고서처럼 모든 층을 서버에서 먼저 받는다.
+     */
+    function buildSurveyExcelSheetForFloor(bldg, floorCode, rawDefects, activeColumns) {
+        const defects = getSurveyRowsForReport(rawDefects);
+        if (!defects.length) return null;
+        const defectPhotoLabels = {};
+        let pCounter = 0;
+        rawDefects.forEach((d, dIdx) => {
+            const defectKey = d.id || `idx_${dIdx}`;
+            defectPhotoLabels[defectKey] = [];
+            getDefectOutputPhotos(d).forEach(() => {
+                pCounter++;
+                defectPhotoLabels[defectKey].push(`사진${pCounter < 10 ? '0' + pCounter : pCounter}`);
+            });
+        });
+        const grade3 = isGrade3Building(bldg);
+        const rows = defects.map((d, dIdx) => {
+            const memberIds = (d._groupMemberIds && d._groupMemberIds.length) ? d._groupMemberIds : [d.id || `idx_${dIdx}`];
+            const labels = memberIds.flatMap((mid) => defectPhotoLabels[mid] || []);
+            const cellCtx = {
+                floorCode,
+                photoRemark: labels.length > 0 ? labels.join(' ') : '-',
+                surveyReportNo: formatSurveyReportNo(d, grade3, floorCode)
+            };
+            if (grade3) {
+                cellCtx.gradeNo = cellCtx.surveyReportNo;
+                cellCtx.floorDisplayLabel = getGrade3FloorDisplayLabel(floorCode, bldg);
+            }
+            return activeColumns.map((c) => ({
+                text: String(getSurveyCellText(c.key, d, cellCtx) == null ? '' : getSurveyCellText(c.key, d, cellCtx)),
+                style: getSurveyCellColorStyle(c.key, d, cellCtx)
+            }));
+        });
+        return { header: activeColumns.map((c) => c.label), rows };
+    }
+
+    window.exportSurveyExcelAllFloors = async function () {
+        const bldg = window.state.currentBuilding;
+        const bldgId = (bldg && bldg.id) || window.state.currentBuildingId;
+        if (!bldg || !bldgId) { window.showToast('선택된 건축물이 없습니다.', 'warning'); return; }
+        const xl = window.BSA && window.BSA.surveyXlsx;
+        if (!xl || !window.JSZip) { window.showToast('엑셀 만들기 도구를 불러오지 못했습니다. 새로고침 후 다시 해 주세요.', 'error'); return; }
+        const btn = document.getElementById('btnExportExcelAll');
+        if (btn) btn.disabled = true;
+        if (typeof window.showLoading === 'function') window.showLoading('전체 층 상태조사표 엑셀 만드는 중…');
+        try {
+            if (!(await ensureBuildingFloorsFreshForReport(bldg, '전체 층 엑셀'))) return;
+            let floors = [];
+            if (typeof listNdtFloorCodesForBuilding === 'function') floors = listNdtFloorCodesForBuilding(bldgId) || [];
+            else if (bldg.floorsList) floors = bldg.floorsList.map((f) => f.floorCode);
+            if (!floors.length && window.state.currentFloor) floors = [window.state.currentFloor];
+            const ordered = xl.orderFloorCodes(floors,
+                (fc) => typeof isExteriorFloorCode === 'function' && isExteriorFloorCode(fc),
+                (list) => (typeof window.sortFloorsLowToHigh === 'function' ? window.sortFloorsLowToHigh(list) : list));
+            const getFloorLabel = (floorCode) => {
+                const fromList = (bldg.floorsList || []).find((f) => f.floorCode === floorCode);
+                const raw = fromList ? fromList.floorLabel
+                    : (typeof window.getFloorLabelFromCode === 'function' ? window.getFloorLabelFromCode(floorCode, bldg) : floorCode);
+                return stripFloorCodeSuffix(raw || floorCode).replace(/\s+(?=\d)/g, '') || floorCode;
+            };
+            const activeColumns = getActiveSurveyColumns();
+            const used = new Set();
+            const sheets = [];
+            ordered.inner.concat(ordered.exterior).forEach((fc) => {
+                const key = `${bldgId}_${fc}`;
+                const raw = window.state.defects[key] || (window.state.currentFloor === fc ? getCurrentFloorDefects() : []);
+                if (!raw || !raw.length) return;
+                const sh = buildSurveyExcelSheetForFloor(bldg, fc, raw, activeColumns);
+                if (!sh) return;
+                const label = getFloorLabel(fc);
+                sh.name = xl.sheetName(label, used);
+                sh.title = `[스마트 건축물 안전점검] ${bldg.name} (${label}) 상태조사표`;
+                sheets.push(sh);
+            });
+            if (!sheets.length) { window.showToast('등록된 결함이 있는 층이 없습니다.', 'warning'); return; }
+            const blob = await xl.buildXlsxBlob(sheets, window.JSZip);
+            const safeName = String(bldg.name || '건물').replace(/[\\/:*?"<>|]/g, '_');
+            const url = URL.createObjectURL(blob);
+            const link = document.createElement('a');
+            link.href = url;
+            link.download = `${safeName}_전체층_상태조사표.xlsx`;
+            document.body.appendChild(link);
+            link.click();
+            document.body.removeChild(link);
+            setTimeout(() => URL.revokeObjectURL(url), 4000);
+            window.showToast(`전체 ${sheets.length}개 층을 한 파일(층마다 탭)로 저장했습니다.`, 'success', 4000);
+        } catch (e) {
+            window.showToast('전체 층 엑셀 저장 중 오류: ' + (e && e.message ? e.message : e), 'error', 5000);
+        } finally {
+            if (typeof window.hideLoading === 'function') window.hideLoading();
+            if (btn) btn.disabled = false;
+        }
+    };
+    const btnExportExcelAll = document.getElementById('btnExportExcelAll');
+    if (btnExportExcelAll) btnExportExcelAll.addEventListener('click', () => window.exportSurveyExcelAllFloors());
+
     // --- 7. 외부(엑셀) 결함표 가져오기 엔진 ---
     // 이미 엑셀로 결함조사표를 작성해오던 점검자들이 그대로 파일만 올리면 되도록,
     // 엑셀/CSV의 헤더를 자동 인식해 매칭해주고 사용자가 확인/보정할 수 있는 화면을 띄운다.
