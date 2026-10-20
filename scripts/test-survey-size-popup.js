@@ -26,7 +26,7 @@ function extractFunction(name) {
     }
     throw new Error('unterminated ' + name);
 }
-const names = ['normalizeMeasureJoin', 'inferMeasureJoin', 'parseSizeTextToCrackMeasures', 'normalizeCrackDecimalText',
+const names = ['normalizeMeasureJoin', 'inferMeasureJoin', 'sizeTextSaysAreaJoin', 'isMeasureOnlySizeText', 'parseSizeTextToCrackMeasures', 'normalizeCrackDecimalText',
     'normalizeEaSpacingInText', 'formatCrackMeasurePair', 'normalizeCrackMeasureForEdit', 'getDefectCrackMeasureRowsForEdit',
     'applyCrackMeasuresEditToDefect'];
 const api = new Function(names.map(extractFunction).join('\n') + '\nreturn {' + names.join(',') + '};')();

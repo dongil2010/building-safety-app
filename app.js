@@ -29404,11 +29404,47 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
     }
 
     function inferMeasureJoin(defect, measure) {
+        if (measure && measure.join === '/' && sizeTextSaysAreaJoin(defect, measure)) return 'x';
         if (measure && (measure.join === 'x' || measure.join === '/')) return measure.join;
         const size = String((defect && defect.size) || '');
-        if (/\d(?:\.\d+)?\s*[x×]\s*\d/i.test(size)) return 'x';
+        // 2026-10-20 '*'도 면적 표기(0.3*0.3) — 예전엔 x·×만 봐서 '*'로 쓴 규모가 '/'로 되돌아갔다
+        if (/\d(?:\.\d+)?\s*[x×*]\s*\d/i.test(size)) return 'x';
         if (/W\s*=\s*[\d.]+\s*m\b/i.test(size) && /L\s*=\s*[\d.]+\s*m\b/i.test(size) && !/W\s*=\s*[\d.]+\s*mm\b/i.test(size)) return 'x';
         return '/';
+    }
+
+    /**
+     * 2026-10-20 「/ → x(*) 바꿨는데 안 바뀐 게 있음」: 규모 글자만 x/*로 고치고 폭·길이 행은 '/'로 남은 결함.
+     * 규모 글자가 측정값 표기뿐이고 같은 자리 행의 폭·길이가 같은데 글자 쪽이 x면 x로 본다(저장값은 안 건드림).
+     */
+    function sizeTextSaysAreaJoin(defect, measure) {
+        if (!defect || !Array.isArray(defect.crackMeasures)) return false;
+        const size = String(defect.size || '');
+        if (!/[x×*]/i.test(size) || !isMeasureOnlySizeText(size)) return false;
+        const idx = defect.crackMeasures.indexOf(measure);
+        if (idx < 0) return false;
+        const parsed = parseSizeTextToCrackMeasures(size);
+        if (parsed.length !== defect.crackMeasures.length) return false;
+        const p = parsed[idx];
+        if (!p || p.join !== 'x') return false;
+        const num = (v) => normalizeCrackDecimalText(String(v == null ? '' : v).replace(/^\s*Cw\s*[:=]\s*/i, '').replace(/\s*(mm|㎜|m)$/i, '').trim());
+        return num(p.width) === num(measure.width) && num(p.length) === num(measure.length) && !!num(measure.length);
+    }
+
+    /**
+     * 저장 직전: 「규모 및 상태」 글자를 손으로 고쳤고 그게 측정값 표기(0.3x0.3, 0.3*2.0 -2EA …)뿐이면
+     * 폭·길이·개수 행도 그 글자대로 맞춘다. 예전엔 글자만 저장되고 행(join '/')이 남아
+     * 화면·한글·엑셀이 행 기준으로 다시 '/'를 만들어 「바꾼 게 적용 안 됨」으로 보였다.
+     */
+    function reconcileDefectMeasuresWithEditedSize(defect, prevSize) {
+        if (!defect) return false;
+        const size = String(defect.size == null ? '' : defect.size).trim();
+        if (!size || size === '-' || size === String(prevSize == null ? '' : prevSize).trim()) return false;
+        if (!isMeasureOnlySizeText(size)) return false;
+        const parsed = parseSizeTextToCrackMeasures(size);
+        if (!parsed.length) return false;
+        applyCrackMeasuresEditToDefect(defect, parsed);
+        return true;
     }
 
     /**
@@ -37849,6 +37885,7 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
         }
 
         defects.forEach((d) => {
+            const prevSizeForReconcile = d.size;
             if (changedFields.has('category')) d.category = categoryVal;
             if (changedFields.has('component')) d.component = compVal;
             if (changedFields.has('defectType')) {
@@ -37871,6 +37908,9 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
                 d.crackLength = crackLengthVal;
                 d.itemCount = itemCountVal;
                 d.size = sizeVal;
+            }
+            if (changedFields.has('size') && !changedFields.has('crackMeasures') && !isGoodType) {
+                reconcileDefectMeasuresWithEditedSize(d, prevSizeForReconcile);
             }
             if (changedFields.has('isProgress')) d.isProgress = isProgress;
             if (changedFields.has('isLeak')) d.isLeak = isLeak;
@@ -38020,6 +38060,7 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
             // Update existing defect
             const idx = state.defects[key].findIndex(d => d.id === pinId);
             if (idx !== -1) {
+                const prevSizeForReconcile = state.defects[key][idx].size;
                 state.defects[key][idx].no = noVal;
                 state.defects[key][idx].category = categoryGuardedVal;
                 state.defects[key][idx].component = compVal;
@@ -38041,6 +38082,7 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
                 state.defects[key][idx].isPriorityManage = isPriorityManage;
                 state.defects[key][idx].forceArrowDir = forceArrowDir;
                 state.defects[key][idx].arrowOctant = arrowOctant;
+                if (!isGoodType) reconcileDefectMeasuresWithEditedSize(state.defects[key][idx], prevSizeForReconcile);
                 if (state.defects[key][idx].shapeType === 'area') {
                     state.defects[key][idx].areaFillStyle = areaFillVal;
                     state.defects[key][idx].areaBorderStyle = areaBorderVal;
