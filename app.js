@@ -3316,6 +3316,7 @@ document.addEventListener('DOMContentLoaded', () => {
             setSel('inputEditBuildingInspectionYear', bldg.inspectionYear);
             setSel('inputEditBuildingInspectionPeriod', bldg.inspectionPeriod);
         }
+        if (typeof window.syncInspectionRoundDateInput === 'function') setTimeout(() => window.syncInspectionRoundDateInput(), 0);
     }
 
     function mergeBuildingsForSync(serverBuildings, localBuildings, deletedIds, prevAssetsById) {
@@ -5568,6 +5569,48 @@ document.addEventListener('DOMContentLoaded', () => {
         if (typeof window.renderDashboard === 'function') window.renderDashboard();
     };
 
+    /** 2026-10-20 회차 점검일 — 회차 목록·점검 설정에서 바로 정한다(같은 회차의 모든 동에 함께) */
+    window.setSurveyRoundInspectionDate = function(siteKey, roundKey, date) {
+        const mm = window.BSA && window.BSA.buildingMetaMerge;
+        if (!siteKey || !roundKey || !mm || typeof mm.setRoundDate !== 'function') return 0;
+        const all = filterActiveBuildings(window.state.buildings || [], window.state.deletedBuildingIds);
+        const targets = all.filter((b) => getBuildingSiteName(b) === siteKey && getBuildingSurveyRoundKey(b) === roundKey);
+        const cur = window.state.currentBuilding;
+        if (cur && !targets.some((b) => b.id === cur.id) && getBuildingSiteName(cur) === siteKey && getBuildingSurveyRoundKey(cur) === roundKey) targets.push(cur);
+        let changed = 0;
+        targets.forEach((b) => { if (mm.setRoundDate(b, roundKey, date)) { markBuildingMetaDirty(b); changed += 1; } });
+        if (cur && cur !== targets.find((b) => b.id === cur.id) && targets.some((b) => b.id === cur.id)) {
+            const src = targets.find((b) => b.id === cur.id);
+            cur.roundDates = JSON.parse(JSON.stringify(src.roundDates || {}));
+            markBuildingMetaDirty(cur);
+        }
+        if (!changed) return 0;
+        saveStateToLocalStorage();
+        if (typeof syncStateToFirebase === 'function') syncStateToFirebase();
+        window.showToast(`${formatSurveyRoundLabel(roundKey)} 점검일 → ${date || '건물 공통 점검일'}`, 'success', 3000);
+        if (typeof window.syncInspectionRoundDateInput === 'function') window.syncInspectionRoundDateInput();
+        return changed;
+    };
+
+    /** 점검 설정(고급 필터)의 점검일 칸을 지금 회차 날짜로 맞춘다 */
+    window.syncInspectionRoundDateInput = function() {
+        const el = document.getElementById('inputInspectionRoundDate');
+        const b = window.state && window.state.currentBuilding;
+        if (!el) return;
+        el.disabled = !b;
+        el.value = b && typeof getBuildingInspectionDate === 'function' ? (getBuildingInspectionDate(b, getCurrentSurveyRoundKey()) || '') : '';
+    };
+    document.addEventListener('change', (e) => {
+        const t = e.target;
+        if (!t || !t.id) return;
+        if (t.id === 'selectInspectionYear' || t.id === 'selectInspectionPeriod') {
+            setTimeout(() => window.syncInspectionRoundDateInput(), 0);
+        } else if (t.id === 'inputInspectionRoundDate') {
+            const b = window.state && window.state.currentBuilding;
+            if (b) window.setSurveyRoundInspectionDate(getBuildingSiteName(b), getCurrentSurveyRoundKey(), t.value || '');
+        }
+    });
+
     window.renderDashboard = function() {
         const grid = elements.buildingListGrid || document.getElementById('buildingListGrid');
         if (!grid) return;
@@ -5640,6 +5683,15 @@ document.addEventListener('DOMContentLoaded', () => {
                     const site = el.getAttribute('data-site-key');
                     const round = el.getAttribute('data-round-key');
                     if (site && round) window.openDashboardRoundDongs(site, round);
+                });
+            });
+            grid.querySelectorAll('[data-action="round-date"]').forEach((el) => {
+                ['click', 'pointerdown', 'touchstart'].forEach((ev) => el.addEventListener(ev, (e) => e.stopPropagation()));
+                el.addEventListener('change', (e) => {
+                    e.stopPropagation();
+                    const site = el.getAttribute('data-site-key');
+                    const round = el.getAttribute('data-round-key');
+                    if (site && round) window.setSurveyRoundInspectionDate(site, round, el.value || '');
                 });
             });
             grid.querySelectorAll('[data-action="round-type"]').forEach((el) => {
@@ -5820,6 +5872,15 @@ document.addEventListener('DOMContentLoaded', () => {
                         title="이 회차의 점검 종류" aria-label="${escapeHtml(roundLabel)} 점검 종류">
                         ${buildInspectionTypeOptionsHtml(typeLabel, { short: true })}
                     </select>`;
+                // 2026-10-20 회차 점검일(비우면 건물 공통 점검일)
+                const roundDate = rk === '_none' ? '' : (getBuildingInspectionDate(members[0], rk) || '');
+                const dateInput = rk === '_none' ? '' : `
+                    <label class="round-date-wrap" title="이 회차 점검일 (재령일 계산·출력에 사용)" style="display:inline-flex;align-items:center;gap:0.2rem;font-size:0.75rem;">
+                        <span>점검일</span>
+                        <input type="date" class="round-date-input" data-action="round-date" data-site-key="${safeSite}" data-round-key="${safeRound}"
+                            value="${escapeHtml(roundDate)}" aria-label="${escapeHtml(roundLabel)} 점검일" style="height:28px;font-size:0.78rem;padding:0 0.25rem;max-width:9.5rem;">
+                    </label>`;
+                if (roundDate) metaHint = `점검일 ${roundDate} · ${metaHint}`;
                 // 단일: 회차 = 점검 시작 + 도면·전경. 여러 동: 회차 = 동 선택으로 진입
                 if (multiDong) {
                     return `
@@ -5829,6 +5890,7 @@ document.addEventListener('DOMContentLoaded', () => {
                                 <span class="building-row-meta">${escapeHtml(metaHint)} · 동 선택</span>
                             </div>
                             <div class="building-row-actions building-row-actions-compact">
+                                ${dateInput}
                                 ${typeSelect}
                                 <button type="button" class="icon-btn icon-btn-trash" title="이 회차 삭제(휴지통)" data-action="delete-round" data-site-key="${safeSite}" data-round-key="${safeRound}" aria-label="회차 삭제">
                                     <i class="fa-solid fa-trash"></i>
@@ -5847,6 +5909,7 @@ document.addEventListener('DOMContentLoaded', () => {
                             <span class="building-row-meta">${escapeHtml(metaHint)}</span>
                         </div>
                         <div class="building-row-actions building-row-actions-compact">
+                            ${dateInput}
                             ${typeSelect}
                             <button type="button" class="icon-btn icon-btn-start" title="점검 시작" data-action="inspect" data-bldg-id="${safeId}" aria-label="점검">
                                 <i class="fa-solid fa-map-location-dot"></i>
@@ -8203,6 +8266,7 @@ document.addEventListener('DOMContentLoaded', () => {
         if (document.getElementById('inputEditBuildingCompletionDate')) document.getElementById('inputEditBuildingCompletionDate').value = bldg.completionDate || '';
         if (document.getElementById('inputEditBuildingNotes')) document.getElementById('inputEditBuildingNotes').value = bldg.notes || '';
         initEditRoundDates(bldg);
+        if (typeof window.syncInspectionRoundDateInput === 'function') window.syncInspectionRoundDateInput();
 
         populateEditBuildingImportSources(bldg.id);
         setImportSourcePickerValue('selectEditImportSource', '', { silent: true });
@@ -20757,6 +20821,7 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
         if (typeof drawCanvas === 'function') drawCanvas();
         if (typeof renderNdtSummaryTable === 'function') renderNdtSummaryTable();
 
+        if (typeof window.syncInspectionRoundDateInput === 'function') window.syncInspectionRoundDateInput();
         const twinNote = droppedTwins > 0 ? ` · 겹친 현회차 ${droppedTwins}건 제거` : '';
         window.showToast(
             `${next.year} ${next.period} 점검 시작 · 기존 ${defectCount}건은 전회차로 유지${twinNote}`,
