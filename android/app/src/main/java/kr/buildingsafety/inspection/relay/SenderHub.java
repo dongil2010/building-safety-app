@@ -7,6 +7,8 @@ import android.net.Network;
 import android.net.NetworkCapabilities;
 import android.net.NetworkRequest;
 import android.net.RouteInfo;
+import android.net.MacAddress;
+import android.net.wifi.ScanResult;
 import android.net.wifi.WifiManager;
 import android.net.wifi.WifiNetworkSpecifier;
 import android.os.Build;
@@ -68,6 +70,69 @@ public final class SenderHub {
     private final Map<String, Integer> beaconPorts = Collections.synchronizedMap(new LinkedHashMap<>());
     /** 「같은 Wi-Fi」 QR 로 받은 받는 기기 주소(핫스팟 없이 공유기로). 있으면 Wi-Fi 를 바꾸지 않고 여기로 보낸다. */
     private volatile String directIp;
+
+    // 2026-10-20 「QR 찍어도 핫스팟 연결을 못해」 — 연결 시도 기록·실패 이유·수동 연결(설정에서 직접) 안내
+    private volatile String qrSsid;
+    private volatile String qrPass;
+    private volatile String qrAuth;
+    private volatile boolean qrHidden;
+    private volatile String errorCode;
+    private volatile boolean manual;
+    private volatile int attemptNo;
+    private volatile int attemptTotal;
+    private volatile String attemptDesc;
+    private volatile String scanInfo;
+    private volatile String permNote;
+    private volatile long connectedAt;
+    private volatile int searchRounds;
+    private List<Attempt> plan = new ArrayList<>();
+
+    /** 연결 시도 하나: 보안 방식(WPA=WPA2 / SAE=WPA3 / nopass) + BSSID(주변 검색에서 찾았을 때만). */
+    static final class Attempt {
+        final String auth;
+        final String bssid;
+        Attempt(String auth, String bssid) { this.auth = auth; this.bssid = bssid; }
+        String describe() {
+            String a = "SAE".equalsIgnoreCase(auth) ? "WPA3" : ("nopass".equalsIgnoreCase(auth) ? "암호없음" : "WPA2");
+            return bssid != null ? a + "+BSSID" : a;
+        }
+    }
+
+    /**
+     * 시도 순서. QR 의 T: 값 먼저(주변 검색에서 그 Wi-Fi 가 WPA3 전용이면 WPA3 먼저), 그다음 반대 방식,
+     * 주변 검색에서 BSSID 를 알았으면 마지막에 BSSID 까지 붙여서(이름이 같은 Wi-Fi 가 여럿이거나 기기가 이름만으로 못 찾을 때).
+     */
+    static List<Attempt> buildPlan(String pass, String qrType, String scanCaps, String bssid) {
+        List<Attempt> out = new ArrayList<>();
+        if (pass == null || pass.isEmpty()) {
+            out.add(new Attempt("nopass", null));
+            if (bssid != null) out.add(new Attempt("nopass", bssid));
+            return out;
+        }
+        String caps = scanCaps == null ? "" : scanCaps.toUpperCase(java.util.Locale.ROOT);
+        boolean seenSae = caps.contains("SAE");
+        boolean seenPsk = caps.contains("PSK");
+        String first;
+        if (seenSae && !seenPsk) first = "SAE";
+        else if (seenPsk) first = "WPA";
+        else first = "SAE".equalsIgnoreCase(qrType) ? "SAE" : "WPA";
+        String second = "SAE".equals(first) ? "WPA" : "SAE";
+        out.add(new Attempt(first, null));
+        // 검색에서 한 방식만 보였으면 반대 방식은 소용없음 — 단, 검색 정보가 없으면 둘 다
+        if (caps.isEmpty() || (seenSae && seenPsk)) out.add(new Attempt(second, null));
+        if (bssid != null) out.add(new Attempt(first, bssid));
+        return out;
+    }
+
+    /** 주파수(MHz) → 「2.4GHz」 등 */
+    static String bandOf(int mhz) {
+        if (mhz >= 2400 && mhz < 2500) return "2.4GHz";
+        if (mhz >= 4900 && mhz < 5900) return "5GHz";
+        if (mhz >= 5925 && mhz < 7125) return "6GHz";
+        return mhz > 0 ? mhz + "MHz" : "?";
+    }
+
+    public void setPermNote(String note) { permNote = note; }
     private volatile int directPort = SnapProtocol.DEFAULT_PORT;
     private volatile String state = "idle";
     private volatile String message;
@@ -122,79 +187,191 @@ public final class SenderHub {
 
     /** QR 에서 읽은 Wi-Fi 로 붙는다(Android 10+). 그 아래 버전은 Wi-Fi 설정에서 직접 붙인 뒤 start 만 부른다. */
     public synchronized boolean connect(Context context, String wifiSsid, String pass, String auth) {
-        return connect(context, wifiSsid, pass, auth, false);
+        return connect(context, wifiSsid, pass, auth, false, true);
     }
 
     /**
-     * retry=true 는 WPA2↔WPA3 을 바꿔 한 번 더 붙어 보는 것. QR 에 WPA 라고 써 있어도
-     * 삼성 휴대폰 핫스팟·전용 Wi-Fi 가 WPA3 전용이면 WPA2 암호로는 안 붙는다(반대도).
+     * hidden: QR 의 H:true. allowAuto=false 면(권한 없음 등) 자동 연결은 건너뛰고 바로 「설정에서 직접 연결」 안내.
+     * 실패하면 시도 순서(buildPlan)대로 다음 방식으로, 다 실패하면 manual=true(화면이 이름·암호를 크게 보여 줌).
+     * 직접 연결해도 workLoop 가 지금 붙은 Wi-Fi 에서 받는 기기를 찾아 자동으로 이어 보낸다.
      */
-    private synchronized boolean connect(Context context, String wifiSsid, String pass, String auth, boolean retry) {
+    public synchronized boolean connect(Context context, String wifiSsid, String pass, String auth, boolean hidden, boolean allowAuto) {
         app = context.getApplicationContext();
         directIp = null;
         start(context);
-        ssid = wifiSsid;
         releaseRequest();
-        final String wantSsid = wifiSsid;
-        final String wantPass = pass;
-        final String usedAuth = auth;
+        ssid = wifiSsid;
+        qrSsid = wifiSsid;
+        qrPass = pass == null ? "" : pass;
+        qrAuth = auth;
+        qrHidden = hidden;
+        errorCode = null;
+        manual = false;
+        receiverIp = null;
+        connectedAt = 0;
+        searchRounds = 0;
+        String[] seen = scanFor(wifiSsid);
+        String caps = seen == null ? null : seen[0];
+        String bssid = seen == null ? null : seen[1];
+        plan = buildPlan(qrPass, auth, caps, bssid);
+        attemptNo = 0;
+        attemptTotal = plan.size();
+        RelayDiag.step(app, "send_connect");
         if (Build.VERSION.SDK_INT < Build.VERSION_CODES.Q) {
-            message = "이 폰(Android 9 이하)은 자동 연결이 안 됩니다. Wi-Fi 설정에서 「" + wifiSsid + "」에 직접 연결해 주세요.";
-            emitStatus();
+            goManual("OLD_ANDROID", "이 폰(Android 9 이하)은 자동 연결이 안 됩니다. Wi-Fi 설정에서 「" + wifiSsid + "」에 직접 연결하면 자동으로 이어서 보냅니다.");
             return false;
         }
-        ConnectivityManager cm = (ConnectivityManager) app.getSystemService(Context.CONNECTIVITY_SERVICE);
-        if (cm == null) return false;
+        if (!allowAuto) {
+            goManual("WIFI_PERMISSION", "「근처 기기」(또는 위치) 권한이 없어 자동 연결을 못 합니다. 아래 「Wi-Fi 설정 열기」에서 「" + wifiSsid + "」에 직접 연결하거나, 앱 권한을 허용한 뒤 「다시 자동 연결」을 누르세요.");
+            return false;
+        }
+        return nextAttempt();
+    }
+
+    /** 마지막 QR 로 처음부터 다시 자동 연결. */
+    public synchronized boolean retryLast(Context context) {
+        if (qrSsid == null) return false;
+        return connect(context, qrSsid, qrPass, qrAuth, qrHidden, true);
+    }
+
+    public String lastQrSsid() { return qrSsid; }
+    public String lastQrPass() { return qrPass; }
+    public String lastQrAuth() { return qrAuth; }
+    public boolean lastQrHidden() { return qrHidden; }
+
+    private void goManual(String code, String msg) {
+        connecting = false;
+        errorCode = code;
+        manual = true;
+        message = msg;
+        if (app != null) RelayDiag.error(app, code, msg + (scanInfo != null ? " / 검색 " + scanInfo : ""));
+        wake();
+        emitStatus();
+    }
+
+    /** 주변 Wi-Fi 검색 결과에서 그 이름을 찾는다(권한·위치가 있어야 보임). {보안 문자열, BSSID} 또는 null. scanInfo 에 화면용 요약. */
+    @SuppressWarnings("deprecation")
+    private String[] scanFor(String want) {
+        scanInfo = null;
         try {
-            WifiNetworkSpecifier.Builder b = new WifiNetworkSpecifier.Builder().setSsid(wifiSsid);
-            if (pass != null && !pass.isEmpty()) {
-                if (auth != null && auth.equalsIgnoreCase("SAE")) b.setWpa3Passphrase(pass);
-                else b.setWpa2Passphrase(pass);
+            WifiManager wm = (WifiManager) app.getSystemService(Context.WIFI_SERVICE);
+            if (wm == null) return null;
+            if (!wm.isWifiEnabled()) { scanInfo = "Wi-Fi 꺼짐"; return null; }
+            try { wm.startScan(); } catch (Exception ignored) { }
+            List<ScanResult> list = wm.getScanResults();
+            if (list == null || list.isEmpty()) { scanInfo = "검색 결과 없음(권한·위치 확인)"; return null; }
+            ScanResult best = null;
+            for (ScanResult r : list) {
+                String name = Build.VERSION.SDK_INT >= 33 && r.getWifiSsid() != null ? unquote(r.getWifiSsid().toString()) : r.SSID;
+                if (want.equals(name) && (best == null || r.level > best.level)) best = r;
+            }
+            if (best == null) { scanInfo = "주변에 안 보임"; return null; }
+            scanInfo = "보임 " + bandOf(best.frequency) + " " + best.level + "dBm " + securityLabel(best.capabilities);
+            return new String[] { best.capabilities, best.BSSID };
+        } catch (SecurityException e) {
+            scanInfo = "검색 권한 없음";
+        } catch (Exception e) {
+            scanInfo = "검색 오류";
+        }
+        return null;
+    }
+
+    static String securityLabel(String caps) {
+        if (caps == null) return "";
+        String c = caps.toUpperCase(java.util.Locale.ROOT);
+        boolean sae = c.contains("SAE"), psk = c.contains("PSK");
+        if (sae && psk) return "WPA2/3";
+        if (sae) return "WPA3";
+        if (psk) return "WPA2";
+        if (c.contains("OWE")) return "OWE";
+        return "열림";
+    }
+
+    private static String unquote(String s) {
+        if (s == null) return null;
+        if (s.length() >= 2 && s.startsWith("\"") && s.endsWith("\"")) return s.substring(1, s.length() - 1);
+        return s;
+    }
+
+    /** 시도 순서에서 다음 것을 요청. 남은 게 없으면 수동 연결 안내. */
+    private synchronized boolean nextAttempt() {
+        if (!active || qrSsid == null) return false;
+        if (attemptNo >= plan.size()) {
+            boolean notSeen = scanInfo != null && scanInfo.startsWith("주변에 안 보임");
+            String band = scanInfo != null && (scanInfo.contains("5GHz") || scanInfo.contains("6GHz")) ? " 이 Wi-Fi는 " + (scanInfo.contains("6GHz") ? "6GHz" : "5GHz") + "라 이 폰이 못 잡을 수 있습니다." : "";
+            goManual(notSeen ? "WIFI_NOT_SEEN" : "WIFI_UNAVAILABLE", notSeen
+                ? "받는 기기 Wi-Fi 「" + qrSsid + "」가 이 폰 주변에 안 보입니다. 받는 기기 화면에 QR이 떠 있는지(핫스팟이 꺼지지 않았는지), 두 기기가 가까운지 보세요. 안 되면 아래에서 직접 연결하세요."
+                : "자동 연결이 안 됐습니다(연결 창 취소·시간 초과 또는 기기 제한)." + band + " 아래 「Wi-Fi 설정 열기」에서 「" + qrSsid + "」에 직접 연결하면 자동으로 이어서 보냅니다.");
+            return false;
+        }
+        Attempt at = plan.get(attemptNo++);
+        attemptDesc = at.describe();
+        ConnectivityManager cm = (ConnectivityManager) app.getSystemService(Context.CONNECTIVITY_SERVICE);
+        if (cm == null) { goManual("NO_CONNECTIVITY", "연결 기능을 쓸 수 없습니다. 아래에서 직접 연결하세요."); return false; }
+        try {
+            WifiNetworkSpecifier.Builder b = new WifiNetworkSpecifier.Builder().setSsid(qrSsid);
+            if (qrHidden) b.setIsHiddenSsid(true);
+            if (at.bssid != null) {
+                try { b.setBssid(MacAddress.fromString(at.bssid)); } catch (Exception ignored) { }
+            }
+            if (!"nopass".equalsIgnoreCase(at.auth)) {
+                if ("SAE".equalsIgnoreCase(at.auth)) b.setWpa3Passphrase(qrPass);
+                else b.setWpa2Passphrase(qrPass);
             }
             NetworkRequest req = new NetworkRequest.Builder()
                 .addTransportType(NetworkCapabilities.TRANSPORT_WIFI)
                 .removeCapability(NetworkCapabilities.NET_CAPABILITY_INTERNET)
                 .setNetworkSpecifier(b.build())
                 .build();
+            final String wantSsid = qrSsid;
             ConnectivityManager.NetworkCallback cb = new ConnectivityManager.NetworkCallback() {
                 @Override public void onAvailable(Network network) {
                     requestedNet = network;
                     connecting = false;
                     receiverIp = null;
                     message = null;
+                    errorCode = null;
+                    manual = false;
+                    connectedAt = System.currentTimeMillis();
+                    searchRounds = 0;
+                    if (app != null) { RelayDiag.step(app, "send_wifi_ok"); RelayDiag.clearError(app); }
                     wake();
                     emitStatus();
                 }
                 @Override public void onLost(Network network) {
                     if (network.equals(requestedNet)) requestedNet = null;
                     receiverIp = null;
-                    message = "받는 기기 Wi-Fi 연결이 끊겼습니다. 다시 연결하는 중…";
+                    message = "받는 기기 Wi-Fi 연결이 끊겼습니다. 받는 기기 핫스팟이 꺼졌으면 다시 켜고 QR을 다시 스캔해 주세요.";
+                    errorCode = "WIFI_LOST";
                     emitStatus();
                 }
                 @Override public void onUnavailable() {
-                    connecting = false;
-                    if (!retry && wantPass != null && !wantPass.isEmpty() && active && wantSsid.equals(ssid)) {
-                        String other = "SAE".equalsIgnoreCase(usedAuth) ? "WPA" : "SAE";
-                        message = "다른 보안 방식(" + ("SAE".equals(other) ? "WPA3" : "WPA2") + ")으로 한 번 더 연결해 봅니다…";
-                        emitStatus();
-                        connect(app, wantSsid, wantPass, other, true);
-                        return;
+                    synchronized (SenderHub.this) {
+                        if (requestCb != this) return; // 이미 다른 시도로 넘어감
+                        requestCb = null;
                     }
-                    message = "Wi-Fi 연결이 취소됐거나 받는 기기 Wi-Fi를 못 찾았습니다. 받는 기기 화면에 QR이 떠 있는지 보고 다시 스캔해 주세요.";
-                    emitStatus();
+                    connecting = false;
+                    if (!active || !wantSsid.equals(qrSsid)) return;
+                    if (attemptNo < plan.size()) {
+                        message = "연결이 안 돼 다른 방식(" + plan.get(attemptNo).describe() + ")으로 한 번 더 해 봅니다… 연결 창이 다시 뜨면 「연결」을 눌러 주세요.";
+                        emitStatus();
+                    }
+                    nextAttempt();
                 }
             };
             requestCb = cb;
             connecting = true;
-            message = null;
-            cm.requestNetwork(req, cb, 60000);
+            message = attemptNo > 1 ? message : null;
+            if (app != null) RelayDiag.step(app, "send_request_" + attemptDesc);
+            cm.requestNetwork(req, cb, 45000);
             emitStatus();
             return true;
-        } catch (Exception e) {
-            connecting = false;
-            message = "Wi-Fi 연결 요청 실패: " + e.getMessage();
-            emitStatus();
+        } catch (SecurityException e) {
+            goManual("WIFI_PERMISSION", "권한이 없어 자동 연결을 못 합니다(" + e.getMessage() + "). 앱 권한에서 「근처 기기」·「위치」를 허용하거나, 아래에서 직접 연결하세요.");
             return false;
+        } catch (Exception e) {
+            if (app != null) RelayDiag.error(app, "WIFI_REQUEST", e.getClass().getSimpleName() + ": " + e.getMessage());
+            return nextAttempt();
         }
     }
 
@@ -202,6 +379,9 @@ public final class SenderHub {
     public synchronized void connectLan(Context context, String ip, int port, String receiverLabel, String wifiName) {
         app = context.getApplicationContext();
         releaseRequest();
+        qrSsid = null;
+        manual = false;
+        errorCode = null;
         directIp = ip;
         directPort = port;
         receiverIp = null;
@@ -259,6 +439,8 @@ public final class SenderHub {
         receiverName = null;
         ssid = null;
         directIp = null;
+        manual = false;
+        errorCode = null;
         state = "idle";
         message = null;
         if (app != null) PhotoRelayService.refresh(app);
@@ -294,6 +476,28 @@ public final class SenderHub {
                 for (RouteInfo r : lp.getRoutes()) {
                     InetAddress g = r.getGateway();
                     if (g instanceof Inet4Address && !g.isAnyLocalAddress()) out.add(g.getHostAddress());
+                }
+            }
+        } catch (Exception ignored) { }
+        return out;
+    }
+
+    /** 그 Wi-Fi 에서 받은 내 주소의 x.y.z.1 과 DHCP 서버 주소(핫스팟이면 대개 받는 기기 자신). */
+    private List<String> subnetGuesses(Network net) {
+        List<String> out = new ArrayList<>();
+        try {
+            ConnectivityManager cm = (ConnectivityManager) app.getSystemService(Context.CONNECTIVITY_SERVICE);
+            LinkProperties lp = cm == null ? null : cm.getLinkProperties(net);
+            if (lp == null) return out;
+            if (Build.VERSION.SDK_INT >= 30) {
+                InetAddress d = lp.getDhcpServerAddress();
+                if (d instanceof Inet4Address) out.add(d.getHostAddress());
+            }
+            for (android.net.LinkAddress la : lp.getLinkAddresses()) {
+                InetAddress a = la.getAddress();
+                if (a instanceof Inet4Address) {
+                    byte[] b = a.getAddress();
+                    out.add((b[0] & 0xff) + "." + (b[1] & 0xff) + "." + (b[2] & 0xff) + ".1");
                 }
             }
         } catch (Exception ignored) { }
@@ -336,6 +540,7 @@ public final class SenderHub {
             message = "받는 기기(" + direct + ")에 닿지 않습니다. 두 기기가 같은 Wi-Fi(공유기)에 연결돼 있는지 보세요. 게스트 Wi-Fi·기기 간 차단(AP 격리)이 켜진 공유기는 안 됩니다.";
         }
         candidates.addAll(gatewayIps(net));
+        candidates.addAll(subnetGuesses(net));
         candidates.add(FALLBACK_IP);
         for (String ip : candidates) {
             if (!active) return false;
@@ -367,7 +572,15 @@ public final class SenderHub {
                 if (findReceiver(net)) {
                     state = "ready";
                     message = null;
+                    errorCode = null;
+                    manual = false;
                     backoff = 0;
+                    searchRounds = 0;
+                } else if (++searchRounds >= 5 && directIp == null) {
+                    errorCode = "RECEIVER_NOT_FOUND";
+                    message = requestedNet != null
+                        ? "받는 기기 Wi-Fi에는 연결됐는데 받는 기기를 못 찾았습니다. 받는 기기 화면에서 받기가 켜져 있는지(「받기 중지」를 누르지 않았는지) 보세요."
+                        : "지금 연결된 Wi-Fi에서 받는 기기를 못 찾았습니다." + (qrSsid != null ? " 이 폰이 「" + qrSsid + "」에 연결돼 있는지 보세요." : "");
                 }
             } else {
                 state = "ready";
@@ -503,6 +716,7 @@ public final class SenderHub {
                 byte[] buf = new byte[1024];
                 long until = System.currentTimeMillis() + 10000;
                 while (active && System.currentTimeMillis() < until) {
+                    if (wifiNetwork() != net) break; // 받는 기기 Wi-Fi 에 막 붙었으면 그 망에 다시 묶는다
                     DatagramPacket p = new DatagramPacket(buf, buf.length);
                     try { ds.receive(p); } catch (SocketTimeoutException e) { continue; }
                     String[] b = SnapProtocol.parseBeacon(new String(p.getData(), 0, p.getLength(), StandardCharsets.UTF_8));
@@ -543,6 +757,20 @@ public final class SenderHub {
         o.put("lastSent", lastSentName);
         o.put("message", message);
         o.put("mode", directIp != null ? "lan" : (ssid != null ? "wifi" : null));
+        o.put("errorCode", errorCode);
+        o.put("manual", manual);
+        if (manual && qrSsid != null) {
+            o.put("qrSsid", qrSsid);
+            o.put("qrPassword", qrPass);
+        }
+        o.put("canRetry", qrSsid != null && directIp == null);
+        o.put("attempt", attemptNo);
+        o.put("attempts", attemptTotal);
+        o.put("attemptDesc", attemptDesc);
+        o.put("scanInfo", scanInfo);
+        o.put("permNote", permNote);
+        JSObject diag = RelayDiag.snapshot(app);
+        o.put("diag", diag);
         o.put("directIp", directIp);
         return o;
     }

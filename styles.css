@@ -17607,3 +17607,15 @@ input.ndt-mo-locked { background: var(--bg-secondary, #f2f2f2); color: var(--tex
 .relay-off-lan { white-space: normal; }
 /* 큰 QR 화면에서 hidden 버튼이 .psm-btn(display:flex) 때문에 다 보이던 것 */
 .rqv-screen [hidden] { display: none !important; }
+/* 2026-10-20 보내는 쪽 직접 연결 안내 */
+.psm-manual{border:2px solid #f59e0b;background:#fffbeb;border-radius:14px;padding:14px;margin:10px 0;display:flex;flex-direction:column;gap:8px}
+.psm-manual[hidden]{display:none!important}
+.psm-manual-head{margin:0;font-weight:700;color:#92400e}
+.psm-manual-row{display:flex;flex-direction:column;gap:2px}
+.psm-manual-row span{font-size:13px;color:#78350f}
+.psm-manual-val{font-size:24px;line-height:1.25;word-break:break-all;user-select:all;-webkit-user-select:all;font-family:ui-monospace,Consolas,monospace;color:#111827}
+.psm-manual-btns{display:grid;grid-template-columns:1fr 1fr;gap:8px}
+.psm-manual-btns .psm-btn{min-height:46px;font-size:15px}
+.psm-manual-btns [hidden]{display:none!important}
+.psm-manual-note{margin:0;font-size:13px;color:#78350f}
+.psm-diag[hidden]{display:none!important}

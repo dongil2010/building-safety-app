@@ -166,7 +166,7 @@ public final class SnapProtocol {
         if (content == null) return null;
         String c = content.trim();
         if (!c.regionMatches(true, 0, "WIFI:", 0, 5)) return null;
-        String ssid = null, pass = "", type = "";
+        String ssid = null, pass = "", type = "", hidden = "false";
         for (String f : splitFields(c.substring(5))) {
             if (f.length() < 2 || f.charAt(1) != ':') continue;
             char k = Character.toUpperCase(f.charAt(0));
@@ -174,10 +174,13 @@ public final class SnapProtocol {
             if (k == 'S') ssid = v;
             else if (k == 'P') pass = v;
             else if (k == 'T') type = v;
+            else if (k == 'H') hidden = "true".equalsIgnoreCase(v.trim()) ? "true" : "false";
         }
         if (ssid == null || ssid.isEmpty()) return null;
         if (ssid.length() >= 2 && ssid.startsWith("\"") && ssid.endsWith("\"")) ssid = ssid.substring(1, ssid.length() - 1);
-        return new String[] { ssid, pass, type };
+        if (pass.length() >= 2 && pass.startsWith("\"") && pass.endsWith("\"") && !pass.matches("\"[0-9A-Fa-f]{64}\"")) pass = pass.substring(1, pass.length() - 1);
+        // {ssid, 암호, 방식(WPA/SAE/nopass…), 숨김 "true"/"false"}
+        return new String[] { ssid, pass, type, hidden };
     }
 
     /** 「같은 Wi-Fi」 QR. name·wifiSsid 는 화면 안내용(없어도 됨). */

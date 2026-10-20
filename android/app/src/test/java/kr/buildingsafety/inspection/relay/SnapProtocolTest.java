@@ -170,4 +170,36 @@ public class SnapProtocolTest {
         assertEquals(8888, SnapProtocol.SERVER_PORTS[0]);
         for (int p : SnapProtocol.SERVER_PORTS) assertTrue(p != SnapProtocol.DISCOVERY_PORT);
     }
+
+    @Test
+    public void hiddenAndQuotedWifiQr() {
+        String[] w = SnapProtocol.parseWifiQr("WIFI:S:Hide\\;Me;T:SAE;P:\"pa\\;ss\";H:true;;");
+        assertEquals("Hide;Me", w[0]);
+        assertEquals("pa;ss", w[1]);
+        assertEquals("SAE", w[2]);
+        assertEquals("true", w[3]);
+        assertEquals("false", SnapProtocol.parseWifiQr("WIFI:S:A;T:WPA;P:abcd1234;;")[3]);
+    }
+
+    @Test
+    public void senderAttemptPlan() {
+        // 검색 정보 없음: QR 방식 → 반대 방식
+        java.util.List<SenderHub.Attempt> p = SenderHub.buildPlan("abcd1234", "WPA", null, null);
+        assertEquals(2, p.size());
+        assertEquals("WPA", p.get(0).auth);
+        assertEquals("SAE", p.get(1).auth);
+        // WPA3 전용으로 보이면 WPA3 먼저, BSSID 변형 추가
+        p = SenderHub.buildPlan("abcd1234", "WPA", "[RSN-SAE-CCMP][ESS]", "aa:bb:cc:dd:ee:ff");
+        assertEquals("SAE", p.get(0).auth);
+        assertEquals("aa:bb:cc:dd:ee:ff", p.get(p.size() - 1).bssid);
+        // 전환 모드(PSK+SAE): 둘 다
+        p = SenderHub.buildPlan("abcd1234", "SAE", "[WPA2-PSK-CCMP][RSN-SAE-CCMP]", null);
+        assertEquals("WPA", p.get(0).auth);
+        assertEquals(2, p.size());
+        // 암호 없음
+        p = SenderHub.buildPlan("", "nopass", null, null);
+        assertEquals("nopass", p.get(0).auth);
+        assertEquals("5GHz", SenderHub.bandOf(5180));
+        assertEquals("2.4GHz", SenderHub.bandOf(2437));
+    }
 }

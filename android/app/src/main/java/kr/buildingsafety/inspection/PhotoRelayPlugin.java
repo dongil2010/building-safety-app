@@ -354,7 +354,11 @@ public class PhotoRelayPlugin extends Plugin implements RelayEvents {
             call.reject("받기용 QR이 아닙니다. 받는 기기의 「오프라인 직접 받기」 화면 QR(Wi-Fi 또는 같은 Wi-Fi)을 비춰 주세요.", "NOT_WIFI_QR");
             return;
         }
-        boolean auto = SenderHub.get().connect(ctx(), wifi[0], wifi[1], wifi[2]);
+        // 연결 요청 자체는 권한 없이도 되는 기기가 많아 일단 시도하고, 권한이 없으면 화면에 이유만 남긴다
+        String w = wifiAlias();
+        boolean wifiPermOk = w == null || getPermissionState(w) == PermissionState.GRANTED;
+        SenderHub.get().setPermNote(wifiPermOk ? null : ("nearby".equals(w) ? "근처 기기 권한 없음" : "위치 권한 없음"));
+        boolean auto = SenderHub.get().connect(ctx(), wifi[0], wifi[1], wifi[2], wifi.length > 3 && "true".equals(wifi[3]), true);
         JSObject o = new JSObject();
         o.put("ssid", wifi[0]);
         o.put("autoConnect", auto);
@@ -377,6 +381,84 @@ public class PhotoRelayPlugin extends Plugin implements RelayEvents {
     public void senderStart(PluginCall call) {
         SenderHub.get().start(ctx());
         call.resolve(SenderHub.get().status(ctx()));
+    }
+
+    /** 마지막으로 읽은 QR 로 자동 연결을 처음부터 다시. */
+    @PluginMethod
+    public void senderRetry(PluginCall call) {
+        boolean ok = SenderHub.get().retryLast(ctx());
+        JSObject o = SenderHub.get().status(ctx());
+        o.put("retried", ok);
+        call.resolve(o);
+    }
+
+    /**
+     * 「Wi-Fi 저장해서 연결」: Android 11+ 는 시스템 「네트워크 추가」 창(WifiNetworkSuggestion)으로 저장,
+     * 그 아래는 Wi-Fi 설정만 연다. 연결되면 SenderHub 가 지금 Wi-Fi 에서 받는 기기를 찾아 이어 보낸다.
+     */
+    @PluginMethod
+    public void senderSaveWifi(PluginCall call) {
+        SenderHub h = SenderHub.get();
+        String ssid = h.lastQrSsid();
+        JSObject o = new JSObject();
+        try {
+            h.start(ctx());
+            if (ssid != null && Build.VERSION.SDK_INT >= 30) {
+                android.net.wifi.WifiNetworkSuggestion.Builder b = new android.net.wifi.WifiNetworkSuggestion.Builder().setSsid(ssid);
+                String pass = h.lastQrPass();
+                if (pass != null && !pass.isEmpty()) {
+                    if ("SAE".equalsIgnoreCase(h.lastQrAuth())) b.setWpa3Passphrase(pass); else b.setWpa2Passphrase(pass);
+                }
+                if (h.lastQrHidden()) b.setIsHiddenSsid(true);
+                ArrayList<android.net.wifi.WifiNetworkSuggestion> list = new ArrayList<>();
+                list.add(b.build());
+                Intent i = new Intent(android.provider.Settings.ACTION_WIFI_ADD_NETWORKS);
+                i.putParcelableArrayListExtra(android.provider.Settings.EXTRA_WIFI_NETWORK_LIST, list);
+                i.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK);
+                getContext().startActivity(i);
+                o.put("opened", "add_networks");
+                call.resolve(o);
+                return;
+            }
+        } catch (Exception e) {
+            RelayDiag.error(ctx(), "WIFI_ADD", e.getClass().getSimpleName() + ": " + e.getMessage());
+        }
+        openWifiSettings(o);
+        call.resolve(o);
+    }
+
+    @PluginMethod
+    public void senderOpenWifiSettings(PluginCall call) {
+        SenderHub.get().start(ctx());
+        JSObject o = new JSObject();
+        openWifiSettings(o);
+        call.resolve(o);
+    }
+
+    private void openWifiSettings(JSObject o) {
+        try {
+            Intent i = new Intent(android.provider.Settings.ACTION_WIFI_SETTINGS);
+            i.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK);
+            getContext().startActivity(i);
+            o.put("opened", "wifi_settings");
+        } catch (Exception e) {
+            o.put("opened", (String) null);
+            o.put("message", "Wi-Fi 설정을 못 열었습니다. 폰 설정 → Wi-Fi 에서 직접 연결해 주세요.");
+        }
+    }
+
+    @PluginMethod
+    public void copyText(PluginCall call) {
+        String t = call.getString("text", "");
+        JSObject o = new JSObject();
+        try {
+            android.content.ClipboardManager cm = (android.content.ClipboardManager) getContext().getSystemService(android.content.Context.CLIPBOARD_SERVICE);
+            cm.setPrimaryClip(android.content.ClipData.newPlainText("Wi-Fi 암호", t));
+            o.put("copied", true);
+        } catch (Exception e) {
+            o.put("copied", false);
+        }
+        call.resolve(o);
     }
 
     @PluginMethod

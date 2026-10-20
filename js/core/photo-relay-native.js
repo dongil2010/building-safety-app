@@ -104,6 +104,9 @@
         if (d.app) parts.push('앱 ' + d.app + (d.appCode ? `(${d.appCode})` : ''));
         if (info.web) parts.push('웹 ' + info.web);
         if (s.lohsReason != null) parts.push('LOHS ' + s.lohsReason);
+        if (s.attemptDesc) parts.push('시도 ' + (s.attempt || 0) + '/' + (s.attempts || 0) + ' ' + s.attemptDesc);
+        if (s.scanInfo) parts.push('검색 ' + s.scanInfo);
+        if (s.permNote) parts.push(s.permNote);
         if (d.step) parts.push('단계 ' + d.step);
         if (d.code && d.code !== code) parts.push('지난 오류 ' + d.code + (d.message ? ': ' + d.message : ''));
         if (d.crash) parts.push('앱 멈춤: ' + d.crash);
@@ -151,9 +154,21 @@
         };
     }
 
+    /** 보내는 쪽 자동 연결이 막혔을 때 직접 연결 안내(이름·암호 크게)를 보여야 하는지. 연결되면(ready) 숨김. */
+    function senderNeedsManual(s) {
+        s = s || {};
+        return !!(s.active && s.manual && s.qrSsid && s.state !== 'ready');
+    }
+
     function describeSender(s) {
         s = s || {};
         const st = s.active ? (s.state || 'idle') : 'idle';
+        if (st !== 'ready' && s.active && s.manual) {
+            return { tone: 'warn', title: '자동 연결 실패 — 직접 연결해 주세요', detail: s.message || `Wi-Fi 설정에서 「${s.qrSsid || ''}」에 직접 연결하면 자동으로 이어서 보냅니다.`, code: s.errorCode || null };
+        }
+        if (st !== 'ready' && s.active && s.errorCode === 'RECEIVER_NOT_FOUND') {
+            return { tone: 'warn', title: '받는 기기를 못 찾았습니다', detail: s.message || '받는 기기에서 받기가 켜져 있는지 보세요.', code: s.errorCode };
+        }
         if (st === 'ready') {
             const who = s.receiverName ? `${s.receiverName} (${s.receiverIp})` : (s.receiverIp || '');
             return { tone: 'ok', title: '받는 기기와 연결됨', detail: s.sending ? `보내는 중: ${s.sending}` : (who ? `${who} 로 바로 보냅니다.` : '찍으면 바로 보냅니다.') };
@@ -813,6 +828,7 @@
 
         // ── 보내기: 전체 화면 ──
         let sendEls = null;
+        let lastSendState = null;
         function buildSendScreen() {
             sendScreen = el('div', 'psm-screen');
             sendScreen.id = 'photoSendModeScreen';
@@ -875,9 +891,35 @@
             stopBtn.type = 'button';
             sub.appendChild(wifiBtn);
             sub.appendChild(stopBtn);
+            // 자동 연결이 막혔을 때: 이름·암호를 크게, 복사·저장·설정 열기·다시 자동 연결
+            const manual = el('section', 'psm-manual');
+            manual.hidden = true;
+            manual.appendChild(el('p', 'psm-manual-head', '이 폰의 Wi-Fi 설정에서 아래 Wi-Fi에 연결하세요'));
+            const mRow = (label) => {
+                const r = el('div', 'psm-manual-row');
+                r.appendChild(el('span', null, label));
+                const v = el('b', 'psm-manual-val');
+                r.appendChild(v);
+                manual.appendChild(r);
+                return v;
+            };
+            const mSsid = mRow('Wi-Fi 이름');
+            const mPass = mRow('암호');
+            const mBtns = el('div', 'psm-manual-btns');
+            const mk2 = (cls, label) => { const b = el('button', 'psm-btn ' + cls, label); b.type = 'button'; mBtns.appendChild(b); return b; };
+            const copyBtn = mk2('psm-copy', '암호 복사');
+            const saveBtn = mk2('psm-save', 'Wi-Fi 저장해서 연결');
+            const openBtn = mk2('psm-open', 'Wi-Fi 설정 열기');
+            const retryBtn = mk2('psm-retry', '다시 자동 연결');
+            manual.appendChild(mBtns);
+            manual.appendChild(el('p', 'psm-manual-note', '연결되면 이 화면이 자동으로 받는 기기를 찾아 이어서 보냅니다. 「인터넷 없음」 경고가 떠도 「연결 유지」를 눌러 주세요.'));
+            const diag = el('p', 'relay-diag psm-diag');
+            diag.hidden = true;
+
             const help = el('p', 'psm-help', '찍은 사진은 이 폰 갤러리에 남기지 않고 받는 기기로만 보냅니다. 못 보낸 사진은 지우지 않고 기다렸다가 연결되면 자동으로 다시 보냅니다. 인터넷이 없어도 됩니다.');
 
             body.appendChild(conn);
+            body.appendChild(manual);
             body.appendChild(scan);
             body.appendChild(shoot);
             body.appendChild(toggle);
@@ -885,6 +927,7 @@
             body.appendChild(last);
             body.appendChild(sub);
             body.appendChild(help);
+            body.appendChild(diag);
             sendScreen.appendChild(head);
             sendScreen.appendChild(body);
             document.body.appendChild(sendScreen);
@@ -927,7 +970,31 @@
                 try { senderState = await plugin.senderStop(); } catch (_e) { /* ignore */ }
                 renderSend();
             });
-            sendEls = { conn, title, detail, scan, shoot, sentB, queuedB, failedB, last, stopBtn };
+            copyBtn.addEventListener('click', async () => {
+                const pw = (senderState && senderState.qrPassword) || '';
+                let ok = false;
+                try { if (plugin.copyText) ok = !!((await plugin.copyText({ text: pw })) || {}).copied; } catch (_e) { ok = false; }
+                if (!ok) { try { await navigator.clipboard.writeText(pw); ok = true; } catch (_e) { ok = false; } }
+                toast(ok ? '암호를 복사했습니다. Wi-Fi 암호 칸에 붙여 넣으세요.' : '복사가 안 됩니다. 화면의 암호를 보고 입력해 주세요.', ok ? 'success' : 'warning');
+            });
+            const callNative = async (name, fallbackMsg) => {
+                try {
+                    if (typeof plugin[name] !== 'function') { await plugin.openWifiSettings(); return; }
+                    const r = await plugin[name]();
+                    if (r && r.message) toast(r.message, 'warning');
+                    if (r && r.status) senderState = r.status;
+                    else if (r && r.state) senderState = r;
+                } catch (e) { toast(errText(e, fallbackMsg), 'error'); }
+                renderSend();
+            };
+            saveBtn.addEventListener('click', () => callNative('senderSaveWifi', 'Wi-Fi 저장 창을 못 열었습니다.'));
+            openBtn.addEventListener('click', () => callNative('senderOpenWifiSettings', 'Wi-Fi 설정을 못 열었습니다.'));
+            retryBtn.addEventListener('click', async () => {
+                if (typeof plugin.senderRetry !== 'function') { toast('「QR 스캔해서 연결」을 다시 눌러 주세요.', 'info'); return; }
+                await callNative('senderRetry', '다시 연결하지 못했습니다.');
+                toast('다시 연결합니다. 확인 창이 뜨면 「연결」을 눌러 주세요.', 'info');
+            });
+            sendEls = { conn, title, detail, scan, shoot, sentB, queuedB, failedB, last, stopBtn, manual, mSsid, mPass, retryBtn, diag };
         }
 
         function renderSend() {
@@ -946,6 +1013,18 @@
             sendEls.scan.classList.toggle('done', d.tone === 'ok');
             sendEls.scan.querySelector('span').textContent = d.tone === 'ok' ? '다른 받는 기기로 다시 연결' : 'QR 스캔해서 연결';
             sendEls.stopBtn.hidden = !s.active;
+            const man = senderNeedsManual(s);
+            sendEls.manual.hidden = !man;
+            if (man) {
+                sendEls.mSsid.textContent = s.qrSsid || '';
+                sendEls.mPass.textContent = s.qrPassword ? s.qrPassword : '(암호 없음)';
+            }
+            sendEls.retryBtn.hidden = !s.canRetry;
+            const showDiag = !!(s.active && s.state !== 'ready' && (s.errorCode || s.manual || s.attemptDesc));
+            sendEls.diag.hidden = !showDiag;
+            if (showDiag) sendEls.diag.textContent = '진단: ' + diagLine(s, {});
+            if (lastSendState && lastSendState !== 'ready' && s.state === 'ready' && s.active) toast('받는 기기와 연결됐습니다. 이제 찍으면 바로 보냅니다.', 'success');
+            lastSendState = s.active ? s.state : null;
         }
 
         function openSendMode() {
@@ -966,7 +1045,7 @@
         return { available, init, isReceiving, onModalOpen, openSendMode, closeSendMode, openQrScreen, closeQrScreen, setMode };
     }
 
-    const api = { getPlugin, createInboxPump, describeReceiver, describeSender, createShooter, validateHotspotInput, loadManualHotspot, saveManualHotspot, fixActionFor, needsManual, pickQr, diagLine, createUi };
+    const api = { getPlugin, createInboxPump, describeReceiver, describeSender, senderNeedsManual, createShooter, validateHotspotInput, loadManualHotspot, saveManualHotspot, fixActionFor, needsManual, pickQr, diagLine, createUi };
     if (typeof module === 'object' && module.exports) module.exports = api;
     if (root && typeof root.document !== 'undefined') {
         root.BsaPhotoRelayLib = api;

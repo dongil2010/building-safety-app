@@ -193,8 +193,8 @@ function mockPlugin(inbox) {
         assert.ok(/startServerOnly\(ctx\(\), "PERMISSION"/.test(plugin2), '권한 거부여도 받기 서버는 연다');
         assert.ok(/getSecurityType\(\)/.test(recv2) && /if \(type == 2\) return "SAE"/.test(recv2), 'WPA3 전용 전용Wi-Fi는 QR에 SAE');
         assert.ok(/postDelayed\([\s\S]*HOTSPOT_TIMEOUT[\s\S]*15000\)/.test(recv2), '콜백이 안 오면 15초 뒤 실패 처리');
-        assert.ok(/String other = "SAE"\.equalsIgnoreCase\(usedAuth\) \? "WPA" : "SAE"/.test(send2), 'WPA2/WPA3 바꿔 한 번 더');
-        assert.ok(/requestNetwork\(req, cb, 60000\)/.test(send2), '연결 요청 시간 제한');
+        assert.ok(/String second = "SAE"\.equals\(first\) \? "WPA" : "SAE"/.test(send2), 'WPA2/WPA3 바꿔 한 번 더');
+        assert.ok(/requestNetwork\(req, cb, 45000\)/.test(send2), '연결 요청 시간 제한');
         assert.ok(/id="btnShowRelayQr"/.test(html), '홈: 받기용 핫스팟 켜기 · QR 보기');
         const mod = read('js/core/photo-relay-native.js');
         assert.ok(/getElementById\('btnShowRelayQr'\)[\s\S]*openQrScreen\(\{ autoStart: true \}\)/.test(mod), '한 번 누르면 켜고 QR 크게');
@@ -250,6 +250,30 @@ function mockPlugin(inbox) {
         assert.ok(/receiverStartLan/.test(mod3) && /OLD_APP/.test(mod3), '옛 앱이면 업데이트 안내');
         const css3 = read('styles.css');
         assert.ok(/\.relay-diag \{/.test(css3));
+    }
+
+    {
+        // 2026-10-20 보내는 쪽: QR 찍어도 핫스팟에 못 붙을 때
+        const m = { active: true, state: 'no_wifi', manual: true, qrSsid: 'BSA_1234', qrPassword: 'pw12345678', errorCode: 'WIFI_UNAVAILABLE', message: '자동 연결이 안 됐습니다', attempt: 2, attempts: 2, attemptDesc: 'WPA3', scanInfo: '보임 5GHz -60dBm WPA2' };
+        const d = relay.describeSender(m);
+        assert.strictEqual(d.tone, 'warn');
+        assert.ok(/직접 연결/.test(d.title) && d.code === 'WIFI_UNAVAILABLE');
+        assert.ok(relay.senderNeedsManual(m));
+        assert.ok(!relay.senderNeedsManual(Object.assign({}, m, { state: 'ready' })), '연결되면 안내 숨김');
+        assert.strictEqual(relay.describeSender(Object.assign({}, m, { state: 'ready', receiverIp: '192.168.49.1' })).tone, 'ok');
+        const line = relay.diagLine(m, {});
+        assert.ok(line.includes('WIFI_UNAVAILABLE') && line.includes('시도 2/2 WPA3') && line.includes('5GHz'));
+        assert.strictEqual(relay.describeSender({ active: true, state: 'searching', errorCode: 'RECEIVER_NOT_FOUND', message: 'x' }).title, '받는 기기를 못 찾았습니다');
+        const send4 = read(J + 'relay/SenderHub.java');
+        const plugin4 = read(J + 'PhotoRelayPlugin.java');
+        assert.ok(/setIsHiddenSsid\(true\)/.test(send4) && /setBssid\(/.test(send4) && /notSeen \? "WIFI_NOT_SEEN"/.test(send4));
+        assert.ok(/getDhcpServerAddress/.test(send4), '핫스팟 주소 찾기 후보');
+        assert.ok(/public void senderRetry\(/.test(plugin4) && /ACTION_WIFI_ADD_NETWORKS/.test(plugin4) && /public void copyText\(/.test(plugin4));
+        const scanRes = plugin4.slice(plugin4.indexOf('private void scanResult'));
+        assert.ok(scanRes.indexOf('parseLanQr') < scanRes.indexOf('parseWifiQr'), '같은 Wi-Fi QR 은 Wi-Fi 연결을 건너뜀');
+        const mod4 = read('js/core/photo-relay-native.js');
+        assert.ok(/psm-manual/.test(mod4) && /암호 복사/.test(mod4) && /Wi-Fi 설정 열기/.test(mod4) && /다시 자동 연결/.test(mod4));
+        assert.ok(/\.psm-manual\[hidden\]/.test(read('styles.css')));
     }
 
     console.log('test-photo-relay-native: ok');
