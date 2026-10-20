@@ -5753,10 +5753,26 @@ document.addEventListener('DOMContentLoaded', () => {
                     }
                 });
             });
+            grid.querySelectorAll('[data-action="dong-rename"]').forEach((el) => {
+                el.addEventListener('click', (e) => {
+                    if (blockGhostClick()) { e.preventDefault(); e.stopPropagation(); return; }
+                    e.stopPropagation();
+                    const id = el.getAttribute('data-bldg-id');
+                    if (id) window.renameDongOfBuilding(id);
+                });
+            });
+            grid.querySelectorAll('[data-action="dong-delete"]').forEach((el) => {
+                el.addEventListener('click', (e) => {
+                    if (blockGhostClick()) { e.preventDefault(); e.stopPropagation(); return; }
+                    e.stopPropagation();
+                    const id = el.getAttribute('data-bldg-id');
+                    if (id) window.deleteDongOfBuilding(id);
+                });
+            });
             syncInspectionTypeSelectOptionLabels(grid);
         };
 
-        const renderBuildingActionRow = (bldg, titleHtml, metaHtml, rowClass) => {
+        const renderBuildingActionRow = (bldg, titleHtml, metaHtml, rowClass, extraBtnsHtml) => {
             const safeId = escapeHtml(bldg.id);
             return `
                 <div class="building-row ${rowClass || ''}" data-id="${safeId}">
@@ -5776,7 +5792,7 @@ document.addEventListener('DOMContentLoaded', () => {
                         <button type="button" class="icon-btn icon-btn-offline" title="오프라인 준비 — 모든 층·도면·사진을 이 기기에 받기" data-action="offline-prep" data-bldg-id="${safeId}" aria-label="오프라인 준비">
                             <i class="fa-solid fa-cloud-arrow-down"></i>
                             <span class="icon-btn-label">오프라인</span>
-                        </button>
+                        </button>${extraBtnsHtml || ''}
                     </div>
                 </div>
             `;
@@ -5807,11 +5823,22 @@ document.addEventListener('DOMContentLoaded', () => {
                 const floorCount = (bldg.floorsList && bldg.floorsList.length > 0)
                     ? `도면 ${bldg.floorsList.length}개 층`
                     : '도면 미등록';
+                const sid = escapeHtml(bldg.id);
+                const dongBtns = `
+                        <button type="button" class="icon-btn icon-btn-edit" title="동 이름 지정/변경" data-action="dong-rename" data-bldg-id="${sid}" aria-label="동 이름 변경">
+                            <i class="fa-solid fa-pen"></i>
+                            <span class="icon-btn-label">이름</span>
+                        </button>
+                        <button type="button" class="icon-btn icon-btn-danger" title="이 동 삭제(휴지통)" data-action="dong-delete" data-bldg-id="${sid}" aria-label="동 삭제">
+                            <i class="fa-solid fa-trash-can"></i>
+                            <span class="icon-btn-label">삭제</span>
+                        </button>`;
                 return renderBuildingActionRow(
                     bldg,
                     `<i class="fa-solid fa-door-open flag-icon-muted"></i> ${escapeHtml(formatDongRowLabel(bldg))}`,
                     `${escapeHtml(bldg.inspectionType || '점검')} · ${escapeHtml(floorCount)}`,
-                    'building-row-dong'
+                    'building-row-dong',
+                    dongBtns
                 );
             }).join('');
             bindBuildingRowActions();
@@ -9011,6 +9038,14 @@ document.addEventListener('DOMContentLoaded', () => {
                 window.showToast('현장명을 입력해 주세요.', 'warning');
                 if (siteNameInput) siteNameInput.focus();
                 return;
+            }
+            if (multiDong && dong) {
+                const rkChk = `${document.getElementById('inputEditBuildingInspectionYear')?.value || bldg.inspectionYear || '2026년'}_${document.getElementById('inputEditBuildingInspectionPeriod')?.value || bldg.inspectionPeriod || '하반기'}`;
+                if (dongNameTakenInSiteRound(siteName, rkChk, dong, bldg.id)) {
+                    window.showToast(`이 현장·회차에 "${dong}"이(가) 이미 있습니다.`, 'warning', 4000);
+                    dongInput?.focus();
+                    return;
+                }
             }
             const name = composeBuildingDisplayName(siteName, dong);
             const nameInput = document.getElementById('inputEditBuildingName');
@@ -21045,6 +21080,82 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
             return formatDongRowLabel(b) === want || normalizeDongLabel(getBuildingDongLabel(b)) === normalizeDongLabel(dong);
         });
     }
+
+    /** 같은 현장·회차에 같은 동 이름(대소문자·공백 무시)이 다른 건물에 있는지 */
+    function dongNameTakenInSiteRound(siteKey, roundKey, dong, exceptId) {
+        const want = normalizeDongLabel(dong).toLowerCase();
+        if (!want) return false;
+        return getSiteBuildingsSorted(siteKey).some((b) => b && b.id !== exceptId
+            && getBuildingSurveyRoundKey(b) === roundKey
+            && normalizeDongLabel(getBuildingDongLabel(b)).toLowerCase() === want);
+    }
+
+    /** 동 이름 지정/변경 — 건물 id·결함·도면·사진·회차는 그대로, dong/name만 바꾼다 */
+    window.renameDongOfBuilding = async function(bldgId) {
+        const bldg = (window.state.buildings || []).find((b) => b && b.id === bldgId);
+        if (!bldg) { window.showToast('동을 찾을 수 없습니다.', 'warning'); return false; }
+        const siteKey = getBuildingSiteName(bldg);
+        const roundKey = getBuildingSurveyRoundKey(bldg);
+        const cur = getBuildingDongLabel(bldg) || '';
+        const raw = await window.appPrompt(`동 이름을 입력하세요.\n(현장: ${siteKey} · ${formatSurveyRoundLabel(roundKey)})`, cur, { title: cur ? '동 이름 변경' : '동 이름 지정', placeholder: '예: 101동' });
+        if (raw == null) return false;
+        const dong = normalizeDongLabel(raw);
+        if (!dong) { window.showToast('동 이름을 입력해 주세요.', 'warning'); return false; }
+        if (dong === cur) return false;
+        if (dongNameTakenInSiteRound(siteKey, roundKey, dong, bldg.id)) {
+            window.showToast(`이 현장·회차에 "${dong}"이(가) 이미 있습니다.`, 'warning', 4000);
+            return false;
+        }
+        bldg.siteName = siteKey;
+        bldg.dong = dong;
+        bldg.multiDong = true;
+        bldg.name = composeBuildingStorageName(siteKey, dong);
+        bldg._pendingCloudSync = true;
+        if (typeof markBuildingMetaDirty === 'function') markBuildingMetaDirty(bldg);
+        if (window.state.currentBuildingId === bldg.id && window.state.currentBuilding) {
+            window.state.currentBuilding.dong = dong;
+            window.state.currentBuilding.name = bldg.name;
+        }
+        saveStateToLocalStorage();
+        if (typeof syncStateToFirebase === 'function') syncStateToFirebase();
+        if (typeof renderDashboard === 'function') renderDashboard();
+        window.showToast(cur ? `"${cur}" → "${dong}" 이름을 바꿨습니다.` : `동 이름을 "${dong}"(으)로 지정했습니다.`, 'success');
+        return true;
+    };
+
+    /** 동 삭제 — 이름 입력 + 2차 확인 후 기존 휴지통 경로(30일 뒤 영구 삭제·삭제 동기화) 사용 */
+    window.deleteDongOfBuilding = async function(bldgId) {
+        const bldg = (window.state.buildings || []).find((b) => b && b.id === bldgId);
+        if (!bldg) { window.showToast('동을 찾을 수 없습니다.', 'warning'); return false; }
+        const siteKey = getBuildingSiteName(bldg);
+        const roundKey = getBuildingSurveyRoundKey(bldg);
+        const label = formatDongRowLabel(bldg);
+        const siteActive = getSiteBuildingsSorted(siteKey);
+        if (siteActive.length <= 1) {
+            window.showToast('현장의 마지막 동은 여기서 지울 수 없습니다. 현장 전체를 지우려면 「현장 정보 수정」의 삭제를 사용해 주세요.', 'warning', 6000);
+            return false;
+        }
+        const typed = await window.appPrompt(`삭제하려면 동 이름 「${label}」을(를) 그대로 입력하세요.`, '', { title: '동 삭제', danger: true });
+        if (typed == null) return false;
+        if (normalizeDongLabel(typed) !== label) {
+            window.showToast('입력한 이름이 달라 삭제하지 않았습니다.', 'warning');
+            return false;
+        }
+        const defectCount = typeof countBuildingDefects === 'function' ? countBuildingDefects(bldg) : 0;
+        const sameRoundLeft = siteActive.filter((b) => b.id !== bldg.id && getBuildingSurveyRoundKey(b) === roundKey).length;
+        if (!await window.confirmDelete(
+            `동 「${label}」을(를) 휴지통으로 보낼까요?\n\n` +
+            `· 현장: ${siteKey} · ${formatSurveyRoundLabel(roundKey)}\n` +
+            `· 결함 ${defectCount}건 · 도면·사진은 휴지통 보관 중에는 그대로 남습니다.\n` +
+            `· 약 30일간 보관되며 그 안에 복원할 수 있고, 지나면 도면·결함·사진과 함께 영구 삭제됩니다.` +
+            (sameRoundLeft === 0 ? '\n\n※ 이 회차의 마지막 동입니다. 삭제하면 이 회차가 목록에서 사라집니다.' : '')
+        )) return false;
+        if (window.moveBuildingToTrash(bldg)) {
+            window.showToast(`동 「${label}」을(를) 휴지통으로 옮겼습니다. 30일 내 복원 가능`, 'success', 5000);
+            return true;
+        }
+        return false;
+    };
 
     window.updateHomeFabForDashboardMode = function() {
         const fab = document.getElementById('btnMobileFabAddBuilding');
