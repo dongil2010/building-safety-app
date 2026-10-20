@@ -6,7 +6,7 @@
  * 실행: npm run electron
  * 설치 파일: npm run electron:dist
  */
-const { app, BrowserWindow, dialog, shell, net, session } = require('electron');
+const { app, BrowserWindow, dialog, shell, net, session, ipcMain } = require('electron');
 
 const REMOTE_URL = 'https://dongil2010.github.io/building-safety-app/';
 
@@ -131,7 +131,8 @@ function createWindow(startUrl) {
         webPreferences: {
             nodeIntegration: false,
             contextIsolation: true,
-            sandbox: true
+            sandbox: true,
+            preload: path.join(__dirname, 'preload.js')
         }
     });
 
@@ -175,6 +176,42 @@ function createWindow(startUrl) {
 }
 
 let appStartUrl = null;
+
+/**
+ * CAD 핀: 바탕화면 cad_defects_import.json 읽기(읽기 전용, 이 파일 이름만).
+ * 바탕화면·OneDrive 바탕 화면 중 가장 최근에 저장된 것. 우리 앱 화면(배포 주소·내장 서버)에서 온 요청만.
+ */
+function cadImportCandidates() {
+    const env = process.env;
+    const home = env.USERPROFILE || require('os').homedir();
+    const name = 'cad_defects_import.json';
+    const ones = [env.OneDrive, env.OneDriveConsumer, env.OneDriveCommercial, home && path.join(home, 'OneDrive')].filter(Boolean);
+    const out = [];
+    try { out.push(path.join(app.getPath('desktop'), name)); } catch (_) { /* ignore */ }
+    if (home) out.push(path.join(home, 'Desktop', name), path.join(home, '바탕 화면', name));
+    ones.forEach(function (od) { out.push(path.join(od, '바탕 화면', name), path.join(od, 'Desktop', name)); });
+    return out.filter(function (p, i) { return out.indexOf(p) === i; });
+}
+function trustedSender(event) {
+    try {
+        const u = new URL(event.senderFrame ? event.senderFrame.url : event.sender.getURL());
+        if (u.origin === new URL(REMOTE_URL).origin) return true;
+        return u.protocol === 'http:' && (u.hostname === '127.0.0.1' || u.hostname === 'localhost');
+    } catch (_) { return false; }
+}
+ipcMain.handle('bsa:read-cad-import-json', async function (event) {
+    if (!trustedSender(event)) return { found: false, error: 'untrusted' };
+    let best = null;
+    for (const p of cadImportCandidates()) {
+        try {
+            const st = fs.statSync(p);
+            if (!st.isFile() || st.size > 30 * 1024 * 1024) continue;
+            if (!best || st.mtimeMs > best.mtime) best = { path: p, mtime: st.mtimeMs };
+        } catch (_) { /* 없음 */ }
+    }
+    if (!best) return { found: false };
+    return { found: true, path: best.path, mtime: best.mtime, text: fs.readFileSync(best.path, 'utf8') };
+});
 
 app.whenReady().then(async function () {
     let startUrl = process.env.BSA_START_URL;

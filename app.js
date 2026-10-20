@@ -43644,45 +43644,149 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
         window.showToast?.('📍 [1/2] 캐드에서 찍은 첫 번째 기준점(예: 좌상단 기둥)을 도면에서 클릭해 주세요.', 'info', 5000);
     }
 
+    /** CAD JSON 글을 지금 층에 불러오기 — 파일 고르기·바탕화면 바로 읽기가 같은 검사·흐름을 쓴다 */
+    function processCadJsonText(text) {
+        if (!state.currentBuildingId || !state.currentFloor) {
+            window.showToast?.('먼저 점검할 대상 건축물과 층을 선택해 주세요.', 'warning', 3500);
+            return false;
+        }
+        const bldg = state.currentBuilding || (state.buildings || []).find(b => b.id === state.currentBuildingId);
+        const floorKey = `${state.currentBuildingId}_${state.currentFloor}`;
+        if (!state.defects) state.defects = {};
+        if (!state.defects[floorKey]) state.defects[floorKey] = [];
+        const parsed = window.BSA.cadDesktopImport.parseCadJson(text);
+        if (!parsed.ok) { alert(parsed.error); return false; }
+        try {
+            startCad2PointCalibration(parsed.data, floorKey, bldg);
+        } catch (err) {
+            console.error('[importCadPinsJson Error]', err);
+            alert('캐드 JSON 파일을 불러오는 중 오류가 발생했습니다:\n' + err.message);
+            return false;
+        }
+        return true;
+    }
+
     window.importCadPinsJson = function (event) {
         const file = event.target.files && event.target.files[0];
         if (!file) return;
-
         if (!state.currentBuildingId || !state.currentFloor) {
             window.showToast?.('먼저 점검할 대상 건축물과 층을 선택해 주세요.', 'warning', 3500);
             event.target.value = '';
             return;
         }
-
-        const bldg = state.currentBuilding || (state.buildings || []).find(b => b.id === state.currentBuildingId);
-        const floorKey = `${state.currentBuildingId}_${state.currentFloor}`;
-        if (!state.defects) state.defects = {};
-        if (!state.defects[floorKey]) state.defects[floorKey] = [];
-
         const reader = new FileReader();
         reader.onload = function (e) {
-            try {
-                const data = JSON.parse(e.target.result);
-                const cadDefects = (data && Array.isArray(data.defects)) ? data.defects : [];
-                if (cadDefects.length === 0) {
-                    alert('선택한 파일에 유효한 결함 데이터(defects 배열)가 없습니다.');
-                    return;
-                }
-
-                if (data.refPoint1 && data.refPoint2) {
-                    startCad2PointCalibration(data, floorKey, bldg);
-                } else {
-                    alert('구버전 캐드 파일입니다. 최신 CAD2APP.lsp (v2.0)으로 다시 추출해 주세요.');
-                }
-            } catch (err) {
-                console.error('[importCadPinsJson Error]', err);
-                alert('캐드 JSON 파일을 불러오는 중 오류가 발생했습니다:\n' + err.message);
-            } finally {
-                event.target.value = '';
-            }
+            try { processCadJsonText(e.target.result); } finally { event.target.value = ''; }
         };
         reader.readAsText(file);
     };
+
+    // ── 바탕화면 cad_defects_import.json 바로 불러오기(2026-10-20) ──────────────
+    const CAD_DESKTOP_DIR_KEY = 'cadDesktopDirHandle';
+    function cadPickFileFallback(msg) {
+        if (msg) window.showToast?.(msg, 'info', 5000);
+        const inp = document.getElementById('inputImportCadPins');
+        if (inp) inp.click();
+    }
+    function cadTargetLabel() {
+        const bldg = state.currentBuilding || (state.buildings || []).find(b => b.id === state.currentBuildingId);
+        const name = String((bldg && bldg.name) || '').replace(/^🏢\s*/, '');
+        const fl = (typeof window.getFloorLabelFromCode === 'function') ? window.getFloorLabelFromCode(state.currentFloor) : state.currentFloor;
+        return `${name} · ${fl}`;
+    }
+    /** 읽은 파일을 보여주고 확인 — 0 불러오기, 1 다른 파일, 2 폴더 다시 지정 */
+    async function cadConfirmDesktopFile(text, mtime, where, canRepick) {
+        const parsed = window.BSA.cadDesktopImport.parseCadJson(text);
+        const when = mtime ? new Date(mtime).toLocaleString('ko-KR', { month: 'numeric', day: 'numeric', hour: '2-digit', minute: '2-digit' }) : '';
+        const head = `${where}의 cad_defects_import.json${when ? ` (저장 ${when})` : ''}`;
+        const body = parsed.ok ? `결함 ${parsed.count}개를 지금 층에 불러옵니다.\n→ ${cadTargetLabel()}` : parsed.error;
+        const choices = [
+            { label: '불러오기', detail: parsed.ok ? '기준점 2개를 찍는 단계로 넘어갑니다' : '이 파일은 불러올 수 없습니다' },
+            { label: '다른 파일 고르기', detail: '지금처럼 파일 창에서 고릅니다' }
+        ];
+        if (canRepick) choices.push({ label: '바탕화면 폴더 다시 지정', detail: '다른 폴더를 바탕화면으로 씁니다' });
+        const pick = await window.appChoose(`${head}\n${body}`, choices, { title: '📐 CAD 핀 — 바탕화면 파일', okText: '확인', defaultIndex: parsed.ok ? 0 : 1 });
+        if (pick === 0 && !parsed.ok) return 1;
+        return pick;
+    }
+    async function cadPickDesktopDir() {
+        const dir = await window.showDirectoryPicker({ id: 'bsa-cad-desktop', mode: 'read', startIn: 'desktop' });
+        try { await localBackupPut(CAD_DESKTOP_DIR_KEY, dir); } catch (e) { console.warn('[CAD] 바탕화면 폴더 기억 실패', e); }
+        return dir;
+    }
+    async function cadImportFromDesktop() {
+        if (!state.currentBuildingId || !state.currentFloor) {
+            window.showToast?.('먼저 점검할 대상 건축물과 층을 선택해 주세요.', 'warning', 3500);
+            return;
+        }
+        const C = window.BSA && window.BSA.cadDesktopImport;
+        // 1) PC 앱(Electron) — 바탕화면을 바로 읽는다
+        if (C && window.bsaDesktop && typeof window.bsaDesktop.readCadImportJson === 'function') {
+            let res = null;
+            try { res = await window.bsaDesktop.readCadImportJson(); } catch (e) { console.warn('[CAD] 바탕화면 읽기 실패', e); }
+            if (!res || !res.found) {
+                cadPickFileFallback('바탕화면에 cad_defects_import.json이 없어 파일 창을 엽니다.');
+                return;
+            }
+            const pick = await cadConfirmDesktopFile(res.text, res.mtime, '바탕화면', false);
+            if (pick === 0) processCadJsonText(res.text);
+            else if (pick === 1) cadPickFileFallback();
+            return;
+        }
+        // 2) Chrome — 한 번 고른 바탕화면 폴더를 다시 쓴다
+        if (!C || !C.supportsDirPicker(window)) {
+            cadPickFileFallback();
+            return;
+        }
+        let dir = null;
+        try { dir = await localBackupGet(CAD_DESKTOP_DIR_KEY); } catch (_e) { dir = null; }
+        if (!dir) {
+            const pick = await window.appChoose(
+                '바탕화면의 cad_defects_import.json을 파일 창 없이 바로 불러올 수 있습니다.\n처음 한 번만 바탕화면 폴더를 골라 주세요(Chrome이 읽기 권한을 묻습니다).',
+                [
+                    { label: '바탕화면 폴더 고르기', detail: '다음부터는 버튼 한 번으로 바로 불러옵니다' },
+                    { label: '파일 직접 고르기', detail: '지금처럼 파일 창에서 고릅니다' }
+                ],
+                { title: '📐 CAD 핀', okText: '확인', defaultIndex: 0 }
+            );
+            if (pick !== 0) { if (pick === 1) cadPickFileFallback(); return; }
+            try { dir = await cadPickDesktopDir(); } catch (e) {
+                if (e && e.name === 'AbortError') return;
+                cadPickFileFallback('폴더를 열 수 없어 파일 창을 엽니다.');
+                return;
+            }
+        }
+        for (let tries = 0; tries < 3; tries++) {
+            const r = await C.readFromDirHandle(dir, true);
+            if (r.status === 'ok') {
+                const pick = await cadConfirmDesktopFile(r.text, r.lastModified, `「${dir.name}」 폴더`, true);
+                if (pick === 0) processCadJsonText(r.text);
+                else if (pick === 1) cadPickFileFallback();
+                else if (pick === 2) {
+                    try { dir = await cadPickDesktopDir(); continue; } catch (_e) { return; }
+                }
+                return;
+            }
+            if (r.status === 'no-permission') {
+                cadPickFileFallback('바탕화면 폴더 읽기 권한이 없어 파일 창을 엽니다. 다음에 「허용」을 누르면 바로 불러옵니다.');
+                return;
+            }
+            const pick = await window.appChoose(
+                r.status === 'missing'
+                    ? `「${dir.name}」 폴더에 cad_defects_import.json이 없습니다.\nCAD2APP으로 바탕화면에 저장했는지 확인해 주세요.`
+                    : '바탕화면 폴더를 읽지 못했습니다(폴더가 옮겨졌거나 지워졌을 수 있습니다).',
+                [
+                    { label: '파일 직접 고르기', detail: '파일 창에서 고릅니다' },
+                    { label: '바탕화면 폴더 다시 지정', detail: '다른 폴더를 바탕화면으로 씁니다' }
+                ],
+                { title: '📐 CAD 핀', okText: '확인', defaultIndex: 0 }
+            );
+            if (pick === 0) { cadPickFileFallback(); return; }
+            if (pick !== 1) return;
+            try { dir = await cadPickDesktopDir(); } catch (_e) { return; }
+        }
+    }
+    window.cadImportFromDesktop = cadImportFromDesktop;
 
     const btnImportCadPins = document.getElementById('btnImportCadPins');
     const inputImportCadPins = document.getElementById('inputImportCadPins');
@@ -43888,7 +43992,8 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
     }
 
     if (btnImportCadPins && inputImportCadPins) {
-        btnImportCadPins.addEventListener('click', () => inputImportCadPins.click());
+        // 바탕화면 cad_defects_import.json 이 있으면 파일 창 없이 바로(없거나 못 읽으면 지금처럼 파일 창)
+        btnImportCadPins.addEventListener('click', () => { cadImportFromDesktop().catch((e) => { console.warn('[CAD] 바탕화면 불러오기 실패', e); inputImportCadPins.click(); }); });
         inputImportCadPins.addEventListener('change', window.importCadPinsJson);
     }
 
