@@ -9790,8 +9790,17 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
     function stampFloorDrawingUpdated(bldg, floorCode) {
         if (!bldg || !floorCode) return 0;
         const now = Date.now();
-        bldg.floorPdfUpdatedAt = Object.assign({}, bldg.floorPdfUpdatedAt, { [floorCode]: now });
-        markBuildingMetaDirty(bldg);
+        // 2026-10-20 고흥군립남부도서관 외부: 건물 수정창 저장은 시작할 때 잡은 건물 객체(bldg)를 들고 도면을 차례로 올리는데,
+        // 그 사이 동기화가 state.buildings를 새 병합 객체로 바꾸면 시각이 버려진 옛 객체에만 찍혔다 →
+        // 클라우드 시각이 그대로라 다른 기기(폰)가 옛 도면을 계속 썼다. 지금 살아 있는 같은 건물 객체에도 찍는다.
+        const targets = new Set([bldg]);
+        const live = (window.state.buildings || []).find((b) => b && b.id === bldg.id);
+        if (live) targets.add(live);
+        if (state.currentBuilding && state.currentBuilding.id === bldg.id) targets.add(state.currentBuilding);
+        targets.forEach((b) => {
+            b.floorPdfUpdatedAt = Object.assign({}, b.floorPdfUpdatedAt, { [floorCode]: now });
+            markBuildingMetaDirty(b);
+        });
         markFloorDrawingApplied(bldg.id, floorCode, now);
         return now;
     }
