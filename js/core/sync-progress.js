@@ -155,7 +155,9 @@
                     if (remainingKeys.length < 20) remainingKeys.push(e.k + ':' + e.id + '@' + e.seq);
                 }
             });
-            if (data.session && !data.session.finishedAt && data.session.otherFk && data.session.otherFk[fk] === 0) {
+            if (data.session && !data.session.finishedAt && data.session.otherFk && (data.session.otherFk[fk] === 0 || data.session.otherFk[fk] === -1)) {
+                // -1: 확인 직전에 summary()가 「올릴 것에서 빠짐」으로 전체에서 뺀 층 — 다시 넣고 올라감으로 센다
+                if (data.session.otherFk[fk] === -1) data.session.total.other = (data.session.total.other || 0) + 1;
                 data.session.otherFk[fk] = 1;
                 data.session.done.other = (data.session.done.other || 0) + 1;
                 sessionDoneFk(fk, 'other');
@@ -276,8 +278,19 @@
             var s = data.session && !data.session.finishedAt ? data.session : null;
             if (s) {
                 otherPendingFk.forEach(function (fk) {
-                    if (!(fk in s.otherFk)) { s.otherFk[fk] = 0; s.total.other = (s.total.other || 0) + 1; changed = true; }
+                    if (!(fk in s.otherFk) || s.otherFk[fk] === -1) { s.otherFk[fk] = 0; s.total.other = (s.total.other || 0) + 1; changed = true; }
                 });
+                // 2026-10-20 「올릴 것」에서 빠졌는데 서버 확인(confirmFloor)이 없던 층(빈 층 묶음·목록에 없는 건물 정리 등)
+                // — 올라간 것이 아니니 전체에서 뺀다. 안 빼면 172/176처럼 숫자가 끝까지 안 찬다. 다시 dirty가 되면 위에서 되살린다
+                if (ctx.dirtyFloorKeys) {
+                    Object.keys(s.otherFk).forEach(function (fk) {
+                        if (s.otherFk[fk] === 0 && dirty.indexOf(fk) < 0) {
+                            s.otherFk[fk] = -1;
+                            s.total.other = Math.max(0, (s.total.other || 0) - 1);
+                            changed = true;
+                        }
+                    });
+                }
             }
             var rows = [];
             var tot = 0;

@@ -65817,6 +65817,19 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
                 prevAssets
             );
             mergedDeletedBuildings.forEach(purgeLocalStateForDeletedBuilding);
+            // 2026-10-20 건물이 없는(서버 목록에도 업로드 대기에도 없음·삭제됨) 층의 「올릴 것」 표시 정리.
+            // 그대로 두면 매번 건너뛰기만 해서 「서버에 올리는 중 172/176」이 영원히 안 끝났다(현장명 없는 유령 건물 B1F).
+            // 서버 건물 목록을 실제로 받았을 때만(첫 로드 전·오프라인이면 새 건물이 아직 목록에 없을 수 있다).
+            if (Array.isArray(serverData.buildings) && serverData.buildings.length) {
+                const orphanKeys = window.BSA.floorSyncGuard.orphanDirtyFloorKeys(
+                    Array.from(_dirtyFloorKeys), window.state.buildings, mergedDeletedBuildings
+                );
+                if (orphanKeys.length) {
+                    orphanKeys.forEach((k) => _dirtyFloorKeys.delete(k));
+                    persistDirtyFloorKeys();
+                    console.warn('[동기화] 건물이 없는 층의 「올릴 것」 표시를 지웠습니다:', orphanKeys);
+                }
+            }
 
             isRemoteSyncing = true;
             window.state.confirmedDeletedIds = {};

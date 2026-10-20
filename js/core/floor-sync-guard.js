@@ -69,12 +69,32 @@
         }).map(function (b) { return { id: b.id, name: b.name || '' }; });
     }
 
+    /**
+     * 2026-10-20 「올려야 할 층」 중 건물이 없는 것 — 서버 목록을 받은 뒤(동기화 중 병합 직후)에만 부른다.
+     * buildings: 서버+업로드 대기 건물을 합친 목록. 층 키 「건물id_층」의 건물을 가장 긴 id로 찾고(app의 findBuildingForFloorKey와 같음),
+     * 못 찾았거나 그 건물이 삭제 목록에 있으면 고아. 사고: 현장명 없이 도면만 올라간 유령 건물 층이 남아 「올리는 중 172/176」이 안 끝남.
+     * → 고아 층 키 배열
+     */
+    function orphanDirtyFloorKeys(dirtyKeys, buildings, deletedIds) {
+        var del = {};
+        (deletedIds || []).forEach(function (id) { if (id) del[String(id)] = true; });
+        var ids = (buildings || []).filter(function (b) { return b && b.id; }).map(function (b) { return String(b.id); });
+        return (dirtyKeys || []).map(String).filter(function (k) {
+            var best = '';
+            ids.forEach(function (id) {
+                if (k.indexOf(id + '_') === 0 && id.length > best.length) best = id;
+            });
+            return !best || !!del[best];
+        });
+    }
+
     var api = {
         classifyFloorSnap: classifyFloorSnap,
         revOf: revOf,
         lostServerIds: lostServerIds,
         confirmRevBeforeWrite: confirmRevBeforeWrite,
-        lostServerBuildings: lostServerBuildings
+        lostServerBuildings: lostServerBuildings,
+        orphanDirtyFloorKeys: orphanDirtyFloorKeys
     };
     if (root) {
         root.BSA = root.BSA || {};
