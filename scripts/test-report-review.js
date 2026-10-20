@@ -96,6 +96,57 @@ assert.deepStrictEqual(out.map((x) => x.rule), ['unit-mix']);
 out = R.reviewRows([row({ location: 'X1  Y1' }), row({ cause: '', location: 'z' })]);
 assert.strictEqual(out[0].level, 'error');
 
+// ---- 2026-10-20 성광교회 검토에서 규칙으로 잡을 수 있던 것 ----
+// 위치·부재가 다 빈 마킹은 한 줄(empty-pin)로만, 균열폭 빈칸도 따로 안 띄움
+let rs = rules([row({ location: '', component: '', widths: [], crackLength: '' })]);
+assert.deepStrictEqual(rs, ['empty-pin'], '빈 마킹은 한 줄');
+assert.ok(rules([row({ location: '' })]).includes('empty-location'), '위치만 빔은 그대로');
+// 결함인데 원인 「-」
+assert.ok(rules([row({ defectType: '물탱크 설치', cause: '-', widths: [], crackLength: '' })]).includes('dash-cause'));
+assert.ok(!rules([row({ defectType: '상태양호', cause: '-', widths: [], crackLength: '', good: true })]).includes('dash-cause'), '양호는 「-」 정상');
+// 이격균열은 큰 폭 정상
+assert.ok(!rules([row({ defectType: '이격균열', widths: ['6.0'] })]).includes('width-range'));
+assert.ok(rules([row({ defectType: '경사균열', widths: ['6.0'] })]).includes('width-range'));
+// 메모 문구
+assert.ok(rules([row({ defectType: '수직균열 (균열폭 표시)' })]).includes('memo-text'));
+assert.ok(!rules([row({ defectType: '경사균열(2EA), 수평균열' })]).includes('memo-text'), '(2EA)는 메모 아님');
+// 오타
+out = R.reviewRows([row({ component: '천정 마감재' })]);
+assert.ok(out.some((x) => x.rule === 'typo' && /천장/.test(x.msg)));
+out = R.reviewRows([row({ cause: '설계또는 시공 미흡' })]);
+assert.ok(out.some((x) => x.rule === 'typo' && x.msg.includes('「설계또는」 → 「설계 또는」')), '낱말 전체를 보여 줌');
+assert.ok(rules([row({ cause: '시공미흡, 경과 년 수 증대' })]).includes('typo'));
+assert.ok(!rules([row({ cause: '설계 또는 시공 미흡' })]).includes('typo'));
+// 가운뎃점
+assert.ok(rules([row({ defectType: '수직․수평균열' })]).includes('dot'));
+assert.ok(!rules([row({ defectType: '수직·수평균열' })]).includes('dot'));
+// 개수가 폭 칸에도
+assert.ok(rules([row({ defectType: '타일파손', widths: ['7.0'], crackLength: '', sizeText: '7EA' })]).includes('count-in-width'));
+assert.ok(rules([row({ defectType: '볼트 누락', widths: ['2.0'], crackLength: '', sizeText: '2EA' })]).includes('count-in-width'));
+assert.ok(!rules([row({ defectType: '타일파손', widths: [], crackLength: '', sizeText: '7EA' })]).includes('count-in-width'));
+// 폭·길이 바뀐 듯
+assert.ok(rules([row({ widths: ['4.0'], crackLength: '0.2' })]).includes('swap'));
+assert.ok(!rules([row({ widths: ['0.3'], crackLength: '0.2' })]).includes('swap'));
+// 칸 섞임
+assert.ok(rules([row({ component: '슬래브 콘크리트 파취 및 철근', defectType: '철근노출', widths: [], crackLength: '' })]).includes('mixed-field'));
+assert.ok(rules([row({ component: '철골보(G)이음부 상태양호', defectType: '상태양호', cause: '', widths: [], crackLength: '', good: true })]).includes('mixed-field'));
+assert.ok(rules([row({ component: '난간', defectType: '높이 부족 H:630mm', widths: [], crackLength: '' })]).includes('mixed-field'));
+assert.ok(!rules([row({ component: '천장 마감재', defectType: '오염', widths: [], crackLength: '' })]).includes('mixed-field'));
+// 위치만 다르고 값이 같음
+out = R.reviewRows([row({ location: '정원', component: '옹벽', widths: ['0.15'], crackLength: '3.8' }), row({ location: '썬큰', component: '옹벽', widths: ['0.15'], crackLength: '3.8' })]);
+assert.deepStrictEqual(out.map((x) => x.rule), ['same-measure']);
+// 높이 단위 섞임
+out = R.reviewRows([
+    row({ defectType: '높이 부족', widths: [], crackLength: '', location: 'a', sizeText: 'H:800mm' }),
+    row({ defectType: '높이 부족', widths: [], crackLength: '', location: 'b', sizeText: 'H:620mm' }),
+    row({ defectType: '높이 부족', widths: [], crackLength: '', location: 'c', sizeText: 'H:80cm' })
+]);
+assert.deepStrictEqual(out.map((x) => x.rule), ['unit-mix']);
+assert.ok(/cm/.test(out[0].msg));
+// 위치 띄어쓰기 표기 통일
+out = R.reviewRows([row({ location: '남자화장실', widths: ['0.2'] }), row({ location: '남자화장실', widths: ['0.3'] }), row({ location: '남자 화장실', widths: ['0.4'] })]);
+assert.ok(out.some((x) => x.rule === 'variant' && /위치/.test(x.msg)));
+
 // 앱 연결: 미리보기 단추·결과칸·스크립트, 한글과 같은 행(getSurveyRowsForReport)을 쓴다
 const html = fs.readFileSync(path.join(root, 'index.html'), 'utf8');
 const app = fs.readFileSync(path.join(root, 'app.js'), 'utf8');

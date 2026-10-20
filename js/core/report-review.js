@@ -58,6 +58,13 @@
         out.push({ level: level, rule: rule, floorCode: r.floorCode || '', floorLabel: r.floorLabel || r.floorCode || '', no: s(r.no), id: r.id || '', msg: msg });
     }
 
+    // 자주 틀리는 표기 [찾을 말, 바꿀 말, 설명] — 2026-10-20 성광교회 검토에서 나온 것
+    var TYPOS = [
+        [/천정/, '천장', '표준어'],
+        [/([가-힣]+)또는/, '$1 또는', '띄어쓰기'],
+        [/경과\s+년\s*수/, '경과년수', '붙여 씀']
+    ];
+
     var TEXT_FIELDS = [['location', '위치'], ['component', '부재'], ['defectType', '결함 종류'], ['cause', '원인'], ['sizeText', '규모']];
 
     function reviewRows(rows) {
@@ -70,25 +77,47 @@
             var crack = isCrackType(dt);
 
             // ---- 빈칸 ----
+            var noLoc = !trim(r.location), noComp = !trim(r.component);
+            // 위치·부재가 다 비면 마킹만 하고 내용을 안 채운 것 — 칸마다 따로 띄우지 않고 한 줄로(2026-10-20 성광교회 외부 19곳)
+            var emptyPin = noLoc && noComp;
             if (!dt) push(out, r, 'error', 'empty-type', '결함 종류가 비어 있습니다.');
-            if (!trim(r.location)) push(out, r, 'warn', 'empty-location', '위치가 비어 있습니다.');
-            if (!trim(r.component)) push(out, r, 'warn', 'empty-component', '부재가 비어 있습니다 — 한글에는 「기둥」으로 나갑니다.');
+            if (emptyPin) push(out, r, 'warn', 'empty-pin', '위치·부재가 비어 있습니다 — 마킹만 하고 내용을 안 채운 것 같습니다(한글엔 부재 「기둥」으로 나감).');
+            else {
+                if (noLoc) push(out, r, 'warn', 'empty-location', '위치가 비어 있습니다.');
+                if (noComp) push(out, r, 'warn', 'empty-component', '부재가 비어 있습니다 — 한글에는 「기둥」으로 나갑니다.');
+            }
             if (!r.good && dt && !trim(r.cause)) push(out, r, 'error', 'empty-cause', '원인이 비어 있습니다 — 한글에는 「건조수축」으로 나갑니다.');
+            // 결함인데 원인이 「-」(물탱크 설치처럼 결함이 아닌 글이거나 원인을 안 적은 것)
+            else if (!r.good && dt && /^[-–—]+$/.test(trim(r.cause))) push(out, r, 'error', 'dash-cause', '원인이 「-」입니다 — 결함이면 원인을, 결함이 아니면 결함 종류를 「상태양호」로.');
 
             // ---- 균열폭·길이·개수 ----
             var widths = (Array.isArray(r.widths) ? r.widths : []).map(trim).filter(Boolean);
-            if (!r.good && crack && !widths.length && !trim(r.sizeText).replace(/^-$/, '')) push(out, r, 'warn', 'empty-width', '균열인데 균열폭(규모)이 비어 있습니다.');
+            if (!r.good && crack && !emptyPin && !widths.length && !trim(r.sizeText).replace(/^-$/, '')) push(out, r, 'warn', 'empty-width', '균열인데 균열폭(규모)이 비어 있습니다.');
             // 균열이 아닌 것(이격 등)도 폭을 균열폭 칸에 적는다(2026-10-20 사용자) — 「균열 아닌데 폭」은 안 띄우고,
             // 크기 범위(>5mm·<0.01mm)도 균열만 본다(이격폭 20mm는 정상). 숫자 아님·0 이하는 다 본다.
+            // 「이격균열」은 균열이라도 이격이라 큰 폭이 정상 — 너무 크다는 안 띄운다(성광교회 6.0mm)
+            var gap = /이격/.test(squash(dt));
             var wName = crack ? '균열폭' : '폭';
             widths.forEach(function (w) {
                 var ns = nums(w);   // 0.1~0.2 같은 범위는 양끝을 본다
                 if (!ns) { push(out, r, 'error', 'width-nan', wName + ' 「' + w + '」이 숫자가 아닙니다.'); return; }
                 var lo = Math.min.apply(null, ns), n = Math.max.apply(null, ns);
                 if (lo <= 0) push(out, r, 'error', 'width-range', wName + '이 0 이하입니다(' + w + ').');
-                else if (crack && n > CRACK_WIDTH_MAX_MM) push(out, r, 'warn', 'width-range', '균열폭 ' + w + ' — mm로 보기엔 너무 큽니다(cm·소수점 확인).');
+                else if (crack && !gap && n > CRACK_WIDTH_MAX_MM) push(out, r, 'warn', 'width-range', '균열폭 ' + w + ' — mm로 보기엔 너무 큽니다(cm·소수점 확인).');
                 else if (crack && lo < CRACK_WIDTH_MIN_MM) push(out, r, 'warn', 'width-range', '균열폭 ' + w + ' — mm로 보기엔 너무 작습니다(m로 적었는지 확인).');
             });
+            // 개수를 폭 칸에도 적음: 규모 「7EA」인데 폭 7.0(타일 파손·볼트 누락 등) — 한글 규모에 폭 숫자로 같이 나간다
+            var eaM = s(r.sizeText).match(/(\d+(?:\.\d+)?)\s*(?:EA|개소|개)(?![A-Za-z가-힣])/i);
+            if (eaM && !crack && widths.length === 1) {
+                var wn = num(widths[0]);
+                if (Number.isFinite(wn) && wn === parseFloat(eaM[1])) push(out, r, 'warn', 'count-in-width', '개수(' + trim(eaM[0]) + ')가 폭 칸에도 들어 있습니다(폭 ' + widths[0] + ') — 폭 칸은 비우세요.');
+            }
+            // 폭·길이가 바뀐 듯: 균열폭 2mm 이상인데 길이 0.3m 이하
+            var lens = String(trim(r.crackLength)).split(/\s*[\/,]\s*/).filter(Boolean);
+            if (crack && !gap && widths.length === 1 && lens.length === 1) {
+                var wv = nums(widths[0]), lv = nums(lens[0]);
+                if (wv && lv && Math.max.apply(null, wv) >= 2 && Math.max.apply(null, lv) <= 0.3) push(out, r, 'info', 'swap', '균열폭 ' + widths[0] + 'mm·길이 ' + lens[0] + 'm — 폭과 길이가 바뀌었는지 확인.');
+            }
             String(trim(r.crackLength)).split(/\s*[\/,]\s*/).filter(Boolean).forEach(function (l) {
                 var ns = nums(l);
                 if (!ns) { push(out, r, 'error', 'length-nan', '균열 길이 「' + l + '」이 숫자가 아닙니다.'); return; }
@@ -101,13 +130,29 @@
                 if (!Number.isFinite(n) || n <= 0 || Math.floor(n) !== n) push(out, r, 'warn', 'count', '개수 「' + c + '」이 1 이상의 정수가 아닙니다.');
             });
 
-            // ---- 같은 말 두 번·띄어쓰기 ----
+            // ---- 같은 말 두 번·띄어쓰기·메모 문구·오타·가운뎃점 ----
             TEXT_FIELDS.forEach(function (f) {
                 var v = s(r[f[0]]);
                 var rep = findRepeat(v);
                 if (rep) push(out, r, 'warn', 'repeat', f[1] + '에 같은 말이 두 번 들어갔습니다: 「' + rep + '」');
                 else if (/\S {2,}\S/.test(v)) push(out, r, 'info', 'space', f[1] + '에 띄어쓰기가 두 칸 이상입니다: 「' + v.trim() + '」');
+                // 현장 메모가 남은 것: 「수직균열 (균열폭 표시)」
+                var memo = v.match(/\([^()]*(?:표시|기재|입력|작성|확인요|추후)[^()]*\)/);
+                if (memo) push(out, r, 'warn', 'memo-text', f[1] + '에 메모 문구가 남아 있습니다: 「' + memo[0] + '」');
+                TYPOS.forEach(function (t) {
+                    var m = v.match(t[0]);
+                    if (m) push(out, r, 'info', 'typo', f[1] + ' 「' + m[0] + '」 → 「' + m[0].replace(t[0], t[1]) + '」' + (t[2] ? '(' + t[2] + ')' : '') + '.');
+                });
+                var dot = v.match(/[․•∙]/);
+                if (dot) push(out, r, 'info', 'dot', f[1] + '에 가운뎃점이 「' + dot[0] + '」입니다 — 「·」로 맞추세요.');
             });
+            // 칸 섞임: 부재 칸에 결함 글(「슬래브 콘크리트 파취 및…」「철골보 이음부 상태양호」)
+            var comp = trim(r.component);
+            var cm = comp.match(/상태양호|보수완료|균열|파취|박락|박리|탈락|누수|들뜸|파손|녹\s?발생/);
+            if (cm) push(out, r, 'warn', 'mixed-field', '부재 칸에 결함 내용(「' + cm[0] + '」)이 들어 있습니다: 「' + comp + '」 — 결함 종류 칸으로.');
+            // 결함 종류 칸에 치수(「높이 부족 H:630mm」)
+            var dm = dt.match(/[HhLlWw]\s*[:：=]\s*\d+(?:\.\d+)?\s*(?:mm|cm|m)?|\d+(?:\.\d+)?\s*(?:mm|cm)(?![A-Za-z])/);
+            if (dm) push(out, r, 'info', 'mixed-field', '결함 종류에 치수(「' + dm[0] + '」)가 들어 있습니다 — 규모 칸으로.');
         });
 
         // ---- 같은 층에 똑같은 행(복사 실수) ----
@@ -120,8 +165,32 @@
             else seen[k] = r;
         });
 
+        // ---- 위치만 다르고 부재·결함·폭·길이가 같은 행(복사 후 위치만 고친 듯, 성광교회 정원 옹벽/썬큰 옹벽) ----
+        var seenM = {};
+        rows.forEach(function (r) {
+            if (!r || r.good || !trim(r.location)) return;
+            var ws = (r.widths || []).map(trim).filter(Boolean).join('/'), ln = trim(r.crackLength);
+            if (!ws || !ln) return;
+            var k = [r.floorCode, squash(r.component), squash(r.defectType), ws, ln].join('|');
+            var prev = seenM[k];
+            if (prev && squash(prev.location) !== squash(r.location)) push(out, r, 'info', 'same-measure', prev.no + '번(' + trim(prev.location) + ')과 위치만 다르고 부재·결함·폭·길이가 같습니다 — 복사 후 안 고쳤는지 확인.');
+            else if (!prev) seenM[k] = r;
+        });
+
+        // ---- 높이 단위 섞임: H:800mm / H:80cm ----
+        var hUnits = {};
+        rows.forEach(function (r) {
+            if (!r) return;
+            var m = (s(r.sizeText) + ' ' + s(r.defectType)).match(/[Hh]\s*[:：=]\s*\d+(?:\.\d+)?\s*(mm|cm|m)(?![A-Za-z])/);
+            if (m) (hUnits[m[1].toLowerCase()] = hUnits[m[1].toLowerCase()] || []).push(r);
+        });
+        var hu = Object.keys(hUnits).sort(function (a, b) { return hUnits[b].length - hUnits[a].length; });
+        hu.slice(1).forEach(function (u) {
+            hUnits[u].forEach(function (r) { push(out, r, 'info', 'unit-mix', '높이 단위를 「' + u + '」로 썼습니다 — 다른 곳은 「' + hu[0] + '」(' + hUnits[hu[0]].length + '곳).'); });
+        });
+
         // ---- 표기 통일: 띄어쓰기만 다른 같은 말(철근노출 / 철근 노출) — 건물 전체에서 적게 쓴 쪽을 알린다 ----
-        [['defectType', '결함 종류'], ['cause', '원인'], ['component', '부재']].forEach(function (f) {
+        [['defectType', '결함 종류'], ['cause', '원인'], ['component', '부재'], ['location', '위치']].forEach(function (f) {
             var groups = {};
             rows.forEach(function (r) {
                 var v = trim(r && r[f[0]]);
