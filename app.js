@@ -7392,13 +7392,15 @@ document.addEventListener('DOMContentLoaded', () => {
         if (!floorCodes.size && sourceBldg.floorsList?.length) {
             sourceBldg.floorsList.forEach((f) => { if (f?.floorCode) floorCodes.add(f.floorCode); });
         }
+        // 2026-10-20 층 옮기기: 고른 층만 복사(options.floorCodes)
+        const onlyCodes = Array.isArray(options.floorCodes) ? new Set(options.floorCodes.map(String)) : null;
 
         if (!targetBldg.floorDrawings) targetBldg.floorDrawings = {};
         if (!targetBldg.floorDrawingPdfs) targetBldg.floorDrawingPdfs = {};
         if (!targetBldg.floorDrawingTiers) targetBldg.floorDrawingTiers = {};
         if (!targetBldg.floorDrawingSources) targetBldg.floorDrawingSources = {};
 
-        const list = [...floorCodes];
+        const list = [...floorCodes].filter((fc) => !onlyCodes || onlyCodes.has(String(fc)));
         let done = 0;
         for (const fc of list) {
             done += 1;
@@ -7460,11 +7462,12 @@ document.addEventListener('DOMContentLoaded', () => {
             }
         }
 
-        if (!targetBldg.floorsList?.length && sourceBldg.floorsList?.length) {
-            targetBldg.floorsList = JSON.parse(JSON.stringify(sourceBldg.floorsList));
-        } else if (sourceBldg.floorsList?.length) {
+        const srcFloorsList = (sourceBldg.floorsList || []).filter((f) => !onlyCodes || (f && onlyCodes.has(String(f.floorCode))));
+        if (!targetBldg.floorsList?.length && srcFloorsList.length) {
+            targetBldg.floorsList = JSON.parse(JSON.stringify(srcFloorsList));
+        } else if (srcFloorsList.length) {
             const existing = new Set((targetBldg.floorsList || []).map((f) => f.floorCode));
-            sourceBldg.floorsList.forEach((f) => {
+            srcFloorsList.forEach((f) => {
                 if (!f?.floorCode || existing.has(f.floorCode)) return;
                 if (!targetBldg.floorsList) targetBldg.floorsList = [];
                 targetBldg.floorsList.push(JSON.parse(JSON.stringify(f)));
@@ -21363,6 +21366,136 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
             return true;
         }
         return false;
+    };
+
+    /* ---------------- 층을 다른 동(건물)으로 옮기기 (2026-10-20 여수성광교회 본관·기념관 나누기) ----------------
+     * 사진을 다시 올리지 않는다 — 결함·비파괴 기록을 같은 id·같은 사진 id 그대로 옮길 동의 층 키로 옮긴다.
+     *  사진은 회사 photos/{사진id}에 있고 저장 경로는 현장·회차 기준이라, 같은 현장·회차 안이면 그대로 쓸 수 있다.
+     * 원래 동 층에는 「옮겨 나감」 묘비만 남긴다(trackDefectDeletion/trackNdtDeletion). 삭제 기능(removeSingleDefectRecord·
+     *  층 삭제)을 쓰지 않으므로 사진 삭제·미룬 삭제 대기열에 들어가지 않는다. 묘비가 있어야 원래 동을 나중에 영구 삭제할 때
+     *  그 동에 남은 결함으로 보고 사진을 지우는 일이 없다(permanentlyDeleteBuilding은 그 동 결함의 사진을 지운다).
+     * 도면은 옮길 동 id로 새 파일을 올린다(cloneFloorDrawingsFromSource, 고른 층만) — 원래 동을 지울 때 그 동 파일만 지워지게.
+     * 그 밖의 층 단위 기록(메모·평가단위·부재 수·가이드·구조 부재·도면 스타일·출력 범위·회전 등, state의 「건물id_층」 칸)은 복사.
+     * 개발자 도구에서 부른다: await bsaMoveFloorsToBuilding(원래id, 옮길id, ['층코드', …], { dryRun: true }) 로 먼저 확인. */
+    const FLOOR_MOVE_KEEP_KEYS = new Set(['deletedDefectIds', 'deletedDefectAt', 'deletedNdtIds', 'deletedNdtAt']);
+    const FLOOR_MOVE_RECORD_KEYS = ['defects', 'ndtData', 'ndtDisplacementGroups'];
+
+    function floorMoveOtherMapKeys(sk) {
+        const st = window.state;
+        return Object.keys(st).filter((k) => !FLOOR_MOVE_KEEP_KEYS.has(k) && FLOOR_MOVE_RECORD_KEYS.indexOf(k) < 0
+            && st[k] && typeof st[k] === 'object' && !Array.isArray(st[k])
+            && Object.prototype.hasOwnProperty.call(st[k], sk));
+    }
+
+    function planFloorMove(src, dst, codes) {
+        const st = window.state;
+        const srcCodes = collectKnownFloorCodesForBuilding(src);
+        return codes.map((fc) => {
+            const sk = `${src.id}_${fc}`;
+            const dk = `${dst.id}_${fc}`;
+            const defects = ((st.defects || {})[sk] || []).filter(Boolean);
+            const photoIds = new Set();
+            defectPhotoIdsOfList(defects, photoIds);
+            const problems = [];
+            if (!srcCodes.has(fc)) problems.push('원래 동에 없는 층');
+            if (FLOOR_MOVE_RECORD_KEYS.some((k) => ((st[k] || {})[dk] || []).length)) problems.push('옮길 동의 같은 층에 이미 기록이 있음');
+            return {
+                floorCode: fc,
+                defects: defects.length,
+                defectIds: defects.map((d) => d.id),
+                photos: photoIds.size,
+                ndt: ((st.ndtData || {})[sk] || []).length,
+                groups: ((st.ndtDisplacementGroups || {})[sk] || []).length,
+                otherMaps: floorMoveOtherMapKeys(sk),
+                problems
+            };
+        });
+    }
+
+    window.bsaMoveFloorsToBuilding = async function (srcId, dstId, floorCodes, opts) {
+        opts = opts || {};
+        const st = window.state;
+        const src = (st.buildings || []).find((b) => b && b.id === srcId);
+        const dst = (st.buildings || []).find((b) => b && b.id === dstId);
+        if (!src || !dst || src.id === dst.id) throw new Error('원래 동·옮길 동을 확인해 주세요.');
+        if (getBuildingSiteName(src) !== getBuildingSiteName(dst) || getBuildingSurveyRoundKey(src) !== getBuildingSurveyRoundKey(dst)) {
+            throw new Error('같은 현장·같은 회차의 동끼리만 옮길 수 있습니다(사진 저장 위치가 현장·회차 기준).');
+        }
+        const codes = Array.from(new Set((floorCodes || []).map(String).filter(Boolean)));
+        if (!codes.length) throw new Error('옮길 층을 골라 주세요.');
+        if (navigator.onLine === false || !db || !st.companyId) throw new Error('인터넷 연결·로그인이 필요합니다.');
+
+        // 1) 원래 동 층을 서버에서 최신으로(안 열어 본 층이 빠진 채 옮겨지지 않게)
+        const fresh = await refreshBuildingFloorsFromServer(src, { force: true });
+        if (!fresh.ok && fresh.skipped !== 'recent') throw new Error('원래 동 층을 서버에서 받지 못했습니다: ' + ((fresh.failed || []).join(', ') || fresh.skipped));
+        const plan = planFloorMove(src, dst, codes);
+        const blocked = plan.some((r) => r.problems.length);
+        if (opts.dryRun || blocked) return { dryRun: true, blocked, plan };
+
+        // 2) 도면 — 옮길 동 id로 새 파일(고른 층만), 층 목록도 고른 층만 붙는다
+        await cloneFloorDrawingsFromSource(src, dst.id, dst, { floorCodes: codes, merge: true }, opts.onProgress);
+        if (typeof persistBuildingDrawingAssetsNow === 'function') await persistBuildingDrawingAssetsNow(dst);
+
+        // 3) 층 기록 옮기기
+        codes.forEach((fc) => {
+            const sk = `${src.id}_${fc}`;
+            const dk = `${dst.id}_${fc}`;
+            FLOOR_MOVE_RECORD_KEYS.forEach((k) => {
+                if (!st[k]) st[k] = {};
+                const list = (st[k][sk] || []).filter(Boolean);
+                st[k][dk] = list.slice();
+                list.forEach((r) => {
+                    if (!r.id) return;
+                    if (k === 'defects') trackDefectDeletion(sk, r.id, r, { wallClock: true });
+                    else trackNdtDeletion(sk, r.id, r, { wallClock: true });
+                });
+                st[k][sk] = [];
+            });
+            floorMoveOtherMapKeys(sk).forEach((k) => {
+                try { st[k][dk] = JSON.parse(JSON.stringify(st[k][sk])); } catch (_e) { st[k][dk] = st[k][sk]; }
+            });
+            markFloorKeyDirty(sk);
+            markFloorKeyDirty(dk);
+        });
+        syncBuildingDrawingFloorCodes(dst);
+        markBuildingMetaDirty(dst);
+        markBuildingMetaDirty(src);
+        saveStateToLocalStorage();
+        await syncAfterImportWithRetry('층 옮기기');
+        if (typeof renderDashboard === 'function') renderDashboard();
+        return { dryRun: false, plan };
+    };
+
+    /** 옮긴 뒤 서버에서 다시 읽어 맞는지 본다 — 옮길 동 층에 결함·사진 id가 다 있고, 원래 동 층엔 묘비만 남았는지 */
+    window.bsaVerifyFloorMove = async function (srcId, dstId, plan) {
+        const st = window.state;
+        const src = (st.buildings || []).find((b) => b && b.id === srcId);
+        const dst = (st.buildings || []).find((b) => b && b.id === dstId);
+        if (!src || !dst) throw new Error('동을 찾을 수 없습니다.');
+        const out = [];
+        for (const row of (plan || [])) {
+            const fc = row.floorCode;
+            const sb = await readFloorSyncBundle(src, fc);
+            const db2 = await readFloorSyncBundle(dst, fc);
+            const dstItems = (db2 && db2.markings && db2.markings.items) || [];
+            const dstIds = new Set(dstItems.map((d) => d && d.id));
+            const dstPhotos = defectPhotoIdsOfList(dstItems, new Set());
+            const srcItems = (sb && sb.markings && sb.markings.items) || [];
+            const srcDel = new Set((sb && sb.markings && sb.markings.deletedIds) || []);
+            const missing = (row.defectIds || []).filter((id) => !dstIds.has(id));
+            const notTomb = (row.defectIds || []).filter((id) => !srcDel.has(id));
+            out.push({
+                floorCode: fc,
+                expectDefects: row.defects, dstDefects: dstItems.length, missingInDst: missing,
+                expectPhotos: row.photos, dstPhotos: dstPhotos.size,
+                expectNdt: row.ndt + row.groups,
+                dstNdt: ((db2 && db2.ndt && db2.ndt.items) || []).length + ((db2 && db2.ndt && db2.ndt.displacementGroups) || []).length,
+                srcItemsLeft: srcItems.filter((d) => d && !srcDel.has(d.id)).length,
+                srcNotTombstoned: notTomb,
+                ok: !missing.length && !notTomb.length && dstPhotos.size >= row.photos
+            });
+        }
+        return out;
     };
 
     window.updateHomeFabForDashboardMode = function() {
