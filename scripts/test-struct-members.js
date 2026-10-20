@@ -281,7 +281,7 @@ assert.ok(layer.includes("tf = function (q) { return { x: q.x + dx, y: q.y + dy 
 assert.ok(layer.includes('if (changes.length) pushHist(fk, changes);'), '줄 끌기는 되돌리기 한 번에');
 
 // ---- 거더·빔은 시작→끝 두 번 눌러 추가(기둥에 붙어 면에서 면까지), 추가 중엔 기둥을 눌러도 고르지 않음 ----
-assert.ok(layer.includes('if (isLineType(ui.addType)) { addLinePoint(p, pad); return; }'));
+assert.ok(/if \(isLineType\(ui\.addType\)\) \{[\s\S]{0,200}else addLinePoint\(p, pad\);\s*return;/.test(layer), '추가 중엔 고르기 전에 시작·끝 점(손가락은 뗄 때, 2026-10-20)');
 assert.ok(layer.includes("if (hit.type === '기둥') return { id: hit.id, x: hit.x, y: hit.y, hx: hit.w / 2, hy: hit.h / 2, on: '기둥' };"), '기둥 중심에 붙는다');
 assert.ok(layer.includes('var from = horiz ? lo.x + lo.hx : lo.y + lo.hy, to = horiz ? hi.x - hi.hx : hi.y - hi.hy;'), '기둥 면에서 면까지');
 assert.ok(layer.includes("if (ui.pend) { ui.pend = null; ui.builtSig = ''; sync(); }"), 'Esc로 시작 점 취소');
@@ -402,6 +402,19 @@ assert.ok(layer.includes('pushHist(fk, changes);'), '나눠 그린 칸은 되돌
 assert.ok(layer.includes('if (Math.min(dev, 90 - dev) > SLANT_MIN_DEG && api.slantedRun) {'), '8° 넘게 기울면 비스듬한 보');
 assert.ok(layer.includes("if (d.ang) r.setAttribute('transform', 'rotate(' + d.ang + ' ' + d.x + ' ' + d.y + ')');"), '돌려 그림');
 assert.ok(layer.includes('api.barEnds(selD).map('), '비스듬한 보 끝 손잡이');
+
+// 2026-10-20 현장(폰·태블릿) 편집: 왼쪽 도구 줄 입구, 편집 막은 브라우저 터치 제스처를 막고 직접 이동·확대, 추가는 손 뗄 때
+{
+    const html = fs.readFileSync(path.join(root, 'index.html'), 'utf8');
+    const app = fs.readFileSync(path.join(root, 'app.js'), 'utf8');
+    assert.ok(/id="mobileBtnStructLayer"/.test(html), '폰·태블릿 입구 단추');
+    assert.ok(app.includes("['btnStructLayer', 'mobileBtnStructLayer'].forEach"), '두 단추 모두 연결');
+    assert.ok(/getView:[\s\S]{0,200}setView:[\s\S]{0,600}viewDone:/.test(app), '브리지 화면 이동·확대');
+    assert.ok(layer.includes('touch-action:none'), '편집 중 브라우저 제스처 막기');
+    assert.ok(layer.includes("startTap(e, function () { addAt(p, pad); })"), '기둥 추가는 손 뗄 때');
+    assert.ok(layer.includes("startTap(e, function () { addLinePoint(p, pad); })"), '거더·빔 점도 손 뗄 때');
+    assert.ok(layer.includes('if (ui.selId && !ui.addType) {'), '추가 중 종류 단추는 고른 부재를 바꾸지 않음');
+}
 
 console.log('test-struct-members: ok');
 

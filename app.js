@@ -27104,6 +27104,23 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
             return im ? { w: im.naturalWidth || im.width || 0, h: im.naturalHeight || im.height || 0 } : { w: 0, h: 0 };
         },
         onMapTab: () => state.currentTab !== 'tab-ndt',
+        // 편집 중 손가락 이동·두 손가락 확대(2026-10-20) — 편집 막이 도면을 덮어 도면 쪽 터치 처리가 안 받으므로 여기서 직접 바꾼다
+        getView: () => ({ scale: state.view.scale, ox: state.view.offsetX, oy: state.view.offsetY }),
+        scaleLimits: () => getMapViewScaleLimits(),
+        setView: (scale, ox, oy) => {
+            state.view.scale = scale;
+            state.view.offsetX = ox;
+            state.view.offsetY = oy;
+            if (elements.zoomScaleText) elements.zoomScaleText.textContent = formatMapZoomLabel();
+            drawCanvas();
+            if (typeof updateMapZoomOverlay === 'function') updateMapZoomOverlay();
+            scheduleFloorDrawingTierSync();
+            if (shouldUseViewportTilesForCurrentFloor()) scheduleViewportHiPatchSync();
+        },
+        viewDone: () => {
+            flushViewportHiPatchSync();
+            scheduleFloorDrawingTierSync();
+        },
         placeBar: (bar, host) => { if (typeof placeMemberCountBar === 'function') placeMemberCountBar(bar, host); },
         commit: (floorKey) => {
             if (floorKey && typeof markFloorKeyDirty === 'function') markFloorKeyDirty(floorKey);
@@ -27137,11 +27154,15 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
         if (show) loadStructLayer().catch(() => { /* 다음 그리기 때 다시 */ });
     }
     (function bindStructLayerButton() {
-        const btn = document.getElementById('btnStructLayer');
-        if (!btn) return;
-        btn.addEventListener('click', () => {
-            loadStructLayer().then((layer) => { if (layer) layer.toggleBar(); })
-                .catch((err) => window.showToast?.(err.message, 'error', 3000));
+        // PC 오른쪽 패널 단추 + 폰·태블릿 왼쪽 도구 줄 단추(2026-10-20 현장 편집)
+        ['btnStructLayer', 'mobileBtnStructLayer'].forEach((id) => {
+            const btn = document.getElementById(id);
+            if (!btn) return;
+            btn.addEventListener('click', (e) => {
+                e.preventDefault();
+                loadStructLayer().then((layer) => { if (layer) layer.toggleBar(); })
+                    .catch((err) => window.showToast?.(err.message, 'error', 3000));
+            });
         });
     })();
 
