@@ -31,5 +31,5 @@ assert.strictEqual((app.match(/(?<!function )drawBookmarkChrome\(ctx,/g) || []).
 assert.ok(/if \(d\.isBookmark\) row\.classList\.add\('is-important'\);/.test(app));
 assert.ok(!/isPriorityManage\) row\.classList\.add\('is-important'\)/.test(app));
 // 중점관리 데이터·핀 색은 그대로
-assert.ok(/if \(defect\.isPriorityManage\) return getStyleColor\('priorityManage'\);/.test(app), '중점관리 핀 색 유지');
+assert.ok(/if \(defect\.isPriorityManage\) return isDefectRepaired\(defect\) \? PRIORITY_REPAIRED_COLOR : getStyleColor\('priorityManage'\);/.test(app), '중점관리 핀 색 유지(보수된 것만 검정)');
 console.log('test-important-badge-bookmark-only: ok');

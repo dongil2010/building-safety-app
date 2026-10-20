@@ -2412,6 +2412,7 @@ document.addEventListener('DOMContentLoaded', () => {
             d.photos = photosVal.slice();
             d.prevRoundPhotos = prevVal.slice();
             syncDefectPhotoRefs(d, d.photos, d.prevRoundPhotos, before);
+            applyPendingRepairPhotoToDefect(d);
             // 사용자가 사진을 바꿨다 — 병합이 이 목록을 통째로 따르게 시각을 찍는다(합집합이면 지운 사진이 돌아옴)
             stampDefectPhotosChangedIfSafe(d);
             if (typeof touchDefectUpdatedAt === 'function') touchDefectUpdatedAt(d);
@@ -11460,8 +11461,39 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
     // 중점관리(체크)=녹색 (등급 무관 최우선)
     // 1,2종: 결함=빨강, 상태양호=파랑
     // 3종: 상태양호=검정, 기존조사(전회차)=빨강, 신규조사=파랑
+    // 2026-10-20 「중점관리 항목 체크 되어 있어도 보수 했으면 검정으로」
+    // 보수됨 = 결함 종류가 보수완료·상태양호 같은 양호 글자이거나, 수정창에서 「보수완료 사진」을 고른 마킹.
+    function getDefectRepairPhotoIndex(defect) {
+        if (!defect) return -1;
+        const photos = Array.isArray(defect.photos) ? defect.photos : [];
+        if (defect.repairPhotoId && Array.isArray(defect.photoIds)) {
+            const i = defect.photoIds.indexOf(defect.repairPhotoId);
+            if (i >= 0 && (photos[i] || !photos.length)) return i;
+        }
+        const n = Number(defect.repairPhotoNo);
+        if (Number.isInteger(n) && n >= 1 && (!photos.length || photos[n - 1])) return n - 1;
+        return -1;
+    }
+    function getDefectRepairPhotoSrc(defect) {
+        const i = getDefectRepairPhotoIndex(defect);
+        if (i < 0) return '';
+        return (Array.isArray(defect.photos) && defect.photos[i]) || '';
+    }
+    function isDefectRepaired(defect) {
+        if (!defect) return false;
+        if (isGoodDefectType(defect.defectType)) return true;
+        return getDefectRepairPhotoIndex(defect) >= 0;
+    }
+    /** 중점관리인데 보수까지 끝난 마킹 — 녹색 대신 검정 */
+    function isPriorityRepairedDefect(defect) {
+        return !!(defect && defect.isPriorityManage && isDefectRepaired(defect));
+    }
+    const PRIORITY_REPAIRED_COLOR = '#000000';
+    window.BSA = window.BSA || {};
+    window.BSA.priorityRepair = { getDefectRepairPhotoIndex, getDefectRepairPhotoSrc, isDefectRepaired, isPriorityRepairedDefect };
+
     function getDefectColor(defect) {
-        if (defect.isPriorityManage) return getStyleColor('priorityManage');
+        if (defect.isPriorityManage) return isDefectRepaired(defect) ? PRIORITY_REPAIRED_COLOR : getStyleColor('priorityManage');
         const isGood = isGoodDefectType(defect.defectType);
         if (isGrade3Building()) {
             if (isGood) return getStyleColor('defectGoodGrade3');
@@ -36147,6 +36179,7 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
 
         window._pendingPhotos = [];
         window._pendingPrevRoundPhotos = [];
+        window._pendingRepairPhotoIdx = -1;
         window._pendingPinCoords = null;
         window._pendingAreaRect = null;
         refreshDefectQuickPickBar();
@@ -36224,6 +36257,7 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
         window._pendingAreaRect = null;
         window._pendingPhotos = [];
         window._pendingPrevRoundPhotos = [];
+        window._pendingRepairPhotoIdx = -1;
         renderDefectMarkingTimeline(null);
         clearDefectBulkEditState();
         syncDefectBulkEditChrome(false);
@@ -36357,6 +36391,7 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
             syncDefectArrowDirUi();
 
             window._pendingPhotos = Array.isArray(existingPin.photos) ? existingPin.photos.filter(Boolean).slice() : [];
+            window._pendingRepairPhotoIdx = getDefectRepairPhotoIndex(existingPin);
             window._pendingPrevRoundPhotos = Array.isArray(existingPin.prevRoundPhotos)
                 ? existingPin.prevRoundPhotos.filter(Boolean).slice()
                 : [];
@@ -36457,6 +36492,7 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
             syncDefectArrowDirUi();
             window._pendingPhotos = [];
             window._pendingPrevRoundPhotos = [];
+            window._pendingRepairPhotoIdx = -1;
 
             if (areaRect) {
                 if (locEl && !tmpl) {
@@ -36764,7 +36800,91 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
 
         renderDefectPhotoSlot('prev', prev);
         renderDefectPhotoSlot('curr', curr);
+        syncRepairPhotoUi(curr.length);
         syncDefectSaveAllPhotosButton(prev.length + curr.length);
+    }
+
+    /**
+     * 2026-10-20 중점관리 마킹의 「보수완료 사진」 — 현차 사진 중 하나를 보수완료 사진으로 고른다
+     * (새로 넣기: 「보수완료 사진 추가」, 이미 넣은 사진: 사진 위 「보수완료」 단추). 고른 사진은
+     * 3종 중점관리 비교표(한글)·조사표 화면 비교 칸의 금회차 자리에 들어가고, 그 마킹은 검정으로 그린다.
+     */
+    function isRepairPhotoEditableNow() {
+        const cb = document.getElementById('defectPriorityManage');
+        if (!cb || !cb.checked) return false;
+        if (typeof isDefectBulkEditMode === 'function' && isDefectBulkEditMode()) return false;
+        return true;
+    }
+    function syncRepairPhotoUi(count) {
+        const frame = document.getElementById('defectCurrMainFrame');
+        if (!frame || !frame.parentNode) return;
+        const editable = isRepairPhotoEditableNow();
+        const rIdx = typeof window._pendingRepairPhotoIdx === 'number' ? window._pendingRepairPhotoIdx : -1;
+        const extra = document.getElementById('defectCurrExtraRow');
+        const holders = [frame].concat(extra ? Array.from(extra.querySelectorAll('.defect-photo-extra-item')) : []);
+        holders.forEach((h, i) => {
+            if (i >= count) return;
+            let b = h.querySelector('.defect-repair-photo-toggle');
+            if (!editable) { if (b) b.remove(); return; }
+            if (!b) {
+                b = document.createElement('button');
+                b.type = 'button';
+                b.className = 'defect-repair-photo-toggle';
+                b.addEventListener('click', (e) => { e.preventDefault(); e.stopPropagation(); window.toggleRepairPhoto(Number(b.dataset.idx)); });
+                h.appendChild(b);
+            }
+            const on = i === rIdx;
+            b.dataset.idx = String(i);
+            b.title = on ? '보수완료 사진 지정 풀기' : '이 사진을 보수완료 사진으로';
+            b.textContent = on ? '✔ 보수완료' : '보수완료';
+            b.style.cssText = 'position:absolute;left:4px;bottom:4px;z-index:3;font-size:.68rem;font-weight:800;padding:1px 6px;border-radius:9px;'
+                + (on ? 'background:#111;color:#fff;border:1px solid #111;' : 'background:rgba(255,255,255,.9);color:#111;border:1px solid #555;');
+            if (getComputedStyle(h).position === 'static') h.style.position = 'relative';
+        });
+        let bar = document.getElementById('defectRepairPhotoBar');
+        if (!editable) { if (bar) bar.hidden = true; return; }
+        if (!bar) {
+            bar = document.createElement('div');
+            bar.id = 'defectRepairPhotoBar';
+            bar.className = 'defect-repair-photo-bar';
+            bar.style.cssText = 'display:flex;gap:.35rem;margin-top:.35rem;';
+            bar.innerHTML = '<button type="button" class="btn btn-sm btn-outline" data-repair-pick="gallery" style="flex:1;border-color:#111;color:#111"><i class="fa-solid fa-screwdriver-wrench"></i> 보수완료 사진 추가</button>'
+                + '<button type="button" class="btn btn-sm btn-outline" data-repair-pick="camera" title="보수완료 사진 촬영" style="border-color:#111;color:#111"><i class="fa-solid fa-camera"></i></button>';
+            bar.addEventListener('click', (e) => {
+                const b = e.target.closest('[data-repair-pick]');
+                if (!b) return;
+                e.preventDefault();
+                e.stopPropagation();
+                triggerDefectPhotoPick(b.getAttribute('data-repair-pick'), 'repair');
+            });
+            (extra || frame).insertAdjacentElement('afterend', bar);
+        }
+        bar.hidden = false;
+    }
+    window.toggleRepairPhoto = function(idx) {
+        if (!isRepairPhotoEditableNow()) return;
+        const i = Number(idx);
+        if (!Number.isInteger(i) || i < 0) return;
+        window._pendingRepairPhotoIdx = window._pendingRepairPhotoIdx === i ? -1 : i;
+        window._defectPhotosDirty = true;
+        renderDefectPhotoSection();
+        void persistOpenDefectPhotosNow();
+        scheduleDefectAutoApply();
+    };
+    /** 수정창에서 고른 보수완료 사진(_pendingRepairPhotoIdx)을 결함에 적는다 — 번호와 사진 ID 둘 다 */
+    function applyPendingRepairPhotoToDefect(d) {
+        if (!d) return;
+        const idx = window._pendingRepairPhotoIdx;
+        if (typeof idx !== 'number') return;
+        const photos = Array.isArray(d.photos) ? d.photos : [];
+        if (idx >= 0 && photos[idx]) {
+            d.repairPhotoNo = idx + 1;
+            const pid = Array.isArray(d.photoIds) ? d.photoIds[idx] : null;
+            if (pid) d.repairPhotoId = pid; else delete d.repairPhotoId;
+        } else {
+            delete d.repairPhotoNo;
+            delete d.repairPhotoId;
+        }
     }
 
     /** 2026-10-16 사진이 있으면 사진 칸 아래 「사진 모두 갤러리에 저장」(웹: 내려받기) */
@@ -36855,6 +36975,11 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
         if (!await window.confirmDelete('이 사진을 삭제할까요?')) return;
         if (window._pendingPhotos) {
             window._pendingPhotos.splice(idx, 1);
+            const rIdx = window._pendingRepairPhotoIdx;
+            if (typeof rIdx === 'number' && rIdx >= 0) {
+                if (rIdx === idx) window._pendingRepairPhotoIdx = -1;
+                else if (idx < rIdx) window._pendingRepairPhotoIdx = rIdx - 1;
+            }
             window._defectPhotosDirty = true;
             renderDefectPhotoSection();
             void persistOpenDefectPhotosNow();
@@ -37408,6 +37533,7 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
             if (isDefectPhotoTargetStillOpen(pickedFor)) {
                 if (!window._pendingPhotos) window._pendingPhotos = [];
                 window._pendingPhotos.push(compressedUrl);
+                if (target === 'repair') window._pendingRepairPhotoIdx = window._pendingPhotos.length - 1;
                 window._defectPhotosDirty = true;
                 renderDefectPhotoSection();
                 void persistOpenDefectPhotosNow();
@@ -38269,6 +38395,7 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
             }
         }
 
+        if (savedDefect) applyPendingRepairPhotoToDefect(savedDefect);
         const prevPhotosVal = Array.isArray(window._pendingPrevRoundPhotos)
             ? window._pendingPrevRoundPhotos.filter(Boolean)
             : [];
@@ -43568,7 +43695,7 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
             case 'progress': return `<span style="font-weight:800; font-size:0.92rem; color:${(text === '진행중' || text === '진행中' || text === '진행 中') ? '#dc2626' : '#a3a3a3'};">${text}</span>`;
             case 'leak': return `<span style="font-weight:800; font-size:0.92rem; color:${(text === '누수중' || text === '누수中' || text === '누수 中') ? '#2a2a2a' : '#a3a3a3'};">${text}</span>`;
             case 'cause': return `<span style="font-weight:700; color:#334155;">🔍 ${text}</span>`;
-            case 'priorityManage': return `<span style="font-weight:800; font-size:0.92rem; color:${text === '중점관리' ? getStyleColor('priorityManage') : '#a3a3a3'};">${text}</span>`;
+            case 'priorityManage': return `<span style="font-weight:800; font-size:0.92rem; color:${text === '중점관리' ? (isDefectRepaired(d) ? PRIORITY_REPAIRED_COLOR : getStyleColor('priorityManage')) : '#a3a3a3'};">${text}</span>`;
             case 'remark': return `<span style="font-weight:700; color:${text !== '-' ? '#2563eb' : '#a3a3a3'};">${text}</span>`;
             default: return text;
         }
@@ -44114,7 +44241,7 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
             case 'progress': return `font-weight:800; color:${(text === '진행중' || text === '진행中' || text === '진행 中') ? '#dc2626' : '#a3a3a3'};`;
             case 'leak': return `font-weight:800; color:${(text === '누수중' || text === '누수中' || text === '누수 中') ? '#2a2a2a' : '#a3a3a3'};`;
             case 'cause': return 'font-weight:700;';
-            case 'priorityManage': return `font-weight:800; color:${text === '중점관리' ? getStyleColor('priorityManage') : '#a3a3a3'};`;
+            case 'priorityManage': return `font-weight:800; color:${text === '중점관리' ? (isDefectRepaired(d) ? PRIORITY_REPAIRED_COLOR : getStyleColor('priorityManage')) : '#a3a3a3'};`;
             case 'remark': return `font-weight:700; color:${text !== '-' ? '#2563eb' : '#a3a3a3'};`;
             default: return '';
         }
@@ -44602,7 +44729,7 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
         section.hidden = false;
         grid.innerHTML = compareItems.map((d) => {
             const prevSrc = getDefectPrevOutputPhotos(d)[0] || '';
-            const currSrc = getDefectOutputPhotos(d)[0] || '';
+            const currSrc = getDefectRepairPhotoSrc(d) || getDefectOutputPhotos(d)[0] || '';
             const ctx = {
                 floorCode,
                 gradeNo: formatSurveyReportNo(d, true, floorCode),
@@ -44612,7 +44739,7 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
             const title = `${memberNameOut(d.component) || '부재'} ${d.defectType || '결함'}`.trim();
             const roundLabels = getDefectHwpxCompareRoundLabels(d, bldg);
             const prevLabel = roundLabels.prev ? `전차 · ${roundLabels.prev}` : '전차';
-            const currLabel = roundLabels.curr ? `현차 · ${roundLabels.curr}` : '현차';
+            const currLabel = (roundLabels.curr ? `현차 · ${roundLabels.curr}` : '현차') + (getDefectRepairPhotoSrc(d) ? ' · 보수완료' : '');
             const openBase = `${defectNo} ${title}`.trim();
             return `
                 <div class="survey-priority-compare-card">
@@ -45313,7 +45440,14 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
         const id = bldgId || state.currentBuildingId;
         const fc = floorCode || state.currentFloor;
         if (!id || !fc || !state.defects) return false;
-        return (state.defects[`${id}_${fc}`] || []).some((d) => d && d.isPriorityManage && !d.mapUnregistered);
+        return (state.defects[`${id}_${fc}`] || []).some((d) => d && d.isPriorityManage && !d.mapUnregistered && !isDefectRepaired(d));
+    }
+    /** 그 층 도면에 중점관리였다가 보수된(검정) 마킹이 있나 — 1·2종 범례에 「보수완료」 검정 줄 */
+    function floorHasPriorityRepairedMarking(floorCode, bldgId) {
+        const id = bldgId || state.currentBuildingId;
+        const fc = floorCode || state.currentFloor;
+        if (!id || !fc || !state.defects) return false;
+        return (state.defects[`${id}_${fc}`] || []).some((d) => d && !d.mapUnregistered && isPriorityRepairedDefect(d));
     }
     /**
      * 도면에 그릴 범례 줄(화면·보고서/PDF·한글 그림·벡터 PDF·범위 맞춤 공용).
@@ -45326,6 +45460,10 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
                 || normalizeLegendLabelKey(it.label) === '중점관리');
             if (!hasRow && floorHasPriorityManageMarking(floorCode)) {
                 items.push(enrichLocationMapLegendItem({ label: '중점관리', color: getStyleColor('priorityManage'), styleKey: 'priorityManage', auto: true }));
+            }
+            const hasRepairRow = items.some((it) => normalizeLegendLabelKey(it.label) === '보수완료');
+            if (!hasRepairRow && floorHasPriorityRepairedMarking(floorCode)) {
+                items.push(enrichLocationMapLegendItem({ colorName: '흑색', label: '보수완료', color: PRIORITY_REPAIRED_COLOR, auto: true }));
             }
         }
         return items;
@@ -51994,7 +52132,9 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
                         for (let ci = 0; ci < allPriorityCompareEntries.length; ci++) {
                             const { d, floorCode: cmpFloorCode } = allPriorityCompareEntries[ci];
                             const prevSrc = getDefectPrevOutputPhotos(d)[0];
-                            const currSrc = getDefectOutputPhotos(d)[0];
+                            // 2026-10-20 보수완료 사진을 고른 중점관리 항목은 금회차 칸에 그 사진
+                            const repairSrc = getDefectRepairPhotoSrc(d);
+                            const currSrc = repairSrc || getDefectOutputPhotos(d)[0];
                             if (!prevSrc && !currSrc) continue;
 
                             if (compareDefectsOnPage > 0 && compareDefectsOnPage >= COMPARE_DEFECTS_PER_PAGE) {
@@ -52028,7 +52168,7 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
                                     const col = addr ? addr.getAttribute('colAddr') : '';
                                     if (col === '0' || col === '3') setTcText(tc, defectNo);
                                     else if (col === '1') setTcText(tc, prevSrc ? roundLabels.prev : '');
-                                    else if (col === '4') setTcText(tc, currSrc ? roundLabels.curr : '');
+                                    else if (col === '4') setTcText(tc, currSrc ? (repairSrc ? `${roundLabels.curr} (보수완료)` : roundLabels.curr) : '');
                                 });
                             }
 

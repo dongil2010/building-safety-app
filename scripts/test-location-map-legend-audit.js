@@ -15,13 +15,15 @@ function makeCtx(o) {
     const ctx = {
         state: { currentBuilding: { id: 'B' }, currentBuildingId: 'B', currentFloor: o.floor || '1F', locationMapLegend: o.legend || null, defects: o.defects || {} },
         isGrade3Building: () => !!o.grade3,
-        getStyleColor: (k) => (o.colors || COLORS)[k]
+        getStyleColor: (k) => (o.colors || COLORS)[k],
+        window: {}
     };
     vm.createContext(ctx);
     vm.runInContext(['normalizeHexColor', 'hexToLegendColorName', 'resolveLegendColorName', 'getDefaultLocationMapLegend',
         'legendStyleKeyByLabel', 'normalizeLegendLabelKey', 'resolveLegendItemStyleKey', 'floorHasPriorityManageMarking',
+        'floorHasPriorityRepairedMarking', 'isGoodDefectType', 'getDefectRepairPhotoIndex', 'isDefectRepaired', 'isPriorityRepairedDefect',
         'getLocationMapLegendDrawItems', 'enrichLocationMapLegendItem', 'getActiveLocationMapLegend']
-        .map((n) => extractFunction(app, 'function ' + n + '(')).join('\n') + '\nthis.items = getLocationMapLegendDrawItems; this.defaults = getDefaultLocationMapLegend;', ctx);
+        .map((n) => extractFunction(app, 'function ' + n + '(')).join('\n') + "\nconst PRIORITY_REPAIRED_COLOR = '#000000';" + '\nthis.items = getLocationMapLegendDrawItems; this.defaults = getDefaultLocationMapLegend;', ctx);
     return ctx;
 }
 const J = (v) => JSON.parse(JSON.stringify(v)); // vm 쪽 배열과 비교
