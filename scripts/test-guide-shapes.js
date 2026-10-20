@@ -52,7 +52,8 @@ assert.ok(app.includes("guideShapes: (window.BSA && window.BSA.guideShapes) ? wi
 assert.ok(app.includes('window.BSA.guideShapes.mergePackIntoState(window.state, floorKey, bundle.guideShapes'));
 assert.ok(app.includes('guideShapes: window.state.guideShapes || {}'), '로컬 저장');
 assert.ok(html.indexOf('js/core/guide-shapes.js') > 0 && html.indexOf('js/core/guide-shapes.js') < html.indexOf('src="app.js'));
-assert.ok(html.includes('id="btnModeGuide"') && html.includes('id="mobileBtnModeGuide"'));
+// 2026-10-20 입구 버튼 삭제(기둥·보는 「구조 부재」 편집으로 그림) — 자료·동기화는 그대로 둔다
+assert.ok(!html.includes('id="btnModeGuide"') && !html.includes('id="mobileBtnModeGuide"'));
 // guideShapes를 읽는 곳은 가이드 코드·저장·동기화뿐(캔버스 drawCanvas·출력 함수에서 안 읽음)
 const uses = app.split('\n').filter((ln) => /guideShapes|gsApi\(\)\.listFor|api\.listFor\(state, currentMemoFloorKey\(\)\)\.length/.test(ln) && /ctx\.|hwp|Hwp|pdf|Pdf|xlsx|Excel/.test(ln));
 assert.deepStrictEqual(uses, [], '출력 코드에서 가이드를 쓰면 안 된다');

@@ -26859,7 +26859,8 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
         commitGuideChange(floorKey);
     }
     function gsVisible() {
-        return !!(state.bgImage && state.currentTab !== 'tab-ndt' && (state.mode === 'GUIDE' || readGsShowPref()));
+        // 가이드는 2026-10-20 사용자 요청으로 끔(입구 버튼 삭제) — 기둥·보는 「구조 부재」 편집으로 그린다. 저장된 가이드 자료는 지우지 않고 화면에만 안 그림.
+        return !!(state.mode === 'GUIDE' && state.bgImage && state.currentTab !== 'tab-ndt');
     }
     function getGuideOverlay() {
         const canvas = state.canvas || document.getElementById('planCanvas');

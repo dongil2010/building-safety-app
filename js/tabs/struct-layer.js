@@ -923,8 +923,7 @@
             html += '<button type="button" data-act="cancel">가져오기 취소</button>'
                 + '<span class="map-struct-hint">[' + (ui.calib.pts.length + 1) + '/2] 구조도에서 찍은 ' + (ui.calib.pts.length ? '두' : '첫') + ' 번째 기준점과 같은 곳을 도면에서 누르세요. (끌면 도면 이동, 휠로 확대)</span>';
         } else {
-            html += '<button type="button" data-act="import" title="「구조도 부재」 페이지에서 보낸 부재를 이 층에 넣습니다">가져오기</button>'
-                + '<button type="button" data-act="edit" class="' + (ui.editing ? 'active' : '') + '" title="옮기기·지우기·추가">편집</button>';
+            html += '<button type="button" data-act="edit" class="' + (ui.editing ? 'active' : '') + '" title="옮기기·지우기·추가">편집</button>';
             if (ui.editing) {
                 html += ACTIVE.map(function (t) {
                     return '<button type="button" data-act="type" data-type="' + t + '" class="map-count-type' + (ui.addType === t ? ' active' : '') + '" style="--mc-color:' + api.COLORS[t] + '" title="' + (ui.selId ? '고른 부재를 ' + t + '(으)로' : (isLineType(t) ? '시작·끝 두 곳을 눌러 ' + t + ' 추가' : '빈 곳을 눌러 ' + t + ' 추가')) + '">' + t + ' <b><small>' + c[t] + '</small></b></button>';
