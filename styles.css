@@ -17652,3 +17652,39 @@ input.ndt-mo-locked { background: var(--bg-secondary, #f2f2f2); color: var(--tex
     border-radius: 999px; padding: 0.16rem 0.55rem;
 }
 .defect-gap-notice [data-gap-close] { border: none; background: transparent; font-size: 0.95rem; padding: 0 0.35rem; }
+
+/* 2026-10-20 건물 설정창 아래 버튼 잘림(「수정」이 오른쪽 끝에서 잘림): 넘치면 두 줄로 —
+   왼쪽(휴지통·백업·오프라인 준비) / 오른쪽(취소·수정). 어떤 화면에서도 자르지 않는다. */
+#editBuildingModal .edit-building-footer {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    row-gap: 0.5rem;
+    column-gap: 0.5rem;
+    padding: 0.7rem 1rem;
+    max-width: 100%;
+    box-sizing: border-box;
+    overflow: visible;
+}
+#editBuildingModal .edit-building-footer-left,
+#editBuildingModal .edit-building-footer-actions {
+    flex-wrap: wrap;
+    gap: 0.4rem;
+    min-width: 0;
+    max-width: 100%;
+}
+#editBuildingModal .edit-building-footer-actions {
+    margin-left: auto;
+    justify-content: flex-end;
+}
+#editBuildingModal .edit-building-footer .btn {
+    padding: 0.5rem 0.75rem;
+    white-space: nowrap;
+    max-width: 100%;
+    flex: 0 1 auto;
+}
+@media (max-width: 560px) {
+    #editBuildingModal .edit-building-footer-left,
+    #editBuildingModal .edit-building-footer-actions { flex: 1 1 100%; }
+    #editBuildingModal .edit-building-footer .btn { flex: 1 1 auto; padding: 0.5rem 0.5rem; font-size: 0.78rem; white-space: normal; }
+}
