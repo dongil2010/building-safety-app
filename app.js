@@ -689,6 +689,54 @@ document.addEventListener('DOMContentLoaded', () => {
         if (roundRow) roundRow.hidden = !(sourceBldg && opts && opts.defects);
     }
 
+    // --- 3.5b 떠 있는 상태 표시(오프라인 배지·올리는 중 알약·알림) 위치 ---
+    // 2026-10-20 「업로드중 표시가 버튼을 가림」: 위쪽 오른편(헤더 버튼 자리)·아래 도구막대 위에 떠서 가렸다.
+    // 이제 모두 화면 아래 왼쪽(알림은 아래 가운데)에 작게 두고, 아래에 붙은 도구막대·하단 결함창이 보이면
+    // 그 위로 올린다(--bsa-float-bottom). 화면 대부분을 덮는 창(전체 모달·오른쪽 서랍)은 피하지 않는다.
+    const FLOAT_AVOID_SELECTOR = [
+        '.mobile-canvas-dock', '#mobileMapDock', '#ndtStyleSizeToolbar', '.home-fab-add-building',
+        '#defectModal.active .modal-content', '#ndtModal.active .modal-content', '#ndtCrackMonitorModal.active .modal-content',
+        '#ndtDisplacementGroupEditModal.active .modal-content', '#cadPinAdjustBar',
+        '[class*="toolbar"]', '[class*="dock"]', '[class*="zoom-control"]', 'nav', 'footer'
+    ].join(',');
+    let _floatSafeRaf = 0;
+    function updateFloatingIndicatorSafeArea() {
+        _floatSafeRaf = 0;
+        const vh = window.innerHeight || document.documentElement.clientHeight || 0;
+        const vw = window.innerWidth || document.documentElement.clientWidth || 0;
+        if (!vh) return;
+        let lift = 0;
+        let nodes = [];
+        try { nodes = document.querySelectorAll(FLOAT_AVOID_SELECTOR); } catch (_e) { nodes = []; }
+        nodes.forEach((el) => {
+            if (!el || el.closest('.offline-badge, .sync-progress-pill, .toast-container')) return;
+            const r = el.getBoundingClientRect();
+            if (r.width < 8 || r.height < 8) return;
+            if (r.bottom < vh - 48 || r.top >= vh) return;          // 화면 아래에 붙은 것만
+            if (r.height > vh * 0.72) return;                        // 화면 대부분을 덮는 창은 제외
+            if (r.left > vw * 0.55 && r.width < vw * 0.45) return;   // 오른쪽 끝 작은 버튼(FAB)은 왼쪽 표시와 안 겹침
+            const cs = getComputedStyle(el);
+            if (cs.visibility === 'hidden' || cs.display === 'none' || Number(cs.opacity) === 0) return;
+            lift = Math.max(lift, vh - r.top);
+        });
+        const root = document.documentElement;
+        const px = Math.round(lift > 0 ? lift + 6 : 0);
+        if (root.style.getPropertyValue('--bsa-float-bottom') !== px + 'px') root.style.setProperty('--bsa-float-bottom', px + 'px');
+        const badge = document.getElementById('offlineBadge');
+        const badgeShown = !!(badge && badge.style.display !== 'none' && badge.offsetHeight);
+        const stack = badgeShown ? Math.round(badge.offsetHeight + 6) : 0;
+        if (root.style.getPropertyValue('--bsa-float-stack') !== stack + 'px') root.style.setProperty('--bsa-float-stack', stack + 'px');
+    }
+    function scheduleFloatingIndicatorSafeArea() {
+        if (_floatSafeRaf) return;
+        _floatSafeRaf = requestAnimationFrame(updateFloatingIndicatorSafeArea);
+    }
+    window.scheduleFloatingIndicatorSafeArea = scheduleFloatingIndicatorSafeArea;
+    window.addEventListener('resize', scheduleFloatingIndicatorSafeArea);
+    window.addEventListener('orientationchange', scheduleFloatingIndicatorSafeArea);
+    document.addEventListener('click', () => setTimeout(scheduleFloatingIndicatorSafeArea, 60), true);
+    setInterval(scheduleFloatingIndicatorSafeArea, 1200);
+
     // --- 3.6 오프라인 상태 배지 ---
     function ensureOfflineBadge() {
         let badge = document.getElementById('offlineBadge');
