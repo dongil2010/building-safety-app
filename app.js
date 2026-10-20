@@ -27292,6 +27292,15 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
             setTimeout(() => memoActivePointers.delete(e.pointerId), 0);
         }, true));
     }
+    function selectedMarkingClaimsClient(clientX, clientY) {
+        try {
+            if (!elements.planCanvas || typeof selectedDefectIds === 'undefined' || !selectedDefectIds.size) return false;
+            const r = elements.planCanvas.getBoundingClientRect();
+            const sx = clientX - r.left, sy = clientY - r.top;
+            const img = memoScreenToImg(sx, sy);
+            return !!claimSelectedPinPart(img.x, img.y, getCurrentFloorMapPlacedDefects());
+        } catch (_e) { return false; }
+    }
     function bindDrawingMemoOverlayEvents(ov) {
         ov.addEventListener('pointerdown', (e) => {
             const chip = e.target && e.target.closest ? e.target.closest('.map-memo-chip') : null;
@@ -27300,6 +27309,11 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
                 return;
             }
             if (!chip) return;
+            // 2026-10-20 고른 마킹 바로 근처면 메모가 가로채지 않고 마킹을 잡는다(PC 마우스)
+            if (e.pointerType === 'mouse' && e.button === 0 && state.mode !== 'MEMO' && selectedMarkingClaimsClient(e.clientX, e.clientY)) {
+                handleDragStart(e.clientX, e.clientY, false, false, { ctrlKey: e.ctrlKey, metaKey: e.metaKey });
+                return;
+            }
             e.preventDefault();
             e.stopPropagation();
             const st = memoImgToScreen(memoApi().listFor(window.state, currentMemoFloorKey()).find((m) => m.id === chip.dataset.id) || { x: 0, y: 0 });
@@ -35068,6 +35082,9 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
     function findHitPinPart(imgX, imgY) {
         // 2026-10-16 숨긴(부재 종류·필터로 끈) 마킹은 터치·클릭·커서·균열모니터 판정에서 빠진다 — 그리는 목록과 같게
         const defects = getCurrentFloorMapPlacedDefects();
+        // 2026-10-20 고른 마킹이 먼저: 그 화살표 끝·NO.박스·지시선 근처를 누르면 옆 마킹·박스가 아니라 고른 마킹을 잡는다
+        const claimed = claimSelectedPinPart(imgX, imgY, defects);
+        if (claimed) return claimed;
         // 터치/조밀 배치: 화살표(TIP)가 박스 안·근처에 있어도 TIP을 잡을 수 있게
         // 박스 즉시 return 하지 않고, TIP·BOX 후보를 모은 뒤 TIP을 우선한다.
         let bestTip = null; // { defect, dist, tipR }
@@ -35208,6 +35225,37 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
         if (bestTip) return { defect: bestTip.defect, part: 'TIP' };
         if (bestBox) return { defect: bestBox.defect, part: bestBox.part || 'BOX' };
         return null;
+    }
+
+    /** 고른 마킹의 넉넉한 판정 범위(화면 14px, 터치 20px) 안이면 { defect, part } */
+    function claimSelectedPinPart(imgX, imgY, defects) {
+        const SH = window.BSA && window.BSA.selectedHit;
+        if (!SH || typeof selectedDefectIds === 'undefined' || !selectedDefectIds || !selectedDefectIds.size) return null;
+        const viewScale = Math.max(getMapCanvasViewScale() || 1, 0.02);
+        const pad = (activePointerIsTouch ? 20 : 14) / viewScale;
+        const byId = new Map();
+        const cands = [];
+        (defects || []).forEach((d) => {
+            if (!d || !selectedDefectIds.has(d.id)) return;
+            // 영역은 꼭짓점·변 손잡이가 있으니, 영역 둘레 근처면 예전 판정에 맡긴다
+            if (d.shapeType === 'area' && d.areaX1 !== undefined && isPointInAreaMark(d, imgX, imgY, 16)) return;
+            const dSize = getStyleSize(getDefectStyleKey(d.category, d.defectType));
+            const bx = d.x || 100;
+            const by = d.y || 100;
+            const boxDim = getPinBoxDimensions(dSize.pin, formatPinNumberLabel(d.groupNo || d.no || 'NO.01', getDefectStyleKey(d.category, d.defectType)), state.ctx);
+            const hasTip = d.targetX !== undefined && d.targetY !== undefined;
+            const tip = hasTip ? getMapArrowTipHitCenter(d.targetX, d.targetY, bx, by, dSize.arrow) : null;
+            byId.set(d.id, d);
+            cands.push({
+                id: d.id,
+                tip,
+                tipR: getMapTipHitRadius(dSize.arrow, activePointerIsTouch),
+                box: { cx: bx, cy: by, w: boxDim.w, h: boxDim.h, rot: state.rotationAngle || 0 },
+                leader: hasTip ? { x1: bx, y1: by, x2: d.targetX, y2: d.targetY } : null
+            });
+        });
+        const r = SH.claimSelected(imgX, imgY, cands, pad);
+        return r ? { defect: byId.get(r.id), part: r.part } : null;
     }
 
     /** 히트 결과에 맞는 CSS 커서 (이동=4방향, 변=상하/좌우, 꼭짓점=대각선) */

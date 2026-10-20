@@ -29,6 +29,7 @@ function getPinBoxDimensions() { return { w: 60, h: 30 }; }
 function formatPinNumberLabel(v) { return v; }
 function getMapArrowTipHitCenter(tx, ty) { return { x: tx, y: ty }; }
 function isPointInsideMarkBox(px, py, bx, by, w, h) { return Math.abs(px - bx) <= w / 2 && Math.abs(py - by) <= h / 2; }
+function claimSelectedPinPart() { return null; } // 고른 마킹 없음(선택 우선은 test-selected-hit)
 ${fn('findHitPinPart')}
 return { set: (l) => { list = l; }, hit: findHitPinPart };
 `)();
