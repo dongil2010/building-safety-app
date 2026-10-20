@@ -139,6 +139,7 @@
             if (ids && ids.length) { idSet = {}; ids.forEach(function (x) { idSet[String(x)] = 1; }); }
             var confirmed = 0;
             var remaining = 0;
+            var remainingKeys = [];
             Object.keys(data.entries).forEach(function (k) {
                 var e = data.entries[k];
                 if (!e || e.k === 'photo') return;
@@ -151,6 +152,7 @@
                     sessionDoneFk(e.fk || fk, e.k);
                 } else {
                     remaining++;
+                    if (remainingKeys.length < 20) remainingKeys.push(e.k + ':' + e.id + '@' + e.seq);
                 }
             });
             if (data.session && !data.session.finishedAt && data.session.otherFk && data.session.otherFk[fk] === 0) {
@@ -160,7 +162,7 @@
             }
             delete data.failures[fk];
             save();
-            return { confirmed: confirmed, remaining: remaining };
+            return { confirmed: confirmed, remaining: remaining, remainingKeys: remainingKeys };
         }
 
         /** 사진이 서버(Storage)에 올라간 것이 확인됐다 */

@@ -1026,6 +1026,12 @@ document.addEventListener('DOMContentLoaded', () => {
             _syncPillSeenSession = false;
             if (now < _syncPillDoneUntil) mode = 'done';
         }
+        // 2026-10-20 자동 올리기 멈춤 — 눌러서 「지금 다시 올리기」
+        let parkedInfo = null;
+        try { parkedInfo = typeof window.bsaSyncParkedState === 'function' ? window.bsaSyncParkedState() : null; } catch (_e) { parkedInfo = null; }
+        const parkedGate = !!(parkedInfo && parkedInfo.gate && parkedInfo.gate.parked);
+        const parkedPhotos = (parkedInfo && parkedInfo.parkedPhotos) || [];
+        if (parkedGate || parkedPhotos.length) mode = 'fail';
         if (mode === 'run' || mode === 'fail') _syncPillSeenSession = true;
         pill.classList.toggle('show', !!mode);
         pill.classList.toggle('done', mode === 'done');
@@ -1034,7 +1040,11 @@ document.addEventListener('DOMContentLoaded', () => {
             const txt = pill.querySelector('[data-bsp-txt]');
             const bar = pill.querySelector('[data-bsp-bar]');
             const ic = pill.querySelector('[data-bsp-ic]');
-            if (txt) txt.textContent = mode === 'fail' ? `올리기 실패 · 남음 ${sum.pending}건` : sp.pillText(sum);
+            if (txt) {
+                txt.textContent = (parkedGate || parkedPhotos.length)
+                    ? `자동 올리기 멈춤${parkedPhotos.length ? ` · 사진 ${parkedPhotos.length}장` : ''} · 눌러서 다시 시도`
+                    : (mode === 'fail' ? `올리기 실패 · 남음 ${sum.pending}건` : sp.pillText(sum));
+            }
             if (bar) bar.style.width = sum.percent + '%';
             if (ic) ic.className = 'fa-solid ' + (mode === 'done' ? 'fa-circle-check' : (mode === 'fail' ? 'fa-triangle-exclamation' : (sum.syncing ? 'fa-arrows-rotate fa-spin' : 'fa-cloud-arrow-up')));
         }
@@ -1042,9 +1052,21 @@ document.addEventListener('DOMContentLoaded', () => {
         const sheet = document.getElementById('bsaSyncProgressSheet');
         if (sheet && !sheet.hidden) {
             const body = sheet.querySelector('[data-bsp-body]');
-            if (body) body.innerHTML = sp.renderPanelHtml(sum, syncProgressFloorLabel);
+            if (body) {
+                let parkedHtml = '';
+                if (parkedGate || parkedPhotos.length) {
+                    const esc = (x) => String(x == null ? '' : x).replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
+                    const g = parkedInfo.gate || {};
+                    parkedHtml = `<div class="bsp-parked" style="border:1px solid #f59e0b;background:#fffbeb;color:#92400e;border-radius:8px;padding:8px 10px;margin-bottom:8px;font-size:0.85rem;">`
+                        + `<strong><i class="fa-solid fa-circle-pause"></i> 자동 올리기를 멈췄습니다</strong> — 같은 실패를 반복하며 서버 사용량을 쓰지 않도록 멈춘 것이고, 이 기기의 데이터는 지우지 않았습니다.`
+                        + (parkedGate ? `<br>원인: ${esc(g.kind === 'permanent' ? '서버가 거부(권한·없음·잘못된 값 등)' : `${g.fails || 0}번 연속 실패`)} · ${esc(g.reason || '')}` : '')
+                        + (parkedPhotos.length ? `<br>못 올린 사진 ${parkedPhotos.length}장: ${esc(parkedPhotos.slice(0, 5).map((x) => `${x.id} (${x.reason || x.kind})`).join(', '))}${parkedPhotos.length > 5 ? ' …' : ''}` : '')
+                        + `<br>원인을 해결한 뒤 아래 「지금 다시 올리기」를 눌러 주세요.</div>`;
+                }
+                body.innerHTML = parkedHtml + sp.renderPanelHtml(sum, syncProgressFloorLabel);
+            }
             const retry = sheet.querySelector('[data-bsp="retry"]');
-            if (retry) retry.disabled = !sum.pending || !sum.online;
+            if (retry) retry.disabled = !sum.online || !(sum.pending || parkedGate || parkedPhotos.length);
         }
         // 2026-10-19 오프라인 준비 창(건물마다 진행률·다시 받기)
         const opModal = document.getElementById('offlinePrepModal');
@@ -1110,6 +1132,8 @@ document.addEventListener('DOMContentLoaded', () => {
             window.showToast('오프라인입니다. 인터넷이 연결되면 자동으로 올립니다.', 'warning', 3000);
             return;
         }
+        // 2026-10-20 멈춘 올리기·사진을 풀고 다시(기기 데이터는 지운 적 없음)
+        if (typeof window.bsaUnparkSync === 'function') window.bsaUnparkSync();
         syncProgressBegin();
         // 올리기 → 서버 확인 → (오프라인 준비한 동이면) 「비울까요?」 — 기존 흐름 그대로
         if (typeof window.runOfflineReturnSync === 'function') window.runOfflineReturnSync('manual');
@@ -57390,6 +57414,92 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
     // 권한 오류는 규칙을 다시 게시해야 풀린다 — 짧게 재시도해봐야 소용없으니 길게 쉰다.
     // (0으로 두고 완전히 멈추지는 않는다. 관리자가 규칙을 올리면 새로고침 없이 스스로 회복)
     const SYNC_PERMISSION_COOLDOWN_MS = 300000;
+    // 2026-10-20 끝없는 재시도 방지(js/core/sync-retry.js): 연속 실패를 기기에 남기고(새로고침해도 이어서 셈),
+    // 영구 오류(권한·없음·잘못된 값·너무 큼)나 6번 연속 실패면 자동 올리기를 멈춘다(지우지 않음). 「지금 다시 올리기」로만 다시.
+    let _syncGate = null;
+    let _syncGateCid = null;
+    let _photoRetryTracker = null;
+    let _offlineVerifyGate = null;
+    let _offlineVerifyGateCid = null;
+    const _photoLastError = new Map();
+    function syncRetryApi() { return (window.BSA && window.BSA.syncRetry) || null; }
+    function syncCid() { return (window.state && window.state.companyId) || ''; }
+    function syncGate() {
+        const R = syncRetryApi();
+        if (!R) return null;
+        if (!_syncGate || _syncGateCid !== syncCid()) {
+            _syncGateCid = syncCid();
+            _syncGate = R.createGate({
+                storage: (typeof localStorage !== 'undefined') ? localStorage : null,
+                storageKey: `bsa_sync_gate_v1_${_syncGateCid}`,
+                maxAttempts: 6, baseMs: SYNC_RETRY_BASE_MS, capMs: 10 * 60 * 1000, quotaMinMs: SYNC_QUOTA_COOLDOWN_MS
+            });
+        }
+        return _syncGate;
+    }
+    function photoRetryTracker() {
+        const R = syncRetryApi();
+        if (!R) return null;
+        if (!_photoRetryTracker) {
+            _photoRetryTracker = R.createItemTracker({
+                storage: (typeof localStorage !== 'undefined') ? localStorage : null,
+                storageKey: () => `bsa_photo_retry_v1_${syncCid()}`,
+                maxAttempts: 5, baseMs: 0
+            });
+        }
+        return _photoRetryTracker;
+    }
+    function offlineVerifyGate() {
+        const R = syncRetryApi();
+        if (!R) return null;
+        if (!_offlineVerifyGate || _offlineVerifyGateCid !== syncCid()) {
+            _offlineVerifyGateCid = syncCid();
+            _offlineVerifyGate = R.createGate({
+                storage: (typeof localStorage !== 'undefined') ? localStorage : null,
+                storageKey: `bsa_offline_verify_gate_v1_${_offlineVerifyGateCid}`,
+                maxAttempts: 8, baseMs: 60000, capMs: 6 * 60 * 60 * 1000
+            });
+        }
+        return _offlineVerifyGate;
+    }
+    function isSyncParked() {
+        const g = syncGate();
+        return !!(g && g.isParked());
+    }
+    window.bsaSyncParkedState = () => {
+        const g = syncGate();
+        const t = photoRetryTracker();
+        return { gate: g ? g.state() : null, parkedPhotos: t ? t.parked() : [] };
+    };
+    /** 「지금 다시 올리기」 — 멈춘 올리기·멈춘 사진을 풀고 한 번 돌린다(지운 것 없음: 기기 사본 그대로) */
+    window.bsaUnparkSync = function () {
+        const g = syncGate(); if (g) g.unpark();
+        const t = photoRetryTracker(); if (t) t.unparkAll();
+        const v = offlineVerifyGate(); if (v) v.unpark();
+        _photoSyncUploadFailCount.clear();
+        clearSyncErrorRetryTimer();
+        if (typeof scheduleSyncProgressRender === 'function') scheduleSyncProgressRender();
+    };
+    function onSyncParked(r) {
+        console.warn('[동기화] 자동 올리기를 멈춤:', r);
+        if (typeof window.showToast === 'function') {
+            window.showToast(r && r.kind === 'permanent'
+                ? '서버가 거부한 오류라 자동 올리기를 멈췄습니다(기기 데이터는 그대로). 원인을 해결한 뒤 「지금 다시 올리기」를 눌러 주세요.'
+                : '올리기가 계속 실패해 자동 재시도를 멈췄습니다(기기 데이터는 그대로). 「지금 다시 올리기」로 다시 시도할 수 있습니다.', 'warning', 9000);
+        }
+        if (typeof scheduleSyncProgressRender === 'function') scheduleSyncProgressRender();
+    }
+    // 다른 탭이 올리는 중이면 이 탭은 쉬었다가 한 번만 다시(실패로 세지 않음)
+    let _otherTabRetryTimer = null;
+    function scheduleSyncAfterOtherTab() {
+        if (_otherTabRetryTimer) return;
+        const R = syncRetryApi();
+        const delay = R ? R.backoffMs(2, { baseMs: 5000, capMs: 60000 }) : 20000;
+        _otherTabRetryTimer = setTimeout(() => {
+            _otherTabRetryTimer = null;
+            if (_dirtyFloorKeys.size && navigator.onLine !== false && !isSyncParked()) syncStateToFirebase();
+        }, delay);
+    }
     let _photoFetchQuotaPausedUntil = 0;
     let _photoFetchInflight = 0;
     const PHOTO_FETCH_MAX_CONCURRENT = 4;
@@ -57439,6 +57549,13 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
             SYNC_RETRY_BASE_MS * Math.pow(2, _syncRetryFailCount),
             SYNC_RETRY_MAX_MS
         );
+        const gate = syncGate();
+        if (gate) {
+            // 2026-10-20 영구 오류·연속 실패 상한 → 멈춤(자동 재시도 없음). 아니면 지수 백오프+지터(상한 10분)
+            const r = gate.fail(err, (err && err.message) || '');
+            if (r.parked) { _syncRetryFailCount = Math.min(_syncRetryFailCount + 1, 8); onSyncParked(r); return; }
+            delay = r.delayMs;
+        }
         if (isQuota) {
             delay = Math.max(delay, SYNC_QUOTA_COOLDOWN_MS);
             pauseFirestoreWrites(delay);
@@ -57450,8 +57567,11 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
         _syncRetryTimer = setTimeout(() => {
             _syncRetryTimer = null;
             if (!db || !window.state.companyId || !navigator.onLine) return;
+            if (isSyncParked()) return;
             if (Date.now() < _photoFetchQuotaPausedUntil) {
-                scheduleSyncRetryAfterError(err);
+                // 읽기 쉬는 중 — 실패로 세지 않고 남은 시간만큼 다시 기다린다
+                _syncRetryTimer = setTimeout(() => { _syncRetryTimer = null; if (!isSyncParked()) syncStateToFirebase(); },
+                    Math.max(1000, _photoFetchQuotaPausedUntil - Date.now()));
                 return;
             }
             syncStateToFirebase();
@@ -59077,6 +59197,7 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
                 return true;
             } catch (e) {
                 console.warn('사진 클라우드 업로드 실패:', photoId, e);
+                if (typeof _photoLastError !== 'undefined') _photoLastError.set(photoId, e);
                 return false;
             }
         })();
@@ -60860,6 +60981,8 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
         return { rev: guard.revOf(data), busy: guard.classifyFloorSnap(true, data) === 'busy' };
     }
 
+    /** 층마다 「일지에 남은 변경 때문에 다시 올림」 횟수(1분 창) — 자동 기록이 만드는 끝없는 다시 올리기 차단 */
+    const _journalRedirty = new Map();
     async function writeFloorSyncBundle(bldg, floorCode) {
         if (!bldg || !bldg.id || !floorCode) return;
         const floorRef = getFloorScopeRef(bldg, floorCode);
@@ -60922,7 +61045,19 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
                     .concat(((pack.ndt && pack.ndt.items) || []).map((x) => x && x.id).filter(Boolean))
                     .concat((pack.ndt && pack.ndt.deletedIds) || []);
                 const res = j.confirmFloor(floorKey, journalSeq, ids);
-                if (res && res.remaining) markFloorKeyDirty(floorKey);
+                // 2026-10-20 끝없는 올리기 원인(진행률 표시 50dd772에서 생김): 묶음을 만든 뒤 일지에 새 변경이 남으면 층을 다시
+                // 「올릴 것」으로 표시하는데, 동기화·적용 중에 자동으로 기록을 남기는 코드(이전 방식 옮김·자동 위치 등)가 있으면
+                // 매 회차 새 기록 → 다시 표시 → 곧바로 전체 동기화(서버 읽기·쓰기)를 끝없이 반복했다.
+                // 같은 층을 일지 때문에만 다시 올리는 것은 1분에 2번까지 — 넘으면 다시 표시하지 않고(일지는 그대로 남음 →
+                // 다음 사용자 수정·「지금 다시 올리기」 때 함께 올라감) 무엇이 남았는지 기록만 한다.
+                if (res && res.remaining) {
+                    const now = Date.now();
+                    const prev = _journalRedirty.get(floorKey);
+                    const n = (prev && now - prev.at < 60000) ? prev.n + 1 : 1;
+                    _journalRedirty.set(floorKey, { n, at: prev && now - prev.at < 60000 ? prev.at : now });
+                    if (n <= 2) markFloorKeyDirty(floorKey);
+                    else if (n === 3) console.warn('[동기화] 올린 뒤에도 일지에 새 변경이 계속 생겨 다시 올리기를 멈춤(1분):', floorKey, res.remainingKeys);
+                }
             }
         } catch (_e) { /* 진행률 실패는 동기화에 영향 없음 */ }
     }
@@ -62188,6 +62323,12 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
         if (!db || !window.state.companyId || navigator.onLine === false) return;
         const prep = window.BSA && window.BSA.offlinePrep;
         if (!prep) return;
+        // 2026-10-20 자동(시작·온라인·포커스)은 멈춘 올리기나 백오프 중이면 돌리지 않는다 — 매번 전 층을 서버에서 다시 읽던 것 방지
+        const manual = reason === 'manual';
+        if (!manual) {
+            const g = syncGate();
+            if (g && !g.autoAllowed()) return;
+        }
         _offlineReturnRunning = true;
         try {
             let offlineWorked = false;
@@ -62204,7 +62345,10 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
                 if (saves.length) await Promise.all(saves.map((p) => Promise.resolve(p).catch(() => {})));
                 if (!_dirtyFloorKeys.size) break;
                 if (_syncInFlight || isRemoteSyncing) { await new Promise((r) => setTimeout(r, 800)); continue; }
+                const before = _dirtyFloorKeys.size;
                 try { await syncStateToFirebase(); } catch (e) { console.warn('[오프라인 복귀] 올리기 실패', e); }
+                // 실패해서 백오프·멈춤이면 여기서 15번 몰아 돌리지 않는다(백오프 타이머가 다시 한다)
+                if (_syncRetryTimer || isSyncParked() || _dirtyFloorKeys.size >= before) break;
                 await new Promise((r) => setTimeout(r, 400));
             }
             if (hadPending && !_dirtyFloorKeys.size) window.showToast('오프라인에서 작업한 내용을 서버에 올렸습니다.', 'success', 3500);
@@ -62217,11 +62361,19 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
             // ② 서버에서 다시 읽어 확인(오프라인 준비한 동만)
             const bldgs = statuses.map((r) => (window.state.buildings || []).find((b) => b && b.id === r.buildingId)).filter(Boolean);
             const failed = [];
+            // 2026-10-20 서버 확인(층마다 서버 읽기)은 실패가 이어지면 백오프·멈춤 — 자동으로 매번 전 층을 다시 읽지 않게
+            const vg = offlineVerifyGate();
+            if (!manual && vg && !vg.autoAllowed()) return;
+            if (_dirtyFloorKeys.size) {
+                if (vg) vg.fail({ code: 'pending', message: '아직 안 올라간 층' });
+                return;
+            }
             for (const b of bldgs) {
                 const probs = await verifyBuildingOnServer(b);
                 if (probs.length) failed.push(`${b.name || b.id}: ${probs.join(', ')}`);
             }
             if (failed.length) {
+                if (vg) vg.fail({ code: 'verify', message: failed.join('; ') });
                 window.showToast('서버에 아직 다 올라가지 않아 오프라인 데이터를 그대로 둡니다.', 'warning', 6000);
                 await window.appAlert(`서버 확인 결과 아직 안 올라간 것이 있습니다. 오프라인 데이터는 지우지 않았습니다.\n\n${failed.join('\n')}\n\n인터넷이 다시 연결되거나 앱을 다시 열면 자동으로 다시 확인합니다.`, { title: '오프라인 데이터' });
                 return;
@@ -62229,6 +62381,7 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
             // ③ 2026-10-19 다 올라간 것을 확인했다 → 서버의 최신(다른 사람이 고친 층 포함)으로 모든 층·도면·새 사진을 다시 받아
             //    오프라인 준비 상태로 둔다(읽기만). 진행: 오프라인 준비 창 「다시 받는 중 n/m층」 → 「오프라인 준비 완료 (시각)」.
             //    (예전에는 여기서 「오프라인 데이터 비울까요?」를 물었다 — 비우기는 오프라인 준비 창의 「비우기」 버튼으로 한다)
+            if (vg) vg.ok();
             try { localStorage.removeItem('bsa_offline_worked_v1'); } catch (_e) { /* ignore */ }
             window.showToast('모두 서버에 올라간 것을 확인했습니다. 최신 데이터를 다시 받아 오프라인 준비를 새로 합니다…', 'info', 4000);
             const rr = await refreshOfflineBuildingsAfterReturn(bldgs);
@@ -64076,15 +64229,32 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
             seen.add(job.photoId);
             unique.push(job);
         });
+        const tracker = (typeof photoRetryTracker === 'function') ? photoRetryTracker() : null;
         await runPhotoJobsInBatches(unique, async (job) => {
+            // 2026-10-20 멈춘 사진(영구 오류·5번 연속 실패)은 자동으로 다시 올리지 않는다 — 기기 사본은 그대로, 「지금 다시 올리기」로만
+            if (tracker && !tracker.shouldTry(job.photoId)) return;
             let ok = false;
+            let err = null;
+            const lastErrMap = (typeof _photoLastError !== 'undefined') ? _photoLastError : null;
+            if (lastErrMap) lastErrMap.delete(job.photoId);
             try {
                 ok = (await ensurePhotoPersistedToStorage(job.photoId, job.inlineUrl)) !== false;
             } catch (e) {
+                err = e;
                 console.warn('[사진] 동기화 업로드 실패:', job.photoId, e);
             }
             if (ok) {
                 _photoSyncUploadFailCount.delete(job.photoId);
+                if (tracker) tracker.ok(job.photoId);
+                return;
+            }
+            if (tracker) {
+                const r = tracker.fail(job.photoId, err || (lastErrMap && lastErrMap.get(job.photoId)) || { code: 'upload-failed', message: '사진 업로드 실패' });
+                if (r.parked) {
+                    console.warn(`[사진] ${job.photoId} 자동 올리기 멈춤(${r.kind}, ${r.n}번) — 기기 사본은 그대로 둡니다.`);
+                    return;
+                }
+                if (job.floorKey) failedFloors.add(job.floorKey);
                 return;
             }
             // 같은 사진이 계속 실패하면(권한·손상 등) 그 층을 끝없이 다시 쓰지 않게 5번에서 멈춘다
@@ -65501,8 +65671,23 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
             _syncPending = true;
             return;
         }
+        // 2026-10-20 멈춘 올리기는 자동으로 다시 돌리지 않는다(「지금 다시 올리기」가 풀어 준다). 변경은 기기에 남는다.
+        if (isSyncParked()) {
+            if (typeof scheduleSyncProgressRender === 'function') scheduleSyncProgressRender();
+            return;
+        }
         if (typeof flushOverviewCaptionsFromDom === 'function') flushOverviewCaptionsFromDom();
         _syncInFlight = true;
+        // 2026-10-20 탭 여러 개가 같은 기기에서 동시에 올리지 않게(탭 사이 잠금) — 다른 탭이 올리는 중이면 잠시 뒤 한 번만
+        const _tabLockRelease = syncRetryApi()
+            ? await syncRetryApi().tryCrossTabLock(`bsa-sync-${window.state.companyId}`)
+            : () => {};
+        if (!_tabLockRelease) {
+            _syncInFlight = false;
+            scheduleSyncAfterOtherTab();
+            return;
+        }
+        let cycleFailReason = '';
         if (typeof syncProgressBegin === 'function') syncProgressBegin();
         ensureSyncMetaState();
         let leaseInfo = null;
@@ -65589,6 +65774,8 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
                 } catch (e) {
                     console.warn('[동기화] 층을 서버에서 읽지 못해 이번에는 쓰지 않습니다(다음에 다시):', floorKey, e && e.message);
                     floorsSkipWrite.add(floorKey);
+                    if (!cycleFailReason) cycleFailReason = `층 읽기 실패(${floorKey}): ${(e && e.message) || e}`;
+                    if (syncRetryApi() && syncRetryApi().classify(e) === 'permanent') throw e;
                     if (typeof syncProgressFail === 'function') syncProgressFail(floorKey, '서버에서 층을 읽지 못함 — 다음 동기화에서 다시');
                     continue;
                 }
@@ -65664,6 +65851,7 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
                     3
                 );
                 if (!conf.ok) {
+                    if (!cycleFailReason) cycleFailReason = `층 버전 확인 실패(${floorKey}): ${conf.reason || ''}`;
                     console.warn('[동기화] 서버 층이 계속 바뀌거나 확인되지 않아 이번에는 쓰지 않습니다(다음에 다시):', floorKey, conf.reason);
                     if (typeof syncProgressFail === 'function') syncProgressFail(floorKey, '다른 기기가 같은 층을 올리는 중 — 합친 뒤 다시');
                     continue;
@@ -65681,6 +65869,7 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
             }
             // 층 쓰기가 "올릴 것 있음"을 지웠다 — 사진을 못 올린 층은 다시 남겨 다음 동기화가 재시도하게 한다
             if (photoFailedFloors && photoFailedFloors.size) {
+                if (!cycleFailReason) cycleFailReason = `사진 업로드 실패(${photoFailedFloors.size}개 층)`;
                 photoFailedFloors.forEach((k) => markFloorKeyDirty(k));
                 if (typeof syncProgressFail === 'function') photoFailedFloors.forEach((k) => syncProgressFail(k, '사진 업로드 실패 — 다시 시도'));
                 console.warn('[사진] 업로드 실패가 있어 다음 동기화에서 다시 올립니다:', Array.from(photoFailedFloors));
@@ -65747,7 +65936,12 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
             await docRef.set(dataToSync, { merge: true });
             if (csPerKey) await writeCompanySettingsPerKey(docRef, rootGuardData);
             clearSyncErrorRetryTimer();
-            _syncRetryFailCount = 0;
+            // 2026-10-20 일부가 실패한 회차는 성공으로 치지 않는다 — 예전엔 여기서 실패 수를 0으로 돌리고
+            // 남은 층 때문에 곧바로(~3.5초) 전체 동기화를 다시 돌려, 같은 실패를 끝없이 반복하며 읽기·쓰기를 태웠다.
+            if (!cycleFailReason) {
+                _syncRetryFailCount = 0;
+                const g = syncGate(); if (g) g.ok();
+            }
             let clearedPendingCloudSync = false;
             (window.state.buildings || []).forEach((b) => {
                 if (b && b._pendingCloudSync) {
@@ -65814,7 +66008,7 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
                 if (typeof window.showToast === 'function') {
                     window.showToast(
                         isPermErr
-                            ? '서버 접근 권한이 없어 동기화를 멈췄습니다. 관리자에게 Firebase 보안 규칙 게시를 요청해 주세요. (5분 후 자동 재시도)'
+                            ? '서버 접근 권한이 없어 동기화를 멈췄습니다(기기 데이터는 그대로). 관리자에게 Firebase 보안 규칙 게시를 요청한 뒤 「지금 다시 올리기」를 눌러 주세요.'
                             : isFirestoreQuotaError(e)
                                 ? 'Firebase 읽기/쓰기 한도(429)에 걸렸습니다. 2분 후 자동 재시도합니다.'
                                 : '서버 동기화에 실패했습니다. 잠시 후 자동으로 재시도합니다.',
@@ -65835,6 +66029,12 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
             }
             setTimeout(() => { isRemoteSyncing = false; }, 400);
             _syncInFlight = false;
+            try { _tabLockRelease(); } catch (_e) { /* ignore */ }
+            // 일부 실패: 곧바로 다시 돌리지 않고 백오프(연속이면 멈춤)
+            if (cycleFailReason && !_syncRetryTimer && !isSyncParked()) {
+                _syncPending = false;
+                scheduleSyncRetryAfterError({ code: 'partial-failure', message: cycleFailReason });
+            }
             if (typeof scheduleSyncProgressRender === 'function') scheduleSyncProgressRender();
             // 온라인 복귀 flush 시도가 끝나면 원격 적용 재개 (실패해도 무한 차단하지 않음.
             // dirty 층은 applyFloorBundleToState 가드가 계속 보호)
@@ -65843,15 +66043,18 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
             }
             if (_dirtyFloorKeys.size === 0) {
                 clearOfflinePendingFlush();
-            } else if (!_syncPending && !_syncRetryTimer && navigator.onLine !== false) {
+            } else if (!_syncPending && !_syncRetryTimer && navigator.onLine !== false && !isSyncParked()) {
                 // 배치에 못 들어간 overflow dirty를 이어서 flush
                 _syncPending = true;
             }
             persistDirtyFloorKeys();
+            if (_syncPending && (_syncRetryTimer || isSyncParked())) _syncPending = false;
             if (_syncPending && !_syncRetryTimer) {
                 _syncPending = false;
                 if (typeof _fsWritePausedUntil === 'number' && Date.now() < _fsWritePausedUntil) {
-                    scheduleSyncRetryAfterError({ code: 'resource-exhausted', message: 'Write stream cooling down' });
+                    // 쓰기 쉬는 중 — 실패로 세지 않고 남은 시간 뒤 한 번
+                    _syncRetryTimer = setTimeout(() => { _syncRetryTimer = null; if (!isSyncParked()) syncStateToFirebase(); },
+                        Math.max(1000, _fsWritePausedUntil - Date.now()));
                 } else {
                     // isRemoteSyncing이 400ms 뒤에 풀리므로, 즉시 재호출하지 않고 디바운스로 이어간다.
                     setTimeout(() => {

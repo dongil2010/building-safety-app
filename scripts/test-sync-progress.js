@@ -125,7 +125,7 @@ const writeAt = w.indexOf('await writeChunkedPdfToDocRef(');
 const confAt = w.indexOf('j.confirmFloor(floorKey, journalSeq, ids)');
 assert.ok(markAt > 0 && markAt < w.indexOf('sanitizeDefectsForFirestore('), '묶음 만들기 전에 순번');
 assert.ok(writeAt > 0 && confAt > writeAt, '서버 쓰기가 끝난 뒤에만 올라감');
-assert.ok(/if \(res && res\.remaining\) markFloorKeyDirty\(floorKey\)/.test(w), '업로드 중 고친 것은 다시 올림');
+assert.ok(/if \(res && res\.remaining\) \{/.test(w) && /if \(n <= 2\) markFloorKeyDirty\(floorKey\)/.test(w), '업로드 중 고친 것은 다시 올림(1분에 2번까지 — 끝없는 다시 올리기 방지)');
 const sync = fnBody('async function syncStateToFirebase(');
 assert.ok(sync.includes("syncProgressFail(floorKey, '서버에서 층을 읽지 못함"), '읽기 실패 표시');
 assert.ok(sync.includes("syncProgressFail(floorKey, '다른 기기가 같은 층을"), 'rev 충돌 표시');
