@@ -17631,3 +17631,24 @@ input.ndt-mo-locked { background: var(--bg-secondary, #f2f2f2); color: var(--tex
 .psm-manual-btns [hidden]{display:none!important}
 .psm-manual-note{margin:0;font-size:13px;color:#78350f}
 .psm-diag[hidden]{display:none!important}
+
+/* 2026-10-20 빈 마킹 번호 알림 — 아래 왼쪽 작은 알약(오프라인·올리는 중 표시 위), 아래 도구막대 위로 */
+.defect-gap-notice {
+    display: none; align-items: center; gap: 0.4rem;
+    position: fixed; z-index: 99997;
+    left: calc(0.5rem + env(safe-area-inset-left, 0px));
+    bottom: calc(0.5rem + var(--bsa-float-bottom, 0px) + var(--bsa-float-stack2, 0px) + env(safe-area-inset-bottom, 0px));
+    max-width: calc(100vw - 1rem);
+    padding: 0.22rem 0.3rem 0.22rem 0.65rem; border-radius: 999px;
+    border: 1px solid rgba(217, 119, 6, 0.45); background: #fffbeb; color: #92400e;
+    font-size: 0.76rem; font-weight: 700; line-height: 1.2; white-space: nowrap;
+    box-shadow: 0 4px 14px rgba(20, 20, 20, 0.16);
+}
+.defect-gap-notice.show { display: inline-flex; }
+.defect-gap-notice [data-gap-text] { overflow: hidden; text-overflow: ellipsis; }
+.defect-gap-notice button {
+    font: inherit; font-size: 0.72rem; font-weight: 800; cursor: pointer;
+    border: 1px solid rgba(217, 119, 6, 0.5); background: #ffffff; color: #92400e;
+    border-radius: 999px; padding: 0.16rem 0.55rem;
+}
+.defect-gap-notice [data-gap-close] { border: none; background: transparent; font-size: 0.95rem; padding: 0 0.35rem; }

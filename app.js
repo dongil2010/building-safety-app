@@ -709,7 +709,7 @@ document.addEventListener('DOMContentLoaded', () => {
         let nodes = [];
         try { nodes = document.querySelectorAll(FLOAT_AVOID_SELECTOR); } catch (_e) { nodes = []; }
         nodes.forEach((el) => {
-            if (!el || el.closest('.offline-badge, .sync-progress-pill, .toast-container')) return;
+            if (!el || el.closest('.offline-badge, .sync-progress-pill, .toast-container, .defect-gap-notice')) return;
             const r = el.getBoundingClientRect();
             if (r.width < 8 || r.height < 8) return;
             if (r.bottom < vh - 48 || r.top >= vh) return;          // 화면 아래에 붙은 것만
@@ -726,6 +726,9 @@ document.addEventListener('DOMContentLoaded', () => {
         const badgeShown = !!(badge && badge.style.display !== 'none' && badge.offsetHeight);
         const stack = badgeShown ? Math.round(badge.offsetHeight + 6) : 0;
         if (root.style.getPropertyValue('--bsa-float-stack') !== stack + 'px') root.style.setProperty('--bsa-float-stack', stack + 'px');
+        const pill = document.querySelector('.sync-progress-pill.show');
+        const stack2 = stack + (pill && pill.offsetHeight ? Math.round(pill.offsetHeight + 6) : 0);
+        if (root.style.getPropertyValue('--bsa-float-stack2') !== stack2 + 'px') root.style.setProperty('--bsa-float-stack2', stack2 + 'px');
     }
     function scheduleFloatingIndicatorSafeArea() {
         if (_floatSafeRaf) return;
@@ -736,6 +739,64 @@ document.addEventListener('DOMContentLoaded', () => {
     window.addEventListener('orientationchange', scheduleFloatingIndicatorSafeArea);
     document.addEventListener('click', () => setTimeout(scheduleFloatingIndicatorSafeArea, 60), true);
     setInterval(scheduleFloatingIndicatorSafeArea, 1200);
+
+    // --- 3.5c 빈 마킹 번호 알림 (2026-10-20) ---
+    // 온라인이고 결함위치도 탭이 보일 때, 이 층(외부는 외부 전체) 마킹 번호에 빈 칸이 있으면 아래 왼쪽에 작게 알린다.
+    // 같은 층·같은 빈 번호 조합은 한 번만(닫으면 번호가 바뀔 때까지 다시 안 뜸).
+    const _gapNoticeDismissed = new Set();
+    let _gapNoticeTimer = 0;
+    function ensureGapNotice() {
+        let el = document.getElementById('defectGapNotice');
+        if (el) return el;
+        el = document.createElement('div');
+        el.id = 'defectGapNotice';
+        el.className = 'defect-gap-notice';
+        el.setAttribute('role', 'status');
+        el.innerHTML = '<i class="fa-solid fa-hashtag"></i> <span data-gap-text></span>'
+            + '<button type="button" data-gap-run>빈칸 당기기</button>'
+            + '<button type="button" data-gap-close aria-label="닫기" title="닫기">×</button>';
+        el.querySelector('[data-gap-run]').addEventListener('click', () => {
+            el.classList.remove('show');
+            if (el.dataset.sig) _gapNoticeDismissed.add(el.dataset.sig);
+            const b = document.getElementById('btnCompactMarkingGaps');
+            if (b) b.click();
+        });
+        el.querySelector('[data-gap-close]').addEventListener('click', () => {
+            el.classList.remove('show');
+            if (el.dataset.sig) _gapNoticeDismissed.add(el.dataset.sig);
+        });
+        document.body.appendChild(el);
+        return el;
+    }
+    function updateDefectNumberGapNotice() {
+        _gapNoticeTimer = 0;
+        const el = document.getElementById('defectGapNotice');
+        const hide = () => { if (el) el.classList.remove('show'); };
+        if (!navigator.onLine || !state.currentBuildingId || !state.currentFloor) return hide();
+        const mapTab = document.getElementById('tab-map');
+        if (!mapTab || mapTab.offsetParent === null) return hide();
+        if (document.body.classList.contains('defect-modal-open')) return hide();
+        const key = `${state.currentBuildingId}_${state.currentFloor}`;
+        let gaps = [];
+        try { gaps = findDefectMarkingNumberGaps(getFloorDefectsForNumbering(key)); } catch (_e) { gaps = []; }
+        if (!gaps.length) return hide();
+        const sig = key + '|' + gaps.join(',');
+        if (_gapNoticeDismissed.has(sig)) return hide();
+        const box = ensureGapNotice();
+        const shown = gaps.slice(0, 8).join(', ') + (gaps.length > 8 ? ` 외 ${gaps.length - 8}개` : '');
+        box.querySelector('[data-gap-text]').textContent = `빈 번호 있음: ${shown}`;
+        box.dataset.sig = sig;
+        box.classList.add('show');
+        if (typeof scheduleFloatingIndicatorSafeArea === 'function') scheduleFloatingIndicatorSafeArea();
+    }
+    function scheduleDefectNumberGapNotice() {
+        if (_gapNoticeTimer) return;
+        _gapNoticeTimer = setTimeout(updateDefectNumberGapNotice, 400);
+    }
+    window.scheduleDefectNumberGapNotice = scheduleDefectNumberGapNotice;
+    setInterval(scheduleDefectNumberGapNotice, 2500);
+    window.addEventListener('online', scheduleDefectNumberGapNotice);
+    window.addEventListener('offline', scheduleDefectNumberGapNotice);
 
     // --- 3.6 오프라인 상태 배지 ---
     function ensureOfflineBadge() {
@@ -4242,8 +4303,75 @@ document.addEventListener('DOMContentLoaded', () => {
      * CAD 가져오기 번호(isCadImported)도 포함. 그룹은 메인 1개로 취급.
      * @returns {{ moved: number, before: string, after: string }|null}
      */
+    /**
+     * 2026-10-20 「빈칸 당기기 후 도면 번호가 옛 번호」: 번호(no)는 updatedAt으로, 박스 번호(groupNo)는
+     * 소속 시각(groupUpdatedAt)으로 병합되는데 예전엔 groupUpdatedAt을 안 올려 동기화 때 서버의 옛 groupNo가 이겼다.
+     * 도면 라벨은 groupNo를, 표는 no를 써서 표만 새 번호·도면은 옛 번호가 됐다.
+     */
+    function stampDefectNumberChanged(d, groupNoChanged) {
+        if (!d) return;
+        const stamp = (typeof bsaStampAfter === 'function') ? bsaStampAfter : ((p) => Math.max(Date.now(), (Number(p) || 0) + 1));
+        d.updatedAt = stamp(Math.max(Number(d.updatedAt) || 0, Number(d.fieldAtThrough) || 0));
+        d.contentUpdatedAt = Math.max(d.updatedAt, (Number(d.contentUpdatedAt) || 0) + 1);
+        if (groupNoChanged || d.groupId || d.groupNo) d.groupUpdatedAt = stamp(d.groupUpdatedAt);
+        d._numberChanged = true;
+    }
+
+    /** 묶음의 박스 번호(groupNo)가 마킹 번호(no)와 어긋난 것(예전 동기화로 옛 groupNo가 남음)을 no 기준으로 맞춘다 */
+    function healStaleDefectGroupNos(defects) {
+        let healed = 0;
+        const byGroup = new Map();
+        (defects || []).forEach((d) => {
+            if (!d) return;
+            if (!d.groupId) {
+                if (d.groupNo && d.no && !d.surveyExtra && stripDefectNoSuffix(d.no) !== d.groupNo) {
+                    d.groupNo = stripDefectNoSuffix(d.no);
+                    stampDefectNumberChanged(d, true);
+                    healed++;
+                }
+                return;
+            }
+            if (!byGroup.has(d.groupId)) byGroup.set(d.groupId, []);
+            byGroup.get(d.groupId).push(d);
+        });
+        byGroup.forEach((members) => {
+            const marking = members.filter((m) => !m.surveyExtra && m.no);
+            if (!marking.length) return;
+            const bases = new Set(marking.map((m) => stripDefectNoSuffix(m.no)));
+            if (bases.size !== 1) return;
+            const base = Array.from(bases)[0];
+            if (!base || members.every((m) => m.groupNo === base)) return;
+            members.forEach((m) => {
+                if (m.groupNo !== base) { m.groupNo = base; stampDefectNumberChanged(m, true); healed++; }
+            });
+        });
+        return healed;
+    }
+    window.healStaleDefectGroupNos = healStaleDefectGroupNos;
+
+    /** 빈 마킹 번호(1..최대 중 없는 메인 번호) */
+    function findDefectMarkingNumberGaps(defects) {
+        const mains = new Set();
+        const seenGroup = new Set();
+        (defects || []).forEach((d) => {
+            if (!d || d.surveyExtra) return;
+            if (d.groupId) { if (seenGroup.has(d.groupId)) return; seenGroup.add(d.groupId); }
+            const raw = stripDefectNoSuffix(d.groupNo || d.no || '');
+            const m = String(raw).replace(/^NO\.?\s*/i, '').trim().match(/(\d+)/);
+            const n = m ? parseInt(m[1], 10) : 0;
+            if (n > 0) mains.add(n);
+        });
+        if (!mains.size) return [];
+        const max = Math.max.apply(null, Array.from(mains));
+        const gaps = [];
+        for (let n = 1; n <= max && gaps.length < 200; n++) if (!mains.has(n)) gaps.push(n);
+        return gaps;
+    }
+    window.findDefectMarkingNumberGaps = findDefectMarkingNumberGaps;
+
     function compactDefectMarkingNumberGaps(defects) {
         if (!Array.isArray(defects) || !defects.length) return null;
+        const healedGroupNos = healStaleDefectGroupNos(defects);
 
         const getMain = (d) => {
             const raw = stripDefectNoSuffix(d.groupNo || d.no || '');
@@ -4301,38 +4429,34 @@ document.addEventListener('DOMContentLoaded', () => {
             });
             const victim = candidates[0];
             const baseStr = formatDefectNoSeq(gap);
-            const now = Date.now();
 
             if (victim.kind === 'group') {
-                victim.members.forEach((m) => { m.groupNo = baseStr; });
+                victim.members.forEach((m) => {
+                    const prevG = String(m.groupNo || '');
+                    m.groupNo = baseStr;
+                    if (prevG !== baseStr) stampDefectNumberChanged(m, true);
+                });
                 applyDefectGroupNumbering(victim.members, baseStr, (m, nextNo) => {
                     const prev = String(m.no || '');
                     m.no = nextNo;
                     if (m.isCadImported) m.cadNo = nextNo;
-                    if (prev !== String(nextNo || '')) {
-                        m.updatedAt = now;
-                        m.contentUpdatedAt = now;
-                        if (m.fieldAt) m.fieldAtThrough = now;
-                    }
+                    if (prev !== String(nextNo || '')) stampDefectNumberChanged(m, false);
                 });
             } else if (victim.defect) {
                 const prev = String(victim.defect.no || '');
+                const prevG = String(victim.defect.groupNo || '');
                 victim.defect.no = baseStr;
                 if (victim.defect.groupNo) victim.defect.groupNo = baseStr;
                 if (victim.defect.isCadImported) victim.defect.cadNo = baseStr;
-                if (prev !== baseStr) {
-                    victim.defect.updatedAt = now;
-                    victim.defect.contentUpdatedAt = now;
-                    if (victim.defect.fieldAt) victim.defect.fieldAtThrough = now;
-                }
+                if (prev !== baseStr || (prevG && prevG !== baseStr)) stampDefectNumberChanged(victim.defect, !!(prevG && prevG !== baseStr));
             }
             moved += 1;
         }
 
         units = buildUnits();
         const afterStr = units.map((u) => u.main).sort((a, b) => a - b).join(', ');
-        if (!moved) return { moved: 0, before: beforeStr, after: afterStr };
-        return { moved, before: beforeStr, after: afterStr };
+        if (!moved) return { moved: 0, before: beforeStr, after: afterStr, healed: healedGroupNos };
+        return { moved, before: beforeStr, after: afterStr, healed: healedGroupNos };
     }
 
     window.compactDefectMarkingNumberGaps = compactDefectMarkingNumberGaps;
@@ -10471,6 +10595,7 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
 
     function paintMapCanvas(_opts) {
         if (!state.ctx || !state.canvas) return;
+            ensureMapStyleMatchesCurrentFloor();
         const ctx = state.ctx;
         const dpr = state.canvasDpr || 1;
         const cw = state.canvasCssW || Math.round(state.canvas.width / dpr);
@@ -23234,12 +23359,34 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
     }
 
     // 결함이 바뀌기 직전에 호출해서 현재 상태를 되돌리기 스택에 저장
-    function pushDefectHistory() {
+    /** extraKeys: 한 번에 같이 바뀌는 다른 층(외부 입면 번호 공간 등) — 되돌리기 한 번에 모두 돌린다 */
+    function snapshotDefectHistoryEntry(key, extraKeys) {
+        const others = (extraKeys || []).filter((k) => k && k !== key);
+        if (!others.length) return JSON.stringify(state.defects[key] || []);
+        const multi = {};
+        [key].concat(others).forEach((k) => { multi[k] = state.defects[k] || []; });
+        return JSON.stringify({ __multi: multi });
+    }
+
+    function applyDefectHistoryEntry(key, entry) {
+        const parsed = JSON.parse(entry);
+        const multi = (parsed && !Array.isArray(parsed) && parsed.__multi) ? parsed.__multi : { [key]: parsed };
+        const keys = Object.keys(multi);
+        const back = snapshotDefectHistoryEntry(key, keys);
+        keys.forEach((k) => {
+            const before = state.defects[k] || [];
+            state.defects[k] = Array.isArray(multi[k]) ? multi[k] : [];
+            reconcileDefectHistoryJump(k, before, state.defects[k]);
+        });
+        return back;
+    }
+
+    function pushDefectHistory(extraKeys) {
         if (!state.currentBuildingId) return;
         const key = getDefectHistoryKey();
         if (!defectHistory[key]) defectHistory[key] = { undo: [], redo: [] };
         const h = defectHistory[key];
-        h.undo.push(JSON.stringify(state.defects[key] || []));
+        h.undo.push(snapshotDefectHistoryEntry(key, Array.isArray(extraKeys) ? extraKeys : null));
         if (h.undo.length > 30) h.undo.shift();
         h.redo = [];
         updateUndoRedoButtons();
@@ -23336,7 +23483,14 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
                     stampDefectPhotosChangedIfSafe(d);
                 }
                 if (br.group) d.groupUpdatedAt = bsaStampAfter(Math.max(Number(d.groupUpdatedAt) || 0, Number(prev.groupUpdatedAt) || 0));
-                if (!br.content && (br.position || br.photos || br.group)) d.updatedAt = bsaStampAfter(d.updatedAt);
+                // 2026-10-20 번호(no·cadNo)만 바뀐 되돌리기(빈칸 당기기 등)도 시각을 올린다 — 안 그러면 서버의 당겨진 번호가 다시 이긴다
+                const numChanged = String(prev.no || '') !== String(d.no || '') || String(prev.cadNo || '') !== String(d.cadNo || '');
+                if (numChanged) {
+                    d.updatedAt = bsaStampAfter(Math.max(Number(d.updatedAt) || 0, Number(prev.updatedAt) || 0));
+                    d.contentUpdatedAt = Math.max(d.updatedAt, (Number(d.contentUpdatedAt) || 0) + 1, (Number(prev.contentUpdatedAt) || 0) + 1);
+                    if (d.groupId || d.groupNo) d.groupUpdatedAt = bsaStampAfter(Math.max(Number(d.groupUpdatedAt) || 0, Number(prev.groupUpdatedAt) || 0));
+                }
+                if (!br.content && !numChanged && (br.position || br.photos || br.group)) d.updatedAt = bsaStampAfter(d.updatedAt);
             }
         });
         beforeById.forEach((d, id) => {
@@ -23356,13 +23510,9 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
         const h = defectHistory[key];
         if (!h || h.undo.length === 0) return;
         const prevSnapshot = h.undo.pop();
-        const before = state.defects[key] || [];
-        h.redo.push(JSON.stringify(before));
-        state.defects[key] = JSON.parse(prevSnapshot);
-        reconcileDefectHistoryJump(key, before, state.defects[key]);
+        h.redo.push(applyDefectHistoryEntry(key, prevSnapshot));
         saveStateToLocalStorage();
-        renderSurveyTable();
-        drawCanvas();
+        refreshAfterDefectNumberChange();
         window.showToast('되돌리기 완료', 'info', 1500);
     }
 
@@ -23372,15 +23522,22 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
         const h = defectHistory[key];
         if (!h || h.redo.length === 0) return;
         const nextSnapshot = h.redo.pop();
-        const before = state.defects[key] || [];
-        h.undo.push(JSON.stringify(before));
-        state.defects[key] = JSON.parse(nextSnapshot);
-        reconcileDefectHistoryJump(key, before, state.defects[key]);
+        h.undo.push(applyDefectHistoryEntry(key, nextSnapshot));
         saveStateToLocalStorage();
-        renderSurveyTable();
-        drawCanvas();
+        refreshAfterDefectNumberChange();
         window.showToast('다시 실행 완료', 'info', 1500);
     }
+
+    /** 표·도면·목록을 한꺼번에 다시 그린다(번호가 바뀐 뒤 어느 한쪽만 옛 번호로 남지 않게) */
+    function refreshAfterDefectNumberChange() {
+        if (typeof renderSurveyTable === 'function') renderSurveyTable();
+        if (typeof drawCanvas === 'function') drawCanvas();
+        if (typeof updateMapSelectionBar === 'function') updateMapSelectionBar({ scrollToSelection: false });
+        else if (typeof renderDefectListPanel === 'function') renderDefectListPanel();
+        if (typeof updateUndoRedoButtons === 'function') updateUndoRedoButtons();
+        if (typeof window.scheduleDefectNumberGapNotice === 'function') window.scheduleDefectNumberGapNotice();
+    }
+    window.refreshAfterDefectNumberChange = refreshAfterDefectNumberChange;
 
     function updateUndoRedoButtons() {
         const h = state.currentBuildingId ? defectHistory[getDefectHistoryKey()] : null;
@@ -32681,11 +32838,32 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
     function saveFloorMapStyleSettings(floorCode, buildingId) {
         if (!floorCode || !buildingId) return;
         if (!state.floorMapStyleSettings) state.floorMapStyleSettings = {};
+        // 2026-10-20 「다른 도면 갔다 오면 마킹 크기가 들쭉날쭉」: 지금 크기 설정이 다른 층 것이면(층을 바꾸는 길 중
+        // 설정을 안 바꾼 곳) 그걸 이 층에 저장하면 이 층 크기가 다른 층 크기로 덮였다 — 주인이 다르면 저장하지 않는다.
+        const owner = state._mapStyleFloorKey;
+        if (owner && owner !== getFloorMapStyleKey(buildingId, floorCode)) return;
         state.floorMapStyleSettings[getFloorMapStyleKey(buildingId, floorCode)] = snapshotMapStyleSettings();
     }
 
+    /** 그리기 직전: 크기 설정이 지금 층 것이 아니면 지금 층 것으로(층 전환 길마다 빠짐없이) */
+    function ensureMapStyleMatchesCurrentFloor() {
+        if (_mapStyleRenderContext || !state.currentFloor || !state.currentBuildingId) return;
+        const key = getFloorMapStyleKey(state.currentBuildingId, state.currentFloor);
+        if (state._mapStyleFloorKey === key) return;
+        applyFloorMapStyleSettings(state.currentFloor, state.currentBuildingId);
+    }
+    window.ensureMapStyleMatchesCurrentFloor = ensureMapStyleMatchesCurrentFloor;
+
     function applyFloorMapStyleSettings(floorCode, buildingId) {
         if (!floorCode) return;
+        // 떠나는 층의 지금 설정을 먼저 그 층에 남긴다(목록·검색으로 다른 층으로 뛰는 길은 저장을 안 했다)
+        const leaving = state._mapStyleFloorKey;
+        const target = getFloorMapStyleKey(buildingId, floorCode);
+        if (leaving && leaving !== target && state.currentBuildingId && String(leaving).indexOf(String(state.currentBuildingId) + '') >= 0) {
+            if (!state.floorMapStyleSettings) state.floorMapStyleSettings = {};
+            if (state.floorMapStyleSettings[leaving]) state.floorMapStyleSettings[leaving] = snapshotMapStyleSettings();
+        }
+        state._mapStyleFloorKey = target;
         const saved = state.floorMapStyleSettings?.[getFloorMapStyleKey(buildingId, floorCode)];
         const ndtKept = cloneStyleSizesSubset(state.styleSizes, NDT_STYLE_SIZE_KEYS);
         if (saved) {
@@ -42565,25 +42743,36 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
                 ? '외부 도면(외부1·2·…) 전체를 한 번호로 보고 빈 칸을 뒤에서부터 앞으로 땡길까요?\n(한 도면의 빈 번호는 다른 외부 도면에 있을 수 있습니다.)'
                 : '현재 층의 마킹번호 빈 칸을 뒤에서부터 앞으로 땡길까요?\n(예: 1번 삭제 후 2,3,4 → 1,2,3 / 14,15,17,18 → 14,15,16,17)';
             if (!await window.appConfirm(confirmMsg)) return;
-            if (typeof pushDefectHistory === 'function') pushDefectHistory();
+            // 외부 입면처럼 여러 도면이 한 번호 공간이면 그 층들을 모두 한 되돌리기 기록에 담는다
+            const poolKeys = Object.keys(state.defects || {}).filter((k) => {
+                const arr = state.defects[k];
+                return Array.isArray(arr) && arr.some((d) => list.indexOf(d) >= 0);
+            });
+            if (typeof pushDefectHistory === 'function') pushDefectHistory(poolKeys);
             const result = compactDefectMarkingNumberGaps(list);
-            if (!result || !result.moved) {
+            if (!result || (!result.moved && !result.healed)) {
                 if (typeof window.showToast === 'function') window.showToast('채울 빈 번호가 없습니다.', 'info');
                 return;
             }
+            poolKeys.concat([key]).forEach((k) => {
+                const arr = state.defects[k] || [];
+                if (arr.some((d) => d && d._numberChanged) && typeof markFloorKeyDirty === 'function') markFloorKeyDirty(k);
+                arr.forEach((d) => {
+                    if (d && d._numberChanged) {
+                        delete d._numberChanged;
+                        if (typeof journalDefectChange === 'function') journalDefectChange('edit', d, k);
+                    }
+                });
+            });
             if (typeof discardStalePendingRemoteAfterLocalPinEdit === 'function') {
                 discardStalePendingRemoteAfterLocalPinEdit();
             }
             saveStateToLocalStorage();
-            if (typeof renderSurveyTable === 'function') renderSurveyTable();
-            if (typeof drawCanvas === 'function') drawCanvas();
-            if (typeof updateMapSelectionBar === 'function') {
-                updateMapSelectionBar({ scrollToSelection: false });
-            } else if (typeof renderDefectListPanel === 'function') {
-                renderDefectListPanel();
-            }
+            refreshAfterDefectNumberChange();
             if (typeof window.showToast === 'function') {
-                window.showToast(`마킹번호 ${result.moved}개 이동: ${result.before} → ${result.after}`, 'success', 4500);
+                window.showToast(result.moved
+                    ? `마킹번호 ${result.moved}개 이동: ${result.before} → ${result.after}`
+                    : `도면 번호 ${result.healed}개를 표 번호에 맞췄습니다.`, 'success', 4500);
             }
         });
     }

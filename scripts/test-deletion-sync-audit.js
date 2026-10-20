@@ -180,7 +180,9 @@ async function testUndoRedoReconcile() {
 
     for (const name of ['function undoDefectChange(', 'function redoDefectChange(']) {
         const body = extractFunction(name);
-        assert.ok(/reconcileDefectHistoryJump\(key, before, state\.defects\[key\]\)/.test(body),
+        // 2026-10-20 여러 층 한 번에 되돌리기: applyDefectHistoryEntry가 층마다 reconcileDefectHistoryJump를 부른다
+        assert.ok(/reconcileDefectHistoryJump\(key, before, state\.defects\[key\]\)/.test(body)
+            || (/applyDefectHistoryEntry\(key,/.test(body) && /reconcileDefectHistoryJump\(k, before, state\.defects\[k\]\)/.test(extractFunction('function applyDefectHistoryEntry('))),
             name + ' 는 동기화 기록을 맞춰야 한다');
     }
     const del = extractFunction('function deleteAllPhotosForDefect(');
