@@ -39,7 +39,8 @@ const TEXT_EXT = /\.(html|htm|js|mjs|cjs|css|json|md|rules|ya?ml|txt|py|ps1|svg)
 const BOM_ALLOWED_EXT = /\.ps1$/i;
 
 /** 밖에서 만든 번들 폴더. 우리가 손으로 쓰는 한글 파일이 아니라 글자 검사에서 뺀다. */
-const VENDOR_DIR = /^vendor\//;
+// 2026-10-20 js/vendor/(pdf.js 워커 등 밖에서 만든 압축 파일)도 같이 뺀다 — pdf.worker.min.js에 원래 든 합자 글자가 깨짐으로 잡혀 배포가 막혔다.
+const VENDOR_DIR = /^(js\/)?vendor\//;
 
 /**
  * U+00C0~U+024F(라틴 확장) 구간에서 예외로 허용하는 문자.
