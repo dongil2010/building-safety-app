@@ -152,9 +152,11 @@ function escapeHtml(str) {
         .replace(/'/g, '&#39;');
 }
 
-// pdf.js 워커 경로 설정 (CDN 스크립트가 로드된 경우에만)
+// pdf.js 워커는 페이지와 같은 주소의 파일이어야 한다.
+// 설치 프로그램(Electron)은 다른 주소의 워커를 못 띄워서, 캐드 선 읽기(자석 스냅)가 조용히 실패한다.
+// 크롬·엣지는 CDN 워커가 되므로 그 차이를 없애기 위해 앱 안에 둔 워커를 쓴다.
 if (typeof pdfjsLib !== 'undefined') {
-    pdfjsLib.GlobalWorkerOptions.workerSrc = 'https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.worker.min.js';
+    pdfjsLib.GlobalWorkerOptions.workerSrc = 'js/vendor/pdf.worker.min.js';
 }
 
 function isPdfFile(file) {

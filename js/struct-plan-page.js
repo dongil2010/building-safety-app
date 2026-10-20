@@ -11,7 +11,7 @@
     // 기둥 빨강 · 거더 파랑 · 빔 황토 (앱 레이어 js/core/struct-members.js COLORS와 같게)
     var COLORS = { '기둥': '#dc2626', '벽': '#7c3aed', '거더': '#2563eb', '빔': '#b7791f', '슬래브': '#16a34a' };
     var USE_TYPES = ['기둥', '거더', '빔'];   // 지금 세는 종류(벽·슬래브는 우선 뺌)
-    var PDF_WORKER = 'https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.worker.min.js';
+    var PDF_WORKER = 'js/vendor/pdf.worker.min.js';
     var $ = function (id) { return document.getElementById(id); };
     var ZOOM_MAX = 8;
 
