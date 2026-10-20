@@ -17229,6 +17229,47 @@ html.bsa-sketch-open, html.bsa-sketch-open body { overscroll-behavior: none; }
     .sync-progress-pill { font-size: 0.74rem; padding: 0.26rem 0.6rem; }
     .sync-progress-pill .bsp-pill-bar { width: 40px; }
 }
+/* 2026-10-20 알약을 헤더 「온라인」 배지 옆으로 — 같은 줄·같은 알약 모양, 떠 있지 않음 */
+.sync-progress-pill .bsp-txt-short { display: none; }
+.sync-progress-pill.in-header {
+    position: static; left: auto; bottom: auto; z-index: auto;
+    box-shadow: none; max-width: 22rem; overflow: hidden; flex: 0 1 auto; min-width: 0;
+    padding: 0.4rem 0.8rem; border-radius: 20px; font-size: 0.82rem; font-weight: 600;
+    background: rgba(37, 99, 235, 0.1); color: #1d4ed8; border: 1px solid rgba(37, 99, 235, 0.3);
+}
+.sync-progress-pill.in-header [data-bsp-txt] { overflow: hidden; text-overflow: ellipsis; min-width: 0; }
+.sync-progress-pill.in-header.done { background: rgba(34, 197, 94, 0.12); color: #15803d; border-color: rgba(34, 197, 94, 0.35); }
+.sync-progress-pill.in-header.fail { background: rgba(234, 88, 12, 0.1); color: #c2410c; border-color: rgba(234, 88, 12, 0.4); }
+.sync-progress-pill.in-header .bsp-pill-bar { width: 44px; }
+body.theme-dark .sync-progress-pill.in-header { color: #93c5fd; }
+body.theme-dark .sync-progress-pill.in-header.done { color: #4ade80; }
+body.theme-dark .sync-progress-pill.in-header.fail { color: #fdba74; }
+/* 태블릿·폰: 도면 안 오른쪽 아래(버튼과 겹치면 JS가 --bsp-lift만큼 올림) */
+.sync-progress-pill.in-canvas {
+    position: absolute; left: auto; top: auto; z-index: 40;
+    right: calc(10px + env(safe-area-inset-right, 0px));
+    bottom: calc(10px + env(safe-area-inset-bottom, 0px) + var(--bsp-lift, 0px));
+    max-width: 60%; padding: 0.26rem 0.6rem; gap: 0.35rem; font-size: 0.74rem;
+    box-shadow: 0 3px 10px rgba(20, 20, 20, 0.16);
+}
+.sync-progress-pill.in-canvas .bsp-txt-long { display: none; }
+.sync-progress-pill.in-canvas .bsp-txt-short { display: inline; }
+.sync-progress-pill.in-canvas .bsp-pill-bar { width: 28px; }
+.sync-progress-pill.in-canvas.fail .bsp-pill-bar, .sync-progress-pill.in-canvas.done .bsp-pill-bar { display: none; }
+/* 헤더 버튼을 밀어내지 않게 넓은 화면(1700px 이상)만 긴 글, 그 아래는 짧은 글(아이콘+「3/10」「올라감」「멈춤」) — 긴 글은 title(마우스 올리면) */
+@media (max-width: 1700px) {
+    .sync-progress-pill.in-header { padding: 0.32rem 0.6rem; gap: 0.35rem; }
+    .sync-progress-pill.in-header .bsp-txt-long { display: none; }
+    .sync-progress-pill.in-header .bsp-txt-short { display: inline; }
+    .sync-progress-pill.in-header .bsp-pill-bar { display: none; }
+}
+@media (max-width: 600px) {
+    .sync-progress-pill.in-header { font-size: 0.72rem; padding: 0.24rem 0.5rem; flex: 0 0 auto; max-width: none; }
+    /* 폰 헤더(도면 밖): 탭 묶음과 붙지 않게 아이콘만(뜻은 title·색) */
+    .sync-progress-pill.in-header:not(.beside-badge) .bsp-txt-short { display: none; }
+    .sync-progress-pill.in-header:not(.beside-badge) { margin-right: 0.35rem; }
+    .sync-progress-pill.in-header .bsp-pill-bar { display: none; }
+}
 .bsp-overlay { position: fixed; inset: 0; z-index: 100000; background: rgba(15, 23, 42, 0.5); display: flex; align-items: center; justify-content: center; padding: 16px; }
 .bsp-overlay[hidden] { display: none !important; }
 .bsp-card {

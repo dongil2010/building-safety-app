@@ -975,12 +975,86 @@ document.addEventListener('DOMContentLoaded', () => {
             pill.id = 'bsaSyncPill';
             pill.className = 'sync-progress-pill';
             pill.title = '눌러서 동기화 진행률 보기';
-            pill.innerHTML = '<i class="fa-solid fa-cloud-arrow-up" data-bsp-ic></i><span data-bsp-txt></span><span class="bsp-pill-bar"><span data-bsp-bar></span></span>';
+            pill.innerHTML = '<i class="fa-solid fa-cloud-arrow-up" data-bsp-ic></i><span class="bsp-txt-long" data-bsp-txt></span><span class="bsp-txt-short" data-bsp-short></span><span class="bsp-pill-bar"><span data-bsp-bar></span></span>';
             pill.addEventListener('click', () => openSyncProgressPanel());
-            document.body.appendChild(pill);
         }
+        placeSyncProgressPill(pill);
         return pill;
     }
+    /**
+     * 2026-10-20 알약 자리 — PC(넓은 화면, 헤더 「온라인」 배지가 보일 때): 배지 바로 옆.
+     * 태블릿·폰: 도면 안 오른쪽 아래 빈 곳(버튼과 겹치면 그 위로 올림, 안전 영역 포함).
+     * 도면이 안 보이는 화면(홈·목록 등): 헤더 탭 묶음 옆(목록을 가리지 않음).
+     */
+    function placeSyncProgressPill(pill) {
+        const vw = window.innerWidth || document.documentElement.clientWidth || 0;
+        const badge = document.getElementById('onlineStatusBadge');
+        const badgeShown = !!(badge && badge.offsetParent !== null);
+        const canvas = document.getElementById('canvasContainer');
+        const canvasShown = !!(canvas && canvas.offsetParent !== null && canvas.clientWidth > 0 && canvas.clientHeight > 0);
+        let where = 'nav';
+        if (badgeShown && vw > 1180) where = 'badge';
+        else if (canvasShown) where = 'canvas';
+        if (where === 'badge') {
+            if (badge.nextElementSibling !== pill) badge.insertAdjacentElement('afterend', pill);
+        } else if (where === 'canvas') {
+            if (pill.parentNode !== canvas) canvas.appendChild(pill);
+        } else {
+            // 탭 묶음 앞(맨 왼쪽) — 좁은 화면에서 탭 묶음이 가로로 밀려 겹치지 않게
+            const cluster = document.getElementById('navTabsCluster');
+            if (cluster && cluster.parentNode) {
+                if (cluster.previousElementSibling !== pill) cluster.insertAdjacentElement('beforebegin', pill);
+            } else if (pill.parentNode !== document.body) {
+                document.body.appendChild(pill);
+            }
+        }
+        pill.classList.toggle('in-header', where !== 'canvas');
+        pill.classList.toggle('in-canvas', where === 'canvas');
+        pill.classList.toggle('beside-badge', where === 'badge');
+        if (where === 'canvas') avoidCanvasControls(pill, canvas);
+        else pill.style.removeProperty('--bsp-lift');
+    }
+    /** 도면 안 알약이 버튼·툴바·키패드와 겹치면 겹친 것 위로 올린다 */
+    function avoidCanvasControls(pill, canvas) {
+        if (!pill.classList.contains('show')) return;
+        pill.style.setProperty('--bsp-lift', '0px');
+        const sel = 'button, a, input, select, textarea, [role="button"], [class*="toolbar"], [class*="keypad"], [class*="zoom"], [class*="rail"], [class*="sheet"], [class*="count-bar"], .floating-indicator, .offline-badge';
+        const cands = Array.from(document.querySelectorAll(sel)).filter((el) => {
+            if (el === pill || pill.contains(el) || el.contains(pill) || el === canvas) return false;
+            if (el.offsetParent === null && getComputedStyle(el).position !== 'fixed') return false;
+            const cs = getComputedStyle(el);
+            if (cs.visibility === 'hidden' || cs.display === 'none' || Number(cs.opacity) === 0) return false;
+            const r = el.getBoundingClientRect();
+            return r.width > 0 && r.height > 0 && r.width < (window.innerWidth * 0.95) ;
+        });
+        const cRect = canvas.getBoundingClientRect();
+        for (let pass = 0; pass < 6; pass++) {
+            const p = pill.getBoundingClientRect();
+            const hit = cands.map((el) => el.getBoundingClientRect())
+                .filter((r) => r.left < p.right + 4 && r.right > p.left - 4 && r.top < p.bottom + 4 && r.bottom > p.top - 4);
+            if (!hit.length) break;
+            const top = Math.min.apply(null, hit.map((r) => r.top));
+            const lift = Math.max(0, cRect.bottom - top + 8 - 10);
+            if (lift > cRect.height - 60) break;   // 올릴 곳이 없으면 그대로
+            pill.style.setProperty('--bsp-lift', `${Math.round(lift)}px`);
+        }
+    }
+    /** 화면 확인용(개발자 도구): 알약을 그 상태로 띄워 자리 보기 — 동기화는 건드리지 않음 */
+    window.bsaPreviewSyncPill = function (mode, longText, shortText) {
+        const pill = ensureSyncProgressPill();
+        pill.classList.add('show');
+        pill.classList.toggle('fail', mode === 'fail');
+        pill.classList.toggle('done', mode === 'done');
+        const t = pill.querySelector('[data-bsp-txt]'); if (t) t.textContent = longText || '';
+        const sh = pill.querySelector('[data-bsp-short]'); if (sh) sh.textContent = shortText || '';
+        placeSyncProgressPill(pill);
+        const r = pill.getBoundingClientRect();
+        return { parent: pill.parentNode && (pill.parentNode.id || pill.parentNode.className), rect: [r.left, r.top, r.width, r.height] };
+    };
+    window.addEventListener('resize', () => scheduleSyncProgressRender());
+    document.addEventListener('click', (e) => {
+        if (e.target && e.target.closest && e.target.closest('.tab-btn')) setTimeout(scheduleSyncProgressRender, 300);
+    }, true);
     function renderSyncProgressUi() {
         const sp = window.BSA && window.BSA.syncProgress;
         const sum = syncProgressSummary();
@@ -1040,6 +1114,14 @@ document.addEventListener('DOMContentLoaded', () => {
             const txt = pill.querySelector('[data-bsp-txt]');
             const bar = pill.querySelector('[data-bsp-bar]');
             const ic = pill.querySelector('[data-bsp-ic]');
+            const shortEl = pill.querySelector('[data-bsp-short]');
+            if (shortEl) {
+                shortEl.textContent = (parkedGate || parkedPhotos.length) ? '멈춤'
+                    : mode === 'done' ? '올라감'
+                        : mode === 'fail' ? `실패 ${sum.pending}`
+                            : (sum.total ? `${sum.done}/${sum.total}` : '올리는 중');
+            }
+            pill.title = (txt && txt.textContent) ? `${txt.textContent} — 눌러서 동기화 진행률 보기` : '눌러서 동기화 진행률 보기';
             if (txt) {
                 txt.textContent = (parkedGate || parkedPhotos.length)
                     ? `자동 올리기 멈춤${parkedPhotos.length ? ` · 사진 ${parkedPhotos.length}장` : ''} · 눌러서 다시 시도`
