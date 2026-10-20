@@ -79,6 +79,9 @@ assert.strictEqual(out[0].rule, 'dup-row');
 assert.strictEqual(out[0].no, '4');
 assert.ok(/3번/.test(out[0].msg));
 assert.deepStrictEqual(rules([row({}), row({ floorCode: '2F' })]), [], '층이 다르면 중복 아님');
+const goodRow = { defectType: '상태양호', cause: '', widths: [], crackLength: '', good: true };
+assert.deepStrictEqual(rules([row(goodRow), row(goodRow)]), [], '상태양호끼리는 같아도 중복 아님');
+assert.deepStrictEqual(rules([row(Object.assign({}, goodRow, { defectType: '보수완료' })), row(Object.assign({}, goodRow, { defectType: '보수완료' }))]), [], '보수완료끼리도');
 
 // 표기 통일(띄어쓰기만 다름) — 적게 쓴 쪽
 out = R.reviewRows([row({ defectType: '철근노출', widths: [], location: 'a' }), row({ defectType: '철근노출', widths: [], location: 'b' }), row({ defectType: '철근 노출', widths: [], location: 'c' })]);

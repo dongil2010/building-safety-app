@@ -113,7 +113,8 @@
         // ---- 같은 층에 똑같은 행(복사 실수) ----
         var seen = {};
         rows.forEach(function (r) {
-            if (!r || !trim(r.location)) return;
+            // 상태양호·보수완료는 같은 자리·같은 글이 여러 번 나오는 게 정상(2026-10-20 사용자) — 빼고 본다
+            if (!r || r.good || !trim(r.location)) return;
             var k = [r.floorCode, squash(r.location), squash(r.component), squash(r.defectType), squash(r.sizeText), (r.widths || []).join('/')].join('|');
             if (seen[k]) push(out, r, 'warn', 'dup-row', seen[k].no + '번과 위치·부재·결함·규모가 모두 같습니다(복사 실수인지 확인).');
             else seen[k] = r;
