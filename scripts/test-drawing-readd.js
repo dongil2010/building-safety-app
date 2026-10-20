@@ -49,6 +49,14 @@ const app = fs.readFileSync(path.join(__dirname, '..', 'app.js'), 'utf8');
 assert(/if \(rasterUploaded\) stampFloorDrawingUpdated\(bldg, item\.floorCode\)/.test(app), '이미지 교체 때 floorPdfUpdatedAt 도장');
 assert(/purgeFloorMarkings\?\.\(window\.state, floorKey/.test(app), '층 삭제 때 도면 위 표시 정리');
 
+// 여러 동: 층 묶음에 건물 id, 남의 묶음은 안 읽고 안 덮음, 겹치는 칸은 건물 id 칸, 보관함 키에 동
+assert(/buildingId: bldg\.id,\n\s*\/\/ 도면 메모/.test(app) || /buildingId: bldg\.id,/.test(app), '층 묶음에 buildingId');
+assert(/bundle\.buildingId && bundle\.buildingId !== bldg\.id\) \{[\s\S]{0,200}return;/.test(app), '다른 동 묶음 무시');
+assert(/readRes\.bundle\.buildingId !== floorBldg\.id[\s\S]{0,200}floorsSkipWrite\.add/.test(app), '다른 동 칸 덮어쓰기 금지');
+assert(/owner !== bldg\.id\) dongKey = siteVaultDocId\(`b_\$\{bldg\.id\}`\)/.test(app), '겹치는 동 칸 분리');
+assert(!/normalizeSiteVaultKey\(bldg\.name\)/.test(app.replace(/function siteVaultKeyForBuilding[\s\S]*?\n    \}/, '')), '보관함 키는 동 포함 함수로');
+assert(/refreshDue \? Promise\.resolve\(null\) : fetchSiteVaultPdf/.test(app), '새 도면은 보관함 옛 PDF로 덮지 않음');
+
 // 도면 크기 변화 감지 + 결함 좌표 비율 조정
 const store = { m: {}, getItem(k) { return this.m[k] || null; }, setItem(k, v) { this.m[k] = v; } };
 assert.strictEqual(R.noteDims(store, 'k', 'B1_3F', 1000, 800, 's1'), null);

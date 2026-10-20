@@ -3839,7 +3839,7 @@ document.addEventListener('DOMContentLoaded', () => {
         } catch (e) {
             console.warn('[건물 백업] 영구 삭제 전 백업 정리 실패 — 백업이 쓰던 사진은 클라우드에 남습니다:', bldg.id, e);
         }
-        const siteKey = normalizeSiteVaultKey(bldg.name);
+        const siteKey = siteVaultKeyForBuilding(bldg);
         recordBuildingDeleted(bldg.id);
         window.state.buildings = (window.state.buildings || []).filter((b) => b.id !== bldg.id);
         const purgeSiteDrawingsFromCloud = countActiveBuildingsForSiteKey(
@@ -60082,6 +60082,18 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
         return s || 'unnamed';
     }
 
+    /**
+     * 현장 보관함 키 — 여러 동 현장은 동까지 넣는다(2026-10-20).
+     * 예전엔 현장명+층만 써서 101동 3F PDF가 102동 3F에 붙었다(옆 동 도면이 보이는 문제).
+     * 단동 현장은 예전 키 그대로라 기존 보관함을 그대로 읽는다.
+     */
+    function siteVaultKeyForBuilding(bldg) {
+        const base = normalizeSiteVaultKey(bldg && bldg.name);
+        const dong = bldg ? getBuildingDongLabel(bldg) : '';
+        if (!dong) return base;
+        return base.endsWith(dong) ? base : `${base} ${dong}`;
+    }
+
     function normalizeDongLabel(dong) {
         return String(dong || '').replace(/\s+/g, ' ').trim();
     }
@@ -60325,9 +60337,30 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
         let ref = db.collection('safety_app').doc(getCompanyDocId())
             .collection('sites').doc(getFirestoreSiteKey(bldg))
             .collection('rounds').doc(getFirestoreRoundKey(bldg));
-        const dongKey = getFirestoreDongKey(bldg);
+        let dongKey = getFirestoreDongKey(bldg);
+        // 같은 현장·회차에서 동 칸이 겹치는(동 이름 없음·같은 이름) 다른 건물이 있으면, 가장 먼저 만든 건물만
+        // 예전 칸을 쓰고 나머지는 건물 id 칸을 쓴다 — 두 동이 한 층 문서를 같이 써서 옆 동 도면이 보였다(2026-10-20)
+        const owner = floorScopeOwnerId(bldg, dongKey);
+        if (owner && owner !== bldg.id) dongKey = siteVaultDocId(`b_${bldg.id}`);
         if (dongKey) ref = ref.collection('dongs').doc(dongKey);
         return ref.collection('floors').doc(String(floorCode));
+    }
+
+    /** 같은 층 칸(현장·회차·동 키)을 쓰는 건물 중 id가 가장 앞선 건물 */
+    function floorScopeOwnerId(bldg, dongKey) {
+        try {
+            const site = getFirestoreSiteKey(bldg);
+            const round = getFirestoreRoundKey(bldg);
+            const ids = filterActiveBuildings(window.state.buildings || [], window.state.deletedBuildingIds)
+                .filter((b) => b && b.id && getFirestoreSiteKey(b) === site && getFirestoreRoundKey(b) === round
+                    && getFirestoreDongKey(b) === dongKey)
+                .map((b) => String(b.id))
+                .sort();
+            if (ids.length < 2) return '';
+            return ids.indexOf(String(bldg.id)) >= 0 ? ids[0] : '';
+        } catch (_e) {
+            return '';
+        }
     }
     window.getFloorScopeRef = getFloorScopeRef;
     window.getFirestoreSiteKey = getFirestoreSiteKey;
@@ -61160,6 +61193,8 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
                 // NDT 전용 도면 참조 { id, at } — 그림은 photos(클라우드)에 있다
                 customDrawing: ndtDrawingRefFor(floorKey)
             },
+            // 이 묶음이 어느 동(건물) 것인지 — 같은 층 칸을 두 동이 나눠 쓰면 읽는 쪽이 남의 것을 버린다(2026-10-20)
+            buildingId: bldg.id,
             drawing: collectFloorDrawingUrlPayload(bldg, floorCode),
             // 도면 메모(결함 아님) — 결함처럼 updatedAt·묘비로 합친다
             memos: (window.BSA && window.BSA.drawingMemo) ? window.BSA.drawingMemo.packFor(window.state, floorKey) : undefined,
@@ -61225,6 +61260,11 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
 
     function mergeFloorBundleIntoState(bldg, floorCode, bundle) {
         if (!bldg || !bldg.id || !floorCode || !bundle) return;
+        // 다른 동이 쓴 층 묶음이면 손대지 않는다 — 옆 동 도면·마킹이 이 동에 붙던 문제(2026-10-20)
+        if (bundle.buildingId && bundle.buildingId !== bldg.id) {
+            console.warn('[floor] 다른 동의 층 묶음이라 건너뜀:', bldg.id, floorCode, '←', bundle.buildingId);
+            return;
+        }
         const floorKey = `${bldg.id}_${floorCode}`;
         const empty = emptyFloorBundle();
         const markings = bundle.markings || empty.markings;
@@ -63589,7 +63629,7 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
 
     async function archiveBuildingPdfsToSiteVault(bldg) {
         if (!bldg || !bldg.id) return;
-        const siteKey = normalizeSiteVaultKey(bldg.name);
+        const siteKey = siteVaultKeyForBuilding(bldg);
         bldg.siteVaultKey = siteVaultDocId(siteKey);
         const floors = (bldg.floorsList && bldg.floorsList.length > 0)
             ? bldg.floorsList.map(f => f.floorCode)
@@ -63668,10 +63708,11 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
 
         // 자동 경로는 레스터만 쓴다. PDF 원본은 forceCloud, 또는 더 나중에 올린 도면이 있을 때만 서버에서 받는다.
         if (db && window.state.companyId && (options.forceCloud || refreshDue) && !options.localOnly) {
-            const siteKey = normalizeSiteVaultKey(bldg.name);
+            const siteKey = siteVaultKeyForBuilding(bldg);
             const [cloudPdf, vaultPdf] = await Promise.all([
                 fetchFloorDrawingPdfFromCloud(bldg.id, floorCode),
-                fetchSiteVaultPdf(siteKey, floorCode),
+                // 새로 넣은 도면(refreshDue)이면 보관함의 옛 PDF로 덮지 않는다 — 지운 도면이 되살아났다
+                refreshDue ? Promise.resolve(null) : fetchSiteVaultPdf(siteKey, floorCode),
             ]);
             const remotePdf = cloudPdf || vaultPdf;
             if (remotePdf) {
@@ -63996,7 +64037,7 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
 
     async function hydrateBuildingPdfsFromSiteVault(bldg) {
         if (!bldg) return;
-        const siteKey = normalizeSiteVaultKey(bldg.name);
+        const siteKey = siteVaultKeyForBuilding(bldg);
         bldg.siteVaultKey = siteVaultDocId(siteKey);
         const floors = (bldg.floorsList && bldg.floorsList.length > 0)
             ? bldg.floorsList.map(f => f.floorCode)
@@ -64040,7 +64081,7 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
             window._cloudSyncedPdfKeys.add(docId);
             const bldg = (window.state.buildings || []).find(b => b.id === buildingId);
             if (bldg) {
-                const siteKey = normalizeSiteVaultKey(bldg.name);
+                const siteKey = siteVaultKeyForBuilding(bldg);
                 bldg.siteVaultKey = siteVaultDocId(siteKey);
                 await uploadSiteVaultPdf(siteKey, floorCode, pdfDataUrl);
             }
@@ -65941,6 +65982,12 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
                     if (!cycleFailReason) cycleFailReason = `층 읽기 실패(${floorKey}): ${(e && e.message) || e}`;
                     if (syncRetryApi() && syncRetryApi().classify(e) === 'permanent') throw e;
                     if (typeof syncProgressFail === 'function') syncProgressFail(floorKey, '서버에서 층을 읽지 못함 — 다음 동기화에서 다시');
+                    continue;
+                }
+                // 서버 층 칸을 다른 동이 쓰고 있으면 덮어쓰지 않는다(이 기기에 그 동 정보가 아직 없을 때 칸이 겹침)
+                if (readRes && readRes.bundle && readRes.bundle.buildingId && readRes.bundle.buildingId !== floorBldg.id) {
+                    console.warn('[동기화] 이 층 칸은 다른 동 것이라 쓰지 않습니다:', floorKey, '←', readRes.bundle.buildingId);
+                    floorsSkipWrite.add(floorKey);
                     continue;
                 }
                 floorReadRev.set(floorKey, readRes.rev);
