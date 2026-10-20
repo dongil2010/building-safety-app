@@ -1450,9 +1450,9 @@ document.addEventListener('DOMContentLoaded', () => {
         } catch (e) {
             console.warn('PDF ref 좌표계 설정 실패:', e);
         }
-        // 캐드 벡터 스냅용 선분 데이터도 같이 준비 (실패해도 스냅만 못 쓸 뿐, 도면 표시엔 영향 없음)
+        // 캐드 벡터 스냅용 선분. 그림만 있고 PDF 원본이 없으면 여기까지 오지 않는다.
         if (window.BSA_PDF_SNAP && typeof window.BSA_PDF_SNAP.ensureGeometry === 'function') {
-            window.BSA_PDF_SNAP.ensureGeometry(pdfUrl, bldg.id, floorCode, window.FLOOR_DRAWING_PDF_PREVIEW_DIM || 4000);
+            await window.BSA_PDF_SNAP.ensureGeometry(pdfUrl, bldg.id, floorCode, window.FLOOR_DRAWING_PDF_PREVIEW_DIM || 4000);
         }
     }
 
@@ -10172,11 +10172,14 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
                 updateFloorDrawingEmptyOverlay(null);
                 floorDrawingActiveTierDim = baseTier;
                 if (bldg && bldg.id) {
-                    if (floorMayHavePdfSource(bldg, floorCode)) {
+                    // 이 기기에 PDF가 없어도 서버에서 받아 스냅 선을 만든다.
+                    // 크롬·엣지는 예전에 받은 PDF가 기기에 남아 스냅이 되고, 프로그램은 그림만 있어 안 붙었다.
+                    if (state.snapToCad !== false || floorMayHavePdfSource(bldg, floorCode)) {
                         await ensureFloorPlanRefForPdf(bldg, floorCode);
-                    } else {
-                        updateFloorPlanRefFromImage(img, bldg.id, floorCode);
                     }
+                    const refNow = state.floorPlanRef;
+                    const refOk = refNow && refNow.bldgId === bldg.id && refNow.floorCode === floorCode && refNow.w > 0;
+                    if (!refOk) updateFloorPlanRefFromImage(img, bldg.id, floorCode);
                 }
                 if (!state.floorDrawingTierImageCache) state.floorDrawingTierImageCache = {};
                 if (bldg && bldg.id) {
@@ -39866,6 +39869,9 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
         syncSnapToCadButtons();
         saveStateToLocalStorage();
         window.showToast?.(state.snapToCad ? 'CAD 스냅 켜짐' : 'CAD 스냅 꺼짐', 'info', 1500);
+        if (state.snapToCad !== false && state.currentBuilding && state.currentFloor) {
+            ensureFloorPlanRefForPdf(state.currentBuilding, state.currentFloor).catch(() => {});
+        }
     }
     syncSnapToCadButtons();
     if (btnSnapToCad) btnSnapToCad.addEventListener('click', toggleSnapToCad);
