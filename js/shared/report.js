@@ -14,7 +14,7 @@ window.BSA.shared.report = {
         '조사표·사진 페이지 분리, 내부 표는 글자 취급',
         '표 칸 긴 글자는 자간 축소 없이 띄어쓰기에서 줄바꿈',
         '한글 규모 칸: 측정값 다음 줄에 -nEA 갯수 (문단 분리)',
-        '전경사진·설명은 HWPX 문서 맨 마지막에 출력'
+        '전경사진·설명은 HWPX 문서 맨 마지막에 출력, 손글씨 메모는 전경사진 바로 뒤'
     ],
     ownerHint: 'app.js REPORT PREVIEW / PDF EXPORT / HWPX',
 

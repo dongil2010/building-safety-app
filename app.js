@@ -49706,6 +49706,82 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
         return plan;
     }
 
+    // 2026-10-20 「손글씨 메모 했던거 한글 출력할때 전경사진 뒤에 오게」 — 건물의 손글씨 메모(층마다 여러 장)를
+    // 흰 바탕 그림으로 그려 전경사진 뒤에 한 장씩 넣는다(전경사진과 같은 틀, 쪽 폭에 맞추고 가로세로 비율 유지). 메모 없으면 안 넣음.
+    const HWPX_SKETCH_TBL_PARA_XML = '<hp:p id="0" paraPrIDRef="13" styleIDRef="0" pageBreak="1" columnBreak="0" merged="0"><hp:run charPrIDRef="53"><hp:tbl id="TBL_ID" zOrder="11" numberingType="TABLE" textWrap="TOP_AND_BOTTOM" textFlow="BOTH_SIDES" lock="0" dropcapstyle="None" pageBreak="NONE" repeatHeader="1" rowCnt="2" colCnt="1" cellSpacing="0" borderFillIDRef="5" noAdjust="0"><hp:sz width="41821" widthRelTo="ABSOLUTE" height="64087" heightRelTo="ABSOLUTE" protect="0"/><hp:pos treatAsChar="1" affectLSpacing="0" flowWithText="1" allowOverlap="0" holdAnchorAndSO="0" vertRelTo="PARA" horzRelTo="COLUMN" vertAlign="TOP" horzAlign="LEFT" vertOffset="0" horzOffset="0"/><hp:outMargin left="140" right="140" top="140" bottom="140"/><hp:inMargin left="140" right="140" top="140" bottom="140"/><hp:tr><hp:tc name="" header="0" hasMargin="0" protect="0" editable="0" dirty="0" borderFillIDRef="15"><hp:subList id="" textDirection="HORIZONTAL" lineWrap="BREAK" vertAlign="CENTER" linkListIDRef="0" linkListNextIDRef="0" textWidth="0" textHeight="0" hasTextRef="0" hasNumRef="0"><hp:p id="2147483648" paraPrIDRef="4" styleIDRef="0" pageBreak="0" columnBreak="0" merged="0"><hp:run charPrIDRef="6"><hp:pic id="PIC_ID" zOrder="36" numberingType="PICTURE" textWrap="TOP_AND_BOTTOM" textFlow="BOTH_SIDES" lock="0" dropcapstyle="None" thumbnailBinIDRef="" href="" groupLevel="0" instid="PIC_INSTID" reverse="0"><hp:offset x="0" y="0"/><hp:orgSz width="768540" height="969540"/><hp:curSz width="41541" height="52405"/><hp:flip horizontal="0" vertical="0"/><hp:rotationInfo angle="0" centerX="20770" centerY="26202" rotateimage="1"/><hp:renderingInfo><hc:transMatrix e1="1" e2="0" e3="0" e4="0" e5="1" e6="0"/><hc:scaMatrix e1="0.054052" e2="0" e3="0" e4="0" e5="0.054051" e6="0"/><hc:rotMatrix e1="1" e2="0" e3="0" e4="0" e5="1" e6="0"/></hp:renderingInfo><hc:img binaryItemIDRef="" bright="0" contrast="0" effect="REAL_PIC" alpha="0"/><hp:imgRect><hc:pt0 x="0" y="0"/><hc:pt1 x="768540" y="0"/><hc:pt2 x="768540" y="969540"/><hc:pt3 x="0" y="969540"/></hp:imgRect><hp:imgClip left="0" right="648540" top="0" bottom="818100"/><hp:inMargin left="0" right="0" top="0" bottom="0"/><hp:imgDim dimwidth="648540" dimheight="818100"/><hp:effects/><hp:sz width="41541" widthRelTo="ABSOLUTE" height="52405" heightRelTo="ABSOLUTE" protect="0"/><hp:pos treatAsChar="0" affectLSpacing="0" flowWithText="1" allowOverlap="0" holdAnchorAndSO="0" vertRelTo="PARA" horzRelTo="COLUMN" vertAlign="TOP" horzAlign="LEFT" vertOffset="0" horzOffset="0"/><hp:outMargin left="0" right="0" top="0" bottom="0"/></hp:pic><hp:t/></hp:run><hp:linesegarray><hp:lineseg textpos="0" vertpos="0" vertsize="1100" textheight="1100" baseline="935" spacing="1320" horzpos="0" horzsize="0" flags="393216"/></hp:linesegarray></hp:p></hp:subList><hp:cellAddr colAddr="0" rowAddr="0"/><hp:cellSpan colSpan="1" rowSpan="1"/><hp:cellSz width="41821" height="60813"/><hp:cellMargin left="141" right="141" top="141" bottom="141"/></hp:tc></hp:tr><hp:tr><hp:tc name="" header="0" hasMargin="0" protect="0" editable="0" dirty="0" borderFillIDRef="16"><hp:subList id="" textDirection="HORIZONTAL" lineWrap="BREAK" vertAlign="CENTER" linkListIDRef="0" linkListNextIDRef="0" textWidth="0" textHeight="0" hasTextRef="0" hasNumRef="0"><hp:p id="2147483648" paraPrIDRef="1" styleIDRef="16" pageBreak="0" columnBreak="0" merged="0"><hp:run charPrIDRef="43"><hp:t>CAPTION</hp:t></hp:run><hp:linesegarray><hp:lineseg textpos="0" vertpos="0" vertsize="1000" textheight="1000" baseline="850" spacing="600" horzpos="0" horzsize="41540" flags="393216"/></hp:linesegarray></hp:p></hp:subList><hp:cellAddr colAddr="0" rowAddr="1"/><hp:cellSpan colSpan="1" rowSpan="1"/><hp:cellSz width="41821" height="3274"/><hp:cellMargin left="141" right="141" top="141" bottom="141"/></hp:tc></hp:tr></hp:tbl><hp:t/></hp:run><hp:linesegarray><hp:lineseg textpos="0" vertpos="0" vertsize="64367" textheight="64367" baseline="54712" spacing="960" horzpos="0" horzsize="42520" flags="393216"/></hp:linesegarray></hp:p>';
+    /** 이 건물의 손글씨 메모 목록 — 층 순서(floorsList)대로, 층 안에서는 만든 순서 */
+    function collectBuildingSketchMemos(st, bldg) {
+        const api = window.BSA && window.BSA.sketchMemo;
+        if (!api || !st || !bldg || !bldg.id || !st.sketchMemos) return [];
+        const prefix = `${bldg.id}_`;
+        const codes = Object.keys(st.sketchMemos).filter((k) => k.indexOf(prefix) === 0).map((k) => k.slice(prefix.length));
+        const order = (Array.isArray(bldg.floorsList) ? bldg.floorsList : []).map((f) => f && f.floorCode).filter(Boolean);
+        codes.sort((a, b) => {
+            const ia = order.indexOf(a), ib = order.indexOf(b);
+            return (ia < 0 ? 1e9 : ia) - (ib < 0 ? 1e9 : ib);
+        });
+        const out = [];
+        codes.forEach((code) => {
+            api.listFor(st, prefix + code).forEach((rec) => {
+                if (rec && Array.isArray(rec.strokes) && rec.strokes.some((x) => x && !x.e)) out.push({ floorCode: code, rec });
+            });
+        });
+        return out;
+    }
+    /** 메모 한 장 → 흰 바탕 PNG(지우개 획은 투명 층에서 지운 뒤 흰 종이 위에 얹는다) */
+    function renderSketchMemoPng(rec, maxSide) {
+        const api = window.BSA && window.BSA.sketchMemo;
+        const w = Math.max(1, Number(rec.w) || 1200), h = Math.max(1, Number(rec.h) || 800);
+        const k = Math.min(1, (maxSide || 2000) / Math.max(w, h));
+        const cw = Math.max(1, Math.round(w * k)), ch = Math.max(1, Math.round(h * k));
+        const layer = document.createElement('canvas');
+        layer.width = cw; layer.height = ch;
+        const lctx = layer.getContext('2d');
+        (rec.strokes || []).forEach((st) => { if (st && st.p) api.drawStroke(lctx, st, k); });
+        const out = document.createElement('canvas');
+        out.width = cw; out.height = ch;
+        const octx = out.getContext('2d');
+        octx.fillStyle = '#ffffff';
+        octx.fillRect(0, 0, cw, ch);
+        octx.drawImage(layer, 0, 0);
+        return { dataUrl: out.toDataURL('image/png'), w: cw, h: ch };
+    }
+    /** 한글 문서 끝(전경사진 뒤)에 「손글씨 메모」 제목 + 메모 한 장씩. 반환: 늘어난 imgCounter */
+    async function appendHwpxSketchMemoSection(o) {
+        const memos = collectBuildingSketchMemos(window.state, o.bldg);
+        let imgCounter = o.imgCounter;
+        if (!memos.length) return imgCounter;
+        const HP = o.HP_NS, HC = o.HC_NS;
+        const esc = (t) => String(t || '').replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;');
+        const parse = (xml) => o.xmlDoc.importNode(new DOMParser().parseFromString(`<root xmlns:hp="${HP}" xmlns:hc="${HC}">${xml}</root>`, 'application/xml').documentElement.firstChild, true);
+        o.sec.appendChild(parse('<hp:p id="0" paraPrIDRef="13" styleIDRef="0" pageBreak="1" columnBreak="0" merged="0"><hp:run charPrIDRef="53"><hp:t>손글씨 메모</hp:t></hp:run><hp:linesegarray><hp:lineseg textpos="0" vertpos="0" vertsize="1100" textheight="1100" baseline="935" spacing="600" horzpos="0" horzsize="41540" flags="393216"/></hp:linesegarray></hp:p>'));
+        const MAX_W = 41821 - 141 - 141;
+        const MAX_H = 60813 - 141 - 141;
+        const perFloor = {};
+        for (let i = 0; i < memos.length; i++) {
+            const { floorCode, rec } = memos[i];
+            perFloor[floorCode] = (perFloor[floorCode] || 0) + 1;
+            const caption = `${o.getFloorLabel ? o.getFloorLabel(floorCode) : floorCode} 손글씨 메모-${perFloor[floorCode]}${rec.title ? ` (${rec.title})` : ''}`;
+            const png = renderSketchMemoPng(rec, 2000);
+            imgCounter++;
+            const para = parse(HWPX_SKETCH_TBL_PARA_XML
+                .replace('TBL_ID', String(8930000 + imgCounter))
+                .replace('PIC_ID', String(8940000 + imgCounter))
+                .replace('PIC_INSTID', String(8950000 + imgCounter))
+                .replace('CAPTION', esc(caption)));
+            para.setAttribute('pageBreak', i === 0 ? '0' : '1');
+            o.sec.appendChild(para);
+            const pic = para.getElementsByTagNameNS(HP, 'pic')[0];
+            const { bytes, mime, ext } = await o.dataUrlToBytes(png.dataUrl);
+            const imgId = `sketchMemo${imgCounter}`;
+            o.zip.file(`BinData/${imgId}.${ext}`, bytes);
+            o.manifestAdds.push(`<opf:item id="${imgId}" href="BinData/${imgId}.${ext}" media-type="${mime}" isEmbeded="1"/>`);
+            o.setPicImage(pic, imgId, png.w, png.h, MAX_W, MAX_H);
+            o.ensureTblTreatAsChar(para.getElementsByTagNameNS(HP, 'tbl')[0]);
+        }
+        return imgCounter;
+    }
+
     window.exportHwpxSurveyTable = async function() {
         const bldg = window.state.currentBuilding;
         const bldgId = (bldg && bldg.id) || window.state.currentBuildingId;
@@ -52696,6 +52772,16 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
                 console.error('전경사진 HWPX 삽입 실패(나머지는 유지):', ovErr);
             }
 
+            // ---- 손글씨 메모 (전경사진 바로 뒤) ----
+            try {
+                imgCounter = await appendHwpxSketchMemoSection({
+                    bldg, sec, xmlDoc, zip, HP_NS, HC_NS, getFloorLabel, imgCounter,
+                    dataUrlToBytes, setPicImage, ensureTblTreatAsChar, manifestAdds
+                });
+            } catch (skErr) {
+                console.error('손글씨 메모 HWPX 삽입 실패(나머지는 유지):', skErr);
+            }
+
             // ---- 균열게이지·균열팁 (문서 맨 마지막 — 전경사진 뒤) ----
             try {
                 const crackHdrState = { text: hwpxHeaderText, dirty: hwpxHeaderDirty };
@@ -54986,6 +55072,16 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
                 }
             } catch (ovErr) {
                 console.error('전경사진 HWPX 삽입 실패(나머지는 유지):', ovErr);
+            }
+
+            // ---- 손글씨 메모 (전경사진 바로 뒤) ----
+            try {
+                imgCounter = await appendHwpxSketchMemoSection({
+                    bldg, sec, xmlDoc, zip, HP_NS, HC_NS, getFloorLabel, imgCounter,
+                    dataUrlToBytes, setPicImage, ensureTblTreatAsChar, manifestAdds
+                });
+            } catch (skErr) {
+                console.error('손글씨 메모 HWPX 삽입 실패(나머지는 유지):', skErr);
             }
 
             // ---- 균열게이지·균열팁 (문서 맨 마지막 — 전경사진 뒤) ----
