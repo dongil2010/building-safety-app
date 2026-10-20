@@ -8193,7 +8193,7 @@ document.addEventListener('DOMContentLoaded', () => {
         const editContact = document.getElementById('inputEditBuildingContactPhone');
         if (editContact) editContact.value = bldg.contactPhone || '';
         document.getElementById('inputEditBuildingFloors').value = bldg.floors || '';
-        document.getElementById('inputEditBuildingDate').value = bldg.date || new Date().toISOString().split('T')[0];
+        document.getElementById('inputEditBuildingDate').value = getBuildingInspectionDate(bldg) || new Date().toISOString().split('T')[0];
         
         if (document.getElementById('inputEditBuildingInspectionType')) document.getElementById('inputEditBuildingInspectionType').value = bldg.inspectionType || '정밀안전점검';
         if (document.getElementById('inputEditBuildingInspectionYear')) document.getElementById('inputEditBuildingInspectionYear').value = bldg.inspectionYear || '2026년';
@@ -8202,6 +8202,7 @@ document.addEventListener('DOMContentLoaded', () => {
         if (document.getElementById('inputEditBuildingFacilityGrade')) document.getElementById('inputEditBuildingFacilityGrade').value = bldg.facilityGrade || '';
         if (document.getElementById('inputEditBuildingCompletionDate')) document.getElementById('inputEditBuildingCompletionDate').value = bldg.completionDate || '';
         if (document.getElementById('inputEditBuildingNotes')) document.getElementById('inputEditBuildingNotes').value = bldg.notes || '';
+        initEditRoundDates(bldg);
 
         populateEditBuildingImportSources(bldg.id);
         setImportSourcePickerValue('selectEditImportSource', '', { silent: true });
@@ -9048,6 +9049,8 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
             bldg.inspector = inspector;
             bldg.contactPhone = contactPhone;
             bldg.floors = floors;
+            // 2026-10-20 회차별 점검일 — 이 칸은 고른 회차의 점검일. 다른 회차 날짜는 아래 목록에서 따로 저장.
+            applyEditRoundDates(bldg, `${inspectionYear}_${inspectionPeriod}`, date);
             bldg.date = date;
             bldg.inspectionType = inspectionType;
             bldg.inspectionYear = inspectionYear;
@@ -17353,11 +17356,22 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
     }
 
     // 준공일(건축물 개요) ~ 점검일 사이 재령일수를 구한다. null이면 계산 불가(준공일 미입력 등).
+    /** 2026-10-20 이 건물 지금 회차의 점검일(회차별 점검일 > 건물 공통 점검일) */
+    function getBuildingInspectionDate(bldg, roundKey) {
+        if (!bldg) return '';
+        const key = roundKey || getBuildingSurveyRoundKey(bldg);
+        const mm = window.BSA && window.BSA.buildingMetaMerge;
+        if (mm && typeof mm.getRoundDate === 'function') return mm.getRoundDate(bldg, key);
+        return bldg.date || '';
+    }
+    window.getBuildingInspectionDate = getBuildingInspectionDate;
+
     function getConcreteAgeInDays(bldgArg) {
         const bldg = bldgArg || window.state.currentBuilding;
         if (!bldg || !bldg.completionDate) return null;
         const completion = new Date(bldg.completionDate);
-        const inspection = bldg.date ? new Date(bldg.date) : new Date();
+        const inspDate = (typeof getBuildingInspectionDate === 'function') ? getBuildingInspectionDate(bldg) : (bldg.date || '');
+        const inspection = inspDate ? new Date(inspDate) : new Date();
         if (isNaN(completion.getTime()) || isNaN(inspection.getTime())) return null;
         const days = Math.round((inspection - completion) / (1000 * 60 * 60 * 24));
         return days >= 0 ? days : null;
@@ -17385,12 +17399,82 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
      * 반발경도 재령일수 — 회사 엑셀과 같이 DAYS360(준공일, 점검일)로 센다(2026-09-22).
      * 탄산화 등 다른 계산은 실제 날짜 차이(getConcreteAgeInDays)를 그대로 쓴다.
      */
+    // ── 2026-10-20 건물 수정창: 회차별 점검일 ──
+    let _editRoundDatesDraft = null;
+    function editRoundKeyFromSelects(bldg) {
+        const y = document.getElementById('inputEditBuildingInspectionYear')?.value || (bldg && bldg.inspectionYear) || '2026년';
+        const p = document.getElementById('inputEditBuildingInspectionPeriod')?.value || (bldg && bldg.inspectionPeriod) || '하반기';
+        return `${y}_${p}`;
+    }
+    function renderEditRoundDatesList() {
+        const box = document.getElementById('editRoundDatesList');
+        if (!box || !_editRoundDatesDraft) return;
+        const sel = _editRoundDatesDraft.selectedKey;
+        const keys = Object.keys(_editRoundDatesDraft.dates).filter((k) => k !== sel);
+        keys.sort((a, b) => (getSurveyRoundOrderRank(b) || 0) - (getSurveyRoundOrderRank(a) || 0));
+        if (!keys.length) {
+            box.innerHTML = '<div class="form-hint" style="font-size:0.78rem;color:#666;">다른 회차 점검일 없음 — 위 「점검 년도·상/하반기」를 바꾸면 그 회차 점검일을 따로 정할 수 있어요.</div>';
+            return;
+        }
+        box.innerHTML = keys.map((k) => `<div style="display:flex;align-items:center;gap:0.5rem;margin-top:0.3rem;">
+            <span style="min-width:8rem;font-size:0.82rem;">${escapeHtml(formatSurveyRoundLabel(k))}</span>
+            <input type="date" class="form-control edit-round-date-input" data-round-key="${escapeHtml(k)}" value="${escapeHtml(_editRoundDatesDraft.dates[k] || '')}" style="max-width:11rem;">
+        </div>`).join('');
+        box.querySelectorAll('.edit-round-date-input').forEach((inp) => {
+            inp.addEventListener('change', () => { _editRoundDatesDraft.dates[inp.dataset.roundKey] = inp.value || ''; });
+        });
+    }
+    function initEditRoundDates(bldg) {
+        const dates = {};
+        const map = (bldg && bldg.roundDates) || {};
+        Object.keys(map).forEach((k) => {
+            const e = map[k];
+            const d = typeof e === 'string' ? e : (e && e.date) || '';
+            if (d) dates[k] = d;
+        });
+        const selectedKey = editRoundKeyFromSelects(bldg);
+        _editRoundDatesDraft = { bldgId: bldg && bldg.id, dates, selectedKey };
+        const dateEl = document.getElementById('inputEditBuildingDate');
+        if (dateEl) dates[selectedKey] = dateEl.value || '';
+        ['inputEditBuildingInspectionYear', 'inputEditBuildingInspectionPeriod'].forEach((id) => {
+            const el = document.getElementById(id);
+            if (!el || el.dataset.roundDateBound) return;
+            el.dataset.roundDateBound = '1';
+            el.addEventListener('change', () => {
+                const d = _editRoundDatesDraft;
+                if (!d) return;
+                const de = document.getElementById('inputEditBuildingDate');
+                if (de) d.dates[d.selectedKey] = de.value || '';
+                const b = (window.state.buildings || []).find((x) => x && x.id === d.bldgId) || window.state.currentBuilding;
+                d.selectedKey = editRoundKeyFromSelects(b);
+                if (de && d.dates[d.selectedKey]) de.value = d.dates[d.selectedKey];
+                renderEditRoundDatesList();
+            });
+        });
+        const dateInput = document.getElementById('inputEditBuildingDate');
+        if (dateInput && !dateInput.dataset.roundDateBound) {
+            dateInput.dataset.roundDateBound = '1';
+            dateInput.addEventListener('change', () => {
+                if (_editRoundDatesDraft) _editRoundDatesDraft.dates[_editRoundDatesDraft.selectedKey] = dateInput.value || '';
+            });
+        }
+        renderEditRoundDatesList();
+    }
+    function applyEditRoundDates(bldg, selectedKey, selectedDate) {
+        const mm = window.BSA && window.BSA.buildingMetaMerge;
+        if (!bldg || !mm || typeof mm.setRoundDate !== 'function') return;
+        const d = (_editRoundDatesDraft && _editRoundDatesDraft.bldgId === bldg.id) ? _editRoundDatesDraft.dates : {};
+        Object.keys(d).forEach((k) => { if (k !== selectedKey) mm.setRoundDate(bldg, k, d[k]); });
+        if (selectedDate) mm.setRoundDate(bldg, selectedKey, selectedDate);
+    }
+
     function getConcreteStrengthAgeDays(bldg) {
         bldg = bldg || window.state.currentBuilding;
         if (!bldg || !bldg.completionDate) return null;
         const start = parseYmdParts(bldg.completionDate);
         const now = new Date();
-        const end = bldg.date ? parseYmdParts(bldg.date) : { y: now.getFullYear(), m: now.getMonth() + 1, d: now.getDate() };
+        const inspDate = (typeof getBuildingInspectionDate === 'function') ? getBuildingInspectionDate(bldg) : (bldg.date || '');
+        const end = inspDate ? parseYmdParts(inspDate) : { y: now.getFullYear(), m: now.getMonth() + 1, d: now.getDate() };
         if (!start || !end) return null;
         const days = excelDays360(start, end);
         return days >= 0 ? days : null;
@@ -17450,7 +17534,7 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
             const autoText = info.autoDays != null ? ` · 자동이면 ${info.autoDays}일` : '';
             return `📅 재령일수: <b>${days}일</b>(${info.source === 'item' ? '이 항목' : '건물 공통'} 직접 입력${autoText}) → ${alphaText}`;
         }
-        return `📅 재령일수: 준공일(${bldg.completionDate}) ~ 점검일(${bldg.date || '오늘'}) = <b>${days}일</b>(1년 360일 기준) → ${alphaText}`;
+        return `📅 재령일수: 준공일(${bldg.completionDate}) ~ 점검일(${getBuildingInspectionDate(bldg) || '오늘'}) = <b>${days}일</b>(1년 360일 기준) → ${alphaText}`;
     }
 
     // 측정 각도 선택지(index.html #ndtAngle)에 있는 값만 쓴다. 그 밖(빈 값 포함)은 0°.
@@ -20642,6 +20726,9 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
         if (yearEl) yearEl.value = next.year;
         if (periodEl) periodEl.value = next.period;
 
+        // 2026-10-20 지난 회차 점검일을 그 회차 것으로 남겨 둔다(새 회차 날짜는 건물 수정에서 따로 정함)
+        { const mm = window.BSA && window.BSA.buildingMetaMerge;
+          if (mm && mm.seedRoundDate && mm.seedRoundDate(bldg, fromKey)) markBuildingMetaDirty(bldg); }
         bldg.inspectionYear = next.year;
         bldg.inspectionPeriod = next.period;
 

@@ -181,12 +181,82 @@
             var at = Math.max(metaUpdatedAt(localMatch), metaUpdatedAt(remote));
             if (at) merged.metaUpdatedAt = at;
             if (localMatch._pendingCloudSync) merged._pendingCloudSync = true;
+            if (localMatch.roundDates || (remote && remote.roundDates)) {
+                merged.roundDates = mergeRoundDates(localMatch.roundDates, remote && remote.roundDates);
+            }
         }
         merged._metaFieldHash = fieldHashes(merged);
         return merged;
     }
 
+    /**
+     * 2026-10-20 회차별 점검일 — bldg.roundDates = { '2026년_하반기': { date: 'YYYY-MM-DD', at: 고친시각 } }
+     *  회차(키)마다 따로 고친 시각으로 비교해 더 나중 것을 남긴다(다른 회차를 고친 기기끼리 서로 안 지움).
+     *  회차 날짜가 없으면 예전 건물 공통 점검일(bldg.date)을 쓴다.
+     */
+    function normalizeRoundDateEntry(v) {
+        if (v == null) return null;
+        if (typeof v === 'string') return { date: v, at: 0 };
+        if (typeof v !== 'object') return null;
+        return { date: typeof v.date === 'string' ? v.date : '', at: Number(v.at) || 0 };
+    }
+
+    function mergeRoundDates(localMap, remoteMap) {
+        var out = {};
+        function take(map, preferOnTie) {
+            if (!map || typeof map !== 'object' || Array.isArray(map)) return;
+            Object.keys(map).forEach(function (k) {
+                var e = normalizeRoundDateEntry(map[k]);
+                if (!e) return;
+                var cur = out[k];
+                if (!cur || e.at > cur.at || (preferOnTie && e.at === cur.at)) out[k] = e;
+            });
+        }
+        take(remoteMap, false);
+        take(localMap, true);
+        return out;
+    }
+
+    function getRoundDate(bldg, roundKey) {
+        if (!bldg) return '';
+        var map = bldg.roundDates;
+        if (roundKey && map && typeof map === 'object') {
+            var e = normalizeRoundDateEntry(map[roundKey]);
+            if (e && e.date) return e.date;
+        }
+        return bldg.date || '';
+    }
+
+    /** 회차 점검일을 정한다. 값이 그대로면 시각을 안 찍는다(반환 false). 빈 값이면 그 회차는 건물 공통 점검일로 돌아간다. */
+    function setRoundDate(bldg, roundKey, date, now) {
+        if (!bldg || !roundKey) return false;
+        var map = (bldg.roundDates && typeof bldg.roundDates === 'object' && !Array.isArray(bldg.roundDates)) ? bldg.roundDates : {};
+        var prev = normalizeRoundDateEntry(map[roundKey]);
+        var next = String(date == null ? '' : date).trim();
+        if (prev && prev.date === next) return false;
+        if (!prev && !next) return false;
+        var t = Number(now);
+        if (!Number.isFinite(t) || t <= 0) t = Date.now();
+        map[roundKey] = { date: next, at: Math.max(t, ((prev && prev.at) || 0) + 1) };
+        bldg.roundDates = map;
+        return true;
+    }
+
+    /** 옛 데이터 옮기기: 이 회차 날짜가 없고 건물 공통 점검일이 있으면 그 날짜를 이 회차 것으로 적어 둔다(시각 0 = 다른 기기 값이 늘 이김). */
+    function seedRoundDate(bldg, roundKey) {
+        if (!bldg || !roundKey || !bldg.date) return false;
+        var map = (bldg.roundDates && typeof bldg.roundDates === 'object' && !Array.isArray(bldg.roundDates)) ? bldg.roundDates : {};
+        if (normalizeRoundDateEntry(map[roundKey])) return false;
+        map[roundKey] = { date: bldg.date, at: 0 };
+        bldg.roundDates = map;
+        return true;
+    }
+
     var api = {
+        mergeRoundDates: mergeRoundDates,
+        getRoundDate: getRoundDate,
+        setRoundDate: setRoundDate,
+        seedRoundDate: seedRoundDate,
         KEYS: KEYS,
         metaUpdatedAt: metaUpdatedAt,
         markDirty: markDirty,
