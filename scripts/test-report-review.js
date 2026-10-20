@@ -88,5 +88,18 @@ assert.ok(/id="btnModalReportReview"/.test(html) && /id="reportReviewPanel"/.tes
 assert.ok(html.indexOf('js/core/report-review.js') > 0 && html.indexOf('js/core/report-review.js') < html.indexOf('src="app.js'));
 assert.ok(/function collectReportReviewRows\(\)[\s\S]{0,900}getSurveyRowsForReport\(defects\)/.test(app));
 assert.ok(app.includes('window.viewDefectOnMapFromSurvey(b.dataset.rrId)'), '줄 누르면 결함으로');
+// 2026-10-20 「미리보기를 닫아야 검토를 할 수 있다」: 결과 창은 미리보기 모달 밖(닫아도 남음), 체크·다시 검사·미리보기 다시 열기
+const modalBody = html.indexOf('id="modalReportPreviewBody"');
+const panelAt = html.indexOf('\n    <div id="reportReviewPanel"');
+assert.ok(modalBody > 0 && panelAt > modalBody, '결과 창은 body 바로 아래(미리보기 모달 밖)');
+assert.ok(/<\/div>\s*<\/div>\s*<\/div>\s*<!-- 2026-10-20 한글 출력 전 규칙 검토/.test(html.slice(modalBody, panelAt + 80)), '모달을 다 닫은 뒤');
+assert.ok(app.includes('data-rr-check=') && app.includes("a === 'rerun'") && app.includes("a === 'preview'"), '체크·다시 검사·미리보기');
+assert.ok(app.includes("panel.classList.toggle('is-over-modal'"), '미리보기 열려 있으면 그 위');
+// 열린 모달은 .modal-overlay.open z-index 10000 — 미리보기 위엔 그보다 높게, 닫힌 뒤엔 다른 열린 창보다 낮게
+const css = fs.readFileSync(path.join(root, 'styles.css'), 'utf8');
+const openZ = +((css.match(/\.modal-overlay\.open\s*\{[^}]*z-index:\s*(\d+)/) || [])[1] || 0);
+const overZ = +((css.match(/\.report-review-panel\.is-over-modal\{z-index:(\d+)\}/) || [])[1] || 0);
+const baseZ = +((css.match(/\.report-review-panel\{position:fixed;[^}]*z-index:(\d+)/) || [])[1] || 0);
+assert.ok(openZ > 0 && overZ > openZ && baseZ > 0 && baseZ < openZ, `z-index 모달 ${openZ} / 위 ${overZ} / 평소 ${baseZ}`);
 
 console.log('test-report-review: ok');

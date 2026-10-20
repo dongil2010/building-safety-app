@@ -55328,10 +55328,29 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
         });
         return rows;
     }
-    function renderReportReview() {
+    // 2026-10-20 「미리보기를 닫아야 검토를 할 수 있다」 → 결과는 미리보기 밖에 떠 있는 창. 줄을 눌러 결함으로 가도 창은 남고,
+    // 다 본 줄은 체크(건물별로 기억), 고친 뒤 「다시 검사」, 「미리보기」로 다시 열기. 미리보기가 열려 있으면 그 위, 아니면 다른 창들 아래.
+    const RR_CHECK_KEY = 'bsa_report_review_checked:';
+    let rrIssues = [];
+    let rrRowCount = 0;
+    let rrActiveKey = '';
+    const rrKey = (it) => [it.rule, it.floorCode, it.id, it.msg].join('|');
+    function rrCheckedSet() {
+        try { return new Set(JSON.parse(localStorage.getItem(RR_CHECK_KEY + (state.currentBuildingId || '')) || '[]')); } catch (_e) { return new Set(); }
+    }
+    function rrSaveChecked(set) {
+        // 지금 목록에 없는 체크는 버린다(고쳐서 사라진 것)
+        const live = new Set(rrIssues.map(rrKey));
+        try { localStorage.setItem(RR_CHECK_KEY + (state.currentBuildingId || ''), JSON.stringify([...set].filter((k) => live.has(k)))); } catch (_e) { /* ignore */ }
+    }
+    function syncReportReviewLayer() {
         const panel = document.getElementById('reportReviewPanel');
+        const modal = document.getElementById('reportPreviewModal');
+        if (panel) panel.classList.toggle('is-over-modal', !!(modal && modal.classList.contains('open')));
+    }
+    function runReportReview() {
         const R = window.BsaReportReview;
-        if (!panel || !R) return;
+        if (!R) return;
         const rows = collectReportReviewRows();
         const issues = R.reviewRows(rows);
         // 층(보고서 순서)·번호 순으로 묶어 보여 준다
@@ -55339,22 +55358,41 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
         rows.forEach((r) => { if (floorOrder.indexOf(r.floorCode) < 0) floorOrder.push(r.floorCode); });
         const noKey = (n) => { const m = String(n || '').match(/^(\d+)(?:-(\d+))?/); return m ? (+m[1]) * 1000 + (+(m[2] || 0)) : 1e9; };
         issues.sort((a, b) => (floorOrder.indexOf(a.floorCode) - floorOrder.indexOf(b.floorCode)) || (noKey(a.no) - noKey(b.no)));
+        rrIssues = issues;
+        rrRowCount = rows.length;
+        drawReportReview();
+    }
+    function drawReportReview() {
+        const panel = document.getElementById('reportReviewPanel');
+        if (!panel) return;
+        const checked = rrCheckedSet();
         const cnt = { error: 0, warn: 0, info: 0 };
-        issues.forEach((it) => { cnt[it.level]++; });
+        let left = 0;
+        rrIssues.forEach((it) => { cnt[it.level]++; if (!checked.has(rrKey(it))) left++; });
         const esc = (t) => String(t == null ? '' : t).replace(/[&<>"]/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]));
         const icon = { error: '⛔', warn: '⚠️', info: 'ℹ️' };
-        let html = '<div class="report-review-head"><b>검토 결과</b> <span>조사표 ' + rows.length + '행</span>'
-            + (issues.length ? ' · <span class="rr-error">확인 필요 ' + cnt.error + '</span> · <span class="rr-warn">주의 ' + cnt.warn + '</span> · <span class="rr-info">참고 ' + cnt.info + '</span>' : ' · <span class="rr-ok">이상한 곳을 찾지 못했습니다</span>')
-            + '<button type="button" class="report-review-close" data-rr-close title="닫기">✕</button></div>';
-        if (issues.length) {
-            html += '<ul class="report-review-list">' + issues.map((it) =>
-                '<li class="rr-' + it.level + '"><button type="button" data-rr-id="' + esc(it.id) + '" title="결함위치도에서 이 결함 보기">'
-                + '<span class="rr-icon">' + icon[it.level] + '</span><span class="rr-where">' + esc(it.floorLabel) + ' ' + esc(it.no) + (it.no ? '번' : '') + '</span>'
-                + '<span class="rr-msg">' + esc(it.msg) + '</span></button></li>').join('') + '</ul>';
+        const modalOpen = !!document.querySelector('#reportPreviewModal.open');
+        let html = '<div class="report-review-head" data-rr-drag title="끌어서 옮기기"><b>검토 결과</b> <span>조사표 ' + rrRowCount + '행</span>'
+            + (rrIssues.length ? ' · <span class="rr-error">확인 필요 ' + cnt.error + '</span> · <span class="rr-warn">주의 ' + cnt.warn + '</span> · <span class="rr-info">참고 ' + cnt.info + '</span> · <span class="rr-left">남음 ' + left + '</span>' : ' · <span class="rr-ok">이상한 곳을 찾지 못했습니다</span>')
+            + '<span class="report-review-tools">'
+            + '<button type="button" data-rr-act="rerun" title="고친 뒤 다시 훑기(체크는 그대로)">↻ 다시 검사</button>'
+            + (modalOpen ? '' : '<button type="button" data-rr-act="preview" title="보고서 미리보기 다시 열기">미리보기</button>')
+            + '<button type="button" data-rr-act="fold" title="접기·펴기">' + (panel.classList.contains('is-folded') ? '▢' : '—') + '</button>'
+            + '<button type="button" data-rr-act="close" title="닫기">✕</button></span></div>';
+        if (rrIssues.length) {
+            html += '<ul class="report-review-list">' + rrIssues.map((it) => {
+                const k = rrKey(it), done = checked.has(k);
+                return '<li class="rr-' + it.level + (done ? ' is-done' : '') + (k === rrActiveKey ? ' is-active' : '') + '">'
+                    + '<label class="rr-check" title="다 봤으면 체크"><input type="checkbox" data-rr-check="' + esc(k) + '"' + (done ? ' checked' : '') + '></label>'
+                    + '<button type="button" data-rr-id="' + esc(it.id) + '" data-rr-key="' + esc(k) + '" title="결함위치도에서 이 결함 보기(이 창은 그대로)">'
+                    + '<span class="rr-icon">' + icon[it.level] + '</span><span class="rr-where">' + esc(it.floorLabel) + ' ' + esc(it.no) + (it.no ? '번' : '') + '</span>'
+                    + '<span class="rr-msg">' + esc(it.msg) + '</span></button></li>';
+            }).join('') + '</ul>';
         }
-        html += '<div class="report-review-foot">규칙으로만 훑습니다(오타·문맥은 못 잡음). 상태양호·보수완료 행은 원인·균열폭 검사에서 뺍니다. 고치는 건 직접 — 줄을 누르면 그 결함으로 갑니다.</div>';
+        html += '<div class="report-review-foot">규칙으로만 훑습니다(오타·문맥은 못 잡음). 상태양호·보수완료 행은 원인·균열폭 검사에서 뺍니다. 줄을 누르면 그 결함으로 가고 이 창은 남습니다 — 고친 뒤 「다시 검사」.</div>';
         panel.innerHTML = html;
         panel.hidden = false;
+        syncReportReviewLayer();
         const btn = document.getElementById('btnModalReportReview');
         if (btn) btn.innerHTML = '<i class="fa-solid fa-list-check"></i> 검토' + (cnt.error + cnt.warn ? ' <b class="rr-badge">' + (cnt.error + cnt.warn) + '</b>' : '');
     }
@@ -55362,17 +55400,54 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
         const btn = document.getElementById('btnModalReportReview');
         const panel = document.getElementById('reportReviewPanel');
         if (!btn || !panel) return;
-        btn.addEventListener('click', () => {
-            if (!panel.hidden) { panel.hidden = true; return; }
-            try { renderReportReview(); } catch (err) { window.showToast?.('검토하지 못했습니다: ' + (err && err.message ? err.message : err), 'error', 4000); }
+        const safeRun = () => { try { runReportReview(); } catch (err) { window.showToast?.('검토하지 못했습니다: ' + (err && err.message ? err.message : err), 'error', 4000); } };
+        btn.addEventListener('click', () => { panel.classList.remove('is-folded'); safeRun(); });
+        // 미리보기가 열리고 닫힐 때 창 높이(겹침 순서)를 맞춘다
+        const modal = document.getElementById('reportPreviewModal');
+        if (modal && typeof MutationObserver === 'function') {
+            new MutationObserver(() => { syncReportReviewLayer(); if (!panel.hidden) drawReportReview(); }).observe(modal, { attributes: true, attributeFilter: ['class'] });
+        }
+        panel.addEventListener('change', (e) => {
+            const cb = e.target.closest('[data-rr-check]');
+            if (!cb) return;
+            const set = rrCheckedSet();
+            if (cb.checked) set.add(cb.dataset.rrCheck); else set.delete(cb.dataset.rrCheck);
+            rrSaveChecked(set);
+            drawReportReview();
         });
         panel.addEventListener('click', (e) => {
-            if (e.target.closest('[data-rr-close]')) { panel.hidden = true; return; }
+            const act = e.target.closest('[data-rr-act]');
+            if (act) {
+                const a = act.dataset.rrAct;
+                if (a === 'close') panel.hidden = true;
+                else if (a === 'rerun') safeRun();
+                else if (a === 'fold') { panel.classList.toggle('is-folded'); drawReportReview(); }
+                else if (a === 'preview' && typeof window.openReportPreviewModalFunc === 'function') window.openReportPreviewModalFunc();
+                return;
+            }
             const b = e.target.closest('[data-rr-id]');
             if (!b || !b.dataset.rrId) return;
-            const modal = document.getElementById('reportPreviewModal');
-            if (modal) { modal.style.display = 'none'; modal.classList.remove('open'); }
+            rrActiveKey = b.dataset.rrKey || '';
+            const m = document.getElementById('reportPreviewModal');
+            if (m) { m.style.display = 'none'; m.classList.remove('open'); }
             if (typeof window.viewDefectOnMapFromSurvey === 'function') window.viewDefectOnMapFromSurvey(b.dataset.rrId);
+            drawReportReview();
+        });
+        // 머리를 끌어 옮기기(지도·수정창을 가리지 않게)
+        panel.addEventListener('pointerdown', (e) => {
+            const head = e.target.closest('[data-rr-drag]');
+            if (!head || e.target.closest('button') || e.button > 0) return;
+            const r = panel.getBoundingClientRect();
+            const ox = e.clientX - r.left, oy = e.clientY - r.top;
+            const move = (ev) => {
+                const x = Math.min(Math.max(0, ev.clientX - ox), window.innerWidth - 80);
+                const y = Math.min(Math.max(0, ev.clientY - oy), window.innerHeight - 40);
+                panel.style.left = x + 'px'; panel.style.top = y + 'px'; panel.style.right = 'auto'; panel.style.bottom = 'auto';
+            };
+            const up = () => { window.removeEventListener('pointermove', move); window.removeEventListener('pointerup', up); };
+            window.addEventListener('pointermove', move);
+            window.addEventListener('pointerup', up);
+            e.preventDefault();
         });
     })();
 
