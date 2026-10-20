@@ -6681,6 +6681,7 @@ document.addEventListener('DOMContentLoaded', () => {
             if (siteInput) siteInput.value = window.state.dashboardSiteKey || '';
             if (dongInput) dongInput.value = '';
             if (nameInput) nameInput.value = '';
+            resetAddBuildingDongRows();
             const inheritMulti = window.state.dashboardSiteKey
                 ? isSiteMultiDong(window.state.dashboardSiteKey)
                 : false;
@@ -7980,7 +7981,23 @@ document.addEventListener('DOMContentLoaded', () => {
             const siteName = (siteNameInput ? siteNameInput.value : '').trim();
             const multiDong = readSiteLayoutRadio('addBuildingSiteLayout', false)
                 || (window.state.dashboardSiteKey ? isSiteMultiDong(window.state.dashboardSiteKey) : false);
+            const isImportForDongs = window._addBuildingMode === 'import';
+            let extraDongNames = [];
+            if (multiDong && !isImportForDongs) {
+                const collected = collectAddBuildingDongNames();
+                if (!collected.ok) return;
+                if (dongInput) dongInput.value = collected.names[0] || '';
+                extraDongNames = collected.names.slice(1);
+            }
             const dong = multiDong ? normalizeDongLabel(dongInput ? dongInput.value : '') : '';
+            if (multiDong && siteName) {
+                const roundKeyChk = `${document.getElementById('inputBuildingInspectionYear')?.value || '2026년'}_${document.getElementById('inputBuildingInspectionPeriod')?.value || '하반기'}`;
+                const clash = [dong].concat(extraDongNames).filter((d) => d && siteRoundAlreadyHasDong(siteName, roundKeyChk, d));
+                if (clash.length) {
+                    window.showToast(`이 현장·회차에 이미 있는 동입니다: ${clash.join(', ')}`, 'warning', 4500);
+                    return;
+                }
+            }
             if (!siteName) {
                 window.showToast('현장명을 입력해 주세요.', 'warning');
                 if (siteNameInput) siteNameInput.focus();
@@ -8135,6 +8152,46 @@ document.addEventListener('DOMContentLoaded', () => {
             };
 
             window.state.buildings.unshift(newBldg);
+            // 여러 동 동시 등록: 나머지 동은 홈 「동 추가」와 같은 구조(같은 회차·도면 없음)로 생성
+            const extraDongBldgs = [];
+            if (multiDong && extraDongNames.length) {
+                const usedIds = new Set((window.state.buildings || []).map((b) => b.id));
+                let seq = Date.now();
+                extraDongNames.forEach((d) => {
+                    let id;
+                    do { seq += 1; id = 'bldg-' + seq; } while (usedIds.has(id));
+                    usedIds.add(id);
+                    extraDongBldgs.push({
+                        id,
+                        _pendingCloudSync: true,
+                        siteName,
+                        dong: d,
+                        multiDong: true,
+                        name: composeBuildingStorageName(siteName, d),
+                        address,
+                        inspector,
+                        contactPhone,
+                        date,
+                        floors: '',
+                        inspectionType,
+                        inspectionYear,
+                        inspectionPeriod,
+                        latestSurveyRoundKey: `${inspectionYear}_${inspectionPeriod}`,
+                        siteVaultKey: siteVaultDocId(siteName),
+                        structureType,
+                        facilityGrade,
+                        completionDate,
+                        notes,
+                        floorsList: [],
+                        floorDrawings: {},
+                        floorDrawingPdfs: {},
+                        floorDrawingTiers: {},
+                        floorDrawingSources: {}
+                    });
+                });
+                // 등록 순서대로 보이도록 첫 동 뒤에 끼움
+                window.state.buildings.splice(1, 0, ...extraDongBldgs);
+            }
             if (multiDong) setSiteMultiDongFlag(siteName, true);
             else setSiteMultiDongFlag(siteName, false);
 
@@ -8165,7 +8222,8 @@ document.addEventListener('DOMContentLoaded', () => {
             const importNote = (isImportMode && sourceBldg)
                 ? ' · 다른 점검 데이터 반영'
                 : '';
-            window.showToast(`'${name}' 건축물이 등록되었습니다${importNote}.`, 'success');
+            const extraNote = extraDongBldgs.length ? ` · 동 ${extraDongBldgs.length + 1}개 등록` : '';
+            window.showToast(`'${name}' 건축물이 등록되었습니다${importNote}${extraNote}.`, 'success');
         });
     }
 
@@ -59706,7 +59764,96 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
         if (!multi) {
             const dongInput = document.getElementById('inputBuildingDong');
             if (dongInput) dongInput.value = '';
+            resetAddBuildingDongRows();
         }
+    }
+
+    /** 건축물 등록 「여러 동」: 동 명칭 입력 행(첫 행 = #inputBuildingDong) */
+    function getAddBuildingDongInputs() {
+        const first = document.getElementById('inputBuildingDong');
+        const extra = Array.from(document.querySelectorAll('#addBuildingExtraDongs input.dong-name-input'));
+        return (first ? [first] : []).concat(extra);
+    }
+    function refreshAddBuildingDongRowButtons() {
+        const inputs = getAddBuildingDongInputs();
+        const firstDel = document.getElementById('btnDelFirstDongRow');
+        if (firstDel) firstDel.hidden = inputs.length <= 1;
+    }
+    function addAddBuildingDongRow(value) {
+        const host = document.getElementById('addBuildingExtraDongs');
+        if (!host) return null;
+        const row = document.createElement('div');
+        row.className = 'dong-name-row';
+        const input = document.createElement('input');
+        input.type = 'text';
+        input.className = 'form-control dong-name-input';
+        input.placeholder = '예: 102동, B동';
+        input.value = value || '';
+        const del = document.createElement('button');
+        del.type = 'button';
+        del.className = 'dong-name-row-del';
+        del.title = '이 동 삭제';
+        del.setAttribute('aria-label', '이 동 삭제');
+        del.innerHTML = '<i class="fa-solid fa-xmark"></i>';
+        del.addEventListener('click', () => { row.remove(); refreshAddBuildingDongRowButtons(); });
+        row.appendChild(input);
+        row.appendChild(del);
+        host.appendChild(row);
+        refreshAddBuildingDongRowButtons();
+        return input;
+    }
+    function resetAddBuildingDongRows() {
+        const host = document.getElementById('addBuildingExtraDongs');
+        if (host) host.innerHTML = '';
+        getAddBuildingDongInputs().forEach((el) => el.classList.remove('is-invalid'));
+        refreshAddBuildingDongRowButtons();
+    }
+    (function wireAddBuildingDongRows() {
+        if (typeof document === 'undefined' || typeof document.getElementById !== 'function') return;
+        const addBtn = document.getElementById('btnAddDongNameRow');
+        if (addBtn) addBtn.addEventListener('click', () => {
+            const input = addAddBuildingDongRow('');
+            if (input) input.focus();
+        });
+        const firstDel = document.getElementById('btnDelFirstDongRow');
+        if (firstDel) firstDel.addEventListener('click', () => {
+            // 첫 행 삭제 = 두 번째 행 값을 첫 행으로 당기고 두 번째 행 제거 (최소 1행 유지)
+            const extraRows = document.querySelectorAll('#addBuildingExtraDongs .dong-name-row');
+            if (!extraRows.length) return;
+            const first = document.getElementById('inputBuildingDong');
+            const nextInput = extraRows[0].querySelector('input');
+            if (first) first.value = nextInput ? nextInput.value : '';
+            extraRows[0].remove();
+            refreshAddBuildingDongRowButtons();
+        });
+    })();
+    /** 입력된 동 명칭 검증 → { ok, names } (trim·빈칸·중복 거부). 행이 1개면 기존처럼 빈 값 허용 */
+    function collectAddBuildingDongNames() {
+        const inputs = getAddBuildingDongInputs();
+        inputs.forEach((el) => el.classList.remove('is-invalid'));
+        const names = [];
+        const seen = new Set();
+        for (const el of inputs) {
+            const v = normalizeDongLabel(el.value);
+            el.value = v;
+            if (!v) {
+                if (inputs.length === 1) return { ok: true, names: [''] };
+                el.classList.add('is-invalid');
+                window.showToast('비어 있는 동 명칭이 있습니다. 입력하거나 행을 삭제해 주세요.', 'warning');
+                el.focus();
+                return { ok: false };
+            }
+            const key = v.toLowerCase();
+            if (seen.has(key)) {
+                el.classList.add('is-invalid');
+                window.showToast(`동 명칭 "${v}"이(가) 중복되었습니다.`, 'warning');
+                el.focus();
+                return { ok: false };
+            }
+            seen.add(key);
+            names.push(v);
+        }
+        return { ok: true, names };
     }
 
     function syncEditBuildingDongFieldVisibility() {
