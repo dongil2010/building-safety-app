@@ -43850,6 +43850,64 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
     const btnImportCadPins = document.getElementById('btnImportCadPins');
     const inputImportCadPins = document.getElementById('inputImportCadPins');
     
+    /**
+     * 「내용 비우기 (핀 위치 유지)」(2026-10-20): 지금 층(이 동·이번 회차) 마킹의 결함 내용만 비운다.
+     * 핀·박스·지시선·번호·영역은 그대로. 이번 회차 사진은 떼기만(파일은 남김 — 되돌리기로 다시 붙음).
+     * 칸 시각(fieldAt)·사진 기록(photoState)을 찍어 서버의 옛 내용이 동기화로 되돌아오지 않게 한다.
+     */
+    async function clearDefectContentsOnFloor() {
+        if (window.__bsaEvalMapOn === true) { window.showToast?.('평가 탭에서는 쓸 수 없습니다.', 'info', 2500); return; }
+        if (!state.currentBuildingId || !state.currentFloor) {
+            window.showToast?.('먼저 점검할 대상 건축물과 층을 선택해 주세요.', 'warning', 3500);
+            return;
+        }
+        const C = window.BSA && window.BSA.defectContentClear;
+        if (!C) return;
+        const floorKey = `${state.currentBuildingId}_${state.currentFloor}`;
+        const list = (state.defects && state.defects[floorKey]) || [];
+        const targets = list.filter((d) => d && C.hasContent(d));
+        if (!targets.length) { window.showToast?.('이 층에는 비울 결함 내용이 없습니다.', 'info', 3000); return; }
+        const photoN = targets.reduce((s, d) => s + C.currentPhotoCount(d), 0);
+        const bldg = state.currentBuilding || (state.buildings || []).find((b) => b.id === state.currentBuildingId);
+        const fl = (typeof window.getFloorLabelFromCode === 'function') ? window.getFloorLabelFromCode(state.currentFloor) : state.currentFloor;
+        const name = String((bldg && bldg.name) || '').replace(/^🏢\s*/, '');
+        const ok = await window.appConfirm(
+            `${name} · ${fl}\n마킹 ${targets.length}개의 결함 내용을 비웁니다.\n` +
+            `(종류·부재·원인·크기·개수·비고·진행 표시${photoN ? ` · 이번 회차 사진 ${photoN}장 떼기` : ''})\n\n` +
+            '핀·박스·지시선·번호는 그대로이고, 이전 회차 사진·다른 층·다른 동은 건드리지 않습니다.\n되돌리기(Ctrl+Z)로 돌아갈 수 있습니다.',
+            { title: '내용 비우기 (핀 위치 유지)', okText: `${targets.length}개 비우기`, danger: true }
+        );
+        if (!ok) return;
+        let snaps = [];
+        if (typeof snapshotBeforeBulkOp === 'function') {
+            try { snaps = await snapshotBeforeBulkOp('내용 비우기', [floorKey]); } catch (_e) { snaps = []; }
+        }
+        pushDefectHistory();
+        let n = 0;
+        targets.forEach((d) => {
+            const photoCount = C.currentPhotoCount(d);
+            const beforeIds = photoCount ? defectPhotoIdList(d, photoCount) : [];
+            const changed = C.clearContentFields(d);
+            if (changed) touchDefectUpdatedAt(d);
+            if (photoCount) {
+                C.unlinkCurrentPhotos(d, beforeIds);
+                recordDefectPhotoState(d, beforeIds, []);
+                stampDefectPhotosChangedIfSafe(d);
+                if (!changed) d.updatedAt = bsaStampAfter(d.updatedAt);
+            }
+            n++;
+        });
+        if (typeof markFloorKeyDirty === 'function') markFloorKeyDirty(floorKey);
+        saveStateToLocalStorage();
+        if (typeof recordAfterBulkOp === 'function') recordAfterBulkOp(snaps);
+        refreshAfterDefectNumberChange();
+        window.showToast?.(`마킹 ${n}개의 내용을 비웠습니다(핀 위치 유지). 되돌리기: Ctrl+Z`, 'success', 5000);
+    }
+    window.clearDefectContentsOnFloor = clearDefectContentsOnFloor;
+    document.getElementById('btnClearDefectContents')?.addEventListener('click', () => {
+        clearDefectContentsOnFloor().catch((e) => { console.warn('[내용 비우기] 실패', e); window.showToast?.('내용 비우기에 실패했습니다: ' + (e && e.message), 'error', 5000); });
+    });
+
     const btnCompactMarkingGaps = document.getElementById('btnCompactMarkingGaps');
     if (btnCompactMarkingGaps) {
         btnCompactMarkingGaps.addEventListener('click', async () => {
