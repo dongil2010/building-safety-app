@@ -37,11 +37,23 @@ assert.ok(rules([row({ widths: ['8'] })]).includes('width-range'), '8mm 너무 �
 assert.ok(rules([row({ widths: ['0.0003'] })]).includes('width-range'), 'm로 적은 듯');
 assert.ok(rules([row({ widths: ['0.3cm'] })]).includes('width-nan'), 'cm 글자');
 assert.ok(rules([row({ widths: ['0'] })]).includes('width-range'), '0');
+// 2026-10-20 범위로 적은 균열폭(0.1~0.2)은 숫자로 본다 — 양끝을 각각 범위 검사
+assert.deepStrictEqual(R.nums('0.1~0.2'), [0.1, 0.2]);
+assert.deepStrictEqual(R.nums('0.1 ～ 0.2mm'), [0.1, 0.2]);
+assert.deepStrictEqual(R.nums('0.1-0.2'), [0.1, 0.2]);
+assert.deepStrictEqual(R.nums('0.3'), [0.3]);
+assert.strictEqual(R.nums('0.1~약2'), null);
+assert.deepStrictEqual(rules([row({ widths: ['0.1~0.2'] })]), [], '0.1~0.2는 정상');
+assert.deepStrictEqual(rules([row({ widths: ['0.1~0.2mm', '0.3'] })]), [], '범위 + 하나');
+assert.ok(rules([row({ widths: ['0.2~8'] })]).includes('width-range'), '범위 끝이 너무 큼');
+assert.ok(rules([row({ widths: ['0.1~'] })]).includes('width-nan'), '끝이 빈 범위');
+assert.deepStrictEqual(rules([row({ crackLength: '0.5~1.2' })]), [], '길이 범위');
 assert.ok(rules([row({ widths: ['0.2', '0.4mm'] })]).length === 0, '여러 폭');
 assert.ok(rules([row({ widths: [], sizeText: '' })]).includes('empty-width'), '균열인데 폭 없음');
 assert.ok(!rules([row({ widths: [], sizeText: '0.3mm×1.2m' })]).includes('empty-width'), '규모 칸에 적었으면 괜찮음');
-assert.ok(rules([row({ defectType: '박리', widths: ['0.2'] })]).includes('width-not-crack'), '균열 아닌데 폭');
-assert.ok(!rules([row({ defectType: '수직균열' })]).includes('width-not-crack'), '수직균열도 균열');
+assert.deepStrictEqual(rules([row({ defectType: '이격', widths: ['20'] })]), [], '이격폭은 균열폭 칸에 적어도 됨(범위 검사도 안 함)');
+assert.ok(rules([row({ defectType: '이격', widths: ['약2'] })]).includes('width-nan'), '이격폭도 숫자는 봄');
+assert.ok(rules([row({ defectType: '수직균열', widths: ['9'] })]).includes('width-range'), '수직균열도 균열(범위 검사)');
 
 // 길이·개수
 assert.ok(rules([row({ crackLength: '120' })]).includes('length-range'), '120m');

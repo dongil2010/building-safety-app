@@ -20,6 +20,14 @@
         if (!t) return NaN;
         return /^[+-]?(\d+\.?\d*|\.\d+)$/.test(t) ? parseFloat(t) : NaN;
     }
+    /** 범위로 적은 값도 받는다(2026-10-20 사용자: 「0.1~0.2」): "0.1~0.2" "0.1～0.2mm" "0.1-0.2" → [0.1, 0.2], 숫자 아니면 null */
+    function nums(v) {
+        var t = trim(v);
+        if (!t) return null;
+        var parts = t.split(/\s*[~～∼〜]\s*|(?:(?<=\d)\s*-\s*(?=[\d.]))/);
+        var out = parts.map(num);
+        return out.length && out.every(Number.isFinite) ? out : null;
+    }
     function isCrackType(t) { return /균열/.test(squash(t)); }
 
     // 균열폭(mm): 이보다 크면 단위(cm·m)나 소수점 실수를 의심
@@ -70,18 +78,22 @@
             // ---- 균열폭·길이·개수 ----
             var widths = (Array.isArray(r.widths) ? r.widths : []).map(trim).filter(Boolean);
             if (!r.good && crack && !widths.length && !trim(r.sizeText).replace(/^-$/, '')) push(out, r, 'warn', 'empty-width', '균열인데 균열폭(규모)이 비어 있습니다.');
-            if (!crack && widths.length && !r.good) push(out, r, 'warn', 'width-not-crack', '균열이 아닌데 균열폭(' + widths.join(', ') + ')이 들어 있습니다.');
+            // 균열이 아닌 것(이격 등)도 폭을 균열폭 칸에 적는다(2026-10-20 사용자) — 「균열 아닌데 폭」은 안 띄우고,
+            // 크기 범위(>5mm·<0.01mm)도 균열만 본다(이격폭 20mm는 정상). 숫자 아님·0 이하는 다 본다.
+            var wName = crack ? '균열폭' : '폭';
             widths.forEach(function (w) {
-                var n = num(w);
-                if (!Number.isFinite(n)) push(out, r, 'error', 'width-nan', '균열폭 「' + w + '」이 숫자가 아닙니다.');
-                else if (n <= 0) push(out, r, 'error', 'width-range', '균열폭이 0 이하입니다(' + w + ').');
-                else if (n > CRACK_WIDTH_MAX_MM) push(out, r, 'warn', 'width-range', '균열폭 ' + w + ' — mm로 보기엔 너무 큽니다(cm·소수점 확인).');
-                else if (n < CRACK_WIDTH_MIN_MM) push(out, r, 'warn', 'width-range', '균열폭 ' + w + ' — mm로 보기엔 너무 작습니다(m로 적었는지 확인).');
+                var ns = nums(w);   // 0.1~0.2 같은 범위는 양끝을 본다
+                if (!ns) { push(out, r, 'error', 'width-nan', wName + ' 「' + w + '」이 숫자가 아닙니다.'); return; }
+                var lo = Math.min.apply(null, ns), n = Math.max.apply(null, ns);
+                if (lo <= 0) push(out, r, 'error', 'width-range', wName + '이 0 이하입니다(' + w + ').');
+                else if (crack && n > CRACK_WIDTH_MAX_MM) push(out, r, 'warn', 'width-range', '균열폭 ' + w + ' — mm로 보기엔 너무 큽니다(cm·소수점 확인).');
+                else if (crack && lo < CRACK_WIDTH_MIN_MM) push(out, r, 'warn', 'width-range', '균열폭 ' + w + ' — mm로 보기엔 너무 작습니다(m로 적었는지 확인).');
             });
             String(trim(r.crackLength)).split(/\s*[\/,]\s*/).filter(Boolean).forEach(function (l) {
-                var n = num(l);
-                if (!Number.isFinite(n)) push(out, r, 'error', 'length-nan', '균열 길이 「' + l + '」이 숫자가 아닙니다.');
-                else if (n <= 0) push(out, r, 'error', 'length-range', '균열 길이가 0 이하입니다(' + l + ').');
+                var ns = nums(l);
+                if (!ns) { push(out, r, 'error', 'length-nan', '균열 길이 「' + l + '」이 숫자가 아닙니다.'); return; }
+                var n = Math.max.apply(null, ns);
+                if (Math.min.apply(null, ns) <= 0) push(out, r, 'error', 'length-range', '균열 길이가 0 이하입니다(' + l + ').');
                 else if (n > CRACK_LENGTH_MAX_M) push(out, r, 'warn', 'length-range', '균열 길이 ' + l + 'm — 너무 깁니다(mm·cm로 적었는지 확인).');
             });
             String(trim(r.itemCount)).split(/\s*[\/,]\s*/).filter(Boolean).forEach(function (c) {
@@ -141,7 +153,7 @@
         return out.sort(function (x, y) { return (order[x.level] - order[y.level]); });
     }
 
-    var api = { reviewRows: reviewRows, findRepeat: findRepeat, num: num, CRACK_WIDTH_MAX_MM: CRACK_WIDTH_MAX_MM, CRACK_LENGTH_MAX_M: CRACK_LENGTH_MAX_M };
+    var api = { reviewRows: reviewRows, findRepeat: findRepeat, num: num, nums: nums, CRACK_WIDTH_MAX_MM: CRACK_WIDTH_MAX_MM, CRACK_LENGTH_MAX_M: CRACK_LENGTH_MAX_M };
     root.BsaReportReview = api;
     if (typeof module !== 'undefined' && module.exports) module.exports = api;
 })(typeof window !== 'undefined' ? window : globalThis);
