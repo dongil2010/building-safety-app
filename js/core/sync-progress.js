@@ -196,6 +196,12 @@
             if (!where) return;
             load();
             data.failures[String(where)] = { reason: String(reason || '실패'), at: now() };
+            // 실패 기록은 안내용 — 최근 50개만(기기 저장 공간, 2026-10-20). 올릴 것 표시(entries)는 자르지 않는다
+            var fk = Object.keys(data.failures);
+            if (fk.length > 50) {
+                fk.sort(function (a, b) { return (data.failures[a].at || 0) - (data.failures[b].at || 0); })
+                    .slice(0, fk.length - 50).forEach(function (k) { delete data.failures[k]; });
+            }
             save();
         }
         function clearFailure(where) {

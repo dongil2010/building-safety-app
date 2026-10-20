@@ -1328,10 +1328,30 @@ document.addEventListener('DOMContentLoaded', () => {
         }
         _activeLocalStateCompanyId = companyId || null;
         clearInspectionStateInMemory();
+        // 2026-10-20 기기 저장 공간이 차서 IndexedDB 예비 저장본에 남긴 것이 더 새 것이면 그걸 읽는다
+        const raw = (companyId || uid) ? await readIdbStateFallbackIfNewer(getLocalStorageStateKey(companyId || null)) : null;
         if (companyId && typeof loadStateFromLocalStorage === 'function') {
-            loadStateFromLocalStorage({ companyId });
+            loadStateFromLocalStorage({ companyId, raw });
         } else if (!companyId && uid && typeof loadStateFromLocalStorage === 'function') {
-            loadStateFromLocalStorage({ companyId: null });
+            loadStateFromLocalStorage({ companyId: null, raw });
+        }
+        // 큰 데이터(SAFETY357 그림·다른 회사 저장본)를 IndexedDB로 옮겨 자리를 만든다(확인 뒤에만 지움)
+        setTimeout(() => { try { window.bsaFreeLocalStorage && window.bsaFreeLocalStorage(); } catch (_e) { /* ignore */ } }, 8000);
+    }
+
+    async function readIdbStateFallbackIfNewer(key) {
+        try {
+            const LQ = window.BSA && window.BSA.lsQuota;
+            if (!LQ) return null;
+            const fb = await localBackupGet('state:' + key);
+            if (!fb || typeof fb.raw !== 'string' || !fb.raw) return null;
+            const lsRaw = localStorage.getItem(key);
+            if (lsRaw && LQ.savedAtOf(lsRaw) >= LQ.savedAtOf(fb.raw)) return null;
+            _idbStateFallbackKeys.add(key);
+            console.info('[저장 공간] IndexedDB 예비 저장본에서 읽습니다:', key);
+            return fb.raw;
+        } catch (_e) {
+            return null;
         }
     }
 
@@ -2764,6 +2784,96 @@ document.addEventListener('DOMContentLoaded', () => {
         });
     }
 
+    // ── 기기 저장 공간 가득 참 처리(2026-10-20) ─────────────────────────────
+    const _idbStateFallbackKeys = new Set();
+    let _quotaSavePending = null;   // { key, json } — 가장 최근 것만
+    let _quotaSaveRunning = false;
+    function localBackupIo() {
+        return {
+            put: (k, v) => localBackupPut(k, v),
+            get: (k) => localBackupGet(k),
+            del: (k) => localBackupDelete(k)
+        };
+    }
+    function dropIdbStateFallback(key) {
+        _idbStateFallbackKeys.delete(key);
+        localBackupIo().del('state:' + key).catch(() => {});
+    }
+    function queueQuotaStateSave(key, json) {
+        _quotaSavePending = { key, json };
+        if (_quotaSaveRunning) return;
+        _quotaSaveRunning = true;
+        (async () => {
+            while (_quotaSavePending) {
+                const job = _quotaSavePending;
+                _quotaSavePending = null;
+                let ok = false;
+                try { ok = await saveStateUnderQuota(job.key, job.json); } catch (e) { console.warn('[저장 공간] 처리 실패:', e); }
+                if (!ok) notifyLocalSaveFailed(true);
+            }
+        })().finally(() => { _quotaSaveRunning = false; });
+    }
+    /** true = 기기(localStorage 또는 IndexedDB 예비)에 확실히 남김 */
+    async function saveStateUnderQuota(key, json) {
+        const LQ = window.BSA.lsQuota;
+        const io = localBackupIo();
+        const r = await LQ.setWithRetry(localStorage, key, json, io, { currentStateKey: key });
+        if (r.freed && (r.freed.moved.length || r.freed.removed.length)) {
+            console.info('[저장 공간] 정리:', r.freed);
+        }
+        if (r.ok) { if (_idbStateFallbackKeys.has(key)) dropIdbStateFallback(key); return true; }
+        // localStorage에 못 쓰면 IndexedDB 예비 저장본(쓰고 → 다시 읽어 확인)
+        const entry = { raw: json, savedAt: LQ.savedAtOf(json) || Date.now(), storageKey: key };
+        await io.put('state:' + key, entry);
+        const back = await io.get('state:' + key);
+        if (!back || back.raw !== json) return false;
+        _idbStateFallbackKeys.add(key);
+        // 확인된 예비 저장본이 있으니 기기의 옛 저장본은 비워 자리를 만들고 한 번 더(되면 예비본 정리)
+        try {
+            localStorage.removeItem(key);
+            localStorage.setItem(key, json);
+            dropIdbStateFallback(key);
+        } catch (_e) { /* 예비 저장본으로 계속 — 다시 열 때 거기서 읽는다 */ }
+        console.info('[저장 공간] 기기 저장본을 IndexedDB 예비 저장소에 남겼습니다:', key, Math.round(json.length / 1024) + 'K자');
+        return true;
+    }
+    function notifyLocalSaveFailed(isQuotaError) {
+        const nowMs = Date.now();
+        if (_localStorageSaveFailedNotified && (nowMs - (_localStorageSaveFailedAt || 0)) <= 120000) return;
+        _localStorageSaveFailedNotified = true;
+        _localStorageSaveFailedAt = nowMs;
+        const cloudQueued = !!(db && window.state.companyId && navigator.onLine !== false);
+        if (!_suppressSyncOnSave && typeof scheduleSyncToFirebase === 'function') {
+            try { scheduleSyncToFirebase(); } catch (_e) { /* ignore */ }
+        }
+        const tail = cloudQueued
+            ? ' 변경사항은 서버에 올리는 중입니다 — 동기화가 끝나기 전에 새로고침하거나 앱을 닫지 마세요.'
+            : ' 지금 오프라인이라 서버에도 못 올렸습니다 — 인터넷에 연결될 때까지 새로고침하거나 앱을 닫지 마세요.';
+        try { console.info(window.bsaStorageReport ? window.bsaStorageReport(true) : ''); } catch (_e) { /* ignore */ }
+        window.showToast(
+            (isQuotaError ? '이 기기 저장 공간이 가득 차서 기기에는 저장하지 못했습니다.' : '변경사항을 기기에 저장하지 못했습니다.') + tail,
+            'error', 10000
+        );
+    }
+    /** 콘솔 진단: bsaStorageReport() — 기기 저장 공간을 많이 쓰는 키 */
+    window.bsaStorageReport = function (asText) {
+        const LQ = window.BSA && window.BSA.lsQuota;
+        if (!LQ) return null;
+        const rep = LQ.report(localStorage);
+        const text = LQ.formatReport(rep, 25);
+        if (!asText) { console.log(text); try { console.table(rep.rows.slice(0, 25).map((r) => ({ key: r.key, 'K자': +(r.chars / 1024).toFixed(1) }))); } catch (_e) { /* ignore */ } }
+        return asText ? text : rep;
+    };
+    /** 콘솔/설정: 큰 데이터를 IndexedDB로 옮겨 자리 만들기 */
+    window.bsaFreeLocalStorage = async function () {
+        const LQ = window.BSA && window.BSA.lsQuota;
+        if (!LQ) return null;
+        const r = await LQ.freeSpace(localStorage, localBackupIo(), { currentStateKey: getLocalStorageStateKey(window.state.companyId) });
+        console.info('[저장 공간] 정리 결과:', r);
+        return r;
+    };
+    if (typeof window.saveStateToLocalStorage !== 'function') window.saveStateToLocalStorage = saveStateToLocalStorage;
+
     function saveStateToLocalStorage() {
         try {
             if ((state.currentTab === 'tab-map' || window.__bsaEvalMapOn === true) && typeof captureFloorSnapshotNow === 'function') {
@@ -2815,6 +2925,8 @@ document.addEventListener('DOMContentLoaded', () => {
             });
 
             const dataToSave = {
+                // 저장 시각(맨 앞) — IndexedDB 예비 저장본과 어느 쪽이 새 것인지 비교한다(2026-10-20)
+                __savedAt: Date.now(),
                 defects: sanitizedDefects,
                 ndtData: sanitizedNdt,
                 ndtDisplacementGroups: window.state.ndtDisplacementGroups || {},
@@ -2888,7 +3000,18 @@ document.addEventListener('DOMContentLoaded', () => {
                 areaBorderStyle: window.state.areaBorderStyle || 'solid',
                 snapToCad: window.state.snapToCad !== false
             };
-            localStorage.setItem(getLocalStorageStateKey(window.state.companyId), JSON.stringify(dataToSave));
+            const stateKeyForSave = getLocalStorageStateKey(window.state.companyId);
+            const stateJson = JSON.stringify(dataToSave);
+            try {
+                localStorage.setItem(stateKeyForSave, stateJson);
+                if (_idbStateFallbackKeys.has(stateKeyForSave)) dropIdbStateFallback(stateKeyForSave);
+            } catch (lsErr) {
+                const LQ = window.BSA && window.BSA.lsQuota;
+                if (!LQ || !LQ.isQuotaError(lsErr)) throw lsErr;
+                // 2026-10-20 가득 참: 바로 오류를 띄우지 않고 공간을 만든 뒤 다시 쓰고, 그래도 안 되면
+                // IndexedDB 예비 저장본에 쓴다(다시 읽어 확인). 둘 다 실패할 때만 알린다.
+                queueQuotaStateSave(stateKeyForSave, stateJson);
+            }
             if (window.state.companyId) {
                 try { localStorage.setItem('bsa_last_active_company_id', window.state.companyId); } catch (_e) { /* ignore */ }
             }
@@ -2964,7 +3087,7 @@ document.addEventListener('DOMContentLoaded', () => {
         options = options || {};
         const companyId = options.companyId !== undefined ? options.companyId : window.state.companyId;
         try {
-            let saved = localStorage.getItem(getLocalStorageStateKey(companyId));
+            let saved = (typeof options.raw === 'string' && options.raw) ? options.raw : localStorage.getItem(getLocalStorageStateKey(companyId));
             // 회사 로그인 시 전역(가입 전) 로컬 blob은 읽지 않음 — 클라우드·회사별 캐시만 사용
             if (!saved && !companyId) {
                 saved = localStorage.getItem(LOCAL_STATE_KEY_LEGACY);
@@ -28821,7 +28944,9 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
         const strip = JSON.parse(JSON.stringify(project || {}));
         (strip.buildings || []).forEach((x) => {
             if (x && x.imageDataUrl) {
-                try { localStorage.setItem('bsa.s357img.' + bid + '.' + x.id, x.imageDataUrl); } catch (_e) { /* 용량 */ }
+                // 2026-10-20 그림은 IndexedDB에(예전엔 localStorage — 기기 저장 공간을 가득 채웠다)
+                const img = x.imageDataUrl;
+                localBackupPut('s357img:' + bid + '.' + x.id, img).catch((e) => console.warn('[SAFETY357] 그림 저장 실패', e));
                 delete x.imageDataUrl;
             }
         });
@@ -28840,9 +28965,15 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
         const saved = bldg.evalSafetyman || {};
         const r = P.merge(saved.project, saved.auto, s357Calc(bldg), F);
         const bid = bldg.id;
-        (r.project.buildings || []).forEach((x) => {
-            if (x && !x.imageDataUrl) { try { const im = localStorage.getItem('bsa.s357img.' + bid + '.' + x.id); if (im) x.imageDataUrl = im; } catch (_e) { /* ignore */ } }
-        });
+        for (const x of (r.project.buildings || [])) {
+            if (!x || x.imageDataUrl) continue;
+            let im = null;
+            try { im = await localBackupGet('s357img:' + bid + '.' + x.id); } catch (_e) { /* ignore */ }
+            // 옛 기기 저장(localStorage) — 시작 때 IndexedDB로 옮기지만, 그 전이면 여기서 읽는다
+            if (!im) { try { im = localStorage.getItem('bsa.s357img.' + bid + '.' + x.id); } catch (_e) { /* ignore */ } }
+            if (im) x.imageDataUrl = im;
+        }
+        if (currentEvalBuilding() !== bldg) return;
         const persist = (project) => {
             const b = currentEvalBuilding();
             if (!b || b.id !== bid) return;
@@ -58515,6 +58646,15 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
             const req = d.transaction('blobs', 'readonly').objectStore('blobs').get(key);
             req.onsuccess = () => resolve(req.result || null);
             req.onerror = () => reject(req.error);
+        });
+    }
+    async function localBackupDelete(key) {
+        const d = await openLocalBackupDb();
+        return new Promise((resolve, reject) => {
+            const tx = d.transaction('blobs', 'readwrite');
+            tx.objectStore('blobs').delete(key);
+            tx.oncomplete = () => resolve(true);
+            tx.onerror = () => reject(tx.error);
         });
     }
     async function localBackupPut(key, value) {

@@ -41,6 +41,7 @@ function run({ quota, now }) {
     };
     const window = {
         state: { buildings: [], defects: { b_1F: [{ id: 'a1', no: '1' }] }, companyId: 'c1', currentTab: 'tab-survey' },
+        BSA: { lsQuota: require('../js/core/ls-quota.js') },
         showToast(msg, type) { calls.toasts.push([msg, type]); }
     };
     const factory = new Function('window', 'localStorage', 'navigator', 'Date', 'ctx', `
@@ -57,6 +58,9 @@ function run({ quota, now }) {
         function scheduleSyncToFirebase() { ctx.calls.sync++; }
         function gaugeStripForLocal(r) { return r; }
         function scheduleGaugePhotoMigrate() {}
+        const _idbStateFallbackKeys = new Set();
+        function dropIdbStateFallback() {}
+        function queueQuotaStateSave(k, j) { ctx.calls.queued = (ctx.calls.queued || 0) + 1; }
         ${fnSrc}
         saveStateToLocalStorage();
         return { notified: _localStorageSaveFailedNotified, failedAt: _localStorageSaveFailedAt };
@@ -72,15 +76,17 @@ let r = run({ quota: false });
 assert.strictEqual(r.calls.sync, 1);
 assert.strictEqual(r.calls.toasts.length, 0);
 
-// 2) 저장 공간 가득 → 그래도 예약, 에러 알림(서버에 올리는 중)
+// 2) 저장 공간 가득 → 그래도 예약. 2026-10-20부터는 바로 오류를 띄우지 않고 정리·재시도·IndexedDB 예비 저장을 건다
 r = run({ quota: true });
 assert.strictEqual(r.calls.sync, 1, '기기 저장이 실패해도 서버 올리기 예약');
-assert.strictEqual(r.calls.toasts.length, 1);
-assert.ok(/가득/.test(r.calls.toasts[0][0]) && /서버에 올리는 중/.test(r.calls.toasts[0][0]), r.calls.toasts[0][0]);
-assert.strictEqual(r.calls.toasts[0][1], 'error');
+assert.strictEqual(r.calls.queued, 1, '가득 차면 정리·재시도 대기열');
+assert.strictEqual(r.calls.toasts.length, 0, '정리 전에는 오류를 띄우지 않음');
 
-// 3) 재알림 간격: 이미 알렸고 2분 안이면 조용히, 지나면 다시
-assert.ok(/nowMs - \(_localStorageSaveFailedAt \|\| 0\)\) > 120000/.test(fnSrc));
+// 3) 정리·예비 저장까지 실패했을 때의 알림: 가득/서버에 올리는 중, 2분 간격
+const notifySrc = extractFunction('notifyLocalSaveFailed');
+assert.ok(/가득/.test(notifySrc) && /서버에 올리는 중/.test(notifySrc));
+assert.ok(/nowMs - \(_localStorageSaveFailedAt \|\| 0\)\) <= 120000\) return/.test(notifySrc));
+assert.ok(/if \(!ok\) notifyLocalSaveFailed\(true\)/.test(src));
 
 // 4) 엑셀 가져오기: 넣은 층 dirty
 const excelStart = src.indexOf('window.confirmImportDefectExcel = async function');
