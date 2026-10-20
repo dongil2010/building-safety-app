@@ -21589,6 +21589,62 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
         return { dryRun: false, plan };
     };
 
+    /**
+     * 같은 id 기록이 다른 동에 이미 있는 「사본 층」을 비운다(묘비만, 사진은 안 지움) — 휴지통에 넣기 전에.
+     * 2026-10-20 「여수성광교회」(동 이름 없는 두 번째 건물)의 본관 지하 1층에 본관 결함 54개·사진 15장이 같은 id로 복사돼 있었다.
+     * 그대로 휴지통 → 30일 뒤 영구 삭제되면 그 동 결함의 사진을 지우므로(permanentlyDeleteBuilding) 본관동 사진이 사라질 수 있다.
+     * 다른 동에 같은 id가 없는 기록은 건드리지 않고 남은 것으로 알려 준다.
+     */
+    window.bsaReleaseDuplicateFloors = async function (srcId, floorCodes, opts) {
+        opts = opts || {};
+        const st = window.state;
+        const src = (st.buildings || []).find((b) => b && b.id === srcId);
+        if (!src) throw new Error('동을 찾을 수 없습니다.');
+        if (navigator.onLine === false || !db || !st.companyId) throw new Error('인터넷 연결·로그인이 필요합니다.');
+        const fresh = await refreshBuildingFloorsFromServer(src, { force: true });
+        if (!fresh.ok && fresh.skipped !== 'recent') throw new Error('층을 서버에서 받지 못했습니다: ' + ((fresh.failed || []).join(', ') || fresh.skipped));
+        const prefix = `${src.id}_`;
+        const elsewhere = {};
+        FLOOR_MOVE_RECORD_KEYS.forEach((k) => {
+            const ids = new Set();
+            Object.keys(st[k] || {}).forEach((key) => {
+                if (key.startsWith(prefix)) return;
+                ((st[k] || {})[key] || []).forEach((r) => { if (r && r.id) ids.add(r.id); });
+            });
+            elsewhere[k] = ids;
+        });
+        const report = [];
+        (floorCodes || []).map(String).forEach((fc) => {
+            const sk = `${src.id}_${fc}`;
+            const row = { floorCode: fc, released: 0, kept: [] };
+            FLOOR_MOVE_RECORD_KEYS.forEach((k) => {
+                const list = ((st[k] || {})[sk] || []).filter(Boolean);
+                const keep = [];
+                list.forEach((r) => {
+                    if (r.id && elsewhere[k].has(r.id)) {
+                        if (!opts.dryRun) {
+                            if (k === 'defects') trackDefectDeletion(sk, r.id, r, { wallClock: true });
+                            else trackNdtDeletion(sk, r.id, r, { wallClock: true });
+                        }
+                        row.released++;
+                    } else {
+                        keep.push(r);
+                        row.kept.push(k + ':' + (r.id || '?'));
+                    }
+                });
+                if (!opts.dryRun && st[k]) st[k][sk] = keep;
+            });
+            if (!opts.dryRun && row.released) markFloorKeyDirty(sk);
+            report.push(row);
+        });
+        if (!opts.dryRun) {
+            markBuildingMetaDirty(src);
+            saveStateToLocalStorage();
+            await syncAfterImportWithRetry('사본 층 비우기');
+        }
+        return { dryRun: !!opts.dryRun, report };
+    };
+
     /** 옮긴 뒤 서버에서 다시 읽어 맞는지 본다 — 옮길 동 층에 결함·사진 id가 다 있고, 원래 동 층엔 묘비만 남았는지 */
     window.bsaVerifyFloorMove = async function (srcId, dstId, plan) {
         const st = window.state;

@@ -128,6 +128,25 @@ function makeCtx() {
     r = await t.ctx.window.bsaMoveFloorsToBuilding('bA', 'bB', ['없는층']);
     assert.strictEqual(r.blocked, true);
 
+    // 사본 층 비우기(bsaReleaseDuplicateFloors): 다른 동에 같은 id가 있는 기록만 묘비, 사진 삭제 길 안 감, 고유 기록은 남김
+    {
+        const tt = makeCtx();
+        vm.runInContext('window.bsaReleaseDuplicateFloors = ' + extractFunction(app, 'window.bsaReleaseDuplicateFloors = async function').replace(/^window\.bsaReleaseDuplicateFloors = /, ''), tt.ctx);
+        tt.state.defects['bB_기념관 1층'] = [{ id: 'd1' }];   // d1만 다른 동에 같은 id로 있다
+        tt.state.ndtData['bB_기념관 1층'] = [{ id: 'n1' }];
+        const rr = await tt.ctx.window.bsaReleaseDuplicateFloors('bA', ['기념관 1층'], { dryRun: true });
+        assert.strictEqual(rr.report[0].released, 2);
+        assert.strictEqual(tt.state.defects['bA_기념관 1층'].length, 2, 'dryRun은 그대로');
+        const r2 = await tt.ctx.window.bsaReleaseDuplicateFloors('bA', ['기념관 1층']);
+        assert.strictEqual(r2.report[0].released, 2, 'd1 + n1');
+        eq(tt.state.defects['bA_기념관 1층'].map((d) => d.id), ['d2'], '고유 결함 d2는 남김');
+        eq(tt.state.deletedDefectIds['bA_기념관 1층'], ['d1']);
+        eq(tt.state.deletedNdtIds['bA_기념관 1층'], ['n1']);
+        eq(tt.state.ndtDisplacementGroups['bA_기념관 1층'].map((g) => g.id), ['g1'], '다른 데 없는 변위 구역은 남김');
+        assert.strictEqual(tt.calls.photoDelete, 0);
+        assert.ok(r2.report[0].kept.includes('defects:d2'));
+    }
+
     // 이 코드는 한글 출력 지문 구간 밖에 있어야 한다
     const hwpxStart = app.indexOf('    // --- HWPX 균열 게이지·팁 측정결과');
     const at = app.indexOf('window.bsaMoveFloorsToBuilding = async function');
