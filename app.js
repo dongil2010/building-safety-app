@@ -44009,7 +44009,9 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
     };
 
     // ── 바탕화면 cad_defects_import.json 바로 불러오기(2026-10-20) ──────────────
+    // 2026-10-21 웹에서 쓰던 바탕화면 폴더 손잡이(File System Access)는 더 쓰지 않는다 — 남은 것을 지운다
     const CAD_DESKTOP_DIR_KEY = 'cadDesktopDirHandle';
+    try { Promise.resolve(localBackupDelete(CAD_DESKTOP_DIR_KEY)).catch(() => {}); } catch (_e) { /* ignore */ }
     function cadPickFileFallback(msg) {
         if (msg) window.showToast?.(msg, 'info', 5000);
         const inp = document.getElementById('inputImportCadPins');
@@ -44029,44 +44031,22 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
         window.showToast?.(`📐 ${where} cad_defects_import.json${when ? ` (${when})` : ''} · 결함 ${parsed.count}개`, 'info', 3500);
         processCadJsonText(text);
     }
-    async function cadPickDesktopDir() {
-        const dir = await window.showDirectoryPicker({ id: 'bsa-cad-desktop', mode: 'read', startIn: 'desktop' });
-        try { await localBackupPut(CAD_DESKTOP_DIR_KEY, dir); } catch (e) { console.warn('[CAD] 바탕화면 폴더 기억 실패', e); }
-        return dir;
-    }
     async function cadImportFromDesktop() {
         if (!state.currentBuildingId || !state.currentFloor) {
             window.showToast?.('먼저 점검할 대상 건축물과 층을 선택해 주세요.', 'warning', 3500);
             return;
         }
         const C = window.BSA && window.BSA.cadDesktopImport;
-        // 1) PC 앱(Electron) — 바탕화면을 바로 읽는다(권한 묻기 없음)
-        if (C && window.bsaDesktop && typeof window.bsaDesktop.readCadImportJson === 'function') {
+        // 1) PC 앱(Electron, preload 다리로 판별) — 바탕화면을 바로 읽는다(권한 묻기 없음)
+        if (C && C.hasDesktopBridge(window)) {
             let res = null;
             try { res = await window.bsaDesktop.readCadImportJson(); } catch (e) { console.warn('[CAD] 바탕화면 읽기 실패', e); }
             if (!res || !res.found) { cadPickFileFallback('바탕화면에 cad_defects_import.json이 없어 파일 창을 엽니다.'); return; }
             cadLoadDesktopText(res.text, res.mtime, '바탕화면');
             return;
         }
-        // 2) Chrome — 기억한 바탕화면 폴더(권한은 이 클릭에서 바로 요청). 처음 한 번만 폴더 고르기
-        if (!C || !C.supportsDirPicker(window)) { cadPickFileFallback(); return; }
-        let dir = null;
-        try { dir = await localBackupGet(CAD_DESKTOP_DIR_KEY); } catch (_e) { dir = null; }
-        if (!dir) {
-            window.showToast?.('처음 한 번만: 바탕화면 폴더에서 「선택」을 눌러 주세요. 다음부터는 바로 불러옵니다.', 'info', 6000);
-            try { dir = await cadPickDesktopDir(); } catch (e) {
-                if (e && e.name === 'AbortError') return;
-                cadPickFileFallback('폴더를 열 수 없어 파일 창을 엽니다.');
-                return;
-            }
-        }
-        const r = await C.readFromDirHandle(dir, true);
-        if (r.status === 'ok') { cadLoadDesktopText(r.text, r.lastModified, '바탕화면'); return; }
-        if (r.status === 'missing') { cadPickFileFallback(`「${dir.name}」 폴더에 cad_defects_import.json이 없어 파일 창을 엽니다.`); return; }
-        if (r.status === 'no-permission') { cadPickFileFallback('바탕화면 읽기를 허용하지 않아 파일 창을 엽니다.'); return; }
-        // 폴더가 옮겨졌거나 지워짐 — 기억을 지우고 파일 창(다음 클릭 때 폴더를 다시 고른다)
-        try { await localBackupDelete(CAD_DESKTOP_DIR_KEY); } catch (_e) { /* ignore */ }
-        cadPickFileFallback('바탕화면 폴더를 읽지 못해 파일 창을 엽니다(다음에 폴더를 다시 고릅니다).');
+        // 2) 웹·Chrome·모바일(2026-10-21): 바탕화면 바로 읽기는 PC 앱에서만 — 지금처럼 파일 창
+        cadPickFileFallback();
     }
     window.cadImportFromDesktop = cadImportFromDesktop;
 

@@ -5,5 +5,6 @@
 const { contextBridge, ipcRenderer } = require('electron');
 
 contextBridge.exposeInMainWorld('bsaDesktop', {
+    isDesktopApp: true,
     readCadImportJson: function () { return ipcRenderer.invoke('bsa:read-cad-import-json'); }
 });

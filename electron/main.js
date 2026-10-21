@@ -188,14 +188,33 @@ function cadImportCandidates() {
     const ones = [env.OneDrive, env.OneDriveConsumer, env.OneDriveCommercial, home && path.join(home, 'OneDrive')].filter(Boolean);
     const out = [];
     try { out.push(path.join(app.getPath('desktop'), name)); } catch (_) { /* ignore */ }
+    // 2026-10-21 레지스트리 User Shell Folders「Desktop」(바탕화면을 옮긴 경우·OneDrive 백업)
+    registryDesktopDirs().forEach(function (d) { out.push(path.join(d, name)); });
     if (home) out.push(path.join(home, 'Desktop', name), path.join(home, '바탕 화면', name));
     ones.forEach(function (od) { out.push(path.join(od, '바탕 화면', name), path.join(od, 'Desktop', name)); });
     return out.filter(function (p, i) { return out.indexOf(p) === i; });
 }
+function registryDesktopDirs() {
+    if (process.platform !== 'win32') return [];
+    const out = [];
+    ['User Shell Folders', 'Shell Folders'].forEach(function (key) {
+        try {
+            const txt = require('child_process').execFileSync('reg', ['query', 'HKCU\\Software\\Microsoft\\Windows\\CurrentVersion\\Explorer\\' + key, '/v', 'Desktop'],
+                { encoding: 'utf8', windowsHide: true, timeout: 3000 });
+            const m = /Desktop\s+REG_(?:EXPAND_)?SZ\s+(.+)/i.exec(txt);
+            if (m) out.push(m[1].trim().replace(/%([^%]+)%/g, function (all, v) { return process.env[v] || all; }));
+        } catch (_) { /* 없음 */ }
+    });
+    return out;
+}
+/** 우리 창의 맨 위 화면에서 온 요청만 — 배포 주소·내장 서버·실제로 연 주소(appStartUrl)의 출처 */
 function trustedSender(event) {
     try {
+        if (event.senderFrame && event.sender && event.sender.mainFrame && event.senderFrame !== event.sender.mainFrame) return false;
         const u = new URL(event.senderFrame ? event.senderFrame.url : event.sender.getURL());
-        if (u.origin === new URL(REMOTE_URL).origin) return true;
+        const ok = [REMOTE_URL, appStartUrl].filter(Boolean).map(function (x) { try { return new URL(x).origin; } catch (_) { return null; } });
+        if (ok.indexOf(u.origin) >= 0) return true;
+        if (/^https:$/.test(u.protocol) && /(^|\.)github\.io$/i.test(u.hostname) && u.pathname.indexOf('/building-safety-app') === 0) return true;
         return u.protocol === 'http:' && (u.hostname === '127.0.0.1' || u.hostname === 'localhost');
     } catch (_) { return false; }
 }

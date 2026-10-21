@@ -21,40 +21,26 @@ const C = require('../js/core/cad-desktop-import.js');
     assert(c.includes('C:\\Users\\a\\OneDrive\\Desktop\\cad_defects_import.json'));
     assert.strictEqual(new Set(c).size, c.length, '중복 없음');
 
-    // Chrome 폴더 손잡이
-    const file = { name: C.FILE_NAME, lastModified: 123, text: async () => good };
-    const mkDir = (perm, opts) => ({
-        name: 'Desktop',
-        queryPermission: async () => perm.q,
-        requestPermission: async () => { perm.asked = true; return perm.r; },
-        getFileHandle: async (n) => {
-            assert.strictEqual(n, C.FILE_NAME);
-            if (opts && opts.missing) { const e = new Error('nf'); e.name = 'NotFoundError'; throw e; }
-            return { getFile: async () => file };
-        }
-    });
-    r = await C.readFromDirHandle(mkDir({ q: 'granted' }), false);
-    assert(r.status === 'ok' && r.text === good && r.lastModified === 123);
-    const p1 = { q: 'prompt', r: 'granted' };
-    r = await C.readFromDirHandle(mkDir(p1), true);
-    assert(r.status === 'ok' && p1.asked, '권한은 버튼 누를 때 한 번 묻는다');
-    r = await C.readFromDirHandle(mkDir({ q: 'prompt', r: 'denied' }), true);
-    assert.strictEqual(r.status, 'no-permission');
-    r = await C.readFromDirHandle(mkDir({ q: 'granted' }, { missing: true }), true);
-    assert.strictEqual(r.status, 'missing');
-    assert.strictEqual(C.supportsDirPicker({}), false, '모바일 등은 파일 창으로');
+    // PC 앱 판별: UA가 아니라 preload 다리
+    assert.strictEqual(C.hasDesktopBridge({}), false, '웹·Chrome·모바일');
+    assert.strictEqual(C.hasDesktopBridge({ navigator: { userAgent: 'Electron/30' } }), false, 'UA만으로는 PC 앱이 아니다');
+    assert.strictEqual(C.hasDesktopBridge({ bsaDesktop: { readCadImportJson: async () => ({}) } }), true);
+    assert(!C.readFromDirHandle && !C.supportsDirPicker, '웹 폴더 손잡이 흐름 없음');
 
     // 앱 연결: 버튼 → 바탕화면 먼저, 파일 창은 대비책. 파일 고르기와 같은 처리 함수
     const app = fs.readFileSync(path.join(__dirname, '..', 'app.js'), 'utf8');
     assert(/btnImportCadPins\.addEventListener\('click', \(\) => \{ cadImportFromDesktop\(\)/.test(app));
     assert(/reader\.onload = function \(e\) \{\s*try \{ processCadJsonText\(e\.target\.result\)/.test(app), '파일 고르기도 같은 처리');
-    assert(/cadLoadDesktopText\(res\.text, res\.mtime/.test(app) && /cadLoadDesktopText\(r\.text, r\.lastModified/.test(app), '확인창 없이 바로');
+    assert(/cadLoadDesktopText\(res\.text, res\.mtime/.test(app), 'PC 앱은 확인창 없이 바로');
     assert(!/cadConfirmDesktopFile/.test(app), '확인창 없음');
     const fnBody = app.slice(app.indexOf('async function cadImportFromDesktop'), app.indexOf('window.cadImportFromDesktop ='));
     assert(!/appChoose/.test(fnBody), '추가 창 없음');
-    assert(/status === 'missing'\) \{ cadPickFileFallback/.test(fnBody), '파일 없으면 바로 파일 창');
+    assert(/if \(C && C\.hasDesktopBridge\(window\)\)/.test(fnBody), 'PC 앱은 다리로 판별');
+    assert(/!res \|\| !res\.found\) \{ cadPickFileFallback/.test(fnBody), 'PC 앱에서 파일 없으면 파일 창');
+    assert(/웹·Chrome·모바일[^\n]*\n\s*cadPickFileFallback\(\);\s*\}/.test(fnBody), '웹은 곧바로 파일 창');
+    assert(!/showDirectoryPicker|requestPermission|localBackupGet\(CAD_DESKTOP_DIR_KEY|localBackupPut\(CAD_DESKTOP_DIR_KEY/.test(app), '웹 폴더 고르기·권한·손잡이 기억 없음');
+    assert(/localBackupDelete\(CAD_DESKTOP_DIR_KEY\)/.test(app), '남은 폴더 손잡이는 지운다');
     assert(/startCad2PointCalibration\(parsed\.data, floorKey, bldg\)/.test(app), '지금 층 기준점 단계 그대로');
-    assert(/localBackupPut\(CAD_DESKTOP_DIR_KEY, dir\)/.test(app), '고른 폴더 기억');
     const idx = fs.readFileSync(path.join(__dirname, '..', 'index.html'), 'utf8');
     assert(/js\/core\/cad-desktop-import\.js/.test(idx));
 
@@ -64,5 +50,7 @@ const C = require('../js/core/cad-desktop-import.js');
     assert(/preload: path\.join\(__dirname, 'preload\.js'\)/.test(main));
     assert(/ipcMain\.handle\('bsa:read-cad-import-json'[\s\S]{0,120}trustedSender\(event\)/.test(main));
     assert(!/writeFile/.test(pre) && /readCadImportJson/.test(pre));
+    assert(/registryDesktopDirs\(\)/.test(main) && /User Shell Folders/.test(main) && /app\.getPath\('desktop'\)/.test(main), '바탕화면: getPath + 레지스트리 + OneDrive');
+    assert(/\[REMOTE_URL, appStartUrl\]/.test(main), '실제로 연 주소의 출처도 믿는다');
     console.log('test-cad-desktop-import: ok');
 })().catch((e) => { console.error(e); process.exit(1); });

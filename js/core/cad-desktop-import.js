@@ -1,8 +1,8 @@
 /**
  * CAD 핀: 바탕화면의 cad_defects_import.json 바로 불러오기(2026-10-20)
  * - PC 앱(Electron): preload 다리(window.bsaDesktop.readCadImportJson)로 바탕화면 파일을 읽는다.
- * - Chrome: 처음 한 번 바탕화면 폴더를 고르면(폴더 권한) 그 손잡이를 IndexedDB에 두고 다음부터 바로 읽는다.
- * - 둘 다 안 되면(모바일·파일 없음) 지금처럼 파일 고르기.
+ * - 웹·Chrome·모바일(2026-10-21): 바탕화면 바로 읽기 없음 — 지금처럼 파일 고르기.
+ * - PC 앱에서 파일이 없으면 파일 고르기.
  */
 (function (root) {
     'use strict';
@@ -39,36 +39,12 @@
         return out.filter(function (p, i) { return out.indexOf(p) === i; });
     }
 
-    /**
-     * Chrome 폴더 손잡이에서 파일 읽기. 반환 { status: 'ok'|'no-permission'|'missing'|'error', text, lastModified }
-     * askPermission=true 면 권한을 한 번 물어본다(버튼 누른 순간에만).
-     */
-    async function readFromDirHandle(dir, askPermission) {
-        if (!dir || typeof dir.getFileHandle !== 'function') return { status: 'error' };
-        try {
-            var opts = { mode: 'read' };
-            var perm = typeof dir.queryPermission === 'function' ? await dir.queryPermission(opts) : 'granted';
-            if (perm !== 'granted' && askPermission && typeof dir.requestPermission === 'function') {
-                perm = await dir.requestPermission(opts);
-            }
-            if (perm !== 'granted') return { status: 'no-permission' };
-            var fh;
-            try { fh = await dir.getFileHandle(FILE_NAME); } catch (e) {
-                if (e && (e.name === 'NotFoundError' || e.name === 'TypeMismatchError')) return { status: 'missing' };
-                throw e;
-            }
-            var f = await fh.getFile();
-            return { status: 'ok', text: await f.text(), lastModified: f.lastModified || 0, name: f.name };
-        } catch (e) {
-            return { status: 'error', error: e };
-        }
+    /** PC 앱(Electron)인가: UA가 아니라 preload 다리(window.bsaDesktop.readCadImportJson)로 판별 */
+    function hasDesktopBridge(win) {
+        return !!(win && win.bsaDesktop && typeof win.bsaDesktop.readCadImportJson === 'function');
     }
 
-    function supportsDirPicker(win) {
-        return !!(win && typeof win.showDirectoryPicker === 'function');
-    }
-
-    var api = { FILE_NAME: FILE_NAME, parseCadJson: parseCadJson, desktopCandidates: desktopCandidates, readFromDirHandle: readFromDirHandle, supportsDirPicker: supportsDirPicker };
+    var api = { FILE_NAME: FILE_NAME, parseCadJson: parseCadJson, desktopCandidates: desktopCandidates, hasDesktopBridge: hasDesktopBridge };
     if (typeof module !== 'undefined' && module.exports) module.exports = api;
     if (root) { root.BSA = root.BSA || {}; root.BSA.cadDesktopImport = api; }
 })(typeof window !== 'undefined' ? window : globalThis);
