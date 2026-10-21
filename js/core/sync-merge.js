@@ -191,12 +191,28 @@
         var ts = Number(deletedAt) || 0;
         if (ts <= 0) return false;
         if (kind === 'ndt') return getRecordUpdatedAt(rec, 'ndt') > ts;
+        // 2026-10-21 되살린 결함(오프라인 내용 수정이 삭제를 이김)은 되살린 시각이 묘비보다 나중이면 산다 — 다른 기기의 옛 묘비가 다시 지우지 않게
+        if ((Number(rec.revivedAt) || 0) > ts) return true;
+        // 아직 안 올라간 **오프라인** 내용 수정(위치만 옮긴 것은 아님) — 지운 쪽이 볼 수 없었던 수정이라 이긴다
+        if (hasPendingOfflineContentEdit(rec)) return true;
         return getDefectContentUpdatedAt(rec) > ts;
+    }
+
+    /** 오프라인에서 고친 내용이 아직 안 올라갔는가(touchDefectUpdatedAt가 오프라인·서버 닿지 않을 때 찍고, 층을 올리면 지운다) */
+    function hasPendingOfflineContentEdit(rec) {
+        return !!(rec && (Number(rec.offlineEditAt) || 0) > 0);
+    }
+
+    /** 묘비를 이기고 살아난 결함에 되살린 시각을 남긴다(묘비보다 나중) — 서버·다른 기기로 퍼진다 */
+    function stampRevived(rec, deletedAt) {
+        if (!rec) return rec;
+        rec.revivedAt = Math.max(Number(rec.revivedAt) || 0, (Number(deletedAt) || 0) + 1);
+        return rec;
     }
 
     /** 지울 때 묘비에 적을 값 — 이 기기가 본 마지막 수정 시각(0이면 1: 0은 "묘비 시각 없음"으로 읽힌다) */
     function tombstoneStampFor(rec, kind) {
-        var t = kind === 'ndt' ? getRecordUpdatedAt(rec, 'ndt') : getDefectContentUpdatedAt(rec);
+        var t = kind === 'ndt' ? getRecordUpdatedAt(rec, 'ndt') : Math.max(getDefectContentUpdatedAt(rec), Number(rec && rec.revivedAt) || 0);
         return Math.max(1, Number(t) || 0);
     }
 
@@ -372,7 +388,7 @@
     var NON_CONTENT_FIELDS = new Set([
         'id', 'no', 'groupNo', 'cadNo', 'isCadImported', 'groupId', 'surveyExtra', 'surveyNumbered', 'mergedFrom',
         'updatedAt', 'contentUpdatedAt', 'positionUpdatedAt', 'groupUpdatedAt', 'photosUpdatedAt', 'photoOrderAt',
-        'fieldAt', 'contentBaseAt', 'fieldAtThrough', 'photoState',
+        'fieldAt', 'contentBaseAt', 'fieldAtThrough', 'photoState', 'revivedAt', 'offlineEditAt',
         'photos', 'photoIds', 'photoUrls', 'prevRoundPhotos', 'prevRoundPhotoIds', 'prevRoundPhotoUrls'
     ].concat(DEFECT_POSITION_FIELDS, DEFECT_GROUP_FIELDS));
 
@@ -744,6 +760,10 @@
 
         merged.contentUpdatedAt = Math.max(serverContentTs, localContentTs, Number(merged.contentUpdatedAt) || 0);
         if (isFieldTracked(merged)) merged.fieldAtThrough = merged.contentUpdatedAt;
+        var rv = Math.max(Number(serverRec.revivedAt) || 0, Number(localRec.revivedAt) || 0);
+        if (rv > 0) merged.revivedAt = rv; else delete merged.revivedAt;
+        // 오프라인 수정 표시는 이 기기 것만(서버 사본에는 안 실린다)
+        if (Number(localRec.offlineEditAt) > 0) merged.offlineEditAt = Number(localRec.offlineEditAt); else delete merged.offlineEditAt;
         merged.positionUpdatedAt = Math.max(serverPosTs, localPosTs, Number(merged.positionUpdatedAt) || 0);
         merged.updatedAt = Math.max(
             getRecordUpdatedAt(serverRec, 'pin'),
@@ -845,13 +865,17 @@
                     && !recordSurvivesDelete(lRec, at, 'pin')) {
                     return;
                 }
-                ordered.push(lRec ? mergeDefectRecord(sRec, lRec, photoCache) : Object.assign({}, sRec));
+                var mergedRec = lRec ? mergeDefectRecord(sRec, lRec, photoCache) : Object.assign({}, sRec);
+                if (deletedSet.has(sRec.id) && at > 0 && hasPendingOfflineContentEdit(lRec)) stampRevived(mergedRec, at);
+                ordered.push(mergedRec);
             });
             localArr.forEach(function (lRec) {
                 if (!lRec || !lRec.id || serverById.has(lRec.id)) return;
                 var at = Number(delAt[lRec.id]) || 0;
                 if (deletedSet.has(lRec.id) && !recordSurvivesDelete(lRec, at, 'pin')) return;
-                ordered.push(Object.assign({}, lRec));
+                var keep = Object.assign({}, lRec);
+                if (deletedSet.has(lRec.id) && at > 0 && hasPendingOfflineContentEdit(lRec)) stampRevived(keep, at);
+                ordered.push(keep);
             });
 
             if (typeof opts.renumberFloorDefects === 'function') {
@@ -945,6 +969,8 @@
         isOutdatedBuild: isOutdatedBuild,
         countKeptExistingOnImport: countKeptExistingOnImport,
         recordSurvivesDelete: recordSurvivesDelete,
+        hasPendingOfflineContentEdit: hasPendingOfflineContentEdit,
+        stampRevived: stampRevived,
         tombstoneStampFor: tombstoneStampFor,
         mergePhotoArrays: mergePhotoArrays,
         collectPhotoSrcById: collectPhotoSrcById,

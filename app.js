@@ -4774,6 +4774,14 @@ document.addEventListener('DOMContentLoaded', () => {
     }
     window.measureServerClockOffset = measureServerClockOffset;
 
+    function isEditingOffline() {
+        try {
+            if (typeof navigator !== 'undefined' && navigator.onLine === false) return true;
+            if (typeof isSyncParked === 'function' && isSyncParked()) return true;
+        } catch (_e) { /* ignore */ }
+        return false;
+    }
+
     function touchDefectUpdatedAt(defect) {
         if (!defect) return;
         const now = bsaStampAfter(Math.max(Number(defect.updatedAt) || 0, Number(defect.fieldAtThrough) || 0));
@@ -4807,6 +4815,9 @@ document.addEventListener('DOMContentLoaded', () => {
         // 늘 앞으로만 간다: 시계가 빠른 기기가 찍은 값보다 작으면, 이 수정을 본 뒤 지운 것으로 오판된다.
         defect.contentUpdatedAt = Math.max(now, (Number(defect.contentUpdatedAt) || 0) + 1);
         if (journalContentChanged && typeof journalDefectChange === 'function') journalDefectChange('edit', defect);
+        // 2026-10-21 오프라인(또는 서버에 닿지 않는 동안)에 고친 내용 — 올리기 전 다른 기기가 지웠어도 이 결함을 살린다.
+        // 위치·배치만 옮긴 것은 여기 안 온다(touchDefectPositionUpdatedAt). 온라인 수정은 지금처럼 나중 삭제가 이긴다.
+        if (journalContentChanged && typeof isEditingOffline === 'function' && isEditingOffline()) defect.offlineEditAt = defect.contentUpdatedAt;
     }
 
     /** 도면 위 마킹 위치/꼭짓점만 옮김 — 삭제보다 늦어도 부활시키지 않음 */
@@ -61735,7 +61746,14 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
         const sanitizedMap = sanitizeDefectsForFirestore({
             [floorKey]: window.state.defects[floorKey] || []
         });
-        const items = sanitizedMap[floorKey] || [];
+        // 2026-10-21 오프라인 수정 표시는 이 기기 것 — 서버 사본에는 싣지 않는다(올라간 뒤엔 지운 쪽도 본 수정)
+        const offlineSent = new Map();
+        const items = (sanitizedMap[floorKey] || []).map((d) => {
+            if (!d || !(Number(d.offlineEditAt) > 0)) return d;
+            offlineSent.set(d.id, Number(d.offlineEditAt));
+            const { offlineEditAt, ...rest } = d;
+            return rest;
+        });
         const pack = {
             markings: {
                 items,
@@ -61777,6 +61795,12 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
             // 2026-10-16 층 버전 — 쓸 때마다 서버가 1 올림(읽은 뒤 바뀌었는지 비교용). updatedAt은 서버 시각으로 이미 기록됨
             syncRev: firebase.firestore.FieldValue.increment(1)
         });
+        // 올라갔다 — 이번에 실은 오프라인 수정 표시만 지운다(쓰는 동안 또 고친 것은 남김)
+        if (offlineSent.size) {
+            (window.state.defects[floorKey] || []).forEach((d) => {
+                if (d && offlineSent.has(d.id) && Number(d.offlineEditAt) <= offlineSent.get(d.id)) delete d.offlineEditAt;
+            });
+        }
         _dirtyFloorKeys.delete(floorKey);
         persistDirtyFloorKeys();
         // 2026-10-19 서버가 층 묶음 저장을 확인했다 → 실린 변경만 「올라감」. 묶음을 만든 뒤 또 고친 것은 남겨 다시 올린다
