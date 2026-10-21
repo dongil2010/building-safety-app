@@ -670,21 +670,46 @@
         // ---------- 손가락(2026-10-20 현장 폰·태블릿) ----------
         // 편집 막이 도면을 덮으므로 도면 이동·확대도 여기서 한다: 빈 곳 한 손가락 끌기 = 도면 이동, 두 손가락 = 확대·축소.
         // 추가(기둥 찍기·거더/빔 시작·끝)는 손을 뗄 때 — 두 손가락으로 확대하려다 기둥이 찍히지 않게.
+        // 두 손가락 확대(2026-10-21 「구조도 편집할 때 확대·축소가 안 됨」): 포인터 이벤트 + CSS touch-action만 믿으면
+        //  실제 폰에서 브라우저가 두 손가락 몸짓을 가져가 pointercancel로 끊기고, 한 손가락이 막대·도구 줄에 닿으면 막이 두 번째 손가락을 못 봤다.
+        //  그래서 확대는 터치 이벤트(e.touches — 화면에 닿은 모든 손가락)로 하고, 막 위 터치는 preventDefault로 브라우저 몸짓을 막는다.
         var touches = {}, pinch = null;
         function touchIds() { return Object.keys(touches); }
         function canvasXY(x, y) { var r = B.canvas().getBoundingClientRect(); return { x: x - r.left, y: y - r.top }; }
-        function startPinch() {
-            var ids = touchIds(), a = touches[ids[0]], b = touches[ids[1]], v = B.getView();
-            var m = canvasXY((a.x + b.x) / 2, (a.y + b.y) / 2);
-            pinch = { ids: [ids[0], ids[1]], d0: Math.hypot(a.x - b.x, a.y - b.y) || 1, s0: v.scale, ix: (m.x - v.ox) / v.scale, iy: (m.y - v.oy) / v.scale };
+        function findTouch(list, id) {
+            for (var i = 0; i < list.length; i++) if (list[i].identifier === id) return list[i];
+            return null;
         }
-        function movePinch() {
-            var a = touches[pinch.ids[0]], b = touches[pinch.ids[1]];
-            if (!a || !b) return;
-            var lim = B.scaleLimits(), m = canvasXY((a.x + b.x) / 2, (a.y + b.y) / 2);
-            var sc = Math.min(Math.max(lim.min, pinch.s0 * Math.hypot(a.x - b.x, a.y - b.y) / pinch.d0), lim.max);
+        function startPinch(list) {
+            var a = list[0], b = list[1], v = B.getView();
+            var m = canvasXY((a.clientX + b.clientX) / 2, (a.clientY + b.clientY) / 2);
+            pinch = { ids: [a.identifier, b.identifier], d0: Math.hypot(a.clientX - b.clientX, a.clientY - b.clientY) || 1, s0: v.scale, ix: (m.x - v.ox) / v.scale, iy: (m.y - v.oy) / v.scale };
+        }
+        function movePinch(list) {
+            var a = findTouch(list, pinch.ids[0]), b = findTouch(list, pinch.ids[1]);
+            if (!a || !b) { startPinch(list); return; }   // 손가락이 바뀌면 지금 두 손가락으로 다시 시작
+            var lim = B.scaleLimits(), m = canvasXY((a.clientX + b.clientX) / 2, (a.clientY + b.clientY) / 2);
+            var sc = Math.min(Math.max(lim.min, pinch.s0 * Math.hypot(a.clientX - b.clientX, a.clientY - b.clientY) / pinch.d0), lim.max);
             B.setView(sc, m.x - pinch.ix * sc, m.y - pinch.iy * sc);
         }
+        function endPinch() {
+            if (!pinch) return;
+            pinch = null;
+            B.viewDone();
+        }
+        function onTouchPinch(e) {
+            if (!ui.editing) { pinch = null; return; }
+            if (e.cancelable) e.preventDefault();
+            if (e.touches.length < 2) return;
+            if (!pinch) { cancelDrag(); startPinch(e.touches); ui.builtSig = ''; sync(); return; }
+            movePinch(e.touches);
+        }
+        ov.addEventListener('touchstart', onTouchPinch, { passive: false });
+        ov.addEventListener('touchmove', onTouchPinch, { passive: false });
+        // 막 밖(막대 위 등)에 닿은 손가락을 떼도 끝나게 창 전체에서 본다
+        var onTouchLift = function (e) { if (pinch && e.touches.length < 2) endPinch(); };
+        window.addEventListener('touchend', onTouchLift, true);
+        window.addEventListener('touchcancel', onTouchLift, true);
         function startPan(e) { ui.drag = { mode: 'pan', pointerId: e.pointerId, last: { x: e.clientX, y: e.clientY }, moved: false }; }
         function startTap(e, act) { ui.drag = { mode: 'tap', pointerId: e.pointerId, last: { x: e.clientX, y: e.clientY }, sx: e.clientX, sy: e.clientY, moved: false, act: act }; }
         /** 하던 끌기를 원래대로 되돌리고 그만둔다(두 번째 손가락이 닿았을 때) */
@@ -709,7 +734,8 @@
             if (isTouch) {
                 touches[e.pointerId] = { x: e.clientX, y: e.clientY };
                 try { ov.setPointerCapture(e.pointerId); } catch (_e) { /* ignore */ }
-                if (touchIds().length >= 2) { cancelDrag(); if (!pinch) startPinch(); ui.builtSig = ''; sync(); return; }
+                // 두 번째 손가락: 하던 끌기만 거둔다(확대는 바로 뒤 touchstart에서 시작)
+                if (touchIds().length >= 2) { cancelDrag(); return; }
                 if (pinch) return;
             }
             var p = local(e);
@@ -766,7 +792,7 @@
         });
         ov.addEventListener('pointermove', function (e) {
             if (touches[e.pointerId]) touches[e.pointerId] = { x: e.clientX, y: e.clientY };
-            if (pinch) { e.preventDefault(); movePinch(); return; }
+            if (pinch) { e.preventDefault(); return; }
             var dr = ui.drag;
             if (!dr || e.pointerId !== dr.pointerId) return;
             e.preventDefault();
@@ -799,10 +825,7 @@
         });
         var end = function (e) {
             delete touches[e.pointerId];
-            if (pinch) {
-                if (pinch.ids.indexOf(String(e.pointerId)) >= 0) { pinch = null; B.viewDone(); }
-                return;
-            }
+            if (pinch) return;   // 확대 끝은 touchend(onTouchLift)에서
             var dr = ui.drag;
             if (!dr || e.pointerId !== dr.pointerId) return;
             if (dr.mode === 'pan' || dr.mode === 'tap') {
