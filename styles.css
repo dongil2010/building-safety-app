@@ -17786,3 +17786,9 @@ input.ndt-mo-locked { background: var(--bg-secondary, #f2f2f2); color: var(--tex
 .round-done-check-edit { font-size: 0.9rem; color: #222; gap: 0.45rem; flex-wrap: wrap; }
 .round-done-check-edit input { width: 18px; height: 18px; }
 .round-done-meta { color: #888; font-size: 0.75rem; }
+
+/* 2026-10-21 부재실측 기둥 단면 사각/원형 */
+.ndt-column-shape-row { display: flex; align-items: center; gap: 0.35rem; flex-wrap: wrap; margin: 0.2rem 0 0.45rem; }
+.ndt-column-shape-label { font-size: 0.8rem; font-weight: 700; color: #444; }
+.ndt-column-shape-btn { border: 1px solid #cbd5e1; background: #fff; border-radius: 8px; padding: 0.25rem 0.6rem; font-size: 0.8rem; cursor: pointer; min-height: 32px; }
+.ndt-column-shape-btn.active { background: #2563eb; border-color: #2563eb; color: #fff; font-weight: 700; }

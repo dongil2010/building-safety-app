@@ -11880,8 +11880,8 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
         }
 
         const measureCtx = state.ctx || null;
-        let bestTarget = null; // { item, dist }
-        let bestBox = null;
+        // 2026-10-21 점·박스 후보를 모두 모은 뒤 pickBoxFirst로 고름(박스 먼저, 고른 마킹 먼저)
+        const ndtHitCands = [];
 
         for (let i = filtered.length - 1; i >= 0; i--) {
             const item = filtered[i];
@@ -11942,9 +11942,7 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
                     : Math.max(visualArrowR + 3, minMouseRadiusImg);
             }
 
-            if (distTarget <= tipHitRadius && (!bestTarget || distTarget < bestTarget.dist)) {
-                bestTarget = { item, dist: distTarget };
-            }
+            const ndtCand = { key: item.id, item, box: false, tipDist: distTarget <= tipHitRadius ? distTarget : Infinity };
 
             let boxW;
             let boxH;
@@ -11966,16 +11964,25 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
                 boxH = boxDim.h;
             }
 
-            if (!bestBox && isPointInsideMarkBox(vx, vy, boxX, boxY, boxW, boxH, hitRotation)) {
-                bestBox = { item, part: 'box' };
-            }
+            ndtCand.box = isPointInsideMarkBox(vx, vy, boxX, boxY, boxW, boxH, hitRotation);
+            if (ndtCand.box || Number.isFinite(ndtCand.tipDist)) ndtHitCands.push(ndtCand);
         }
-        // 2026-10-20 터치(폰·태블릿): 결함위치도처럼 점과 박스가 겹치면 박스 먼저(박스를 잡아 옮기기 쉽게)
-        if (ndtActivePointerIsTouch && bestBox) return bestBox;
-        // PC 마우스: 측정점(화살표/원)이 박스와 겹쳐도 TIP(target) 우선
-        if (bestTarget) return { item: bestTarget.item, part: 'target' };
-        if (bestBox) return bestBox;
-        return null;
+        // 2026-10-21 비파괴도: 점과 박스가 겹치면 PC·터치 모두 박스 먼저(점은 그대로, 박스만 끌림).
+        //  박스 밖에서 점을 누르면 점을 잡는다. 고른 마킹이 먼저(그 안에서도 박스 먼저).
+        const pick = pickNdtBoxFirst(ndtHitCands);
+        if (!pick) return null;
+        const pc = ndtHitCands[pick.index];
+        return pick.part === 'box' ? { item: pc.item, part: 'box' } : { item: pc.item, part: 'target' };
+    }
+
+    function pickNdtBoxFirst(cands) {
+        const SH = window.BSA && window.BSA.selectedHit;
+        const isSel = (k) => !!(k && selectedNdtIds && selectedNdtIds.has(k));
+        if (SH && typeof SH.pickBoxFirst === 'function') return SH.pickBoxFirst(cands, isSel);
+        const bi = cands.findIndex((c) => c.box);
+        if (bi >= 0) return { index: bi, part: 'box' };
+        const ti = cands.findIndex((c) => Number.isFinite(c.tipDist));
+        return ti >= 0 ? { index: ti, part: 'tip' } : null;
     }
 
     function getCurrentFloorNdtData() {
@@ -13200,6 +13207,57 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
         return 'beam';
     }
 
+    // 2026-10-21 「기둥」도 단면 모양 사각/원형을 고를 수 있게 — 원형이면 지름 하나(Φ), 저장은 measureDimMode 'circle'
+    let ndtColumnShapeCircle = false;
+    function resolveNdtFormDimKind(componentName, circleOn) {
+        const k = getNdtMeasureDimKind(componentName);
+        return (k === 'column' && circleOn) ? 'circle' : k;
+    }
+    function getNdtFormDimKind() {
+        return resolveNdtFormDimKind(getNdtCurrentComponentName(), ndtColumnShapeCircle);
+    }
+    window.resolveNdtFormDimKind = resolveNdtFormDimKind;
+
+    function ensureNdtColumnShapeRow() {
+        let row = document.getElementById('ndtColumnShapeRow');
+        if (row) return row;
+        const anchor = document.getElementById('ndtMeasureRcDesignBlock');
+        if (!anchor || !anchor.parentNode) return null;
+        row = document.createElement('div');
+        row.id = 'ndtColumnShapeRow';
+        row.className = 'ndt-column-shape-row';
+        row.innerHTML = '<span class="ndt-column-shape-label">기둥 단면</span>'
+            + '<button type="button" class="ndt-column-shape-btn" data-shape="rect">▭ 사각 (정면×측면)</button>'
+            + '<button type="button" class="ndt-column-shape-btn" data-shape="circle">◯ 원형 (지름 Φ)</button>';
+        anchor.parentNode.insertBefore(row, anchor);
+        row.addEventListener('click', (e) => {
+            const btn = e.target.closest('.ndt-column-shape-btn');
+            if (!btn) return;
+            const on = btn.getAttribute('data-shape') === 'circle';
+            if (on === ndtColumnShapeCircle) return;
+            ndtColumnShapeCircle = on;
+            const dd = document.getElementById('ndtDesignDepth');
+            const md = document.getElementById('ndtMeasuredDepth');
+            if (on) { if (dd) dd.value = ''; if (md) md.value = ''; }
+            toggleNdtMeasureDimMode();
+            const dw = document.getElementById('ndtDesignWidth');
+            if (dw) dw.dispatchEvent(new Event('input', { bubbles: true }));
+        });
+        return row;
+    }
+
+    function syncNdtColumnShapeRow() {
+        const row = ensureNdtColumnShapeRow();
+        if (!row) return;
+        const base = getNdtMeasureDimKind(getNdtCurrentComponentName());
+        row.hidden = base !== 'column';
+        row.style.display = base === 'column' ? '' : 'none';
+        row.querySelectorAll('.ndt-column-shape-btn').forEach((b) => {
+            const isC = b.getAttribute('data-shape') === 'circle';
+            b.classList.toggle('active', isC === ndtColumnShapeCircle);
+        });
+    }
+
     const NDT_DIM_LABELS = {
         beam: {
             designPrimary: '📐 설계 폭 (mm)',
@@ -13271,7 +13329,8 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
     }
 
     function toggleNdtMeasureDimMode() {
-        const kind = getNdtMeasureDimKind(getNdtCurrentComponentName());
+        try { syncNdtColumnShapeRow(); } catch (_e) { /* ignore */ }
+        const kind = getNdtFormDimKind();
         const rcDesign = document.getElementById('ndtMeasureRcDesignBlock');
         const steelDesign = document.getElementById('ndtMeasureSteelDesignBlock');
         const rcMeasured = document.getElementById('ndtMeasureRcMeasuredBlock');
@@ -13383,7 +13442,7 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
         const row = ensureNdtMeasureOptsRow();
         const api = ndtMeasureOptsApi();
         if (!row || !api) return;
-        const kind = kindArg || getNdtMeasureDimKind(getNdtCurrentComponentName());
+        const kind = kindArg || getNdtFormDimKind();
         const showOne = api.supportsOneSide(kind);
         const showSlab = api.supportsSlab(kind);
         row.hidden = !(showOne || showSlab);
@@ -13767,8 +13826,10 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
         const counterAngle = ndtRotationAngle === 90 ? -90 : (ndtRotationAngle === 180 ? -180 : (ndtRotationAngle === 270 ? -270 : 0));
         const rotRad = (counterAngle * Math.PI) / 180;
 
+        const dispCands = []; // 2026-10-21 박스 먼저(고른 구역 먼저) — pickNdtBoxFirst
         for (let i = groups.length - 1; i >= 0; i--) {
             const group = groups[i];
+            const dispCand = { key: group.id ? ndtDispSelKey(group.id) : '', group, box: false, tipDist: Infinity, point: null };
             const groupSize = getStyleSize(group.category === '부재변위' ? 'ndtMemberDisp' : 'ndtSettlement');
             const pinScale = groupSize.pin || 1;
             const ptHitRadius = Math.max(16 * pinScale, minMouseRadiusImg);
@@ -13785,7 +13846,8 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
                 const distLabel = Math.hypot(vx - labelX, vy - labelY);
 
                 if (distDot <= ptHitRadius || distLabel <= ptHitRadius) {
-                    return { type: 'point', group, point: p };
+                    const dd = Math.min(distDot, distLabel);
+                    if (dd < dispCand.tipDist) { dispCand.tipDist = dd; dispCand.point = p; }
                 }
             }
 
@@ -13794,11 +13856,13 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
             const groupStyleKey = group.category === '부재변위' ? 'ndtMemberDisp' : 'ndtSettlement';
             let groupNoStr = formatPinNumberLabel(group.groupNo || 'NO.01', groupStyleKey);
             const groupDim = measurePinBoxDimensions(state.ctx || null, groupNoStr, groupSize.pin, 1);
-            if (isPointInsideMarkBox(vx, vy, bx, by, groupDim.w, groupDim.h, ndtRotationAngle || 0)) {
-                return { type: 'box', group };
-            }
+            dispCand.box = isPointInsideMarkBox(vx, vy, bx, by, groupDim.w, groupDim.h, ndtRotationAngle || 0);
+            if (dispCand.box || dispCand.point) dispCands.push(dispCand);
         }
-        return null;
+        const pick = pickNdtBoxFirst(dispCands);
+        if (!pick) return null;
+        const dc = dispCands[pick.index];
+        return pick.part === 'box' ? { type: 'box', group: dc.group } : { type: 'point', group: dc.group, point: dc.point };
     }
 
     function setupNdtCanvas() {
@@ -19033,6 +19097,8 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
             };
         }
 
+        // 기둥 단면 모양: 저장된 항목이 원형(지름)이면 원형으로 연다
+        ndtColumnShapeCircle = !!(existingItem && existingItem.measureDimMode === 'circle');
         ndtItemPhotoIds = ndtFieldPhotoIdsOf(existingItem);
         bindNdtItemPhotoInputs();
         renderNdtItemPhotoList();
@@ -19189,7 +19255,7 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
         const finishState = (cat === '실측')
             ? (getDefectComboValue(document.getElementById('ndtFinishState'), document.getElementById('ndtFinishStateInput')) || '')
             : '';
-        const dimKind = (cat === '실측') ? getNdtMeasureDimKind(comp) : null;
+        const dimKind = (cat === '실측') ? resolveNdtFormDimKind(comp, ndtColumnShapeCircle) : null;
         let designWidth = null, designDepth = null, measuredWidth = null, measuredDepth = null;
         let designWeb = null, designFlange = null, designWebWidth = null, designFlangeWidth = null;
         let measuredWeb = null, measuredFlange = null, measuredWebWidth = null, measuredFlangeWidth = null;
@@ -19562,7 +19628,7 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
             if (cat !== '실측') return;
             const ratioEl = document.getElementById('ndtSectionRatio');
             const gradeEl = document.getElementById('ndtSectionGrade');
-            const dimKind = getNdtMeasureDimKind(getNdtCurrentComponentName());
+            const dimKind = getNdtFormDimKind();
             let calc = null;
             if (dimKind === 'steel') {
                 const designSteel = readNdtSteelDims('ndtDesign');

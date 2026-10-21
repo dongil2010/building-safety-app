@@ -23,8 +23,8 @@ assert.strictEqual(tap(null, false, false), 'none');
 
 assert.ok(/const NDT_TOUCH_LONG_PRESS_MS = 300;/.test(app), '0.3초');
 const pinAt = fn('findNdtPinAt');
-assert.ok(pinAt.indexOf('if (ndtActivePointerIsTouch && bestBox) return bestBox;') >= 0
-    && pinAt.indexOf('if (ndtActivePointerIsTouch && bestBox) return bestBox;') < pinAt.indexOf("if (bestTarget) return { item: bestTarget.item, part: 'target' };"), '터치는 박스 먼저, PC는 점 먼저');
+// 2026-10-21: PC도 박스 먼저(test-ndt-box-first)
+assert.ok(pinAt.indexOf('pickNdtBoxFirst(ndtHitCands)') >= 0, '터치·PC 모두 박스 먼저');
 assert.ok(/findNdtDisplacementHit\(vx, vy, \{ boxOnly: true \}\) \|\| findNdtDisplacementHit\(vx, vy\)/.test(app), '변위 터치도 박스 먼저');
 // 누르는 순간 선택을 바꾸지 않음(그대로 밀면 팬 + 선택 유지)
 const ts = app.slice(app.indexOf("canvas.addEventListener('touchstart', (e) => {\n            ndtTouchStartedOnCanvas = true;".replace(/\n/g, app.includes('\r\n') ? '\r\n' : '\n')));

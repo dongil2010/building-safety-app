@@ -38,7 +38,30 @@
         });
         return best;
     }
-    var api = { claimSelected: claimSelected, segDist: segDist, boxDist: boxDist };
+    /**
+     * 2026-10-21 비파괴도: 점과 박스가 겹치면 박스 먼저(PC·터치 같음). 고른 마킹이 먼저(그 안에서도 박스 먼저).
+     * cands: 위(나중에 그린 것)부터 [{ key, box: bool(박스 안), tipDist: number(점 반경 안일 때만, 아니면 Infinity) }]
+     * isSelected(key) → bool. 반환 { index, part:'box'|'tip' } | null
+     * 순서: 고른 마킹 박스 → 고른 마킹 점 → 맨 위 박스 → 가장 가까운 점
+     */
+    function pickBoxFirst(cands, isSelected) {
+        var list = cands || [];
+        var sel = typeof isSelected === 'function' ? isSelected : function () { return false; };
+        var i, c, bestTip = -1;
+        for (i = 0; i < list.length; i++) { c = list[i]; if (c && c.box && sel(c.key)) return { index: i, part: 'box' }; }
+        for (i = 0; i < list.length; i++) {
+            c = list[i];
+            if (c && Number.isFinite(c.tipDist) && sel(c.key) && (bestTip < 0 || c.tipDist < list[bestTip].tipDist)) bestTip = i;
+        }
+        if (bestTip >= 0) return { index: bestTip, part: 'tip' };
+        for (i = 0; i < list.length; i++) { c = list[i]; if (c && c.box) return { index: i, part: 'box' }; }
+        for (i = 0; i < list.length; i++) {
+            c = list[i];
+            if (c && Number.isFinite(c.tipDist) && (bestTip < 0 || c.tipDist < list[bestTip].tipDist)) bestTip = i;
+        }
+        return bestTip >= 0 ? { index: bestTip, part: 'tip' } : null;
+    }
+    var api = { pickBoxFirst: pickBoxFirst, claimSelected: claimSelected, segDist: segDist, boxDist: boxDist };
     if (typeof module !== 'undefined' && module.exports) module.exports = api;
     if (root) { root.BSA = root.BSA || {}; root.BSA.selectedHit = api; }
 })(typeof window !== 'undefined' ? window : globalThis);
