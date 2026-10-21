@@ -1327,6 +1327,28 @@
         return out;
     }
 
+    /**
+     * 2026-10-22: 묶인 결함(같은 groupId의 X-1·X-2… 행)은 대부분 한 부재다. 그중 균열·이격 행은
+     * 균열폭이 가장 큰 한 행만 통계에 남긴다(폭이 같거나 없으면 앞 행). 균열이 아닌 행은 그대로 센다.
+     */
+    function collapseGroupedCrackRows(rows) {
+        var isCrack = function (d) { return /균열|이격/.test(String(d && d.defectType != null ? d.defectType : '')); };
+        var maxWidth = function (d) {
+            var ws = getCrackWidthNumbers(d);
+            return ws.length ? Math.max.apply(null, ws) : -1;
+        };
+        var best = {};
+        rows.forEach(function (d) {
+            if (!d || !d.groupId || !isCrack(d)) return;
+            var w = maxWidth(d);
+            if (!best[d.groupId] || w > best[d.groupId].w) best[d.groupId] = { row: d, w: w };
+        });
+        return rows.filter(function (d) {
+            if (!d || !d.groupId || !isCrack(d)) return true;
+            return best[d.groupId].row === d;
+        });
+    }
+
     function shouldIncludeDefect(d, opts) {
         if (!d) return false;
         if (opts.excludeGood) {
@@ -1420,7 +1442,7 @@
 
         floorCodes.forEach(function (floorCode) {
             var raw = window.state.defects[prefix + floorCode] || [];
-            var rows = getSurveyRows(raw).filter(function (d) { return shouldIncludeDefect(d, opts); });
+            var rows = collapseGroupedCrackRows(getSurveyRows(raw).filter(function (d) { return shouldIncludeDefect(d, opts); }));
             if (lintApi) {
                 var lintTargets = getSurveyRows(raw).filter(function (d) {
                     return shouldIncludeDefect(d, { excludeGood: false, currentRoundOnly: opts.currentRoundOnly });
