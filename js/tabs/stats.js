@@ -1070,6 +1070,18 @@
     };
 
     root.BSA.ndtStats = api;
+    /** 팝업을 칸 아래(모자라면 위)에 두고 화면 안으로 밀어 넣는다 */
+    function placeBinPopup(rect, pw, ph, vw, vh) {
+        var m = 6;
+        var left = rect.left + rect.width / 2 - pw / 2;
+        left = Math.max(m, Math.min(left, vw - pw - m));
+        var top = rect.bottom + m;
+        if (top + ph > vh - m) top = rect.top - ph - m;
+        if (top < m) top = Math.max(m, Math.min(vh - ph - m, rect.bottom + m));
+        return { left: Math.round(left), top: Math.round(top) };
+    }
+    api.placeBinPopup = placeBinPopup;
+
     if (typeof module !== 'undefined' && module.exports) {
         module.exports = api;
     }
@@ -1085,6 +1097,7 @@
     /** 부재별 표에서 볼 것: 'crack'(최대 균열폭) | 'bins'(균열폭에 따른 분류) | 'kinds'(결함 종류별 건수) */
     var selectedComponentMode = 'crack';
     var ndtStats = (window.BSA && window.BSA.ndtStats) || {};
+    var placeBinPopup = ndtStats.placeBinPopup || function (r) { return { left: r.left, top: r.bottom }; };
 
     function esc(s) {
         return String(s == null ? '' : s)
@@ -1273,6 +1286,32 @@
         });
     }
 
+    /** 개구부 결함 = 개구부 균열 체크(결함목록·조사표 개구부 결함유무, 가져오기 때 개구부 위치면 자동 체크) */
+    function isOpeningDefect(d) {
+        if (!d) return false;
+        var v = d.isOpeningCrack;
+        return v === true || v === 1 || v === '1' || v === '○' || v === '개구부';
+    }
+
+    /** NO.xx 목록을 숫자 순서로 정렬(중복 제거) */
+    function sortDefectNos(list) {
+        var seen = {};
+        var out = (list || []).map(function (x) { return String(x == null ? '' : x).trim(); }).filter(function (x) {
+            if (!x || seen[x]) return false;
+            seen[x] = true;
+            return true;
+        });
+        out.sort(function (a, b) {
+            var ma = /\d+(?:\.\d+)?/.exec(a), mb = /\d+(?:\.\d+)?/.exec(b);
+            var na = ma ? parseFloat(ma[0]) : NaN, nb = mb ? parseFloat(mb[0]) : NaN;
+            var ha = !isNaN(na), hb = !isNaN(nb);
+            if (ha && hb && na !== nb) return na - nb;
+            if (ha !== hb) return ha ? -1 : 1;
+            return String(a).localeCompare(String(b), 'ko', { numeric: true });
+        });
+        return out;
+    }
+
     function shouldIncludeDefect(d, opts) {
         if (!d) return false;
         if (opts.excludeGood) {
@@ -1281,6 +1320,8 @@
             // 2026-10-16 보수완료·보수됨 등도 상태양호와 같이 제외(core/good-type.js)
             if (!types.length || (types.length === 1 && (window.BsaGoodType ? window.BsaGoodType.isGoodDefectText(types[0]) : String(types[0] || '').indexOf('상태양호') !== -1))) return false;
         }
+        // 2026-10-21 개구부 결함 제외: 개구부 균열 체크(isOpeningCrack)된 결함을 통계에서 뺀다
+        if (opts.excludeOpening && isOpeningDefect(d)) return false;
         if (opts.currentRoundOnly && typeof window.isPreviousRoundDefect === 'function') {
             if (window.isPreviousRoundDefect(d)) return false;
         }
@@ -1391,6 +1432,7 @@
             var floorComponentCrackMax = {};
             var floorComponentCrackCounts = {};
             var floorComponentCrackBins = {};
+            var floorComponentCrackBinNos = {};
             var floorComponentKinds = {};
             rows.forEach(function (d) {
                 var cat = d.category || '구조체';
@@ -1408,6 +1450,8 @@
                     var bin = classifyCrackWidthBin(getCrackWidthNumbers(d));
                     var binBucket = floorComponentCrackBins[compGroup] || (floorComponentCrackBins[compGroup] = {});
                     binBucket[bin] = (binBucket[bin] || 0) + 1;
+                    var noBucket = floorComponentCrackBinNos[compGroup] || (floorComponentCrackBinNos[compGroup] = {});
+                    (noBucket[bin] || (noBucket[bin] = [])).push(d.no || d.groupNo || '');
                 }
                 var kinds = classifyDefectKinds(d);
                 var kindBucket = floorComponentKinds[compGroup] || (floorComponentKinds[compGroup] = {});
@@ -1431,6 +1475,7 @@
                 componentCrackMax: floorComponentCrackMax,
                 componentCrackCounts: floorComponentCrackCounts,
                 componentCrackBins: floorComponentCrackBins,
+                componentCrackBinNos: floorComponentCrackBinNos,
                 componentKinds: floorComponentKinds,
                 coarseGroup: getCoarseFloorGroup(floorCode),
                 zoneInfo: classifyFloorGroup(floorCode)
@@ -1615,18 +1660,28 @@
         } else if (mode === 'bins') {
             var binHead = CRACK_WIDTH_BINS.map(function (b) { return '<th class="stats-kind-col">' + esc(b.label) + '</th>'; }).join('');
             var binTotals = {};
+            var binNoTotals = {};
+            var noAttr = function (list, title) {
+                var nos = sortDefectNos(list);
+                if (!nos.length) return '';
+                return ' data-bin-nos="' + esc(nos.join(',')) + '" data-bin-title="' + esc(title) + '" tabindex="0"';
+            };
             var binBody = floorsWithData.map(function (fr) {
                 var trCls = fr.floorCode === payload.currentFloor ? ' class="stats-row-current"' : '';
                 var bucket = (fr.componentCrackBins && fr.componentCrackBins[selectedComponentGroup]) || {};
+                var noBucket = (fr.componentCrackBinNos && fr.componentCrackBinNos[selectedComponentGroup]) || {};
                 var cells = CRACK_WIDTH_BINS.map(function (b) {
                     var n = bucket[b.key] || 0;
                     binTotals[b.key] = (binTotals[b.key] || 0) + n;
-                    return '<td class="stats-kind-col ' + (n ? 'stats-cell-hit' : 'stats-cell-zero') + '">' + n + '</td>';
+                    var nos = noBucket[b.key] || [];
+                    binNoTotals[b.key] = (binNoTotals[b.key] || []).concat(nos.map(function (x) { return x; }));
+                    return '<td class="stats-kind-col ' + (n ? 'stats-cell-hit stats-bin-nos' : 'stats-cell-zero') + '"' + (n ? noAttr(nos, fr.floorLabel + ' · ' + b.label) : '') + '>' + n + '</td>';
                 }).join('');
                 return '<tr' + trCls + '><th scope="row">' + esc(fr.floorLabel) + '</th>' + cells + '<td class="stats-cell-hit">' + floorCount(fr) + '</td></tr>';
             }).join('');
             var totalCells = CRACK_WIDTH_BINS.map(function (b) {
-                return '<td class="stats-kind-col stats-cell-sum">' + (binTotals[b.key] || 0) + '</td>';
+                var n = binTotals[b.key] || 0;
+                return '<td class="stats-kind-col stats-cell-sum' + (n ? ' stats-bin-nos' : '') + '"' + (n ? noAttr(binNoTotals[b.key], '합계 · ' + b.label) : '') + '>' + n + '</td>';
             }).join('');
             var grand = floorsWithData.reduce(function (a, fr) { return a + floorCount(fr); }, 0);
             tableHtml = '<div class="table-responsive stats-table-wrap"><table class="data-table stats-component-crack-table"><thead><tr><th>층</th>' + binHead + '<th>균열·이격 건수</th></tr></thead><tbody>'
@@ -1683,6 +1738,70 @@
                 goToDefectOnMap(btn.getAttribute('data-floor-code'), btn.getAttribute('data-defect-id'));
             });
         });
+        bindBinNoPopup(root);
+    }
+
+    /** 2026-10-21 균열폭 분류 칸: 마우스를 올리거나(PC) 누르면(터치) 포함된 결함 번호를 띄운다 */
+    var binPopupEl = null;
+    var binPopupPinned = null;
+    function getBinPopup() {
+        if (binPopupEl && document.body.contains(binPopupEl)) return binPopupEl;
+        binPopupEl = document.createElement('div');
+        binPopupEl.id = 'statsBinNoPopup';
+        binPopupEl.className = 'stats-bin-popup';
+        binPopupEl.setAttribute('role', 'tooltip');
+        binPopupEl.hidden = true;
+        document.body.appendChild(binPopupEl);
+        document.addEventListener('pointerdown', function (e) {
+            if (!binPopupPinned) return;
+            if (e.target && e.target.closest && (e.target.closest('.stats-bin-popup') || e.target.closest('[data-bin-nos]'))) return;
+            hideBinPopup(true);
+        }, true);
+        window.addEventListener('scroll', function () { hideBinPopup(true); }, true);
+        window.addEventListener('resize', function () { hideBinPopup(true); });
+        return binPopupEl;
+    }
+    function hideBinPopup(force) {
+        if (!binPopupEl) return;
+        if (binPopupPinned && !force) return;
+        binPopupPinned = null;
+        binPopupEl.hidden = true;
+    }
+    function showBinPopup(cell, pin) {
+        var pop = getBinPopup();
+        var nos = String(cell.getAttribute('data-bin-nos') || '').split(',').filter(Boolean);
+        if (!nos.length) return;
+        pop.innerHTML = '<div class="stats-bin-popup-title">' + esc(cell.getAttribute('data-bin-title') || '') + ' (' + nos.length + '건)</div>'
+            + '<div class="stats-bin-popup-list">' + nos.map(function (n) { return '<span>NO.' + esc(n) + '</span>'; }).join('') + '</div>';
+        pop.hidden = false;
+        pop.style.left = '0px';
+        pop.style.top = '0px';
+        var r = cell.getBoundingClientRect();
+        var pw = pop.offsetWidth, ph = pop.offsetHeight;
+        var vw = document.documentElement.clientWidth || window.innerWidth;
+        var vh = document.documentElement.clientHeight || window.innerHeight;
+        var pos = placeBinPopup(r, pw, ph, vw, vh);
+        pop.style.left = pos.left + 'px';
+        pop.style.top = pos.top + 'px';
+        binPopupPinned = pin ? cell : null;
+    }
+    function bindBinNoPopup(root) {
+        root.querySelectorAll('[data-bin-nos]').forEach(function (cell) {
+            cell.addEventListener('pointerenter', function (e) {
+                if (e.pointerType === 'touch' || binPopupPinned) return;
+                showBinPopup(cell, false);
+            });
+            cell.addEventListener('pointerleave', function (e) {
+                if (e.pointerType === 'touch') return;
+                hideBinPopup(false);
+            });
+            cell.addEventListener('focus', function () { if (!binPopupPinned) showBinPopup(cell, false); });
+            cell.addEventListener('blur', function () { hideBinPopup(false); });
+            cell.addEventListener('click', function () {
+                if (binPopupPinned === cell) { hideBinPopup(true); return; }
+                showBinPopup(cell, true);
+            });
+        });
     }
 
     /** 통계탭의 특정 결함을 결함위치도 작성 화면으로 이동해 선택 표시한다 */
@@ -1720,8 +1839,31 @@
     function getStatsOptions() {
         return {
             excludeGood: !!document.getElementById('statsExcludeGood')?.checked,
-            currentRoundOnly: !!document.getElementById('statsCurrentRoundOnly')?.checked
+            currentRoundOnly: !!document.getElementById('statsCurrentRoundOnly')?.checked,
+            excludeOpening: !!document.getElementById('statsExcludeOpening')?.checked
         };
+    }
+
+    /** 개구부 결함 제외는 건물마다 기억한다(localStorage) */
+    var OPENING_PREF_KEY = 'bsa_stats_exclude_opening_v1';
+    var openingPrefBldg = undefined;
+    function readOpeningPrefs() {
+        try { return JSON.parse(localStorage.getItem(OPENING_PREF_KEY) || '{}') || {}; } catch (e) { return {}; }
+    }
+    function syncExcludeOpeningCheck(bldg) {
+        var el = document.getElementById('statsExcludeOpening');
+        var id = bldg && bldg.id ? String(bldg.id) : '';
+        if (!el || openingPrefBldg === id) return;
+        openingPrefBldg = id;
+        el.checked = !!(id && readOpeningPrefs()[id]);
+    }
+    function saveExcludeOpeningCheck() {
+        var el = document.getElementById('statsExcludeOpening');
+        var bldg = window.state && window.state.currentBuilding;
+        if (!el || !bldg || !bldg.id) return;
+        var prefs = readOpeningPrefs();
+        if (el.checked) prefs[String(bldg.id)] = true; else delete prefs[String(bldg.id)];
+        try { localStorage.setItem(OPENING_PREF_KEY, JSON.stringify(prefs)); } catch (e) {}
     }
 
     /** 대분류 칩(상태조사·비파괴조사)은 index.html을 건드리지 않고 여기서 만들어 붙인다 */
@@ -2202,6 +2344,8 @@
 
         renderStatsFreshNote(metaEl);
         syncCategoryChips();
+        syncExcludeOpeningCheck(bldg);
+        hideBinPopup(true);
         var payload = buildStatsPayload(bldg, getStatsOptions());
         renderSummaryCards(payload, document.getElementById('statsSummaryCards'));
         renderComponentCrackPanel(payload, document.getElementById('statsComponentSection'));
@@ -2231,6 +2375,8 @@
             var el = document.getElementById(id);
             if (el) el.addEventListener('change', function () { window.renderDefectStatsTab(); });
         });
+        var openEl = document.getElementById('statsExcludeOpening');
+        if (openEl) openEl.addEventListener('change', function () { saveExcludeOpeningCheck(); window.renderDefectStatsTab(); });
     }
 
     window.BSA.tabs['tab-stats'] = {

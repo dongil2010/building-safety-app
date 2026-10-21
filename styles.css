@@ -17823,3 +17823,11 @@ html:not(.layout-tablet) #tab-ndt.ndt-split-on .ndt-split-bar {
 }
 .ndt-split-bar .ndt-split-grip { width: 56px; height: 5px; border-radius: 3px; background: #cbd5e1; }
 .ndt-split-bar:hover .ndt-split-grip, .ndt-split-bar.dragging .ndt-split-grip { background: #2563eb; }
+
+/* 2026-10-21 통계: 균열폭 분류 칸 결함 번호 팝업 */
+.stats-component-crack-table td.stats-bin-nos{cursor:pointer;text-decoration:underline dotted;text-underline-offset:3px}
+.stats-bin-popup{position:fixed;z-index:10050;max-width:min(320px,calc(100vw - 12px));max-height:min(260px,calc(100vh - 12px));overflow:auto;background:#fff;color:#1f2937;border:1px solid #cbd5e1;border-radius:8px;box-shadow:0 6px 20px rgba(0,0,0,.18);padding:8px 10px;font-size:13px;line-height:1.4}
+.stats-bin-popup[hidden]{display:none}
+.stats-bin-popup-title{font-weight:600;margin-bottom:6px;color:#0f766e}
+.stats-bin-popup-list{display:flex;flex-wrap:wrap;gap:4px 6px}
+.stats-bin-popup-list span{background:#f1f5f9;border-radius:4px;padding:1px 6px;white-space:nowrap}
