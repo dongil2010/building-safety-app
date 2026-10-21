@@ -77,7 +77,9 @@ const SM = require(path.join(__dirname, '..', 'js', 'core', 'sync-merge.js'));
     assert.deepStrictEqual(G.lostServerBuildings(undefined, demoOnly, []), [], '서버가 비었으면 막을 것 없음');
     const appSrc = require('fs').readFileSync(path.join(__dirname, '..', 'app.js'), 'utf8');
     assert.ok(appSrc.includes("const guardSnap = await docRef.get({ source: 'server' });"), '쓰기 직전 서버에서 다시 읽음');
-    assert.ok(/guardApi\.lostServerBuildings\(guardData\.buildings, sanitizedBuildings, mergedDeletedBuildings\)[\s\S]{0,700}throw new Error\('BUILDING_LIST_GUARD[\s\S]{0,200}await docRef\.set\(dataToSync, \{ merge: true \}\);/.test(appSrc), '빠지면 쓰기 전에 멈춤');
+    // 2026-10-21 멈추는 대신 서버본과 건물 id로 합쳐서 쓴다(오래된 목록이 건물을 지우지 못함)
+    assert.ok(/guardApi\.lostServerBuildings\(guardData\.buildings, sanitizedBuildings, mergedDeletedBuildings\)[\s\S]{0,1200}dataToSync\.buildings = sanitizedBuildings\.concat\(keepServer\)[\s\S]{0,1200}await docRef\.set\(dataToSync, \{ merge: true \}\);/.test(appSrc), '빠지면 서버 건물을 합쳐서 씀');
+    assert.ok(/const localOnly = filterDeletedBuildings\(\s*\(localBuildings \|\| \[\]\)\.filter\(\(b\) => b\?\.id && !remoteIds\.has\(b\.id\)\),/.test(appSrc), '삭제 기록 없는 로컬 건물은 병합에서 유지');
     // 2026-10-16 추가: 동기화 쓰기 전 서버 기준 문서는 서버에서 온 것만 — 서버 읽기 실패 시 캐시로 넘어가지 않고 이번엔 안 씀
     assert.ok(appSrc.includes("async function fetchCompanyDocSnapForWrite(docRef) {\n        try {\n            return await docRef.get({ source: 'server' });"), '쓰기용 읽기는 서버만');
     assert.ok(/async function serverRootDataForWrite\(docRef\) \{\s*if \(_lastRootSnapshotFromServer && /.test(appSrc), '리스너 문서는 서버에서 온 것만');

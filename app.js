@@ -3560,10 +3560,19 @@ document.addEventListener('DOMContentLoaded', () => {
     function mergeBuildingsForSync(serverBuildings, localBuildings, deletedIds, prevAssetsById) {
         const remoteFiltered = filterDeletedBuildings(serverBuildings || [], deletedIds);
         const remoteIds = new Set(remoteFiltered.map((b) => b.id));
+        // 2026-10-21 서버 목록에 없어도 삭제 기록(tombstone)이 없는 건물은 절대 빼지 않는다 — 건물 id로 합친다.
+        // (사고: 옛 31개 목록이 서버를 덮어써 경신여고 등 9개 건물이 삭제 기록 없이 목록에서 사라짐)
+        // 다시 올리도록 _pendingCloudSync 표시를 붙인다.
         const localOnly = filterDeletedBuildings(
-            (localBuildings || []).filter((b) => b?.id && !remoteIds.has(b.id) && b._pendingCloudSync === true),
+            (localBuildings || []).filter((b) => b?.id && !remoteIds.has(b.id)),
             deletedIds
         );
+        localOnly.forEach((b) => {
+            if (b._pendingCloudSync !== true) {
+                console.warn('[건물 병합] 서버 목록에 없지만 삭제 기록이 없어 유지:', b.id, b.name || '');
+                b._pendingCloudSync = true;
+            }
+        });
         const assets = prevAssetsById || captureBuildingDrawingAssetsById(localBuildings);
         const mergedRemote = remoteFiltered.map((b) => {
             const localMatch = (localBuildings || []).find((lb) => lb.id === b.id);
@@ -66913,9 +66922,19 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
                     ? guardApi.lostServerBuildings(guardData.buildings, sanitizedBuildings, mergedDeletedBuildings)
                     : [];
                 if (lostBldgs.length) {
-                    console.error('[동기화 중단] 서버에 있는 건물이 이 기기 목록에 없어 쓰지 않습니다:', lostBldgs);
-                    window.showToast(`동기화를 멈췄습니다: 이 기기의 건물 목록에 서버 건물 ${lostBldgs.length}개가 없습니다. 새로고침(F5) 해 주세요.`, 'error', 12000);
-                    throw new Error('BUILDING_LIST_GUARD: 서버 건물 ' + lostBldgs.length + '개가 빠짐');
+                    // 2026-10-21 쓰기 전에 서버본과 건물 id로 합친다 — 이 기기 목록에 없는 서버 건물(삭제 기록 없음)은
+                    // 서버 항목 그대로 이번 쓰기에 넣어, 오래된 목록이 배열을 통째로 덮어써 건물을 지우지 못하게 한다.
+                    const lostIds = new Set(lostBldgs.map((x) => x.id));
+                    const keepServer = (guardData.buildings || []).filter((b) => b && lostIds.has(b.id));
+                    dataToSync.buildings = sanitizedBuildings.concat(keepServer);
+                    console.warn('[동기화] 이 기기 목록에 없는 서버 건물을 지우지 않고 합쳐서 씁니다:', lostBldgs);
+                    try {
+                        const have = new Set((window.state.buildings || []).map((b) => b && b.id));
+                        keepServer.forEach((b) => { if (!have.has(b.id)) window.state.buildings.push(Object.assign({}, b)); });
+                        _suppressSyncOnSave = true;
+                        if (typeof saveStateToLocalStorage === 'function') saveStateToLocalStorage();
+                        _suppressSyncOnSave = false;
+                    } catch (e) { console.warn('[동기화] 서버 건물 로컬 반영 실패:', e); }
                 }
             }
             await docRef.set(dataToSync, { merge: true });
