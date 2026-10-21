@@ -35313,7 +35313,9 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
         // 터치/조밀 배치: 화살표(TIP)가 박스 안·근처에 있어도 TIP을 잡을 수 있게
         // 박스 즉시 return 하지 않고, TIP·BOX 후보를 모은 뒤 TIP을 우선한다.
         let bestTip = null; // { defect, dist, tipR }
-        let bestBox = null; // { defect }
+        let bestBox = null; // { defect } — NO.박스만
+        // 2026-10-21 영역 안쪽·외곽선 이동(AREA_MOVE)은 따로 — 위에 그린 영역이 아래 마킹의 NO.박스를 가리지 않게
+        let bestArea = null;
 
         for (let i = defects.length - 1; i >= 0; i--) {
             const d = defects[i];
@@ -35358,7 +35360,7 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
                             const b = pts[(ei + 1) % pts.length];
                             if (distPointToSegment(imgX, imgY, a.x, a.y, b.x, b.y) <= edgeTol) {
                                 // 외곽선 근처(바깥/테두리) — 이동은 내부에서만
-                                if (!bestBox) bestBox = { defect: d, part: 'AREA_MOVE' };
+                                if (!bestArea) bestArea = { defect: d, part: 'AREA_MOVE' };
                                 break;
                             }
                         }
@@ -35419,8 +35421,8 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
                     bestBox = { defect: d, part: 'BOX' };
                 }
 
-                if (insideForMove && !bestBox) {
-                    bestBox = { defect: d, part: 'AREA_MOVE' };
+                if (insideForMove && !bestArea) {
+                    bestArea = { defect: d, part: 'AREA_MOVE' };
                 }
                 continue;
             }
@@ -35445,10 +35447,11 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
         // 2026-10-19 「마킹이랑 네모박스랑 너무 가까우면 … 네모 박스가 먼저 드래그로 옮길 수 있게」:
         // 누른 곳이 NO.박스 안이면 박스가 먼저(화살표 끝은 박스 밖으로 나온 부분으로 잡는다).
         // 영역 안쪽(AREA_MOVE)·외곽선 근처에서는 예전처럼 화살표 끝(TIP)이 우선.
-        if (bestBox && bestBox.part === 'BOX') return { defect: bestBox.defect, part: 'BOX' };
+        // 2026-10-21 PC·터치 같음: 다른 마킹의 화살표 끝이 박스 위에 있어도, 위에 그린 영역이 덮고 있어도 NO.박스 먼저
+        if (bestBox) return { defect: bestBox.defect, part: 'BOX' };
         // 화살표 반경 안이면 영역 이동보다 TIP 우선 (근처 영역에 드래그가 뺏기던 문제 해결)
         if (bestTip) return { defect: bestTip.defect, part: 'TIP' };
-        if (bestBox) return { defect: bestBox.defect, part: bestBox.part || 'BOX' };
+        if (bestArea) return { defect: bestArea.defect, part: 'AREA_MOVE' };
         return null;
     }
 

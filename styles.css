@@ -17792,3 +17792,34 @@ input.ndt-mo-locked { background: var(--bg-secondary, #f2f2f2); color: var(--tex
 .ndt-column-shape-label { font-size: 0.8rem; font-weight: 700; color: #444; }
 .ndt-column-shape-btn { border: 1px solid #cbd5e1; background: #fff; border-radius: 8px; padding: 0.25rem 0.6rem; font-size: 0.8rem; cursor: pointer; min-height: 32px; }
 .ndt-column-shape-btn.active { background: #2563eb; border-color: #2563eb; color: #fff; font-weight: 700; }
+
+/* 2026-10-21 비파괴 탭 PC: 도면 : 결과표 ≈ 3:2, 결과표만 따로 스크롤(js/core/ndt-split.js) */
+html:not(.layout-tablet) #tab-ndt.ndt-split-on #ndtCanvasContainer {
+    height: var(--ndt-split-top) !important;
+    min-height: 0 !important;
+    max-height: none !important;
+}
+html:not(.layout-tablet) #tab-ndt.ndt-split-on .ndt-results-section {
+    margin-top: 0 !important;
+}
+html:not(.layout-tablet) #tab-ndt.ndt-split-on .ndt-results-table-wrap {
+    height: var(--ndt-split-bottom) !important;
+    max-height: var(--ndt-split-bottom) !important;
+    overflow: auto !important;
+    overscroll-behavior: contain;
+    padding-top: 0 !important;
+}
+html:not(.layout-tablet) #tab-ndt.ndt-split-on #ndtSummaryTable thead th {
+    position: sticky;
+    top: 0;
+    z-index: 2;
+    background: var(--bg-secondary, #f8fafc);
+    box-shadow: inset 0 -1px 0 var(--border-color, #e5e7eb);
+}
+.ndt-split-bar { display: none; }
+html:not(.layout-tablet) #tab-ndt.ndt-split-on .ndt-split-bar {
+    display: flex; align-items: center; justify-content: center;
+    height: 14px; cursor: row-resize; touch-action: none; user-select: none;
+}
+.ndt-split-bar .ndt-split-grip { width: 56px; height: 5px; border-radius: 3px; background: #cbd5e1; }
+.ndt-split-bar:hover .ndt-split-grip, .ndt-split-bar.dragging .ndt-split-grip { background: #2563eb; }
