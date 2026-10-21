@@ -34,7 +34,7 @@ function extractFunction(src, header) {
 const sandbox = { window: {} };
 vm.createContext(sandbox);
 vm.runInContext([
-    'function parseDefectTypeList(', 'function isOpeningDefect(', 'function sortDefectNos(', 'function shouldIncludeDefect('
+    'function parseDefectTypeList(', 'function isOpeningDefect(', 'function stripDefectNoPrefix(', 'function formatDefectNo(', 'function sortDefectNos(', 'function shouldIncludeDefect('
 ].map((h) => extractFunction(statsSrc, h)).join('\n')
     + '\nthis.inc = function (d, o) { return shouldIncludeDefect(d, o); };'
     + '\nthis.sortJson = function (a) { return JSON.stringify(sortDefectNos(a)); };', sandbox);
@@ -49,6 +49,19 @@ assert.strictEqual(sandbox.inc({ defectType: '균열', isOpeningCrack: false }, 
 
 assert.deepStrictEqual(JSON.parse(sandbox.sortJson(['12', '3', '', '3', '101', '7-1', 'A'])), ['3', '7-1', '12', '101', 'A'],
     '번호는 숫자 순서, 중복·빈 값 제거');
+
+// 2026-10-21 「NO.NO.88」 버그: 이미 붙은 NO 접두어는 떼고 한 번만 붙인다
+vm.runInContext('this.fmt = function (x) { return formatDefectNo(x); };', sandbox);
+['NO.88', 'No.88', 'no88', 'NO 88', 'no. 88', ' N0.88'.replace('0', 'O'), '88'].forEach((x) => {
+    assert.strictEqual(sandbox.fmt(x), 'NO.88', JSON.stringify(x) + ' → NO.88');
+});
+assert.strictEqual(sandbox.fmt('외부1-3'), 'NO.외부1-3', '숫자가 아닌 이름은 그대로');
+assert.strictEqual(sandbox.fmt('NO.외부1-3'), 'NO.외부1-3');
+assert.strictEqual(sandbox.fmt('North-2'), 'NO.North-2', '영문 이름은 NO를 떼지 않는다');
+assert.strictEqual(sandbox.fmt('NO.'), 'NO.NO.', '접두어만 있으면 남긴다(빈 번호 방지)');
+assert.deepStrictEqual(JSON.parse(sandbox.sortJson(['NO.12', 'no 3', 'No.101', '7', 'NO.7', '외부1-3'])), ['3', '7', '12', '101', '외부1-3'],
+    'NO 접두어가 섞여도 숫자 순서, 같은 번호는 하나');
+assert.ok(!/'NO\.' \+ esc\(n\)/.test(statsSrc), '팝업에서 NO.를 무조건 붙이지 않는다');
 
 // 팝업 위치: 화면 안에 들어온다
 const api = require(path.join(ROOT, 'js', 'tabs', 'stats.js'));

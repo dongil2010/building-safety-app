@@ -1293,16 +1293,31 @@
         return v === true || v === 1 || v === '1' || v === '○' || v === '개구부';
     }
 
-    /** NO.xx 목록을 숫자 순서로 정렬(중복 제거) */
+    /** 결함 번호 앞에 이미 붙은 NO. / No. / no / NO 등을 떼어 낸다(대소문자·점·띄어쓰기 무관). 외부1-3 같은 이름은 그대로 */
+    function stripDefectNoPrefix(x) {
+        var t = String(x == null ? '' : x).trim();
+        var m = /^no\s*\.?\s*(?![a-z])/i.exec(t);
+        if (m && m[0].length < t.length) t = t.slice(m[0].length).trim();
+        return t;
+    }
+
+    /** 표시용: 번호 하나에 NO.를 한 번만 붙인다 */
+    function formatDefectNo(x) {
+        var t = stripDefectNoPrefix(x);
+        return t ? 'NO.' + t : '';
+    }
+
+    /** NO.xx 목록을 숫자 순서로 정렬(중복 제거, NO 접두어는 떼고 비교) */
     function sortDefectNos(list) {
         var seen = {};
-        var out = (list || []).map(function (x) { return String(x == null ? '' : x).trim(); }).filter(function (x) {
+        var out = (list || []).map(stripDefectNoPrefix).filter(function (x) {
             if (!x || seen[x]) return false;
             seen[x] = true;
             return true;
         });
         out.sort(function (a, b) {
-            var ma = /\d+(?:\.\d+)?/.exec(a), mb = /\d+(?:\.\d+)?/.exec(b);
+            // 숫자로 시작하는 번호만 숫자 순서, 외부1-3 같은 이름은 그 뒤에 이름 순서
+            var ma = /^\d+(?:\.\d+)?/.exec(a), mb = /^\d+(?:\.\d+)?/.exec(b);
             var na = ma ? parseFloat(ma[0]) : NaN, nb = mb ? parseFloat(mb[0]) : NaN;
             var ha = !isNaN(na), hb = !isNaN(nb);
             if (ha && hb && na !== nb) return na - nb;
@@ -1772,7 +1787,7 @@
         var nos = String(cell.getAttribute('data-bin-nos') || '').split(',').filter(Boolean);
         if (!nos.length) return;
         pop.innerHTML = '<div class="stats-bin-popup-title">' + esc(cell.getAttribute('data-bin-title') || '') + ' (' + nos.length + '건)</div>'
-            + '<div class="stats-bin-popup-list">' + nos.map(function (n) { return '<span>NO.' + esc(n) + '</span>'; }).join('') + '</div>';
+            + '<div class="stats-bin-popup-list">' + nos.map(function (n) { return '<span>' + esc(formatDefectNo(n)) + '</span>'; }).join('') + '</div>';
         pop.hidden = false;
         pop.style.left = '0px';
         pop.style.top = '0px';
