@@ -123,6 +123,8 @@
         if (o.zoneId) out.zoneId = String(o.zoneId); // 구역에 속한 그룹만(없으면 키 자체가 없음)
         const nb = normalizeNumbering(o.numbering);
         if (nb !== 'num') out.numbering = nb; // 숫자는 키 없음(예전 데이터 그대로)
+        // 2026-10-21 내림차순(번호를 거꾸로: 1,2,3 → 3,2,1). 오름차순(기본)은 키 없음
+        if (o.reverse === true) out.reverse = true;
         return out;
     }
 
@@ -417,7 +419,9 @@
         const ranks = numberRanks(items.map((it) => it.line));
         items.sort((a, b) => a.offset - b.offset);
         items.forEach((it) => {
-            const k = ranks.get(it.line);
+            const k0 = ranks.get(it.line);
+            // 내림차순: 마지막 번호부터(오름차순 1,2,3 → 3,2,1)
+            const k = group.reverse === true ? (ranks.size - 1 - k0) : k0;
             it.numberIndex = k;
             it.autoName = groupSeqLabel(group, group.start + k);
             it.name = it.line.label || it.autoName;
@@ -576,7 +580,7 @@
         zones.forEach((z) => parts.push(`z|${roundPts([{ x: z.rect.x1, y: z.rect.y1 }, { x: z.rect.x2, y: z.rect.y2 }])}`));
         (grid.groups || []).forEach((g) => {
             // 번호 방식은 글자일 때만 붙임(숫자 그룹 지문은 예전과 같아 저장된 위치를 다시 계산하지 않음)
-            parts.push(`g${g.axis}|${g.prefix}|${g.start}|${g.band}${g.zoneId ? `|z${zones.findIndex((z) => z.id === g.zoneId)}` : ''}${g.numbering ? `|n${g.numbering}` : ''}`);
+            parts.push(`g${g.axis}|${g.prefix}|${g.start}|${g.band}${g.zoneId ? `|z${zones.findIndex((z) => z.id === g.zoneId)}` : ''}${g.numbering ? `|n${g.numbering}` : ''}${g.reverse ? '|r' : ''}`);
             (g.lines || []).forEach((ln) => {
                 parts.push(`l${ln.seq}|${ln.label || ''}|${ln.band != null ? ln.band : ''}|${roundPts(ln.pts)}`);
             });
@@ -831,6 +835,31 @@
         };
     }
 
+    /**
+     * 2026-10-21 「순서 뒤집기」 — 선 위치는 그대로, 번호 순서(seq)만 거꾸로(1,2,3 → 3,2,1 / A,B,C → C,B,A).
+     * 개별 이름을 준 선은 이름 그대로. 반환: 되돌리기용 이전 seq 목록 [{ id, seq }]
+     */
+    function reverseLineOrder(group) {
+        if (!group || !Array.isArray(group.lines)) return [];
+        const prev = group.lines.map((ln) => ({ id: ln.id, seq: ln.seq }));
+        const ranks = numberRanks(group.lines);
+        const n = ranks.size;
+        group.lines.forEach((ln) => { ln.seq = n - ranks.get(ln); });
+        return prev;
+    }
+
+    /** reverseLineOrder 되돌리기 */
+    function restoreLineSeqs(group, prev) {
+        if (!group || !Array.isArray(prev)) return false;
+        const m = new Map(prev.map((p) => [p.id, p.seq]));
+        group.lines.forEach((ln) => {
+            if (!m.has(ln.id)) return;
+            const s = m.get(ln.id);
+            if (Number.isFinite(s)) ln.seq = s; else delete ln.seq;
+        });
+        return true;
+    }
+
     /** 한 번만: 지금 화면 기준 위치 순서(왼→오른 / 위→아래)로 번호를 다시 매김 */
     function renumberBySpatialOrder(group, ctx) {
         const od = orderedLines(group, ctx);
@@ -1000,7 +1029,7 @@
             visible: src.visible,
             autoLocation: src.autoLocation,
             groups: src.groups.map((g) => {
-                const ng = createGroup(g.axis, { prefix: g.prefix, start: g.start, angle: g.angle, band: g.band, numbering: g.numbering, zoneId: g.zoneId ? zoneMap[g.zoneId] : '' });
+                const ng = createGroup(g.axis, { prefix: g.prefix, start: g.start, angle: g.angle, band: g.band, numbering: g.numbering, reverse: g.reverse === true, zoneId: g.zoneId ? zoneMap[g.zoneId] : '' });
                 ng.lines = (g.lines || []).map((ln) => {
                     const line = { id: uid('gl'), pts: ln.pts.map((p) => ({ x: p.x, y: p.y })) };
                     if (Number.isFinite(ln.seq)) line.seq = ln.seq;
@@ -1077,6 +1106,8 @@
         addLineToGroup,
         nextSeq,
         renumberBySpatialOrder,
+        reverseLineOrder,
+        restoreLineSeqs,
         lineAngle,
         setLineAngle,
         hitTest,

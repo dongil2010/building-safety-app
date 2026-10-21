@@ -35,7 +35,9 @@
         // 평가 탭 입력표(평가단위 × 부재 값, 기울기) — 2026-10-13
         'evalInputs',
         // 평가 탭 SAFETY357 입력(평가단위 = 건물) — 2026-10-13
-        'evalSafetyman'
+        'evalSafetyman',
+        // 회차별 보고서/결함위치도 작성완료 표시(round-done.js) — 2026-10-21
+        'roundDone'
     ];
 
     function metaUpdatedAt(bldg) {
@@ -181,6 +183,14 @@
             var at = Math.max(metaUpdatedAt(localMatch), metaUpdatedAt(remote));
             if (at) merged.metaUpdatedAt = at;
             if (localMatch._pendingCloudSync) merged._pendingCloudSync = true;
+            if (localMatch.roundDone || (remote && remote.roundDone)) {
+                var rdApi = root.BSA && root.BSA.roundDone;
+                if (!rdApi && typeof require === 'function') { try { rdApi = require('./round-done.js'); } catch (_e) { rdApi = null; } }
+                if (rdApi) {
+                    var rdm = rdApi.merge(localMatch.roundDone, remote && remote.roundDone);
+                    if (rdm) merged.roundDone = rdm;
+                }
+            }
             if (localMatch.roundDates || (remote && remote.roundDates)) {
                 merged.roundDates = mergeRoundDates(localMatch.roundDates, remote && remote.roundDates);
             }

@@ -3488,7 +3488,7 @@ document.addEventListener('DOMContentLoaded', () => {
         'floorsOrderManual',
         'siteName', 'dong', 'multiDong', 'name', 'address', 'inspector', 'contactPhone',
         'floors', 'date', 'structureType', 'facilityGrade', 'completionDate', 'notes',
-        'enabledStrengthFormulas', 'strengthAnvilAvg', 'strengthAgeOverride', 'floorPdfRemovedAt', 'floorPdfUpdatedAt', 'evalUnitPlan', 'evalInputs', 'evalSafetyman'
+        'enabledStrengthFormulas', 'strengthAnvilAvg', 'strengthAgeOverride', 'floorPdfRemovedAt', 'floorPdfUpdatedAt', 'evalUnitPlan', 'evalInputs', 'evalSafetyman', 'roundDone'
     ];
 
     function buildingMetaUpdatedAt(bldg) {
@@ -5802,6 +5802,88 @@ document.addEventListener('DOMContentLoaded', () => {
      * 회차마다 정밀/정기가 달라질 수 있어 회차 목록에서 바로 조정할 수 있게 한 것.
      * 현재 열려 있는 건물이 그 회차에 속하면 상단 「점검 설정」 드롭다운도 맞춰 준다.
      */
+    /** 2026-10-21 현장명 옆 「작성완료」 배지 HTML — 종류마다 체크된 최신 회차 하나만 */
+    function buildRoundDoneBadgesHtml(buildings) {
+        const rd = window.BSA && window.BSA.roundDone;
+        if (!rd) return '';
+        const list = rd.latestBadges(buildings || [], getBuildingSurveyRoundKey);
+        return list.map((x) => {
+            const when = x.doneAt ? new Date(x.doneAt).toLocaleString('ko-KR') : '';
+            const tip = `${formatSurveyRoundLabel(x.roundKey)} · ${x.kind === 'report' ? '보고서' : '결함위치도'} 작성완료${when ? ' · ' + when : ''}${x.by ? ' · ' + x.by : ''}`;
+            return `<span class="round-done-badge round-done-badge-${x.kind === 'report' ? 'report' : 'map'}" title="${escapeHtml(tip)}">✔ ${escapeHtml(x.text)}</span>`;
+        }).join('');
+    }
+    window.buildRoundDoneBadgesHtml = buildRoundDoneBadgesHtml;
+
+    /** 현장 정보 수정 창 맨 아래 — 이 건물(현재 회차)의 보고서/결함위치도 작성완료 체크 */
+    window.renderEditRoundDoneChecks = function(bldg) {
+        const host = document.getElementById('editRoundDoneSection');
+        const rd = window.BSA && window.BSA.roundDone;
+        if (!host || !rd) return;
+        const rk = bldg ? getBuildingSurveyRoundKey(bldg) : '';
+        if (!bldg || !rk) { host.hidden = true; return; }
+        host.hidden = false;
+        const site = getBuildingSiteName(bldg);
+        const row = (kind, label) => {
+            const e = rd.getEntry(bldg, kind);
+            const info = e && e.done ? `<small class="round-done-meta">${e.doneAt ? escapeHtml(new Date(e.doneAt).toLocaleString('ko-KR')) : ''}${e.by ? ' · ' + escapeHtml(e.by) : ''}</small>` : '';
+            return `<label class="round-done-check round-done-check-edit">
+                <input type="checkbox" data-kind="${kind}" ${e && e.done ? 'checked' : ''}>
+                <span>${escapeHtml(label)}</span>${info}
+            </label>`;
+        };
+        const list = host.querySelector('.round-done-edit-list');
+        list.innerHTML = row('report', rd.badgeText('report', rk)) + row('defectMap', '결함위치도 작성완료');
+        list.querySelectorAll('input[type="checkbox"]').forEach((cb) => {
+            cb.addEventListener('change', () => {
+                window.setSurveyRoundDone(site, rk, cb.getAttribute('data-kind'), cb.checked);
+                window.renderEditRoundDoneChecks(bldg);
+            });
+        });
+    };
+
+    /** 회차(같은 회차의 모든 동) 작성완료 체크/해제 — 건물 칸(roundDone)으로 저장·동기화 */
+    window.setSurveyRoundDone = function(siteKey, roundKey, kind, done) {
+        const rd = window.BSA && window.BSA.roundDone;
+        if (!rd || !siteKey || !roundKey) return 0;
+        const all = filterActiveBuildings(window.state.buildings || [], window.state.deletedBuildingIds);
+        const targets = all.filter((b) => getBuildingSiteName(b) === siteKey && getBuildingSurveyRoundKey(b) === roundKey);
+        const user = window.state.userName || '';
+        const now = Date.now();
+        let changed = 0;
+        targets.forEach((b) => {
+            if (rd.setDone(b, kind, done, user, now)) { markBuildingMetaDirty(b); changed += 1; }
+        });
+        if (!changed) return 0;
+        saveStateToLocalStorage();
+        if (typeof syncStateToFirebase === 'function') syncStateToFirebase();
+        if (typeof window.showToast === 'function') {
+            window.showToast(`${formatSurveyRoundLabel(roundKey)} ${kind === 'report' ? '보고서' : '결함위치도'} 작성완료 ${done ? '체크' : '해제'}`, 'success', 2500);
+        }
+        if (typeof window.renderDashboard === 'function') window.renderDashboard();
+        if (typeof window.refreshNavRoundDoneBadges === 'function') window.refreshNavRoundDoneBadges();
+        return changed;
+    };
+
+    /** 상단 건물명 옆 배지(현장 전체 기준 최신) */
+    window.refreshNavRoundDoneBadges = function() {
+        const el = document.getElementById('navBuildingName');
+        const b = window.state && window.state.currentBuilding;
+        if (!el || !b) return;
+        let holder = document.getElementById('navRoundDoneBadges');
+        if (!holder) {
+            holder = document.createElement('span');
+            holder.id = 'navRoundDoneBadges';
+            holder.className = 'round-done-badges round-done-badges-nav';
+            el.insertAdjacentElement('afterend', holder);
+        }
+        const site = getBuildingSiteName(b);
+        const members = filterActiveBuildings(window.state.buildings || [], window.state.deletedBuildingIds)
+            .filter((x) => getBuildingSiteName(x) === site);
+        holder.innerHTML = buildRoundDoneBadgesHtml(members);
+        holder.style.display = el.style.display === 'none' ? 'none' : '';
+    };
+
     window.setSurveyRoundInspectionType = function(siteKey, roundKey, inspectionType) {
         if (!siteKey || !roundKey || !INSPECTION_TYPE_OPTIONS.includes(inspectionType)) return;
         const all = filterActiveBuildings(window.state.buildings || [], window.state.deletedBuildingIds);
@@ -5956,6 +6038,14 @@ document.addEventListener('DOMContentLoaded', () => {
                     if (site && round) window.setSurveyRoundInspectionDate(site, round, el.value || '');
                 });
             });
+            grid.querySelectorAll('[data-action="round-done"]').forEach((el) => {
+                ['click', 'pointerdown', 'touchstart'].forEach((ev) => el.addEventListener(ev, (e) => e.stopPropagation()));
+                el.parentElement && el.parentElement.addEventListener('click', (e) => e.stopPropagation());
+                el.addEventListener('change', (e) => {
+                    e.stopPropagation();
+                    window.setSurveyRoundDone(el.getAttribute('data-site-key'), el.getAttribute('data-round-key'), el.getAttribute('data-kind'), el.checked);
+                });
+            });
             grid.querySelectorAll('[data-action="round-type"]').forEach((el) => {
                 // 셀렉트 클릭이 행 클릭(점검 시작/동 선택)으로 번지지 않게 막는다
                 ['click', 'pointerdown', 'touchstart'].forEach((ev) => el.addEventListener(ev, (e) => e.stopPropagation()));
@@ -6070,7 +6160,7 @@ document.addEventListener('DOMContentLoaded', () => {
 
             if (siteNav) siteNav.hidden = false;
             if (siteNavTitle) {
-                siteNavTitle.textContent = `${selectedSiteKey} · ${formatSurveyRoundLabel(roundKey)}`;
+                siteNavTitle.innerHTML = `${escapeHtml(selectedSiteKey)} · ${escapeHtml(formatSurveyRoundLabel(roundKey))} <span class="round-done-badges">${buildRoundDoneBadgesHtml(filtered.filter((b) => getBuildingSiteName(b) === selectedSiteKey))}</span>`;
             }
             if (heroTitle) heroTitle.textContent = '🏢 동 선택';
 
@@ -6111,7 +6201,7 @@ document.addEventListener('DOMContentLoaded', () => {
         if (selectedSiteKey) {
             const siteBuildings = filtered.filter((b) => getBuildingSiteName(b) === selectedSiteKey);
             if (siteNav) siteNav.hidden = false;
-            if (siteNavTitle) siteNavTitle.textContent = selectedSiteKey;
+            if (siteNavTitle) siteNavTitle.innerHTML = `${escapeHtml(selectedSiteKey)} <span class="round-done-badges">${buildRoundDoneBadgesHtml(siteBuildings)}</span>`;
             if (heroTitle) heroTitle.textContent = '📅 점검 회차 선택';
 
             if (siteBuildings.length === 0) {
@@ -6284,7 +6374,7 @@ document.addEventListener('DOMContentLoaded', () => {
             return `
                 <div class="building-row building-row-site" data-site-key="${safeSite}">
                     <div class="building-row-info" data-action="open-site" data-site-key="${safeSite}">
-                        <span class="building-row-name"><i class="fa-solid fa-building flag-icon-muted"></i> ${safeSite}</span>
+                        <span class="building-row-name"><i class="fa-solid fa-building flag-icon-muted"></i> ${safeSite}<span class="round-done-badges">${buildRoundDoneBadgesHtml(members)}</span></span>
                         <span class="building-row-meta building-row-rounds">${escapeHtml(roundHint)}${escapeHtml(layoutHint)}</span>
                         <span class="building-row-meta building-row-site-addr">${escapeHtml(addrLine)}</span>
                         <span class="building-row-meta building-row-site-contact">${escapeHtml(contactLine)}</span>
@@ -6439,6 +6529,7 @@ document.addEventListener('DOMContentLoaded', () => {
         // Nav 건물명 표시 업데이트
         const cleanName = bldg.name ? bldg.name.replace(/^🏢\s*/, '') : '건축물';
         if (elements.appTitle) elements.appTitle.textContent = cleanName;
+        try { window.refreshNavRoundDoneBadges(); } catch (_e) { /* ignore */ }
 
         applyInspectionSelectsFromBuilding(bldg);
         if (!bldg.latestSurveyRoundKey) {
@@ -8614,6 +8705,7 @@ document.addEventListener('DOMContentLoaded', () => {
             }
         }).catch(() => {});
 
+        try { window.renderEditRoundDoneChecks(bldg); } catch (_e) { /* ignore */ }
         modal.dataset.editMode = mode;
         modal.classList.remove('edit-mode-drawing', 'edit-mode-info');
         modal.classList.add(mode === 'drawing' ? 'edit-mode-drawing' : 'edit-mode-info');
@@ -41294,6 +41386,14 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
                             <option value="num"${G.normalizeNumbering(eg.numbering) === 'num' ? ' selected' : ''}>숫자 1, 2, 3</option>
                             <option value="upper"${G.normalizeNumbering(eg.numbering) === 'upper' ? ' selected' : ''}>대문자 A, B, C</option>
                         </select></label>
+                        <label title="오름차순 1, 2, 3 ⇄ 내림차순 3, 2, 1 (${eg.axis === 'row' ? '행' : '열'}마다 따로)">순서 <select data-f="gorder">
+                            <option value="asc"${eg.reverse ? '' : ' selected'}>오름차순</option>
+                            <option value="desc"${eg.reverse ? ' selected' : ''}>내림차순</option>
+                        </select></label>
+                    </div>
+                    <div class="grid-panel-row">
+                        <button type="button" data-act="reverseOrder" title="선 위치는 그대로 두고 이 그룹의 번호 순서만 거꾸로(1,2,3 → 3,2,1 / A,B,C → C,B,A). 개별 이름을 준 선은 그대로">⇅ 순서 뒤집기</button>
+                        ${ge.orderUndo && ge.orderUndo.groupId === eg.id ? '<button type="button" data-act="undoOrder" title="방금 바꾼 순서를 되돌림 (Ctrl+Z)">↶ 되돌리기</button>' : ''}
                     </div>
                     <div class="grid-panel-row">
                         <button type="button" data-act="renumber" title="지금 보이는 위치 순서(열: 왼→오른, 행: 위→아래)로 번호를 한 번만 다시 매김. 그 뒤로 새로 긋는 선은 다시 맨 끝 번호">위치 순서로 다시 매기기</button>
@@ -41419,6 +41519,17 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
             window.showToast?.('위치 순서로 번호를 다시 매겼습니다.', 'success', 2000);
             return;
         }
+        if (act === 'reverseOrder' && eg) {
+            if (eg.lines.length < 2) { window.showToast?.('선이 2개 이상일 때 뒤집을 수 있습니다.', 'info', 2000); return; }
+            ge.orderUndo = { groupId: eg.id, seqs: G.reverseLineOrder(eg) };
+            gridChanged();
+            window.showToast?.('번호 순서를 뒤집었습니다. (되돌리기: ↶ 버튼 또는 Ctrl+Z) 이미 넣은 마킹 위치는 「이 층 마킹에 위치 채우기」로 맞춥니다.', 'success', 3500);
+            return;
+        }
+        if (act === 'undoOrder') {
+            undoGridOrderChange();
+            return;
+        }
         if (act === 'angleAll' && eg) {
             eg.lines.forEach((ln) => G.setLineAngle(ln, eg.axis, eg.angle, gctx));
             gridChanged();
@@ -41453,6 +41564,24 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
             clearDetailLocationForCurrentFloor();
         }
     }
+
+    /** 2026-10-21 행·열 번호 순서(뒤집기·오름/내림) 되돌리기 — 한 단계. 되돌렸으면 true */
+    function undoGridOrderChange() {
+        const ge = gridEditState();
+        const G = gridLib();
+        const u = ge && ge.orderUndo;
+        if (!u || !G) return false;
+        const grid = getCurrentFloorGrid(false);
+        const g = grid && gridFindGroup(grid, u.groupId);
+        ge.orderUndo = null;
+        if (!g) { renderGridPanel(); return false; }
+        if (u.seqs) G.restoreLineSeqs(g, u.seqs);
+        if (u.reverse !== undefined) { if (u.reverse) g.reverse = true; else delete g.reverse; }
+        gridChanged();
+        window.showToast?.('번호 순서를 되돌렸습니다.', 'info', 1800);
+        return true;
+    }
+    window.undoGridOrderChange = undoGridOrderChange;
 
     function onGridPanelChange(e) {
         const el = e.target;
@@ -41515,6 +41644,15 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
                     if (eg.prefix === dflt) eg.prefix = ''; // 도면 표기 그대로 a, b, c(머리글이 필요하면 다시 입력)
                 }
                 if (eg.start < 1) eg.start = 1;
+                break;
+            }
+            case 'gorder': {
+                if (!eg) break;
+                const wasRev = eg.reverse === true;
+                const toRev = el.value === 'desc';
+                if (wasRev === toRev) return;
+                ge.orderUndo = { groupId: eg.id, reverse: wasRev };
+                if (toRev) eg.reverse = true; else delete eg.reverse;
                 break;
             }
             case 'gangle': if (eg) eg.angle = Math.max(-89, Math.min(89, numOr(el.value, eg.angle))); break;
@@ -41756,7 +41894,12 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
         const tag = t && t.tagName;
         if (tag === 'INPUT' || tag === 'TEXTAREA' || tag === 'SELECT' || (t && t.isContentEditable)) return;
         if (document.querySelector('.modal-overlay.open')) return;
-        if ((e.key === 'Delete' || e.key === 'Backspace') && ge.sel) {
+        if ((e.ctrlKey || e.metaKey) && !e.shiftKey && (e.key === 'z' || e.key === 'Z') && ge.orderUndo) {
+            // 행·열 번호 순서(뒤집기·오름/내림) 되돌리기
+            e.preventDefault();
+            e.stopImmediatePropagation();
+            undoGridOrderChange();
+        } else if ((e.key === 'Delete' || e.key === 'Backspace') && ge.sel) {
             e.preventDefault();
             e.stopImmediatePropagation();
             gridDeleteSelected();

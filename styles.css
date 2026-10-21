@@ -17773,3 +17773,16 @@ input.ndt-mo-locked { background: var(--bg-secondary, #f2f2f2); color: var(--tex
 /* 층 이름 바꾸기 */
 .floor-rename-btn { padding:0.2rem 0.45rem; margin-left:4px; font-size:0.78rem; line-height:1; }
 .edit-floor-drawing-rename { font-size:0.72rem; padding:0.1rem 0.4rem; margin-right:4px; flex-shrink:0; }
+
+/* 2026-10-21 회차별 작성완료 배지·체크 */
+.round-done-badges { display: inline-flex; flex-wrap: wrap; gap: 0.25rem; margin-left: 0.4rem; vertical-align: middle; }
+.round-done-badge { display: inline-flex; align-items: center; padding: 0.1rem 0.45rem; border-radius: 999px; font-size: 0.72rem; font-weight: 700; line-height: 1.4; white-space: nowrap; color: #fff; }
+.round-done-badge-report { background: #16a34a; }
+.round-done-badge-map { background: #2563eb; }
+.round-done-check { display: inline-flex; align-items: center; gap: 0.2rem; font-size: 0.72rem; white-space: nowrap; cursor: pointer; color: #555; }
+.round-done-check input { width: 15px; height: 15px; margin: 0; cursor: pointer; }
+.round-done-badges-nav { margin-left: 0.3rem; }
+.round-done-edit-list { display: flex; flex-direction: column; gap: 0.45rem; margin-top: 0.4rem; }
+.round-done-check-edit { font-size: 0.9rem; color: #222; gap: 0.45rem; flex-wrap: wrap; }
+.round-done-check-edit input { width: 18px; height: 18px; }
+.round-done-meta { color: #888; font-size: 0.75rem; }
