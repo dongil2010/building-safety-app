@@ -47079,10 +47079,29 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
             : null;
     }
 
+    /**
+     * 2026-10-22 월곡시장(3종) 범례가 한 기기에서만 「적색 결함발생 / 흑색 상태양호」(1·2종 기본을 3종 색으로 그린 것)로 나옴.
+     * 1·2종 기본 범례가 건물에 저장된 뒤 등급이 3종이 되면, 동기화 병합은 기기 쪽 범례를 항상 남겨서(overlayOnMerged)
+     * 서버의 3종 범례가 그 기기로 안 내려온다. 손대지 않은 「다른 등급의 기본 범례」면 이 등급 기본으로 바꾼다(위치·크기는 그대로).
+     */
+    function isOtherGradeDefaultLegend(items, bldg) {
+        if (!Array.isArray(items) || !items.length) return false;
+        if (items.some((it) => !it || it.colorCustom)) return false;
+        const key = (labels) => labels.map(normalizeLegendLabelKey).sort().join('|');
+        const labels = key(items.map((it) => it.label));
+        if (isGrade3Building(bldg)) {
+            return labels === key(['결함발생', '상태양호']) || labels === key(['결함발생', '상태양호', '중점관리']);
+        }
+        return labels === key(['상태양호', '기존조사', '신규조사', '중점관리']);
+    }
+
     function applyBuildingLocationMapLegend(bldg, opts) {
         if (!bldg) return;
         const forceDefault = !!(opts && opts.forceDefault);
         const defaultItems = getDefaultLocationMapLegend(bldg);
+        if (!forceDefault && isOtherGradeDefaultLegend(bldg.locationMapLegend, bldg)) {
+            bldg.locationMapLegend = cloneLocationMapLegendItems(defaultItems);
+        }
         if (_legendLayout && typeof _legendLayout.applyFromBuilding === 'function') {
             const applied = _legendLayout.applyFromBuilding(bldg, {
                 items: state.locationMapLegend,
