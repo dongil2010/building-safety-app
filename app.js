@@ -31598,7 +31598,23 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
     }
 
     function getCurrentFloorCrackGaugeMarks() {
-        return getCurrentFloorNdtData().filter(isCrackGaugeNdtItem);
+        return sortCrackGaugesByNo(getCurrentFloorNdtData().filter(isCrackGaugeNdtItem), getCrackGaugeMarkDisplayNo);
+    }
+
+    /**
+     * 게이지 번호 순(G-04 → G-05 → G-06). 번호를 고쳐도 찍은 순서로 나오던 문제(2026-10-22).
+     * 번호 없는 것은 뒤로, 같은 번호·번호 없음끼리는 원래 순서 유지.
+     */
+    function sortCrackGaugesByNo(list, getNo) {
+        const keyOf = (raw) => {
+            const s = String(raw || '').trim();
+            const m = s.match(/(\d+)/);
+            return { n: m ? parseInt(m[1], 10) : Infinity, s };
+        };
+        return (list || [])
+            .map((it, idx) => ({ it, idx, k: keyOf(getNo(it)) }))
+            .sort((a, b) => (a.k.n - b.k.n) || (a.k.n === Infinity ? 0 : a.k.s.localeCompare(b.k.s)) || (a.idx - b.idx))
+            .map((x) => x.it);
     }
 
     function getCrackGaugeMarkDisplayNo(item) {
@@ -50016,6 +50032,10 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
         });
         // 게이지·팁 전부 (2026-09-29 전엔 3개까지만). 게이지 먼저, 팁은 뒤 — 양식 순서.
         // no = 표·사진의 NO. 번호, col = 예전 16줄 표 칸 번호(공용 규칙이 없을 때만 씀)
+        // 게이지 번호는 건물 전체에서 이어지므로 층과 상관없이 번호 순 (번호 없는 것은 원래 순서로 뒤에)
+        const sortedItems = sortCrackGaugesByNo(items, (it) => (it.gauge && it.gauge.gaugeNo) || (it.defect && it.defect._crackGaugeMark ? it.defect.no : ''));
+        items.length = 0;
+        sortedItems.forEach((it) => items.push(it));
         const slots = [];
         items.filter((it) => it.hasGauge).forEach((item) => slots.push({ ...item, kind: 'gauge' }));
         items.filter((it) => it.hasTip).forEach((item) => slots.push({ ...item, kind: 'tip' }));
