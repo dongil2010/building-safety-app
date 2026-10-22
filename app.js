@@ -30678,8 +30678,16 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
     }
 
     function isPlasterCrackDefectType(label) {
-        return String(label || '').includes('미장균열');
+        return String(label || '').replace(/\s+/g, '').includes('미장');
     }
+
+    /** 미장 관련 결함(미장균열·미장들뜸·미장 박락 등, 공백 무시)은 구조체가 아니라 비구조체 — 모든 저장·가져오기 경로 공통 */
+    function bsaPlasterNonStructCategory(category, defectType) {
+        const c = String(category || '').trim();
+        if ((c === '' || c === '구조체') && isPlasterCrackDefectType(defectType)) return '비구조체';
+        return category;
+    }
+    window.bsaPlasterNonStructCategory = bsaPlasterNonStructCategory;
 
     function defectTypeListHasPlasterCrack(typeVal) {
         return parseDefectTypeList(typeVal).some((t) => isPlasterCrackDefectType(t));
@@ -30711,7 +30719,7 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
         catEl.value = '비구조체';
         catEl.dispatchEvent(new Event('change', { bubbles: true }));
         if (typeof window.showToast === 'function') {
-            window.showToast('미장균열은 비구조체로 분류됩니다.', 'info', 2500);
+            window.showToast('미장 관련 결함은 비구조체로 분류됩니다.', 'info', 2500);
         }
         return true;
     }
@@ -39442,9 +39450,10 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
 
         defects.forEach((d) => {
             const prevSizeForReconcile = d.size;
-            if (changedFields.has('category')) d.category = categoryVal;
+            if (changedFields.has('category')) d.category = (window.bsaPlasterNonStructCategory ? window.bsaPlasterNonStructCategory(categoryVal, d.defectType) : categoryVal);
             if (changedFields.has('component')) d.component = compVal;
             if (changedFields.has('defectType')) {
+                d.category = (window.bsaPlasterNonStructCategory ? window.bsaPlasterNonStructCategory(d.category, dTypeVal) : d.category);
                 d.defectType = dTypeVal;
                 if (isGoodType) {
                     d.cause = '';
@@ -39618,7 +39627,7 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
             if (idx !== -1) {
                 const prevSizeForReconcile = state.defects[key][idx].size;
                 state.defects[key][idx].no = noVal;
-                state.defects[key][idx].category = categoryGuardedVal;
+                state.defects[key][idx].category = (window.bsaPlasterNonStructCategory ? window.bsaPlasterNonStructCategory(categoryGuardedVal, dTypeVal) : categoryGuardedVal);
                 state.defects[key][idx].component = compVal;
                 state.defects[key][idx].location = locVal;
                 state.defects[key][idx].defectType = dTypeVal;
@@ -39702,7 +39711,7 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
             const newDefect = {
                 id: generateDefectUniqueId(`${state.currentBuildingId}_${state.currentFloor}`),
                 no: document.getElementById('defectNo')?.value || 'NO.01',
-                category: document.getElementById('defectCategory')?.value || '구조체',
+                category: (window.bsaPlasterNonStructCategory ? window.bsaPlasterNonStructCategory((document.getElementById('defectCategory')?.value || '구조체'), dTypeVal) : (document.getElementById('defectCategory')?.value || '구조체')),
                 component: compVal,
                 location: locVal,
                 defectType: dTypeVal,
@@ -43739,7 +43748,7 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
                 groupNo: rawNo,
                 cadNo: rawNo,
                 isCadImported: true,
-                category: cadItem.category || '구조체',
+                category: (window.bsaPlasterNonStructCategory ? window.bsaPlasterNonStructCategory((cadItem.category || '구조체'), (cadItem.defectType || '균열')) : (cadItem.category || '구조체')),
                 component: memberNameOut(cadItem.component) || '',
                 location: defectLocationUsesFloor() ? state.currentFloor : '',
                 defectType: cadItem.defectType || '균열',
@@ -45609,6 +45618,7 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
                 default:
                     break;
             }
+            if (field === 'category' || field === 'defectType') defect.category = (window.bsaPlasterNonStructCategory ? window.bsaPlasterNonStructCategory(defect.category, defect.defectType) : defect.category);
             if (inlineSig(defect) !== sigBefore) touchDefectUpdatedAt(defect);
             // 행·열: 부재가 바뀌면(거더 ↔ 그 밖) 위치 다시 계산 — 지금 보는 층만(선 데이터가 그 층 것)
             if (field === 'component' && key === `${state.currentBuildingId}_${state.currentFloor}` && typeof applyGridAutoLocationToDefect === 'function') {
@@ -57744,7 +57754,7 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
         if (looksLikeFinishMaterialText(defectTypeRaw) || looksLikeFinishMaterialText(componentRaw)) {
             return '마감재';
         }
-        return fromCol;
+        return (window.bsaPlasterNonStructCategory ? window.bsaPlasterNonStructCategory(fromCol, defectTypeRaw) : fromCol);
     }
 
     function resolveImportFlag(raw) {
