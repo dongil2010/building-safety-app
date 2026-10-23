@@ -27234,10 +27234,186 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
     }
     function commitMemoChange(floorKey) {
         if (floorKey && typeof markFloorKeyDirty === 'function') markFloorKeyDirty(floorKey);
+        try { if (floorKey) markMemoAuthorPending(String(floorKey)); } catch (_e) { /* 계정별 저장 실패는 아래 재시도 */ }
         if (typeof saveStateToLocalStorage === 'function') saveStateToLocalStorage();
         if (typeof scheduleSyncToFirebase === 'function') scheduleSyncToFirebase();
         syncDrawingMemoOverlay();
     }
+    // ---- 2026-10-23 계정별 메모 서버 저장(js/core/memo-author-sync.js) ----
+    // 원인: 메모는 층 묶음(전체 동기화)에만 실려, 그 기기 동기화가 멈추거나(멈춘 올리기·읽기 실패·다른 층 오류) 앱을 닫으면
+    // 메모가 기기에만 남았다(경신여고 태블릿). 이제 메모를 바꾸면 그 계정 문서(floors/MEMOS_BY_uid)에 따로 곧바로 올리고,
+    // 실패하면 다시 시도하며, 앱을 열거나 다시 온라인이 되면 기기에 남은 내 메모를 올린다. 서버 메모는 지우지 않는다.
+    const MEMO_PENDING_LS = 'bsa_memo_author_pending_v1';
+    const MEMO_ROUND_CODE = 'ROUND_SKETCH_MEMO';
+    function memoAuthorApi() { return window.BSA && window.BSA.memoAuthorSync; }
+    function memoPendingRead() {
+        try { return new Set(JSON.parse(localStorage.getItem(MEMO_PENDING_LS) || '[]')); } catch (_e) { return new Set(); }
+    }
+    function memoPendingWrite(set) {
+        try { localStorage.setItem(MEMO_PENDING_LS, JSON.stringify(Array.from(set))); } catch (_e) { /* ignore */ }
+        renderMemoPendingBadge();
+    }
+    function bldgIdForMemoKey(floorKey) {
+        const b = (typeof findBuildingForFloorKey === 'function') ? findBuildingForFloorKey(floorKey) : null;
+        return b ? b.id : '';
+    }
+    function markMemoAuthorPending(floorKeyOrBldgId) {
+        const id = bldgIdForMemoKey(floorKeyOrBldgId) || ((window.state.buildings || []).some((b) => b && b.id === floorKeyOrBldgId) ? floorKeyOrBldgId : '');
+        if (!id) return;
+        const set = memoPendingRead();
+        set.add(id);
+        memoPendingWrite(set);
+        scheduleMemoAuthorPush(1500);
+    }
+    let _memoPushTimer = null;
+    let _memoPushBusy = false;
+    let _memoRetryN = 0;
+    function scheduleMemoAuthorPush(ms) {
+        if (_memoPushTimer) clearTimeout(_memoPushTimer);
+        _memoPushTimer = setTimeout(() => { _memoPushTimer = null; flushMemoAuthorPush(); }, Math.max(0, ms || 0));
+    }
+    function applyMemoAuthorPayload(bldg, payload) {
+        const api = memoAuthorApi();
+        if (!api || !payload) return;
+        const P = api.toPacks(payload, bldg.id, MEMO_ROUND_CODE, Object.keys(window.state.drawingMemos || {}));
+        const mergeFn = window.BSA.syncMerge.mergeNdtDataMaps;
+        if (window.BSA.drawingMemo) Object.keys(P.memoPacks).forEach((k) => window.BSA.drawingMemo.mergePackIntoState(window.state, k, P.memoPacks[k], mergeFn));
+        if (window.BSA.sketchMemo && (P.sketchPack.items.length || P.sketchPack.deletedIds.length)) {
+            window.BSA.sketchMemo.mergePackIntoState(window.state, P.sketchKey, P.sketchPack, mergeFn);
+        }
+    }
+    async function pushMemosForBuilding(bldg) {
+        const api = memoAuthorApi();
+        const me = sketchMe();
+        if (!api || !me.uid) throw new Error('memo-author: 로그인 계정 없음');
+        const ref = getFloorScopeRef(bldg, api.docIdFor(me.uid));
+        if (!ref) throw new Error('memo-author: 경로 없음');
+        const snap = await ref.get({ source: 'server' });
+        let serverP = null;
+        if (snap.exists) { try { serverP = JSON.parse((snap.data() || {}).payload || 'null'); } catch (_e) { serverP = null; } }
+        const local = api.collectMine(window.state, bldg.id, me, MEMO_ROUND_CODE);
+        const merged = api.mergeDocs(serverP, local, api.collectTombs(window.state, bldg.id));
+        // 서버에도 없고 기기에도 없으면 빈 문서를 만들지 않는다
+        if (!snap.exists && !api.countItems(merged) && !Object.keys(merged.deleted).length) return 0;
+        const json = JSON.stringify(merged);
+        if (json.length > 950000) throw new Error('memo-author: 메모가 너무 큼(' + json.length + ')');
+        await ref.set({
+            kind: api.KIND, byUid: me.uid, by: me.name || '', buildingId: bldg.id,
+            itemCount: api.countItems(merged), payload: json,
+            updatedAt: firebase.firestore.FieldValue.serverTimestamp()
+        });
+        applyMemoAuthorPayload(bldg, merged);
+        return api.countItems(merged);
+    }
+    /** 이 건물 모든 계정의 메모 문서를 읽어 합친다(읽기만) */
+    async function pullMemosForBuilding(bldg) {
+        const api = memoAuthorApi();
+        if (!api || !db || !window.state.companyId || !bldg) return 0;
+        const ref = getFloorScopeRef(bldg, api.docIdFor('x'));
+        if (!ref) return 0;
+        const qs = await ref.parent.where('kind', '==', api.KIND).get({ source: 'server' });
+        let n = 0;
+        qs.forEach((d) => {
+            const x = d.data() || {};
+            if (x.buildingId && x.buildingId !== bldg.id) return;
+            try { applyMemoAuthorPayload(bldg, JSON.parse(x.payload || 'null')); n++; } catch (_e) { /* 한 계정 문서 오류는 건너뜀 */ }
+        });
+        if (n) {
+            if (typeof saveStateToLocalStorage === 'function') { _suppressSyncOnSave = true; saveStateToLocalStorage(); _suppressSyncOnSave = false; }
+            syncDrawingMemoOverlay();
+        }
+        return n;
+    }
+    window.bsaPullMemosForBuilding = pullMemosForBuilding;
+    async function flushMemoAuthorPush() {
+        if (_memoPushBusy) { scheduleMemoAuthorPush(2000); return; }
+        if (!db || !window.state.companyId || (typeof navigator !== 'undefined' && navigator.onLine === false)) { renderMemoPendingBadge(); return; }
+        const set = memoPendingRead();
+        if (!set.size) { _memoRetryN = 0; return; }
+        _memoPushBusy = true;
+        let failed = 0;
+        try {
+            for (const id of Array.from(set)) {
+                const bldg = (window.state.buildings || []).find((b) => b && b.id === id);
+                if (!bldg) { set.delete(id); continue; }
+                try {
+                    await pushMemosForBuilding(bldg);
+                    set.delete(id);
+                } catch (e) {
+                    failed++;
+                    console.warn('[메모] 서버 저장 실패 — 다시 시도합니다:', id, e && e.message);
+                }
+            }
+        } finally {
+            _memoPushBusy = false;
+            memoPendingWrite(set);
+        }
+        if (failed) {
+            const waits = [5000, 30000, 120000, 300000];
+            scheduleMemoAuthorPush(waits[Math.min(_memoRetryN++, waits.length - 1)]);
+        } else {
+            _memoRetryN = 0;
+        }
+    }
+    window.bsaFlushMemos = flushMemoAuthorPush;
+    function renderMemoPendingBadge() {
+        let el = document.getElementById('memoPendingBadge');
+        const n = memoPendingRead().size;
+        if (!n) { if (el) el.style.display = 'none'; return; }
+        if (!el) {
+            el = document.createElement('div');
+            el.id = 'memoPendingBadge';
+            el.className = 'bsp-clickable';
+            el.style.cssText = 'position:fixed;left:8px;bottom:calc(var(--bsa-float-stack2, 0px) + 8px + env(safe-area-inset-bottom, 0px));z-index:9998;background:#7c2d12;color:#fff;font-size:12px;padding:4px 9px;border-radius:12px;box-shadow:0 2px 6px rgba(0,0,0,.25);cursor:pointer;';
+            el.title = '눌러서 지금 다시 올리기';
+            el.addEventListener('click', () => { _memoRetryN = 0; flushMemoAuthorPush(); });
+            document.body.appendChild(el);
+        }
+        el.textContent = `메모 서버 저장 대기 ${n}곳${navigator.onLine === false ? ' (오프라인)' : ''}`;
+        el.style.display = '';
+    }
+    /** 기기에 남은 내 메모가 있는 건물을 모두 「올릴 것」으로(태블릿에 멈춰 있던 메모 올리기) */
+    function queueAllMyLocalMemos() {
+        const api = memoAuthorApi();
+        const me = sketchMe();
+        if (!api || !me.uid) return 0;
+        const set = memoPendingRead();
+        (window.state.buildings || []).forEach((b) => {
+            if (!b || !b.id) return;
+            if (api.countItems(api.collectMine(window.state, b.id, me, MEMO_ROUND_CODE))) set.add(b.id);
+        });
+        memoPendingWrite(set);
+        if (set.size) scheduleMemoAuthorPush(800);
+        return set.size;
+    }
+    let _memoLastPulledBldg = '';
+    (function bindMemoAuthorSync() {
+        if (typeof window.addEventListener !== 'function' || typeof document.addEventListener !== 'function' || typeof setInterval !== 'function') return;
+        window.addEventListener('online', () => { _memoRetryN = 0; scheduleMemoAuthorPush(1000); renderMemoPendingBadge(); });
+        window.addEventListener('offline', renderMemoPendingBadge);
+        document.addEventListener('visibilitychange', () => {
+            if (document.visibilityState === 'hidden') { if (memoPendingRead().size) flushMemoAuthorPush(); }
+            else scheduleMemoAuthorPush(500);
+        });
+        window.addEventListener('pagehide', () => { if (memoPendingRead().size) flushMemoAuthorPush(); });
+        let started = false;
+        setInterval(() => {
+            if (!db || !window.state.companyId || navigator.onLine === false) return;
+            const me = sketchMe();
+            if (!me.uid) return;
+            if (!started) { started = true; queueAllMyLocalMemos(); }
+            const bid = window.state.currentBuildingId;
+            if (bid && bid !== _memoLastPulledBldg) {
+                const bldg = (window.state.buildings || []).find((b) => b && b.id === bid);
+                if (bldg) {
+                    _memoLastPulledBldg = bid;
+                    pullMemosForBuilding(bldg).catch((e) => { _memoLastPulledBldg = ''; console.warn('[메모] 계정별 메모 받기 실패:', e && e.message); });
+                }
+            }
+        }, 4000);
+        setTimeout(renderMemoPendingBadge, 1500);
+    })();
+
     /** 2026-10-20 손글씨 메모 계정: { uid, name } — 메모는 계정별 */
     function sketchMe() {
         let uid = '';
@@ -27295,7 +27471,7 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
         if (!api || !floorKey || !state.bgImage) return null;
         const text = await promptDrawingMemoText();
         if (text == null || !api.cleanText(text)) return null;
-        const memo = api.createMemo({ x: imgX, y: imgY, text, by: memoAuthorName() });
+        const memo = api.createMemo({ x: imgX, y: imgY, text, by: memoAuthorName(), byUid: (sketchMe().uid || '') });
         if (!memo) return null;
         api.addMemo(window.state, floorKey, memo);
         if (!readMemoShowPref()) setMemoShow(true);
@@ -27642,9 +27818,18 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
                 ov.appendChild(el);
             }
             // 2026-10-16 「...으로 자르지 말고 다 보여주라」: 전체 내용, 저장된 줄바꿈 그대로(CSS white-space: pre)
-            if (el.dataset.text !== m.text) {
+            if (el.dataset.text !== m.text || el.dataset.by !== String(m.by || '')) {
                 el.dataset.text = m.text;
+                el.dataset.by = String(m.by || '');
                 el.textContent = String(m.text || '').replace(/\r\n?/g, '\n');
+                // 2026-10-23 작성 계정 이름 표시
+                if (m.by) {
+                    const by = document.createElement('span');
+                    by.className = 'map-memo-by';
+                    by.textContent = ` — ${m.by}`;
+                    by.style.cssText = 'font-size:0.55em;opacity:0.75;white-space:nowrap;';
+                    el.appendChild(by);
+                }
                 el.title = m.text + (m.by ? `\n— ${m.by}` : '');
                 el.setAttribute('aria-label', `도면 주석: ${m.text}`);
             }

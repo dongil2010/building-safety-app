@@ -30,6 +30,7 @@
             y: Math.round(Number(o.y) || 0),
             text: text,
             by: o.by || '',
+            byUid: o.byUid || '',
             createdAt: now,
             updatedAt: now
         };
@@ -95,7 +96,9 @@
     function packFor(st, floorKey) {
         return {
             items: listFor(st, floorKey).map(function (m) {
-                return { id: m.id, x: m.x, y: m.y, text: m.text, by: m.by || '', createdAt: m.createdAt || 0, updatedAt: m.updatedAt || 0 };
+                var o = { id: m.id, x: m.x, y: m.y, text: m.text, by: m.by || '', createdAt: m.createdAt || 0, updatedAt: m.updatedAt || 0 };
+                if (m.byUid) o.byUid = m.byUid;   // 2026-10-23 계정별 저장
+                return o;
             }),
             deletedIds: ((st && st.deletedMemoIds) || {})[floorKey] || [],
             deletedAt: ((st && st.deletedMemoAt) || {})[floorKey] || {}
