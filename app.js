@@ -4664,16 +4664,30 @@ document.addEventListener('DOMContentLoaded', () => {
         const mainsBefore = units.map((u) => u.main).sort((a, b) => a - b);
         const beforeStr = mainsBefore.join(', ');
 
-        // 2026-10-23 「한 번 눌러선 안 바뀌고 두세 번 눌러야 바뀜」: 예전엔 끝번호를 빈 칸으로 하나씩 옮겨
-        // 순서가 뒤섞였고(1,3,5 → 1,3,2), 동기화와 겹치면 일부만 반영돼 여러 번 눌러야 했다.
-        // 이제 지금 번호 순서를 그대로 두고 한 번에 1부터 연속으로 매긴다(같은 번호끼리는 같은 새 번호).
+        // 2026-10-23 끝(가장 큰) 번호를 가장 작은 빈 번호로 옮기기를 빈 칸이 없어질 때까지 한 번에 반복한다
+        // (묶음은 -2·-3 하위 번호와 함께 이동). 직후 동기화로 빈 칸이 되살아나면 scheduleCompactGapsRecheck가 다시 당긴다.
         let moved = 0;
-        const distinct = [...new Set(units.map((u) => u.main))].sort((a, b) => a - b);
-        const rank = new Map(distinct.map((m, idx) => [m, idx + 1]));
-        units.forEach((victim) => {
-            const target = rank.get(victim.main);
-            if (!target || target === victim.main) return;
-            const baseStr = formatDefectNoSeq(target);
+        const maxSteps = units.length * 4 + 40;
+        for (let step = 0; step < maxSteps; step++) {
+            units = buildUnits();
+            if (!units.length) break;
+            const mains = [...new Set(units.map((u) => u.main))].sort((a, b) => a - b);
+            const maxM = mains[mains.length - 1];
+            let gap = null;
+            for (let n = 1; n <= maxM; n++) {
+                if (!mains.includes(n)) { gap = n; break; }
+            }
+            if (gap == null) break;
+            const topMain = maxM;
+            const candidates = units.filter((u) => u.main === topMain);
+            if (!candidates.length || topMain <= gap) break;
+            candidates.sort((a, b) => {
+                const ka = a.groupId || a.id || '';
+                const kb = b.groupId || b.id || '';
+                return String(kb).localeCompare(String(ka));
+            });
+            const victim = candidates[0];
+            const baseStr = formatDefectNoSeq(gap);
             if (victim.kind === 'group') {
                 victim.members.forEach((m) => {
                     const prevG = String(m.groupNo || '');
@@ -4695,7 +4709,7 @@ document.addEventListener('DOMContentLoaded', () => {
                 if (prev !== baseStr || (prevG && prevG !== baseStr)) stampDefectNumberChanged(victim.defect, !!(prevG && prevG !== baseStr));
             }
             moved += 1;
-        });
+        }
 
         units = buildUnits();
         const afterStr = units.map((u) => u.main).sort((a, b) => a - b).join(', ');
@@ -42256,6 +42270,8 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
     }
 
     function afterGridBulkChange(msg) {
+        if (typeof discardStalePendingRemoteAfterLocalPinEdit === 'function') discardStalePendingRemoteAfterLocalPinEdit();
+        if (state.currentBuildingId && state.currentFloor && typeof markFloorKeyDirty === 'function') markFloorKeyDirty(`${state.currentBuildingId}_${state.currentFloor}`);
         saveStateToLocalStorage();
         if (typeof updateMapSelectionBar === 'function') updateMapSelectionBar({ scrollToSelection: false });
         if (typeof renderDefectListPanel === 'function') renderDefectListPanel();
@@ -42290,8 +42306,11 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
         }
         if (!await window.appConfirm(`이 층 마킹 ${n}개에 행·열 위치를 채웁니다.\n행·열 위치가 없는 마킹만 채우고, 상세 위치(실 이름)는 그대로 둡니다.\n(되돌리기로 취소할 수 있습니다)`)) return;
         if (typeof pushDefectHistory === 'function') pushDefectHistory();
+        // 2026-10-23 확인창을 기다리는 사이 동기화가 층 결함을 새 객체로 바꿔 끼우면, 확인 전에 잡아 둔 목록을 고쳐도
+        // 화면·저장에 안 남아 두세 번 눌러야 됐다 — 확인 뒤 목록을 다시 읽는다.
+        const listNow = filterMapPlacedDefects(getCurrentFloorDefects());
         let done = 0;
-        list.forEach((d) => { if (applyGridAutoLocationToDefect(d, null, { onlyIfEmpty: true })) done += 1; });
+        listNow.forEach((d) => { if (applyGridAutoLocationToDefect(d, null, { onlyIfEmpty: true })) done += 1; });
         afterGridBulkChange(`마킹 ${done}개에 행·열 위치를 채웠습니다.`);
     }
 
@@ -42322,8 +42341,11 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
         if (typeof pushDefectHistory === 'function') pushDefectHistory();
         let done = 0;
         grid.autoLocation = true; // 직접 누른 명령 — 자동 입력 체크와 무관하게 계산
+        // 2026-10-23 확인창을 기다리는 사이 동기화가 층 결함을 새 객체로 바꿔 끼우면, 확인 전에 잡아 둔 목록을 고쳐도
+        // 화면·저장에 안 남아 두세 번 눌러야 됐다 — 확인 뒤 목록을 다시 읽는다.
+        const listNow = filterMapPlacedDefects(getCurrentFloorDefects());
         try {
-            list.forEach((d) => {
+            listNow.forEach((d) => {
                 let changed = false;
                 if (String(d.location || '') !== emptyLoc) {
                     d.location = emptyLoc;
@@ -42441,9 +42463,12 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
         const floorNote = emptyLoc ? `(3종 시설물: 위치칸에는 층 「${emptyLoc}」만 남깁니다)\n` : '';
         if (!await window.appConfirm(`이 층 마킹 ${list.length}개 중 상세 위치가 적힌 ${targets.length}개의 상세 위치를 모두 지웁니다.\n`
             + `행·열 위치는 그대로 둡니다.\n${floorNote}(되돌리기로 한 번에 취소할 수 있습니다)`)) return;
+        // 2026-10-23 확인창을 기다리는 사이 동기화가 층 결함을 새 객체로 바꿔 끼우면, 확인 전에 잡아 둔 목록을 고쳐도
+        // 화면·저장에 안 남아 두세 번 눌러야 됐다 — 확인 뒤 목록을 다시 읽는다.
+        const targetsNow = filterMapPlacedDefects(getCurrentFloorDefects()).filter((d) => String(d.location || '') !== emptyLoc || d.gridLocAuto);
         if (typeof pushDefectHistory === 'function') pushDefectHistory();
         let done = 0;
-        targets.forEach((d) => {
+        targetsNow.forEach((d) => {
             if (clearDefectDetailLocation(d, fc)) {
                 touchDefectUpdatedAt(d);
                 done += 1;
@@ -44194,7 +44219,7 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
     if (btnCompactMarkingGaps) {
         btnCompactMarkingGaps.addEventListener('click', async () => {
             const key = `${state.currentBuildingId}_${state.currentFloor}`;
-            const list = getFloorDefectsForNumbering(key);
+            let list = getFloorDefectsForNumbering(key);
             const exteriorPool = (typeof isExteriorFloorCode === 'function')
                 ? isExteriorFloorCode(state.currentFloor)
                 : (typeof window.isExteriorFloorCode === 'function' && window.isExteriorFloorCode(state.currentFloor));
@@ -44206,6 +44231,9 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
                 ? '외부 도면(외부1·2·…) 전체를 한 번호로 보고 빈 칸을 뒤에서부터 앞으로 땡길까요?\n(한 도면의 빈 번호는 다른 외부 도면에 있을 수 있습니다.)'
                 : '현재 층의 마킹번호 빈 칸을 뒤에서부터 앞으로 땡길까요?\n(예: 1번 삭제 후 2,3,4 → 1,2,3 / 14,15,17,18 → 14,15,16,17)';
             if (!await window.appConfirm(confirmMsg)) return;
+            // 2026-10-23 확인창을 기다리는 사이 동기화가 층 결함을 새 객체로 바꿔 끼우면, 확인 전에 잡아 둔 목록을 고쳐도
+            // 화면·저장에 안 남아 두세 번 눌러야 됐다 — 확인 뒤 목록을 다시 읽는다.
+            list = getFloorDefectsForNumbering(key);
             // 외부 입면처럼 여러 도면이 한 번호 공간이면 그 층들을 모두 한 되돌리기 기록에 담는다
             const poolKeys = Object.keys(state.defects || {}).filter((k) => {
                 const arr = state.defects[k];
