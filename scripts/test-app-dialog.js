@@ -54,6 +54,11 @@ o = dlg.normalizeOptions('confirm', '홈으로 나가시겠습니까?');
 assert.strictEqual(o.danger, false);
 o = dlg.normalizeOptions('confirm', 'x', { danger: false, okText: '나가기', title: '홈으로' });
 assert.deepStrictEqual([o.danger, o.okText, o.title], [false, '나가기', '홈으로']);
+// 체크 목록(여러 동 한글 출력, 2026-10-23): 처음 체크는 지정이 없으면 전부, 범위 밖 번호는 버림
+o = dlg.normalizeOptions('chooseMany', '동', { choices: ['A동', 'B동', 'C동'] });
+assert.deepStrictEqual([o.title, o.choices.length, o.checked], ['선택', 3, [0, 1, 2]]);
+o = dlg.normalizeOptions('chooseMany', '동', { choices: ['A동', 'B동'], checked: [1, 5] });
+assert.deepStrictEqual(o.checked, [1]);
 o = dlg.normalizeOptions('alert', '오류');
 assert.strictEqual(o.title, '알림');
 o = dlg.normalizeOptions('prompt', '이름', { defaultValue: 'A' });

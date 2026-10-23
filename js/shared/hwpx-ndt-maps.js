@@ -173,7 +173,10 @@
                 var content = no ? sec.title + ' ' + no : sec.title;
                 ids.forEach(function (pid) {
                     seq += 1;
-                    entries.push({ photoId: pid, label: '사진' + seq, location: location || '-', content: content });
+                    var entry = { photoId: pid, label: '사진' + seq, location: location || '-', content: content };
+                    // 여러 동 한글 출력: 사진은 동(건물) id로 찾는다
+                    if (rec._ndtBldgId) entry.bldgId = rec._ndtBldgId;
+                    entries.push(entry);
                 });
             });
             if (entries.length) out.push({ title: sec.title, entries: entries });

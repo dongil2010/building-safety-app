@@ -67,6 +67,10 @@ function extractFunction(header) {
     assert.strictEqual(secs[5].entries[0].content, '부재 처짐(변위) NO.01');
     assert.deepStrictEqual(maps.buildPhotoAlbumSections([], []), []);
     assert.deepStrictEqual(maps.buildPhotoAlbumSections(null, undefined), []);
+    // 여러 동 한글 출력(2026-10-23): 동 id가 붙은 항목의 사진은 그 동에서 찾는다
+    const dongSecs = maps.buildPhotoAlbumSections([{ id: 'x', category: '강도', no: '1', location: 'B동 지하1층', photoIds: ['p'], _ndtBldgId: 'bldg-B' }], []);
+    assert.strictEqual(dongSecs[0].entries[0].bldgId, 'bldg-B');
+    assert.ok(!('bldgId' in secs[0].entries[0]), '한 동 출력은 예전 모양 그대로');
 }
 
 // ---- 2) 정리 ----

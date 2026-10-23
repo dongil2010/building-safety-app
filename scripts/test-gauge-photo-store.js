@@ -61,7 +61,7 @@ const rIdx = mig.indexOf("await idbGet('photos', docKey)");
 const setIdIdx = mig.indexOf('log[t.slot.idField] = pid');
 assert.ok(wIdx > 0 && rIdx > wIdx && setIdIdx > rIdx, '쓰고 → 다시 읽어 확인 → 그 뒤에 번호');
 assert.ok(/if \(back !== url\) \{[\s\S]{0,160}continue;/.test(mig), '확인 실패면 건너뜀(사진 그대로)');
-assert.ok(/await ensureGaugePhotosLoaded\(bldgId\);\s*\n\s*const crackFloorsData = buildHwpxCrackMonitorFloorsData/.test(app), '한글 내보내기 전에 사진 채움');
+assert.ok(/await ensureGaugePhotosLoaded\(owner\.id\);\s*\n\s*const crackFloorsData = buildHwpxCrackMonitorFloorsData/.test(app), '한글 내보내기 전에 사진 채움');
 assert.ok(/await ensureGaugePhotosLoaded\(currentBldgId\);\s*\n\s*const crackPagesHtml/.test(app), 'PDF 보고서 전에도');
 assert.ok(/const gauge = gp \? gp\.photoIdsOf\(item\) : \[\];/.test(app), '삭제 보류·재업로드에 게이지 사진 포함');
 assert.ok(/prevPhotoId: crackMonitorUiPhotoId\('gauge', 'prev'\)/.test(app), '창 저장 때 번호 이어 쓰기');

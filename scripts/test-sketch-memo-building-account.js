@@ -73,7 +73,7 @@ assert.ok(sk.listForBuilding(A, 'B').some((x) => x.rec.byUid === 'u2'), '병합 
 const app = fs.readFileSync(path.join(root, 'app.js'), 'utf8').replace(/\r\n/g, '\n');
 assert.ok(app.includes('sketchUi.floorKey = sketchKeyFor(rec && rec.id);') && app.includes('return api ? api.roundKeyFor(b) : \'\';'), '메모는 늘 회차 자리');
 assert.ok(app.includes("codes.delete('ROUND_SKETCH_MEMO');"), '회차 메모 자리는 층 목록·회차 복제에 안 들어감');
-assert.ok(app.includes('migrateSketchMemosForBuilding(sketchUi.bldgId);') && app.includes('await pullRoundSketchMemos(o.bldg);'), '열 때 옮기기, 출력 전 서버 받기');
+assert.ok(app.includes('migrateSketchMemosForBuilding(sketchUi.bldgId);') && app.includes('await pullRoundSketchMemos(owner.b);'), '열 때 옮기기, 출력 전 서버 받기');
 assert.ok(app.includes("by: sketchUi.sheet.id ? '' : sketchMe().name, byUid: sketchUi.sheet.id ? '' : sketchMe().uid"), '작성자·계정은 새 메모에만');
 assert.ok(app.includes('return api.outputGroups(st, bldg.id);'), '한글 출력은 작성자별');
 console.log('test-sketch-memo-building-account: ok');

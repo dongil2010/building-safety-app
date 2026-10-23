@@ -12081,7 +12081,7 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
     // 안 되기 때문(결함위치도의 buildCombinedExteriorSurveyDefects와 같은 패턴). 위치도(도면
     // 이미지)는 이 함수가 건드리지 않는다 — 표(데이터 목록)만 합치고, 위치도는 호출부에서
     // 기존 방식(현재 보고 있는 층 등) 그대로 쓴다.
-    function buildCombinedNdtDataForReport(buildingId) {
+    function buildCombinedNdtDataForReport(buildingId, bldgForLabel) {
         if (!buildingId) return { allItems: [], allDispGroups: [] };
         const floorCodes = listNdtFloorCodesForBuilding(buildingId);
         const allItems = [];
@@ -12097,7 +12097,7 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
         const labelCache = new Map();
         const labelOf = (fc) => {
             if (!labelCache.has(fc)) {
-                labelCache.set(fc, stripFloorCodeSuffix(window.getFloorLabelFromCode(fc)));
+                labelCache.set(fc, stripFloorCodeSuffix(window.getFloorLabelFromCode(fc, bldgForLabel)));
             }
             return labelCache.get(fc);
         };
@@ -14919,7 +14919,9 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
     }
 
     function drawNdtDisplacementChartBody(ctx, group, floorCode, yOffset, cw = 900, ch = 620) {
-        const floorLabel = (typeof window.getFloorLabelFromCode === 'function') ? window.getFloorLabelFromCode(floorCode) : (floorCode || '');
+        // 여러 동 한글 출력은 동 이름을 붙인 층 이름을 미리 넣어 둔다(group._hwpxFloorTitle)
+        const floorLabel = group._hwpxFloorTitle
+            || ((typeof window.getFloorLabelFromCode === 'function') ? window.getFloorLabelFromCode(floorCode) : (floorCode || ''));
         const chartColor = group.color || getStyleColor(group.category === '부재변위' ? 'ndtMemberDisp' : 'ndtSettlement');
         const catLabel = group.category === '부재변위' ? '부재변위(처짐)' : '부동침하 기울기';
         const calc = calcGroupDisplacement(group);
@@ -47808,12 +47810,24 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
         };
     };
 
+    // 여러 동 한글 출력(2026-10-23): 다른 동의 위치도를 그릴 때만 잠깐 그 동을 기준 건물로 쓴다.
+    // state.currentBuilding은 바꾸지 않는다(동기화·화면 코드가 그 값을 보고 움직여서).
+    // 다른 동을 그리는 동안은 「지금 화면에 연 층」 대체값(현재 층 결함·배경 그림·비파괴 캔버스)도 쓰지 않는다.
+    let _hwpxRenderBldgOverride = null;
+    function hwpxRenderBuilding() {
+        return _hwpxRenderBldgOverride || window.state.currentBuilding || {};
+    }
+    function hwpxRenderIsScreenFloor(floorCode) {
+        if (_hwpxRenderBldgOverride && _hwpxRenderBldgOverride.id !== state.currentBuildingId) return false;
+        return state.currentFloor === floorCode;
+    }
+
     function renderFloorPlanCanvasDataUrl(floorCode) {
         try {
-            const bldg = window.state.currentBuilding || {};
+            const bldg = hwpxRenderBuilding();
             const currentBldgId = bldg.id || state.currentBuildingId || 'default';
             const key = `${currentBldgId}_${floorCode}`;
-            const rawDefects = state.defects[key] || (state.currentFloor === floorCode ? getCurrentFloorDefects() : []);
+            const rawDefects = state.defects[key] || (hwpxRenderIsScreenFloor(floorCode) ? getCurrentFloorDefects() : []);
             const defects = filterMapPlacedDefects(rawDefects);
 
             // 1. Check preloaded image cache or image source for this floor (건물별로 구분된 캐시 키 사용)
@@ -47823,7 +47837,7 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
             let floorDrawingSrc = (typeof isUsableRasterDrawingUrl === 'function' && isUsableRasterDrawingUrl(exactSrc))
                 ? exactSrc
                 : null;
-            if (!floorDrawingSrc && state.currentFloor === floorCode && state.bgImage && state.bgImage.src) {
+            if (!floorDrawingSrc && hwpxRenderIsScreenFloor(floorCode) && state.bgImage && state.bgImage.src) {
                 floorDrawingSrc = state.bgImage.src;
             }
             let loadedImg = state.floorImageCache ? state.floorImageCache[cacheKey] : null;
@@ -48557,7 +48571,7 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
 
     function renderNdtFloorPlanCanvasDataUrl(floorCode, categoryFilter = null) {
         try {
-            const bldg = window.state.currentBuilding || {};
+            const bldg = hwpxRenderBuilding();
             const currentBldgId = bldg.id || state.currentBuildingId || 'default';
             const key = `${currentBldgId}_${floorCode}`;
             let ndtItems = (state.ndtData ? (state.ndtData[key] || []) : []).filter((item) => !isCrackGaugeNdtItem(item));
@@ -48659,7 +48673,7 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
             }
 
             const ndtCanvasEl = document.getElementById('ndtCanvas');
-            if (ndtCanvasEl && state.currentFloor === floorCode) {
+            if (ndtCanvasEl && hwpxRenderIsScreenFloor(floorCode)) {
                 try {
                     const cssW = window._ndtCanvasCssW || ndtCanvasEl.clientWidth || ndtCanvasEl.width;
                     const cssH = window._ndtCanvasCssH || ndtCanvasEl.clientHeight || ndtCanvasEl.height;
@@ -48779,7 +48793,7 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
 
     async function renderNdtFloorPlanCanvasDataUrlAsync(floorCode, categoryFilter) {
         // 전용 도면(다른 층이거나 새로고침 뒤라 아직 안 읽힌 것 포함)을 먼저 받아 그림으로 만들어 둔다
-        const bldgForKey = window.state.currentBuilding || {};
+        const bldgForKey = hwpxRenderBuilding();
         const customKey = `${bldgForKey.id || state.currentBuildingId || 'default'}_${floorCode}`;
         const customUrl = await ensureNdtCustomDrawingLoaded(customKey);
         if (customUrl) {
@@ -48795,7 +48809,7 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
         const ready = renderNdtFloorPlanCanvasDataUrl(floorCode, categoryFilter);
         if (ready) return ready;
         try {
-            const bldg = window.state.currentBuilding || {};
+            const bldg = hwpxRenderBuilding();
             if (typeof hydrateFloorDrawingFromCloud === 'function' && bldg.id && floorCode) {
                 try { await hydrateFloorDrawingFromCloud(bldg, floorCode, { localOnly: false }); } catch (_e) { /* ignore */ }
             }
@@ -50633,10 +50647,21 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
             ensureDefectPhotosLoaded, manifestAdds, counters,
             mergeStampHeader, remapStampNode, hwpxHeaderState
         } = ctx;
-        // 비교사진은 IndexedDB·클라우드에 있다 — 한글에 넣기 전에 메모리로 채운다
-        if (typeof ensureGaugePhotosLoaded === 'function') await ensureGaugePhotosLoaded(bldgId);
-        const crackFloorsData = buildHwpxCrackMonitorFloorsData(bldg, bldgId);
-        const { items, slots } = collectHwpxCrackMonitorExportItems(bldg, bldgId, crackFloorsData, getFloorLabel);
+        // 여러 동 한글 출력(ctx.dongParts): 동 순서대로 이어 붙이고 NO. 번호도 동을 넘어 이어서 매긴다
+        const crackOwners = ctx.dongParts
+            ? ctx.dongParts.map((p) => ({ b: p.bldg, id: p.bldgId, label: p.getFloorLabel }))
+            : [{ b: bldg, id: bldgId, label: getFloorLabel }];
+        const items = [];
+        const slots = [];
+        for (const owner of crackOwners) {
+            // 비교사진은 IndexedDB·클라우드에 있다 — 한글에 넣기 전에 메모리로 채운다
+            if (typeof ensureGaugePhotosLoaded === 'function') await ensureGaugePhotosLoaded(owner.id);
+            const crackFloorsData = buildHwpxCrackMonitorFloorsData(owner.b, owner.id);
+            const one = collectHwpxCrackMonitorExportItems(owner.b, owner.id, crackFloorsData, owner.label);
+            one.items.forEach((it) => items.push(it));
+            one.slots.forEach((s) => slots.push(s));
+        }
+        if (crackOwners.length > 1) slots.forEach((slot, idx) => { slot.no = idx + 1; slot.col = idx + 1; });
         if (!items.length || !slots.length) return;
 
         const stamp = await loadHwpxCrackMonitorStampTemplate();
@@ -51146,8 +51171,15 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
     }
     /** 한글 문서 끝(전경사진 뒤)에 「손글씨 메모」 제목 + 메모 한 장씩. 반환: 늘어난 imgCounter */
     async function appendHwpxSketchMemoSection(o) {
-        await pullRoundSketchMemos(o.bldg);   // 이 회차의 모든 계정 메모
-        const memos = collectBuildingSketchMemos(window.state, o.bldg);
+        // 여러 동 한글 출력(o.dongParts)이면 동 순서대로 모으고 메모 이름 앞에 동 이름
+        const owners = o.dongParts ? o.dongParts.map((p) => ({ b: p.bldg, pre: `${p.dongLabel} ` })) : [{ b: o.bldg, pre: '' }];
+        const memos = [];
+        for (const owner of owners) {
+            await pullRoundSketchMemos(owner.b);   // 이 회차의 모든 계정 메모
+            collectBuildingSketchMemos(window.state, owner.b).forEach((m) => {
+                memos.push(owner.pre ? Object.assign({}, m, { label: owner.pre + m.label }) : m);
+            });
+        }
         let imgCounter = o.imgCounter;
         if (!memos.length) return imgCounter;
         const HP = o.HP_NS, HC = o.HC_NS;
@@ -51179,10 +51211,186 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
         return imgCounter;
     }
 
+    // ---- 여러 동을 한글 한 파일로 (2026-10-23) ----
+    // 같은 현장·같은 회차에 동이 둘 이상이면 동을 고르게 한다. 고른 동의 층을 동 순서대로 이어 붙여
+    // 「1) A동 지하1층 … 6) B동 지하1층」처럼 층 머리글 번호·[도면 N-M]·사진 번호가 동을 넘어 이어진다.
+    // 한 동만 고르면(지금 연 동) 예전 출력 그대로.
+    async function pickHwpxDongBuildings(bldg) {
+        const siteKey = getBuildingSiteName(bldg);
+        const roundKey = getBuildingSurveyRoundKey(bldg);
+        if (!isSiteMultiDong(siteKey)) return [bldg];
+        const dongs = getSiteBuildingsSorted(siteKey).filter((b) => getBuildingSurveyRoundKey(b) === roundKey);
+        if (dongs.length < 2) return [bldg];
+        const picked = await window.appChooseMany(
+            '한글 한 파일에 넣을 동을 고르세요.\n층 머리글 번호·도면 번호는 아래 순서대로 이어집니다.',
+            dongs.map((b) => ({ label: formatDongRowLabel(b), detail: b.id === bldg.id ? '지금 연 동' : '' })),
+            { title: '한글로 저장 — 동 선택', okText: '한글로 저장' }
+        );
+        if (picked == null) return null;
+        if (!picked.length) { window.showToast('동을 하나 이상 고르세요.', 'warning'); return null; }
+        return picked.slice().sort((a, b) => a - b).map((i) => dongs[i]);
+    }
+
+    /** 한글 층 이름(「지하 1층」→「지하1층」) — 동마다 그 동의 층 목록으로 */
+    function makeHwpxFloorLabelFn(bldg) {
+        return (floorCode) => {
+            const fromList = (bldg.floorsList || []).find(f => f.floorCode === floorCode);
+            const raw = fromList
+                ? fromList.floorLabel
+                : (typeof window.getFloorLabelFromCode === 'function'
+                    ? window.getFloorLabelFromCode(floorCode, bldg)
+                    : floorCode);
+            return stripFloorCodeSuffix(raw || floorCode).replace(/\s+(?=\d)/g, '');
+        };
+    }
+
+    /** 한 동의 출력 층(외부는 한 장으로 합침)과 층별 결함 */
+    function collectHwpxDongFloors(bldg) {
+        const bldgId = bldg.id;
+        const availableFloors = listNdtFloorCodesForBuilding(bldgId);
+        const floorsData = [];
+        const exteriorCodes = collectExteriorFloorCodes(availableFloors);
+        const exteriorSet = new Set(exteriorCodes);
+        let exteriorMerged = false;
+        availableFloors.forEach(fc => {
+            if (exteriorSet.has(fc)) {
+                if (exteriorMerged) return;
+                exteriorMerged = true;
+                const defects = buildCombinedExteriorSurveyDefects(bldgId, exteriorCodes);
+                if (!defects.length) return;
+                floorsData.push({ floorCode: 'EXT', pageDefects: defects, exteriorCombined: true, exteriorFloorCodes: exteriorCodes.slice() });
+                return;
+            }
+            const defects = getSurveyRowsForReport(window.state.defects[`${bldgId}_${fc}`] || []);
+            if (!defects.length) return;
+            floorsData.push({ floorCode: fc, pageDefects: defects });
+        });
+        return { availableFloors, floorsData };
+    }
+
+    async function exportHwpxSurveyTableDongs(dongBuildings, homeBldg) {
+        const parts = [];
+        for (const b of dongBuildings) {
+            if (!(await ensureBuildingFloorsFreshForReport(b, `한글 보고서(${formatDongRowLabel(b)})`))) return;
+            const one = collectHwpxDongFloors(b);
+            parts.push({
+                bldg: b, bldgId: b.id, dongLabel: getBuildingDongLabel(b) || formatDongRowLabel(b),
+                rawLabel: makeHwpxFloorLabelFn(b), availableFloors: one.availableFloors, floorsData: one.floorsData
+            });
+        }
+        // 층 이름 앞에 동 이름: 「A동 지하1층」
+        parts.forEach((p) => { p.getFloorLabel = (fc) => `${p.dongLabel} ${p.rawLabel(fc)}`; });
+        const home = parts.find((p) => p.bldgId === homeBldg.id) || parts[0];
+        const cur = { part: home };
+        const getFloorLabel = (fc) => cur.part.getFloorLabel(fc);
+
+        const floorsData = [];
+        parts.forEach((p) => p.floorsData.forEach((f) => floorsData.push(Object.assign({}, f, { dongPart: p }))));
+        if (!floorsData.length) { window.showToast('고른 동에 등록된 결함이 없습니다.', 'warning'); return; }
+
+        const grade3 = isGrade3Building(home.bldg);
+        const mixed = parts.filter((p) => isGrade3Building(p.bldg) !== grade3 || p.bldg.inspectionType !== home.bldg.inspectionType);
+        if (mixed.length) {
+            const go = await window.appConfirm(`시설물 종류나 점검 종류가 다른 동이 있습니다: ${mixed.map((p) => p.dongLabel).join(', ')}\n\n`
+                + `${home.dongLabel} 기준(${grade3 ? '3종' : '1·2종'} · ${home.bldg.inspectionType || '-'}) 양식으로 만들까요?`);
+            if (!go) return;
+        }
+
+        // 보고서 직전 점검 — 동마다 보고 한 번에 알린다(한 동 출력과 같은 점검)
+        const health = window.BSA && window.BSA.dataHealth;
+        if (health && typeof health.checkReportData === 'function') {
+            const lines = [];
+            parts.forEach((p) => {
+                const reportDefectsByFloor = {};
+                p.floorsData.forEach((f) => { if (!f.exteriorCombined) reportDefectsByFloor[f.floorCode] = f.pageDefects; });
+                const issues = health.checkReportData({
+                    buildingId: p.bldgId,
+                    defectsMap: window.state.defects,
+                    deletedDefectIds: window.state.deletedDefectIds,
+                    ndtMap: window.state.ndtData,
+                    dispMap: window.state.ndtDisplacementGroups,
+                    reportFloorCodes: p.availableFloors,
+                    reportDefectsByFloor
+                });
+                if (issues.length) {
+                    console.warn(`[보고서 점검] ${p.dongLabel}`, issues);
+                    health.describeReportIssues(issues, p.getFloorLabel).forEach((ln) => lines.push(ln));
+                }
+            });
+            if (lines.length) {
+                const go = await window.appConfirm('보고서를 만들기 전에 확인이 필요한 데이터가 있습니다.\n\n'
+                    + lines.join('\n')
+                    + '\n\n그래도 한글 파일을 만들까요?\n(취소하면 만들지 않습니다)');
+                if (!go) return;
+            }
+        }
+
+        const siteName = getBuildingSiteName(home.bldg);
+        const dongOpts = {
+            parts,
+            setCurrent: (p) => { cur.part = p || home; },
+            fileName: `${siteName}_${parts.map((p) => p.dongLabel).join('_')}`
+        };
+        window.showLoading(`한글(hwpx) 상태조사표를 생성하는 중입니다... (${parts.length}개 동)`);
+        try {
+            if (typeof JSZip === 'undefined') throw new Error('JSZip 라이브러리를 불러오지 못했습니다.');
+            if (grade3) {
+                await exportHwpxSurveyTable3(home.bldg, home.bldgId, floorsData, getFloorLabel, dongOpts);
+            } else {
+                await exportHwpxSurveyTable12(home.bldg, home.bldgId, floorsData, getFloorLabel, dongOpts);
+            }
+        } catch (err) {
+            console.error('HWPX export error:', err);
+            window.showToast('hwpx 생성 중 오류가 발생했습니다: ' + err.message, 'error', 5000);
+        } finally {
+            _hwpxRenderBldgOverride = null;
+            window.hideLoading();
+        }
+    }
+
+    /** 여러 동 출력용: 동 이름을 붙인 비파괴 자료. 층 코드는 「층@@동순번」으로 바꿔
+     * 두 동에 같은 층(지하1층)이 있어도 위치도가 동마다 따로 나오게 한다. */
+    const HWPX_DONG_FC_SEP = '@@';
+    function buildHwpxDongNdtData(parts) {
+        const allItems = [];
+        const allDispGroups = [];
+        parts.forEach((p, pi) => {
+            const r = buildCombinedNdtDataForReport(p.bldgId, p.bldg);
+            const pre = `${p.dongLabel} `;
+            const tag = (rec) => Object.assign(rec, {
+                _ndtFloorLabel: pre + rec._ndtFloorLabel,
+                _ndtRealFloorCode: rec._ndtFloorCode,
+                _ndtFloorCode: `${rec._ndtFloorCode}${HWPX_DONG_FC_SEP}${pi}`,
+                _ndtBldgId: p.bldgId
+            });
+            r.allItems.forEach((it) => allItems.push(tag(Object.assign(it, { location: pre + it.location }))));
+            r.allDispGroups.forEach((g) => {
+                const rec = tag(g);
+                // 부동침하 그래프 제목의 층(그래프 그림 안 글자)
+                rec._hwpxFloorTitle = pre + (window.getFloorLabelFromCode(rec._ndtRealFloorCode, p.bldg) || rec._ndtRealFloorCode);
+                allDispGroups.push(rec);
+            });
+        });
+        return { allItems, allDispGroups };
+    }
+    /** 「층@@동순번」 → { floorCode, part } (여러 동이 아니거나 표시가 없으면 그대로) */
+    function splitHwpxDongFloorCode(code, parts) {
+        const s = String(code || '');
+        const at = s.lastIndexOf(HWPX_DONG_FC_SEP);
+        if (!parts || at < 0) return { floorCode: code, part: null };
+        return { floorCode: s.slice(0, at), part: parts[parseInt(s.slice(at + HWPX_DONG_FC_SEP.length), 10)] || null };
+    }
+
     window.exportHwpxSurveyTable = async function() {
         const bldg = window.state.currentBuilding;
         const bldgId = (bldg && bldg.id) || window.state.currentBuildingId;
         if (!bldg || !bldgId) { window.showToast('건축물을 먼저 선택해주세요.', 'warning'); return; }
+        const dongBuildings = await pickHwpxDongBuildings(bldg);
+        if (!dongBuildings) return;
+        if (dongBuildings.length > 1 || dongBuildings[0].id !== bldg.id) {
+            await exportHwpxSurveyTableDongs(dongBuildings, bldg);
+            return;
+        }
         // 안 열어 본 층이 빠지거나 옛 값으로 나가지 않게 모든 층을 서버에서 먼저 받는다(2026-09-29)
         if (!(await ensureBuildingFloorsFreshForReport(bldg, '한글 보고서'))) return;
 
@@ -51277,7 +51485,37 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
         }
     };
 
-    async function exportHwpxSurveyTable3(bldg, bldgId, floorsData, getFloorLabel) {
+    async function exportHwpxSurveyTable3(bldg, bldgId, floorsData, getFloorLabel, dongOpts) {
+            // 여러 동 한 파일(dongOpts, 2026-10-23): 층 하나를 채우기 전에 useDongOf(그 층)로
+            // bldg·bldgId·위치도 기준 건물·층 이름의 동을 바꾸고, 층 다음 부분(비파괴·전경 등)은 useDongOf(null)로 되돌린다.
+            const dongParts = (dongOpts && dongOpts.parts) || null;
+            const homeBldg = bldg, homeBldgId = bldgId;
+            let curDongPart = null;
+            const useDongOf = (entry) => {
+                if (!dongParts) return;
+                curDongPart = (entry && entry.dongPart) || null;
+                bldg = curDongPart ? curDongPart.bldg : homeBldg;
+                bldgId = curDongPart ? curDongPart.bldgId : homeBldgId;
+                _hwpxRenderBldgOverride = curDongPart ? curDongPart.bldg : null;
+                dongOpts.setCurrent(curDongPart);
+            };
+            // 표 안 칸(3종 구분 「층」 등)은 동 이름 없이 — 표 위 「N) A동 지하1층」 머리글에만 동
+            const rowFloorLabel = (fc) => (curDongPart ? curDongPart.rawLabel(fc) : getFloorLabel(fc));
+            const dongTitlePrefix = () => (curDongPart ? `${curDongPart.dongLabel} ` : '');
+            const ndtBldgOf = (rec) => {
+                const p = dongParts && rec && rec._ndtBldgId && dongParts.find((x) => x.bldgId === rec._ndtBldgId);
+                return p ? p.bldg : bldg;
+            };
+            const renderHwpxNdtMap = async (fc, category) => {
+                const sp = splitHwpxDongFloorCode(fc, dongParts);
+                if (!sp.part) return renderNdtFloorPlanCanvasDataUrlAsync(fc, category);
+                _hwpxRenderBldgOverride = sp.part.bldg;
+                try {
+                    return await renderNdtFloorPlanCanvasDataUrlAsync(sp.floorCode, category);
+                } finally {
+                    _hwpxRenderBldgOverride = null;
+                }
+            };
             // 직전 보고서의 이미지 바이트가 계속 남아 사진이 많을수록 메모리가 누적된다
             _hwpxBytesByUrl.clear();
             // 정기안전점검은 비파괴 장비조사 섹션(DATA·결과표/위치도/사진첩)이 통째로 빠진 전용
@@ -52105,7 +52343,11 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
             if (typeof window.updateLoadingText === 'function') {
                 window.updateLoadingText('한글(hwpx) 위치도 도면 준비 중...');
             }
-            await preloadFloorDrawings(window.state.currentBuilding || bldg);
+            if (dongParts) {
+                for (const p of dongParts) await preloadFloorDrawings(p.bldg);
+            } else {
+                await preloadFloorDrawings(window.state.currentBuilding || bldg);
+            }
 
             // 도면에 결함 핀이 찍힌 위치도 이미지를 만들어 locationMapTbl 한 칸에 채워 넣는다. 1,2종은
             // 층 블록 안에서(아래 본 루프에서) 바로 호출하고, 3종은 모든 층 처리가 끝난 뒤 별도로 몰아서
@@ -52113,7 +52355,7 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
             // 도면이 없어 못 넣었으면 false를 돌려준다(외부처럼 면이 여러 개일 때 빈 칸 정리용).
             const fillLocationMapForFloor = async (locationMapTbl, floorCode, imgSeq, opts) => {
                 try {
-                    const bldgForMap = window.state.currentBuilding || {};
+                    const bldgForMap = hwpxRenderBuilding();
 
                     // getFloorDrawingSrc()는 정확한 층 코드로 도면을 못 찾으면 "층 코드에 포함된
                     // 숫자가 비슷한 다른 층 도면"까지 갖다 쓰는 폴백이 있어(예: 지하1층 "B1F"가
@@ -52281,6 +52523,7 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
 
             for (let slotIdx = 0; slotIdx < floorsData.length; slotIdx++) {
                 const { floorCode, pageDefects } = floorsData[slotIdx];
+                useDongOf(floorsData[slotIdx]);
                 const slot = floorSlots[slotIdx];
                 if (typeof window.updateLoadingText === 'function') {
                     window.updateLoadingText(`한글(hwpx) 상태조사표 생성 중... (${slotIdx + 1}/${floorsData.length} 층)`);
@@ -52294,7 +52537,7 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
                     const t = slot.titlePara.getElementsByTagNameNS(HP_NS, 't')[0];
                     if (t) {
                         const extCombined = !!(floorsData[slotIdx] && floorsData[slotIdx].exteriorCombined);
-                        const titleFloor = extCombined ? '건축물 외부' : getFloorLabel(floorCode);
+                        const titleFloor = extCombined ? `${dongTitlePrefix()}건축물 외부` : getFloorLabel(floorCode);
                         t.textContent = `${slotIdx + 1}) ${titleFloor} 상태조사표 `; // 제목 글자와 표 사이 스페이스 1
                         normalizeHwpxTitleParaFont(slot.titlePara, t, await hwpxCharPrHeightsFromZip(zip));
                     }
@@ -52509,7 +52752,7 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
                         const rowCtx = {
                             floorCode,
                             photoRemark: globalPhotoLabelByDefect.get(d) || '-',
-                            floorDisplayLabel: getFloorLabel(floorCode)
+                            floorDisplayLabel: rowFloorLabel(floorCode)
                         };
                         const colCount = Array.from(normalRowTpl.getElementsByTagNameNS(HP_NS, 'tc')).length;
                         const values = getReportSurveyRowValues(d, rowCtx, isGrade3, colCount);
@@ -52762,6 +53005,7 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
 
             // 비파괴조사(NDT) 섹션은 아직 여러 층을 지원하지 않아 지금 화면에 보고 있는 층 기준으로만 채운다.
             const floorCode = window.state.currentFloor || (floorsData[0] && floorsData[0].floorCode);
+            useDongOf(null);
 
             // ---- 비파괴조사(NDT) 5개 섹션: 콘크리트 강도/탄산화/외벽기울기/부동침하/부재처짐 ----
             // 정기안전점검용 템플릿(hwpx_survey_template_regular.hwpx)에는 이 섹션들이 애초에 없으므로
@@ -52770,18 +53014,18 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
             // 동일한 패턴이라 fillNdtTable로 뽑아 재사용한다. 실패해도 이미 만들어둔 상태조사표/사진/
             // 결함위치도는 살려서 내보내야 하므로 전체를 try/catch로 감싼다.
             try { if (isPreciseInspectionForTemplate) {
-                const ndtBldg = window.state.currentBuilding || {};
+                const ndtBldg = dongParts ? bldg : (window.state.currentBuilding || {});
                 const ndtBldgId = ndtBldg.id || window.state.currentBuildingId;
                 // 결과표는 건물 전체 층을 합쳐 채운다. 위치도는 작성한 항목·층만 비동기로
                 // 렌더해서 7.1.8부터 캡션을 붙여 넣는다(미작성 항목 제목/표는 제거).
-                const { allItems: allNdtItemsForHwpx, allDispGroups: allDispGroupsForHwpx } = buildCombinedNdtDataForReport(ndtBldgId);
+                const { allItems: allNdtItemsForHwpx, allDispGroups: allDispGroupsForHwpx } = (dongParts ? buildHwpxDongNdtData(dongParts) : buildCombinedNdtDataForReport(ndtBldgId));
 
                 const measureItemsHwpx = allNdtItemsForHwpx.filter(item => item.category === '실측');
                 const fireproofItemsHwpx = allNdtItemsForHwpx.filter(item => item.category === '내화피복');
                 const strengthItemsHwpx = allNdtItemsForHwpx.filter(item => item.category === '강도')
-                    .map(item => refreshStrengthItemResults(item, bldg));
+                    .map(item => refreshStrengthItemResults(item, ndtBldgOf(item)));
                 const carbItemsHwpx = allNdtItemsForHwpx.filter(item => item.category === '탄산화')
-                    .map(item => refreshCarbItemResults(item, bldg));
+                    .map(item => refreshCarbItemResults(item, ndtBldgOf(item)));
                 const tiltItemsHwpx = allNdtItemsForHwpx.filter(item => item.category === '기울기');
                 const settlementGroupsHwpx = allDispGroupsForHwpx.filter(g => !g.category || g.category === '변위');
                 const memberDispGroupsHwpx = allDispGroupsForHwpx.filter(g => g.category === '부재변위');
@@ -52985,7 +53229,7 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
                         const group = groups[i];
                         // 그래프 제목의 층은 그 그룹이 조사된 층 — 예전엔 지금 화면에 연 층(currentFloor)이 찍혀
                         // 지상1층 부동침하가 "지하1층 주차장"으로 나왔다(2026-09-22)
-                        const combinedUrl = renderNdtDisplacementCombinedCanvas(group, group._ndtFloorCode || floorCode, i + 1);
+                        const combinedUrl = renderNdtDisplacementCombinedCanvas(group, group._ndtRealFloorCode || group._ndtFloorCode || floorCode, i + 1);
                         anchorPara = await insertImageParaAfter(anchorPara, combinedUrl, 'ndtDispResultAuto', 42520, GROUP_IMG_MAX_H);
                     }
                 };
@@ -53262,7 +53506,8 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
                                         location: slot.location || item.location || '',
                                         component: memberNameOut(item.component) || '',
                                         readings,
-                                        photoId: slot.photoId || null
+                                        photoId: slot.photoId || null,
+                                        bldgId: item._ndtBldgId
                                     });
                                 });
                             });
@@ -53284,7 +53529,7 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
                                 // 있으면 그걸, 없으면 원시 R값 캔버스를(칸 비율에 맞춰) 대신 그려서
                                 // 똑같이 사진 취급으로 표 안에 넣는다.
                                 for (const pt of dataPoints) {
-                                    const photoUrl = pt.photoId ? await loadStrengthPhotoDataUrl(bldg.id, pt.photoId) : null;
+                                    const photoUrl = pt.photoId ? await loadStrengthPhotoDataUrl(pt.bldgId || bldg.id, pt.photoId) : null;
                                     if (photoUrl) {
                                         const size = await loadImageSize(photoUrl);
                                         pt._imgUrl = photoUrl;
@@ -53388,7 +53633,7 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
                                     const pt = perfPoints[seq];
                                     const readings = (pt.slot.readings || []).filter(v => v !== '' && v !== null && v !== undefined);
                                     if (readings.length === 0) continue;
-                                    const calc = calcConcreteStrength(readings, parseFloat(pt.item.strengthAngle), resolveStrengthAgeInfo(pt.item, bldg).days, perfEnabledNames, getStrengthAnvilAvg(bldg));
+                                    const calc = calcConcreteStrength(readings, parseFloat(pt.item.strengthAngle), resolveStrengthAgeInfo(pt.item, ndtBldgOf(pt.item)).days, perfEnabledNames, getStrengthAnvilAvg(bldg));
                                     if (!calc) continue;
                                     perfCanvases.push(renderStrengthPerfPointCanvas(seq + 1, pt.item, pt.slot, readings, calc));
                                 }
@@ -53657,7 +53902,7 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
                             // keepWithAnchor: 표 높이가 거의 한 쪽이라, 제목 바로 아래 첫 장만 쪽 나눔을
                             // 끄고 제목과 같은 쪽에 붙인다(제목만 앞 쪽에 남는 것 방지).
                             const appendLocationMap = async (label, category, imgIdPrefix, floorForMap, anchorOverride, keepWithAnchor) => {
-                                const mapDataUrl = await renderNdtFloorPlanCanvasDataUrlAsync(floorForMap, category);
+                                const mapDataUrl = await renderHwpxNdtMap(floorForMap, category);
                                 if (!mapDataUrl) {
                                     console.warn('NDT 위치도 렌더 실패:', floorForMap, category);
                                     return null;
@@ -53767,7 +54012,7 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
                                     const decodeAlbumPhoto = async (entry) => {
                                         if (!entry) return null;
                                         try {
-                                            const url = await loadStrengthPhotoDataUrl(ndtBldgId, entry.photoId);
+                                            const url = await loadStrengthPhotoDataUrl(entry.bldgId || ndtBldgId, entry.photoId);
                                             if (!url) return null;
                                             const { bytes, mime, ext } = await dataUrlToBytes(url);
                                             const size = await loadImageNaturalSizeFromBytes(bytes, mime);
@@ -53901,7 +54146,7 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
             for (let fi = 0; fi < floorsData.length; fi++) {
                 const { floorCode: fc, pageDefects: defs } = floorsData[fi];
                 defs.filter(d => d.isPriorityManage)
-                    .forEach(d => allPriorityCompareEntries.push({ d, floorCode: fc }));
+                    .forEach(d => allPriorityCompareEntries.push({ d, floorCode: fc, entry: floorsData[fi] }));
             }
             if (allPriorityCompareEntries.length > 0) {
                 try {
@@ -54015,6 +54260,7 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
                         const compareLegendItems = []; // 범례: 실제로 찍힌 표의 층 접두사
                         for (let ci = 0; ci < allPriorityCompareEntries.length; ci++) {
                             const { d, floorCode: cmpFloorCode } = allPriorityCompareEntries[ci];
+                            useDongOf(allPriorityCompareEntries[ci].entry);
                             const prevSrc = getDefectPrevOutputPhotos(d)[0];
                             // 2026-10-20 보수완료 사진을 고른 중점관리 항목은 금회차 칸에 그 사진
                             const repairSrc = getDefectRepairPhotoSrc(d);
@@ -54027,7 +54273,7 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
 
                             const rowCtx = {
                                 floorCode: cmpFloorCode,
-                                floorDisplayLabel: getFloorLabel(cmpFloorCode)
+                                floorDisplayLabel: rowFloorLabel(cmpFloorCode)
                             };
                             const values = getReportSurveyRowValues(d, rowCtx, isGrade3, refColCount);
                             const defectNo = values[0] || getSurveyCellText('no', d, rowCtx) || (d.no || '').replace(/^NO\.?\s*/i, '');
@@ -54088,6 +54334,7 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
             if (grade3LocMapStampPara) {
                 for (let i = 0; i < floorsData.length; i++) {
                     const { floorCode } = floorsData[i];
+                    useDongOf(floorsData[i]);
                     // 외부는 배치도 한 장일 수도, 입면도 여러 장일 수도 있다 — 도면마다 한 장씩.
                     const mapCodes = locationMapCodesForPage(floorsData[i], floorCode);
                     let mapSeq = 0;
@@ -54108,19 +54355,26 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
                 }
             }
 
+            useDongOf(null);
             // ---- 전경사진 (문서 맨 마지막) ----
             try {
-                await hydrateBuildingOverviewPhotos(bldg);
-                const overviewList = (getBuildingOverviewPhotos(bldg) || []).filter((p) => p && (p.dataUrl || p.id));
+                // 여러 동이면 동 순서대로, 캡션 앞에 동 이름
+                const overviewOwners = dongParts
+                    ? dongParts.map((p) => ({ b: p.bldg, pre: `${p.dongLabel} ` }))
+                    : [{ b: bldg, pre: '' }];
                 const overviewReady = [];
-                for (const p of overviewList) {
-                    let src = p.dataUrl;
-                    if (!src && p.id) src = await loadOverviewPhotoDataUrl(bldg.id, p.id);
-                    if (!src) continue;
-                    overviewReady.push({
-                        caption: (p.caption != null && String(p.caption).trim()) ? String(p.caption).trim() : '전경사진',
-                        dataUrl: src
-                    });
+                for (const owner of overviewOwners) {
+                    await hydrateBuildingOverviewPhotos(owner.b);
+                    const overviewList = (getBuildingOverviewPhotos(owner.b) || []).filter((p) => p && (p.dataUrl || p.id));
+                    for (const p of overviewList) {
+                        let src = p.dataUrl;
+                        if (!src && p.id) src = await loadOverviewPhotoDataUrl(owner.b.id, p.id);
+                        if (!src) continue;
+                        overviewReady.push({
+                            caption: owner.pre + ((p.caption != null && String(p.caption).trim()) ? String(p.caption).trim() : '전경사진'),
+                            dataUrl: src
+                        });
+                    }
                 }
                 if (overviewReady.length > 0) {
                     const OV_HEADING_XML = `<hp:p id="0" paraPrIDRef="13" styleIDRef="0" pageBreak="1" columnBreak="0" merged="0"><hp:run charPrIDRef="53"><hp:t>전경사진</hp:t></hp:run><hp:linesegarray><hp:lineseg textpos="0" vertpos="0" vertsize="1100" textheight="1100" baseline="935" spacing="600" horzpos="0" horzsize="41540" flags="393216"/></hp:linesegarray></hp:p>`;
@@ -54172,7 +54426,7 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
             // ---- 손글씨 메모 (전경사진 바로 뒤) ----
             try {
                 imgCounter = await appendHwpxSketchMemoSection({
-                    bldg, sec, xmlDoc, zip, HP_NS, HC_NS, getFloorLabel, imgCounter,
+                    bldg, sec, xmlDoc, zip, HP_NS, HC_NS, getFloorLabel, imgCounter, dongParts,
                     dataUrlToBytes, setPicImage, ensureTblTreatAsChar, manifestAdds
                 });
             } catch (skErr) {
@@ -54183,7 +54437,7 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
             try {
                 const crackHdrState = { text: hwpxHeaderText, dirty: hwpxHeaderDirty };
                 await appendHwpxCrackMonitorSectionEnd({
-                    bldg, bldgId, getFloorLabel, sec, xmlDoc, zip,
+                    bldg, bldgId, getFloorLabel, sec, xmlDoc, zip, dongParts,
                     setTcText, ensureTblTreatAsChar, dataUrlToBytes, loadImageSize, setPicImage,
                     ensureDefectPhotosLoaded, manifestAdds,
                     counters: { imgCounter, cloneIdSeq },
@@ -54252,7 +54506,7 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
                 mimeType: 'application/hwp+zip'
             });
 
-            const bldgName = (bldg.name || '건축물').replace(/^🏢\s*/, '').replace(/[^a-zA-Z0-9가-힣_-]/g, '_');
+            const bldgName = ((dongOpts && dongOpts.fileName) || bldg.name || '건축물').replace(/^🏢\s*/, '').replace(/[^a-zA-Z0-9가-힣_-]/g, '_');
             const dateStr = new Date().toISOString().slice(0, 10).replace(/-/g, '');
             const filename = `${bldgName}_상태조사표_전체층_${dateStr}.hwpx`;
 
@@ -54269,7 +54523,35 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
             window.showToast(`hwpx 파일을 생성했습니다 (${floorsData.length}개 층, 총 ${totalDefectCount}건 반영).`, 'success', 4000);
     }
 
-    async function exportHwpxSurveyTable12(bldg, bldgId, floorsData, getFloorLabel) {
+    async function exportHwpxSurveyTable12(bldg, bldgId, floorsData, getFloorLabel, dongOpts) {
+            // 여러 동 한 파일(dongOpts, 2026-10-23) — exportHwpxSurveyTable3과 같은 방식
+            const dongParts = (dongOpts && dongOpts.parts) || null;
+            const homeBldg = bldg, homeBldgId = bldgId;
+            let curDongPart = null;
+            const useDongOf = (entry) => {
+                if (!dongParts) return;
+                curDongPart = (entry && entry.dongPart) || null;
+                bldg = curDongPart ? curDongPart.bldg : homeBldg;
+                bldgId = curDongPart ? curDongPart.bldgId : homeBldgId;
+                _hwpxRenderBldgOverride = curDongPart ? curDongPart.bldg : null;
+                dongOpts.setCurrent(curDongPart);
+            };
+            const rowFloorLabel = (fc) => (curDongPart ? curDongPart.rawLabel(fc) : getFloorLabel(fc));
+            const dongTitlePrefix = () => (curDongPart ? `${curDongPart.dongLabel} ` : '');
+            const ndtBldgOf = (rec) => {
+                const p = dongParts && rec && rec._ndtBldgId && dongParts.find((x) => x.bldgId === rec._ndtBldgId);
+                return p ? p.bldg : bldg;
+            };
+            const renderHwpxNdtMap = async (fc, category) => {
+                const sp = splitHwpxDongFloorCode(fc, dongParts);
+                if (!sp.part) return renderNdtFloorPlanCanvasDataUrlAsync(fc, category);
+                _hwpxRenderBldgOverride = sp.part.bldg;
+                try {
+                    return await renderNdtFloorPlanCanvasDataUrlAsync(sp.floorCode, category);
+                } finally {
+                    _hwpxRenderBldgOverride = null;
+                }
+            };
             // 직전 보고서의 이미지 바이트가 계속 남아 사진이 많을수록 메모리가 누적된다
             _hwpxBytesByUrl.clear();
             // 정기안전점검은 비파괴 장비조사 섹션(DATA·결과표/위치도/사진첩)이 통째로 빠진 전용
@@ -54823,7 +55105,11 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
             if (typeof window.updateLoadingText === 'function') {
                 window.updateLoadingText('한글(hwpx) 위치도 도면 준비 중...');
             }
-            await preloadFloorDrawings(window.state.currentBuilding || bldg);
+            if (dongParts) {
+                for (const p of dongParts) await preloadFloorDrawings(p.bldg);
+            } else {
+                await preloadFloorDrawings(window.state.currentBuilding || bldg);
+            }
 
             // 도면에 결함 핀이 찍힌 위치도 이미지를 만들어 locationMapTbl 한 칸에 채워 넣는다. 1,2종은
             // 층 블록 안에서(아래 본 루프에서) 바로 호출하고, 3종은 모든 층 처리가 끝난 뒤 별도로 몰아서
@@ -54831,7 +55117,7 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
             // 도면이 없어 못 넣었으면 false를 돌려준다(외부처럼 면이 여러 개일 때 빈 칸 정리용).
             const fillLocationMapForFloor = async (locationMapTbl, floorCode, imgSeq, opts) => {
                 try {
-                    const bldgForMap = window.state.currentBuilding || {};
+                    const bldgForMap = hwpxRenderBuilding();
 
                     // getFloorDrawingSrc()는 정확한 층 코드로 도면을 못 찾으면 "층 코드에 포함된
                     // 숫자가 비슷한 다른 층 도면"까지 갖다 쓰는 폴백이 있어(예: 지하1층 "B1F"가
@@ -54942,6 +55228,7 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
 
             for (let slotIdx = 0; slotIdx < floorsData.length; slotIdx++) {
                 const { floorCode, pageDefects } = floorsData[slotIdx];
+                useDongOf(floorsData[slotIdx]);
                 const slot = floorSlots[slotIdx];
                 if (typeof window.updateLoadingText === 'function') {
                     window.updateLoadingText(`한글(hwpx) 상태조사표 생성 중... (${slotIdx + 1}/${floorsData.length} 층)`);
@@ -54955,7 +55242,7 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
                     const t = slot.titlePara.getElementsByTagNameNS(HP_NS, 't')[0];
                     if (t) {
                         const extCombined = !!(floorsData[slotIdx] && floorsData[slotIdx].exteriorCombined);
-                        const titleFloor = extCombined ? '건축물 외부' : getFloorLabel(floorCode);
+                        const titleFloor = extCombined ? `${dongTitlePrefix()}건축물 외부` : getFloorLabel(floorCode);
                         t.textContent = `${slotIdx + 1}) ${titleFloor} `; // 제목 글자와 표 사이 스페이스 1
                         normalizeHwpxTitleParaFont(slot.titlePara, t, await hwpxCharPrHeightsFromZip(zip));
                     }
@@ -55083,7 +55370,7 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
                         const rowCtx = {
                             floorCode,
                             photoRemark: photoLabelByDefect.get(d) || '-',
-                            floorDisplayLabel: getFloorLabel(floorCode)
+                            floorDisplayLabel: rowFloorLabel(floorCode)
                         };
                         const colCount = Array.from(normalStyleRow.getElementsByTagNameNS(HP_NS, 'tc')).length;
                         const values = getReportSurveyRowValues(d, rowCtx, isGrade3, colCount);
@@ -55309,6 +55596,7 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
 
             // 비파괴조사(NDT) 섹션은 아직 여러 층을 지원하지 않아 지금 화면에 보고 있는 층 기준으로만 채운다.
             const floorCode = window.state.currentFloor || (floorsData[0] && floorsData[0].floorCode);
+            useDongOf(null);
 
             // ---- 비파괴조사(NDT) 5개 섹션: 콘크리트 강도/탄산화/외벽기울기/부동침하/부재처짐 ----
             // 정기안전점검용 템플릿(hwpx_survey_template_regular.hwpx)에는 이 섹션들이 애초에 없으므로
@@ -55317,18 +55605,18 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
             // 동일한 패턴이라 fillNdtTable로 뽑아 재사용한다. 실패해도 이미 만들어둔 상태조사표/사진/
             // 결함위치도는 살려서 내보내야 하므로 전체를 try/catch로 감싼다.
             try { if (isPreciseInspectionForTemplate) {
-                const ndtBldg = window.state.currentBuilding || {};
+                const ndtBldg = dongParts ? bldg : (window.state.currentBuilding || {});
                 const ndtBldgId = ndtBldg.id || window.state.currentBuildingId;
                 // 결과표는 건물 전체 층을 합쳐 채운다. 위치도는 작성한 항목·층만 비동기로
                 // 렌더해서 7.1.8부터 캡션을 붙여 넣는다(미작성 항목 제목/표는 제거).
-                const { allItems: allNdtItemsForHwpx, allDispGroups: allDispGroupsForHwpx } = buildCombinedNdtDataForReport(ndtBldgId);
+                const { allItems: allNdtItemsForHwpx, allDispGroups: allDispGroupsForHwpx } = (dongParts ? buildHwpxDongNdtData(dongParts) : buildCombinedNdtDataForReport(ndtBldgId));
 
                 const measureItemsHwpx = allNdtItemsForHwpx.filter(item => item.category === '실측');
                 const fireproofItemsHwpx = allNdtItemsForHwpx.filter(item => item.category === '내화피복');
                 const strengthItemsHwpx = allNdtItemsForHwpx.filter(item => item.category === '강도')
-                    .map(item => refreshStrengthItemResults(item, bldg));
+                    .map(item => refreshStrengthItemResults(item, ndtBldgOf(item)));
                 const carbItemsHwpx = allNdtItemsForHwpx.filter(item => item.category === '탄산화')
-                    .map(item => refreshCarbItemResults(item, bldg));
+                    .map(item => refreshCarbItemResults(item, ndtBldgOf(item)));
                 const tiltItemsHwpx = allNdtItemsForHwpx.filter(item => item.category === '기울기');
                 const settlementGroupsHwpx = allDispGroupsForHwpx.filter(g => !g.category || g.category === '변위');
                 const memberDispGroupsHwpx = allDispGroupsForHwpx.filter(g => g.category === '부재변위');
@@ -55532,7 +55820,7 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
                         const group = groups[i];
                         // 그래프 제목의 층은 그 그룹이 조사된 층 — 예전엔 지금 화면에 연 층(currentFloor)이 찍혀
                         // 지상1층 부동침하가 "지하1층 주차장"으로 나왔다(2026-09-22)
-                        const combinedUrl = renderNdtDisplacementCombinedCanvas(group, group._ndtFloorCode || floorCode, i + 1);
+                        const combinedUrl = renderNdtDisplacementCombinedCanvas(group, group._ndtRealFloorCode || group._ndtFloorCode || floorCode, i + 1);
                         anchorPara = await insertImageParaAfter(anchorPara, combinedUrl, 'ndtDispResultAuto', 42520, GROUP_IMG_MAX_H);
                     }
                 };
@@ -55809,7 +56097,8 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
                                         location: slot.location || item.location || '',
                                         component: memberNameOut(item.component) || '',
                                         readings,
-                                        photoId: slot.photoId || null
+                                        photoId: slot.photoId || null,
+                                        bldgId: item._ndtBldgId
                                     });
                                 });
                             });
@@ -55831,7 +56120,7 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
                                 // 있으면 그걸, 없으면 원시 R값 캔버스를(칸 비율에 맞춰) 대신 그려서
                                 // 똑같이 사진 취급으로 표 안에 넣는다.
                                 for (const pt of dataPoints) {
-                                    const photoUrl = pt.photoId ? await loadStrengthPhotoDataUrl(bldg.id, pt.photoId) : null;
+                                    const photoUrl = pt.photoId ? await loadStrengthPhotoDataUrl(pt.bldgId || bldg.id, pt.photoId) : null;
                                     if (photoUrl) {
                                         const size = await loadImageSize(photoUrl);
                                         pt._imgUrl = photoUrl;
@@ -55935,7 +56224,7 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
                                     const pt = perfPoints[seq];
                                     const readings = (pt.slot.readings || []).filter(v => v !== '' && v !== null && v !== undefined);
                                     if (readings.length === 0) continue;
-                                    const calc = calcConcreteStrength(readings, parseFloat(pt.item.strengthAngle), resolveStrengthAgeInfo(pt.item, bldg).days, perfEnabledNames, getStrengthAnvilAvg(bldg));
+                                    const calc = calcConcreteStrength(readings, parseFloat(pt.item.strengthAngle), resolveStrengthAgeInfo(pt.item, ndtBldgOf(pt.item)).days, perfEnabledNames, getStrengthAnvilAvg(bldg));
                                     if (!calc) continue;
                                     perfCanvases.push(renderStrengthPerfPointCanvas(seq + 1, pt.item, pt.slot, readings, calc));
                                 }
@@ -56204,7 +56493,7 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
                             // keepWithAnchor: 표 높이가 거의 한 쪽이라, 제목 바로 아래 첫 장만 쪽 나눔을
                             // 끄고 제목과 같은 쪽에 붙인다(제목만 앞 쪽에 남는 것 방지).
                             const appendLocationMap = async (label, category, imgIdPrefix, floorForMap, anchorOverride, keepWithAnchor) => {
-                                const mapDataUrl = await renderNdtFloorPlanCanvasDataUrlAsync(floorForMap, category);
+                                const mapDataUrl = await renderHwpxNdtMap(floorForMap, category);
                                 if (!mapDataUrl) {
                                     console.warn('NDT 위치도 렌더 실패:', floorForMap, category);
                                     return null;
@@ -56310,7 +56599,7 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
                                     const decodeAlbumPhoto = async (entry) => {
                                         if (!entry) return null;
                                         try {
-                                            const url = await loadStrengthPhotoDataUrl(ndtBldgId, entry.photoId);
+                                            const url = await loadStrengthPhotoDataUrl(entry.bldgId || ndtBldgId, entry.photoId);
                                             if (!url) return null;
                                             const { bytes, mime, ext } = await dataUrlToBytes(url);
                                             const size = await loadImageNaturalSizeFromBytes(bytes, mime);
@@ -56410,19 +56699,26 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
             }
 
 
+            useDongOf(null);
             // ---- 전경사진 (문서 맨 마지막) ----
             try {
-                await hydrateBuildingOverviewPhotos(bldg);
-                const overviewList = (getBuildingOverviewPhotos(bldg) || []).filter((p) => p && (p.dataUrl || p.id));
+                // 여러 동이면 동 순서대로, 캡션 앞에 동 이름
+                const overviewOwners = dongParts
+                    ? dongParts.map((p) => ({ b: p.bldg, pre: `${p.dongLabel} ` }))
+                    : [{ b: bldg, pre: '' }];
                 const overviewReady = [];
-                for (const p of overviewList) {
-                    let src = p.dataUrl;
-                    if (!src && p.id) src = await loadOverviewPhotoDataUrl(bldg.id, p.id);
-                    if (!src) continue;
-                    overviewReady.push({
-                        caption: (p.caption != null && String(p.caption).trim()) ? String(p.caption).trim() : '전경사진',
-                        dataUrl: src
-                    });
+                for (const owner of overviewOwners) {
+                    await hydrateBuildingOverviewPhotos(owner.b);
+                    const overviewList = (getBuildingOverviewPhotos(owner.b) || []).filter((p) => p && (p.dataUrl || p.id));
+                    for (const p of overviewList) {
+                        let src = p.dataUrl;
+                        if (!src && p.id) src = await loadOverviewPhotoDataUrl(owner.b.id, p.id);
+                        if (!src) continue;
+                        overviewReady.push({
+                            caption: owner.pre + ((p.caption != null && String(p.caption).trim()) ? String(p.caption).trim() : '전경사진'),
+                            dataUrl: src
+                        });
+                    }
                 }
                 if (overviewReady.length > 0) {
                     const OV_HEADING_XML = `<hp:p id="0" paraPrIDRef="13" styleIDRef="0" pageBreak="1" columnBreak="0" merged="0"><hp:run charPrIDRef="53"><hp:t>전경사진</hp:t></hp:run><hp:linesegarray><hp:lineseg textpos="0" vertpos="0" vertsize="1100" textheight="1100" baseline="935" spacing="600" horzpos="0" horzsize="41540" flags="393216"/></hp:linesegarray></hp:p>`;
@@ -56474,7 +56770,7 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
             // ---- 손글씨 메모 (전경사진 바로 뒤) ----
             try {
                 imgCounter = await appendHwpxSketchMemoSection({
-                    bldg, sec, xmlDoc, zip, HP_NS, HC_NS, getFloorLabel, imgCounter,
+                    bldg, sec, xmlDoc, zip, HP_NS, HC_NS, getFloorLabel, imgCounter, dongParts,
                     dataUrlToBytes, setPicImage, ensureTblTreatAsChar, manifestAdds
                 });
             } catch (skErr) {
@@ -56485,7 +56781,7 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
             try {
                 const crackHdrState = { text: hwpxHeaderText, dirty: hwpxHeaderDirty };
                 await appendHwpxCrackMonitorSectionEnd({
-                    bldg, bldgId, getFloorLabel, sec, xmlDoc, zip,
+                    bldg, bldgId, getFloorLabel, sec, xmlDoc, zip, dongParts,
                     setTcText, ensureTblTreatAsChar, dataUrlToBytes, loadImageSize, setPicImage,
                     ensureDefectPhotosLoaded, manifestAdds,
                     counters: { imgCounter, cloneIdSeq },
@@ -56554,7 +56850,7 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
                 mimeType: 'application/hwp+zip'
             });
 
-            const bldgName = (bldg.name || '건축물').replace(/^🏢\s*/, '').replace(/[^a-zA-Z0-9가-힣_-]/g, '_');
+            const bldgName = ((dongOpts && dongOpts.fileName) || bldg.name || '건축물').replace(/^🏢\s*/, '').replace(/[^a-zA-Z0-9가-힣_-]/g, '_');
             const dateStr = new Date().toISOString().slice(0, 10).replace(/-/g, '');
             const filename = `${bldgName}_상태조사표_전체층_${dateStr}.hwpx`;
 

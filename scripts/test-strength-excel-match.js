@@ -202,10 +202,10 @@ function testRefreshRecomputesStoredItems() {
 
 function testCallSites() {
     assert.ok(/const item = refreshStrengthItemResults\(rawItem\);/.test(app), '비파괴 목록은 다시 계산한 값');
-    assert.strictEqual((app.match(/\.map\(item => refreshStrengthItemResults\(item, bldg\)\)/g) || []).length, 2, '한글 출력 2곳');
+    assert.strictEqual((app.match(/\.map\(item => refreshStrengthItemResults\(item, ndtBldgOf\(item\)\)\)/g) || []).length, 2, '한글 출력 2곳');
     // 2026-10-19 재령일은 resolveStrengthAgeInfo(직접 입력 > 건물 공통 > 360일 자동) 한 곳에서
     assert.ok(/const autoDays = getConcreteStrengthAgeDays\(b\);/.test(app), '자동 재령은 그 건물의 360일 재령');
-    assert.strictEqual((app.match(/resolveStrengthAgeInfo\(pt\.item, bldg\)\.days/g) || []).length, 2, '한글 성과표 2곳');
+    assert.strictEqual((app.match(/resolveStrengthAgeInfo\(pt\.item, ndtBldgOf\(pt\.item\)\)\.days/g) || []).length, 2, '한글 성과표 2곳');
     assert.ok(/strengthAgeDays = \(cat === '강도'\) \? resolveStrengthAgeInfo\(strengthAgeFormItem\)\.days/.test(app), '저장도 같은 재령');
     assert.ok(/carbAgeDays = \(cat === '탄산화'\) \? getConcreteAgeInDays\(\)/.test(app), '탄산화는 실제 날짜 그대로');
     const stats = fs.readFileSync(path.join(root, 'js', 'tabs', 'stats.js'), 'utf8');
