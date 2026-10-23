@@ -30424,9 +30424,73 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
         return (list || []).map(s => String(s || '').trim()).filter(Boolean).join(', ');
     }
 
+    // ---- 2026-10-23 개구부 위치 빠른 선택(창 상부·창 하부·창 측면·문 상부·문 측면) — 결함 수정창(PC·모바일, 새 마킹 포함) ----
+    function defectOpeningPosApplies() {
+        const chk = document.getElementById('defectOpeningCrackCheck');
+        const comp = (document.getElementById('defectComponentInput')?.value || '') + ' ' + (document.getElementById('defectComponent')?.value || '');
+        return !!(chk && chk.checked) || /개구부/.test(comp);
+    }
+    function refreshDefectOpeningPosRow() {
+        const row = document.getElementById('defectOpeningPosRow');
+        if (!row) return;
+        const cur = (document.getElementById('defectOpeningPos')?.value || '').trim();
+        row.style.display = (defectOpeningPosApplies() || cur) ? '' : 'none';
+        row.querySelectorAll('[data-opening-pos]').forEach((b) => {
+            const on = b.getAttribute('data-opening-pos') === cur;
+            b.classList.toggle('active', on);
+            b.classList.toggle('is-on', on);
+            b.setAttribute('aria-pressed', on ? 'true' : 'false');
+            b.style.background = on ? '#0d9488' : '';
+            b.style.color = on ? '#fff' : '#0d9488';
+            b.style.borderColor = '#0d9488';
+        });
+    }
+    function setDefectOpeningPosUi(val) {
+        const inp = document.getElementById('defectOpeningPos');
+        if (inp) inp.value = String(val || '').trim();
+        refreshDefectOpeningPosRow();
+    }
+    function readDefectOpeningPosUi() {
+        return (document.getElementById('defectOpeningPos')?.value || '').trim();
+    }
+    window.setDefectOpeningPosUi = setDefectOpeningPosUi;
+    (function bindDefectOpeningPosChips() {
+        const row = document.getElementById('defectOpeningPosRow');
+        if (!row || row.dataset.bound) return;
+        row.dataset.bound = '1';
+        row.addEventListener('click', (e) => {
+            const b = e.target && e.target.closest && e.target.closest('[data-opening-pos]');
+            if (!b) return;
+            e.preventDefault();
+            const v = b.getAttribute('data-opening-pos');
+            const next = readDefectOpeningPosUi() === v ? '' : v; // 다시 누르면 해제
+            setDefectOpeningPosUi(next);
+            // 위치를 골랐으면 개구부 결함으로(통계 「개구부 결함 제외」와 같은 기준)
+            const chk = document.getElementById('defectOpeningCrackCheck');
+            if (next && chk && !chk.checked) { chk.checked = true; chk.dispatchEvent(new Event('change', { bubbles: true })); }
+            if (typeof scheduleDefectAutoApply === 'function') scheduleDefectAutoApply();
+        });
+        ['defectOpeningCrackCheck', 'defectComponent', 'defectComponentInput'].forEach((id) => {
+            const el = document.getElementById(id);
+            if (el) { el.addEventListener('change', refreshDefectOpeningPosRow); el.addEventListener('input', refreshDefectOpeningPosRow); }
+        });
+        document.addEventListener('click', (e) => { if (e.target && e.target.closest && e.target.closest('#defectComponentChips, .defect-component-chip, [data-component]')) setTimeout(refreshDefectOpeningPosRow, 0); }, true);
+    })();
+
     /** 개구부 균열이면 조사내용에 "개구부 주위 수직균열" 형태로 표기 */
     function formatOpeningAwareDefectType(d) {
         const raw = (d && d.defectType) ? String(d.defectType) : '';
+        // 2026-10-23 개구부 위치(창 상부·창 하부·창 측면·문 상부·문 측면)를 골랐으면 「개구부 주위」 대신 그 위치를 앞에 붙인다
+        const pos = d && d.openingPos ? String(d.openingPos).trim() : '';
+        if (pos) {
+            const ps = parseDefectTypeList(raw);
+            if (!ps.length) return `${pos} 균열`;
+            return joinDefectTypeList(ps.map((t) => {
+                if (!t || (typeof isGoodDefectType === 'function' ? isGoodDefectType(t) : t === '상태양호')) return t;
+                const bare = t.replace(/^개구부\s*주위\s*/, '');
+                return bare.startsWith(pos) ? bare : `${pos} ${bare}`;
+            }));
+        }
         if (!d || !d.isOpeningCrack) return raw;
         const parts = parseDefectTypeList(raw);
         if (!parts.length) return '개구부 주위 균열';
@@ -30890,6 +30954,15 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
             rest = rest.replace(/^[\s,;|/·]+/, '');
             if (!rest) break;
 
+            // 2026-10-23 개수만(폭·길이 공란) 「3EA」·「-3EA」·「3개」 → 개수. 예전엔 숫자 하나로 보고 폭 3.0에 넣어
+            // 엑셀 가져오기·수정창 저장 때 개수가 균열폭으로 옮겨 갔다.
+            const eaOnly = rest.match(/^-?\s*(\d+)\s*(?:EA|개)(?![A-Za-z])/i);
+            if (eaOnly) {
+                rest = rest.slice(eaOnly[0].length);
+                out.push({ width: '', length: '', count: eaOnly[1], join: '/' });
+                continue;
+            }
+
             let m = rest.match(/^Cw\s*[:=]\s*/i);
             if (m) {
                 rest = rest.slice(m[0].length);
@@ -30916,6 +30989,16 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
             rest = w.after.replace(/^\s*mm\b/i, '');
             const joinM = rest.match(/^\s*([/x*])\s*/i);
             if (!joinM) {
+                // 2026-10-23 길이만 「2.0m」·「2.0m -3EA」 → 길이(예전엔 폭으로 들어감)
+                const lenOnly = rest.match(/^\s*m(?![m\w])/i);
+                if (lenOnly) {
+                    rest = rest.slice(lenOnly[0].length);
+                    let lc = '';
+                    const lea = rest.match(/^\s*-\s*(\d+)\s*EA(?![A-Za-z])/i);
+                    if (lea) { lc = lea[1]; rest = rest.slice(lea[0].length); }
+                    out.push({ width: '', length: normalizeCrackDecimalText(w.num), count: lc, join: '/' });
+                    continue;
+                }
                 // 폭만
                 let count = '';
                 const ea = rest.match(/^\s*-\s*(\d+)\s*EA(?![A-Za-z])/i);
@@ -37826,6 +37909,7 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
             if (progCheckEl) progCheckEl.checked = !!existingPin.isProgress;
             if (leakCheckEl) leakCheckEl.checked = !!existingPin.isLeak;
             if (openingCrackCheckEl) openingCrackCheckEl.checked = !!existingPin.isOpeningCrack;
+            setDefectOpeningPosUi(existingPin.openingPos || '');
             if (bookmarkEl) bookmarkEl.checked = !!existingPin.isBookmark;
             if (priorityManageEl) priorityManageEl.checked = !!existingPin.isPriorityManage;
             if (forceArrowDirEl) forceArrowDirEl.checked = !!existingPin.forceArrowDir;
@@ -37922,6 +38006,7 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
             if (progCheckEl) progCheckEl.checked = false;
             if (leakCheckEl) leakCheckEl.checked = false;
             if (openingCrackCheckEl) openingCrackCheckEl.checked = false;
+            setDefectOpeningPosUi('');
             if (bookmarkEl) bookmarkEl.checked = false;
             if (priorityManageEl) priorityManageEl.checked = false;
             if (tmpl && tmpl.groupId) {
@@ -39695,6 +39780,7 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
                 state.defects[key][idx].isProgress = isProgress;
                 state.defects[key][idx].isLeak = isLeak;
                 state.defects[key][idx].isOpeningCrack = isOpeningCrack;
+                { const op = readDefectOpeningPosUi(); if (op) state.defects[key][idx].openingPos = op; else delete state.defects[key][idx].openingPos; }
                 state.defects[key][idx].isCarriedOver = isCarriedOver;
                 state.defects[key][idx].isBookmark = isBookmark;
                 state.defects[key][idx].isPriorityManage = isPriorityManage;
@@ -39779,6 +39865,7 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
                 isProgress: isProgress,
                 isLeak: isLeak,
                 isOpeningCrack: isOpeningCrack,
+                ...(readDefectOpeningPosUi() ? { openingPos: readDefectOpeningPosUi() } : {}),
                 isCarriedOver: isCarriedOver,
                 isBookmark: isBookmark,
                 isPriorityManage: isPriorityManage,
