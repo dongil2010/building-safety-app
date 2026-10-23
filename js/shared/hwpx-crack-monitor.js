@@ -127,14 +127,18 @@
             if (p.axis === 'x') return '→ ' + v;
             return v;
         }).join(' / ');
+        var allZero = parts.length > 0 && parts.every(function (p) { return Math.round(p.value * 100) === 0; });
         return {
             parts: parts,
-            text: text,
-            allZero: parts.length > 0 && parts.every(function (p) { return Math.round(p.value * 100) === 0; })
+            // 변화가 없으면 성분별 「↓ 0mm / → 0mm」 대신 「0」 (2026-10-23 요청)
+            text: allZero ? '0' : text,
+            allZero: allZero
         };
     }
 
     function gaugeText(fmt, y, x, prevY, prevX, opts) {
+        // Y·X가 둘 다 0이면 「↓ 0 / ± 0」 대신 「±0」 하나 — 초기값 줄도 같음 (2026-10-23 요청)
+        if (num(y) === 0 && num(x) === 0) return '±0';
         var parts = [];
         if (!isBlank(y)) parts.push(clean(fmt.gaugeAxis('y', y, prevY, opts)));
         if (!isBlank(x)) parts.push(clean(fmt.gaugeAxis('x', x, prevX, opts)));

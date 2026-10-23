@@ -23,8 +23,8 @@ const TPL = path.join(ROOT, 'templates');
 const fmt = {
     header: (s) => 'NO.' + s.col + ' ' + s.name,
     typeLabel: (s) => (s.kind === 'tip' ? '균열팁' : '크랙모니터'),
-    gaugeAxis: (axis, v, prev, o) => (v == null || String(v).trim() === '' ? '-' : (axis === 'y' ? '↓ ' : '→ ') + v + (o && o.isInitial ? '(초기값)' : '')),
-    tipLength: (v, o) => (v == null || String(v).trim() === '' ? '-' : String(v) + (o && o.isInitial ? '(초기값)' : '')),
+    gaugeAxis: (axis, v, prev, o) => (v == null || String(v).trim() === '' ? '-' : (axis === 'y' ? '↓ ' : '→ ') + v),
+    tipLength: (v, o) => (v == null || String(v).trim() === '' ? '-' : String(v)),
     member: (it) => it.name,
     location: (it) => it.loc,
     roundLabels: () => ({ prev: '', curr: '' })
@@ -146,6 +146,12 @@ const g = (no, log, name) => ({ no, kind: 'gauge', name: name || ('G' + no), gau
     assert.strictEqual(d.text, '-0.07mm');
     const e = cm.changeOf(g(1, { initialY: '0.3', readings: [{ date: '2026-01-05', yMm: '0.3' }] }));
     assert.strictEqual(e.allZero, true);
+    assert.strictEqual(e.text, '0', '변화 없으면 변화량 칸은 0');
+    // Y·X 둘 다 0이면 측정 칸은 ±0
+    const z = cm.buildTableLayout([g(1, { initialY: '0', initialX: '0', readings: [{ date: '2026-01-05', yMm: '0', xMm: '0' }] })], fmt);
+    assert.strictEqual(z.cells['3,1'], '±0');
+    assert.strictEqual(z.cells['4,1'], '±0');
+    assert.strictEqual(z.cells['5,1'], '0');
     const sum = cm.buildSummaryCells(g(1, { initialY: '0.3', readings: [{ date: '2026-01-05', yMm: '0.3' }] }), 1,
         Object.assign({}, fmt, { member: () => '벽체', location: () => '1층' }));
     assert.strictEqual(sum['1,4'], '↓ 0.3');

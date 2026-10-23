@@ -31797,6 +31797,14 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
         const loc = document.getElementById('crackGaugeMarkLocation');
         if (comp) comp.value = isMark ? String(memberNameOut(rec.defect.component) || '') : '';
         if (loc) loc.value = isMark ? String(rec.defect.location || '') : '';
+        // 위치가 비어 있고 이 층에 행·열 선이 있으면 「층 행·열」을 채워 둔다(손으로 쓴 위치는 그대로)
+        if (loc && isMark && !loc.value.trim() && rec.floorCode === state.currentFloor) {
+            const grid = computeGridAutoLocationForPoints(getDefectGridPoints(rec.defect), rec.defect.component);
+            if (grid) {
+                const floor = stripFloorCodeSuffix(window.getFloorLabelFromCode(rec.floorCode)) || '';
+                loc.value = `${floor} ${grid}`.trim();
+            }
+        }
     }
 
     function isNdtCrackMonitorModalOpen() {
@@ -49965,8 +49973,8 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
         let prefix = axis === 'y' ? '↓ ' : (n > 0 ? '→ ' : '± ');
         if (axis === 'x' && n === 0) prefix = '± ';
         let s = prefix + (axis === 'y' ? n : Math.abs(n));
-        if (opts.isInitial) s += '(초기값)';
-        else if (prevVal != null && String(prevVal).trim() !== '') {
+        // 초기값 칸에 붙던 「(초기값)」 문구는 뺌 — 줄 이름(초기 부착 data)으로 충분 (2026-10-23 요청)
+        if (!opts.isInitial && prevVal != null && String(prevVal).trim() !== '') {
             const pn = parseMonitorNumber(prevVal);
             if (pn != null && pn !== n) {
                 const d = Math.round(Math.abs(n - pn) * 100) / 100;
@@ -49979,9 +49987,7 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
     function formatHwpxTipLengthCell(val, opts) {
         opts = opts || {};
         if (val == null || String(val).trim() === '') return '-';
-        let s = String(val).trim();
-        if (opts.isInitial) s += '(초기값)';
-        return s;
+        return String(val).trim();
     }
 
     function formatHwpxCrackChangeSummary(slot) {
@@ -50065,6 +50071,18 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
         return { prev: fmt(prevKey), curr: fmt(currKey) };
     }
 
+    // 한글에 낼 값이 있는지 — 측정 줄은 회차·날짜가 미리 채워져 저장되므로 줄 수가 아니라
+    // 초기값·측정값·사진으로 본다. 게이지 번호만 있는 빈 항목은 한글에서 뺀다.
+    function crackGaugeLogHasHwpxData(g) {
+        return !!(g.initialX || g.initialY || g.prevPhoto || g.currPhoto || g.prevPhotoId || g.currPhotoId
+            || (g.readings || []).some((r) => String(r.xMm || '').trim() || String(r.yMm || '').trim()));
+    }
+
+    function crackTipLogHasHwpxData(t) {
+        return !!(t.initialLengthMm || t.prevPhoto || t.currPhoto || t.prevPhotoId || t.currPhotoId
+            || (t.readings || []).some((r) => String(r.lengthMm || '').trim()));
+    }
+
     function collectHwpxCrackMonitorExportItems(bldg, bldgId, floorsData, getFloorLabel) {
         const items = [];
         (floorsData || []).forEach(({ floorCode, pageDefects, gaugeMarks }) => {
@@ -50073,8 +50091,8 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
                 if (!defectNeedsCrackMonitorUi(defect)) return;
                 const gauge = normalizeCrackGaugeLog(defect.crackGaugeLog);
                 const tip = normalizeCrackTipLog(defect.crackTipLog);
-                const hasGauge = !!(gauge.gaugeNo || gauge.initialX || gauge.initialY || gauge.prevPhoto || gauge.currPhoto || (gauge.readings && gauge.readings.length));
-                const hasTip = !!(tip.initialLengthMm || tip.prevPhoto || tip.currPhoto || (tip.readings && tip.readings.length));
+                const hasGauge = crackGaugeLogHasHwpxData(gauge);
+                const hasTip = crackTipLogHasHwpxData(tip);
                 if (!hasGauge && !hasTip) return;
                 items.push({
                     defect,
@@ -50090,8 +50108,8 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
             (gaugeMarks || []).forEach((mark) => {
                 const gauge = normalizeCrackGaugeLog(mark.crackGaugeLog);
                 const tip = normalizeCrackTipLog(mark.crackTipLog);
-                const hasGauge = !!(gauge.gaugeNo || gauge.initialX || gauge.initialY || gauge.prevPhoto || gauge.currPhoto || (gauge.readings && gauge.readings.length));
-                const hasTip = !!(tip.initialLengthMm || tip.prevPhoto || tip.currPhoto || (tip.readings && tip.readings.length));
+                const hasGauge = crackGaugeLogHasHwpxData(gauge);
+                const hasTip = crackTipLogHasHwpxData(tip);
                 if (!hasGauge && !hasTip) return;
                 items.push({
                     defect: crackGaugeMarkAsExportDefect(mark),
@@ -50110,9 +50128,13 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
         const sortedItems = sortCrackGaugesByNo(items, (it) => (it.gauge && it.gauge.gaugeNo) || (it.defect && it.defect._crackGaugeMark ? it.defect.no : ''));
         items.length = 0;
         sortedItems.forEach((it) => items.push(it));
+        // 열 순서 = 번호 순. 같은 번호에 게이지·팁이 다 있으면 게이지 바로 뒤에 팁
+        // (예전엔 게이지 전부 → 팁 전부라 크랙모니터·균열팁이 따로 몰려 나왔다, 2026-10-23)
         const slots = [];
-        items.filter((it) => it.hasGauge).forEach((item) => slots.push({ ...item, kind: 'gauge' }));
-        items.filter((it) => it.hasTip).forEach((item) => slots.push({ ...item, kind: 'tip' }));
+        items.forEach((item) => {
+            if (item.hasGauge) slots.push({ ...item, kind: 'gauge' });
+            if (item.hasTip) slots.push({ ...item, kind: 'tip' });
+        });
         slots.forEach((slot, idx) => { slot.no = idx + 1; slot.col = idx + 1; });
         return { items, slots };
     }
@@ -50153,7 +50175,12 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
             summaryChange: formatHwpxCrackSummaryChangeText,
             date: (r) => formatHwpxCrackMonitorDate(r && r.date) || (r && r.roundKey) || '',
             member: (item) => memberNameOut(item.defect.component) || '',
-            location: (item) => `${item.floorLabel || ''} ${item.defect.locationDetail || ''}`.trim(),
+            // 게이지 위치에 층이 이미 들어 있으면(행·열 자동 입력) 층을 또 붙이지 않는다
+            location: (item) => {
+                const fl = String(item.floorLabel || '').trim();
+                const detail = String(item.defect.locationDetail || '').trim();
+                return (fl && detail.startsWith(fl) ? detail : `${fl} ${detail}`).trim();
+            },
             roundLabels: (item) => getCrackMonitorItemRoundLabels(item, bldg)
         };
     }
