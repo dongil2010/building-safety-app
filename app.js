@@ -4664,33 +4664,16 @@ document.addEventListener('DOMContentLoaded', () => {
         const mainsBefore = units.map((u) => u.main).sort((a, b) => a - b);
         const beforeStr = mainsBefore.join(', ');
 
+        // 2026-10-23 「한 번 눌러선 안 바뀌고 두세 번 눌러야 바뀜」: 예전엔 끝번호를 빈 칸으로 하나씩 옮겨
+        // 순서가 뒤섞였고(1,3,5 → 1,3,2), 동기화와 겹치면 일부만 반영돼 여러 번 눌러야 했다.
+        // 이제 지금 번호 순서를 그대로 두고 한 번에 1부터 연속으로 매긴다(같은 번호끼리는 같은 새 번호).
         let moved = 0;
-        const maxSteps = units.length * 4 + 40;
-        for (let step = 0; step < maxSteps; step++) {
-            units = buildUnits();
-            if (!units.length) break;
-            const mains = [...new Set(units.map((u) => u.main))].sort((a, b) => a - b);
-            const maxM = mains[mains.length - 1];
-            // 최소 번호가 아니라 1부터 빈 칸을 찾는다.
-            // (1번 삭제 후 2..N만 있으면 min=2라서 예전엔 빈 칸이 없다고 오판함)
-            let gap = null;
-            for (let n = 1; n <= maxM; n++) {
-                if (!mains.includes(n)) { gap = n; break; }
-            }
-            if (gap == null) break;
-
-            // 가장 큰 메인 번호를 가진 유닛 (동률이면 id/groupId 큰 쪽)
-            const topMain = maxM;
-            const candidates = units.filter((u) => u.main === topMain);
-            if (!candidates.length || topMain <= gap) break;
-            candidates.sort((a, b) => {
-                const ka = a.groupId || a.id || '';
-                const kb = b.groupId || b.id || '';
-                return String(kb).localeCompare(String(ka));
-            });
-            const victim = candidates[0];
-            const baseStr = formatDefectNoSeq(gap);
-
+        const distinct = [...new Set(units.map((u) => u.main))].sort((a, b) => a - b);
+        const rank = new Map(distinct.map((m, idx) => [m, idx + 1]));
+        units.forEach((victim) => {
+            const target = rank.get(victim.main);
+            if (!target || target === victim.main) return;
+            const baseStr = formatDefectNoSeq(target);
             if (victim.kind === 'group') {
                 victim.members.forEach((m) => {
                     const prevG = String(m.groupNo || '');
@@ -4712,7 +4695,7 @@ document.addEventListener('DOMContentLoaded', () => {
                 if (prev !== baseStr || (prevG && prevG !== baseStr)) stampDefectNumberChanged(victim.defect, !!(prevG && prevG !== baseStr));
             }
             moved += 1;
-        }
+        });
 
         units = buildUnits();
         const afterStr = units.map((u) => u.main).sort((a, b) => a - b).join(', ');
@@ -34155,7 +34138,39 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
         if (ndtBar) ndtBar.classList.toggle('is-pc-size-panel-open', pcLayout && ndtOpen);
         syncPcSizeToggleBtn(document.getElementById('btnToggleMapStyleSize'), mapOpen);
         syncPcSizeToggleBtn(document.getElementById('btnToggleNdtStyleSize'), ndtOpen);
+        positionPcSizePanelsBelowToolbar();
     };
+
+    // 2026-10-23 PC 창이 좁아 위 도구줄이 두 줄이 되면 크기조절창이 둘째 줄을 덮었다 — 도구줄 실제 아래끝에 맞춘다(PC만)
+    function positionPcSizePanelBelowToolbar(panel, toggleBtn) {
+        if (!panel) return;
+        panel.style.removeProperty('top');
+        if (!panel.classList.contains('is-pc-size-panel-open') || !toggleBtn) return;
+        const parent = panel.offsetParent;
+        const bar = toggleBtn.closest('.map-toolbar, .toolbar, [class*="toolbar"]:not(.toolbar-size-toggle)') || toggleBtn.parentElement;
+        if (!parent || !bar) return;
+        const pr = parent.getBoundingClientRect();
+        const br = bar.getBoundingClientRect();
+        const defTop = panel.getBoundingClientRect().top;
+        // 도구줄이 패널 위쪽을 넘어오면(겹치면) 그 아래로 내린다
+        if (br.bottom > defTop && br.top < defTop + 4 + panel.offsetHeight) {
+            panel.style.setProperty('top', Math.round(br.bottom - pr.top + 4) + 'px', 'important');
+        }
+    }
+    function positionPcSizePanelsBelowToolbar() {
+        positionPcSizePanelBelowToolbar(document.getElementById('mapStyleSizeToolbar'), document.getElementById('btnToggleMapStyleSize'));
+        positionPcSizePanelBelowToolbar(document.getElementById('ndtStyleSizeToolbar'), document.getElementById('btnToggleNdtStyleSize'));
+    }
+    window.addEventListener('resize', () => requestAnimationFrame(positionPcSizePanelsBelowToolbar));
+    if (typeof ResizeObserver === 'function') {
+        try {
+            const ro = new ResizeObserver(() => requestAnimationFrame(positionPcSizePanelsBelowToolbar));
+            ['btnToggleMapStyleSize', 'btnToggleNdtStyleSize'].forEach((id) => {
+                const b = document.getElementById(id);
+                if (b && b.parentElement) ro.observe(b.parentElement);
+            });
+        } catch (_e) { /* ignore */ }
+    }
 
     function refreshCanvasAfterStylePanelToggle() {
         requestAnimationFrame(() => {
@@ -44145,6 +44160,36 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
         clearDefectContentsOnFloor().catch((e) => { console.warn('[내용 비우기] 실패', e); window.showToast?.('내용 비우기에 실패했습니다: ' + (e && e.message), 'error', 5000); });
     });
 
+    // 2026-10-23 당긴 직후 진행 중이던 동기화가 옛 번호를 다시 얹으면 빈 칸이 되살아나 여러 번 눌러야 했다 —
+    // 잠시 뒤 같은 층에 빈 칸이 다시 보이면 조용히 한 번 더 당긴다(최대 3번).
+    function scheduleCompactGapsRecheck(key) {
+        [1200, 3500, 8000].forEach((ms) => setTimeout(() => {
+            try {
+                if (key !== `${state.currentBuildingId}_${state.currentFloor}`) return;
+                const list = getFloorDefectsForNumbering(key);
+                if (!list.length || !findDefectMarkingNumberGaps(list).length) return;
+                const poolKeys = Object.keys(state.defects || {}).filter((k) => {
+                    const arr = state.defects[k];
+                    return Array.isArray(arr) && arr.some((d) => list.indexOf(d) >= 0);
+                });
+                const r = compactDefectMarkingNumberGaps(list);
+                if (!r || (!r.moved && !r.healed)) return;
+                poolKeys.concat([key]).forEach((k) => {
+                    const arr = state.defects[k] || [];
+                    if (arr.some((d) => d && d._numberChanged) && typeof markFloorKeyDirty === 'function') markFloorKeyDirty(k);
+                    arr.forEach((d) => {
+                        if (d && d._numberChanged) {
+                            delete d._numberChanged;
+                            if (typeof journalDefectChange === 'function') journalDefectChange('edit', d, k);
+                        }
+                    });
+                });
+                saveStateToLocalStorage();
+                refreshAfterDefectNumberChange();
+            } catch (e) { console.warn('[빈칸 당기기] 재확인 실패', e); }
+        }, ms));
+    }
+
     const btnCompactMarkingGaps = document.getElementById('btnCompactMarkingGaps');
     if (btnCompactMarkingGaps) {
         btnCompactMarkingGaps.addEventListener('click', async () => {
@@ -44187,6 +44232,7 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
             }
             saveStateToLocalStorage();
             refreshAfterDefectNumberChange();
+            scheduleCompactGapsRecheck(key);
             if (typeof window.showToast === 'function') {
                 window.showToast(result.moved
                     ? `마킹번호 ${result.moved}개 이동: ${result.before} → ${result.after}`
