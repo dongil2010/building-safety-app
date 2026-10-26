@@ -678,7 +678,31 @@ window.EXT_DIRECTION_DEFS = [
     { code: 'EXT_W', label: '건축물 외부-서측 (EXT_W)', shortLabel: '서측', strongKeys: ['서측', '서면', '서쪽', 'WEST'], soloChar: '서' }
 ];
 
-window.isExteriorFloorCode = function(code) {
+// 층 코드로 지금 보고 있는(또는 편집 중인) 건물의 표시 이름을 찾는다 — 이름만 바꾼 층(2F → 「외부-정면」) 판정용
+window.lookupFloorDisplayLabelForExterior = function(code) {
+    const raw = String(code == null ? '' : code).trim();
+    if (!raw) return '';
+    const builds = [window.state && window.state.currentBuilding, window.currentEditingBuilding];
+    for (let i = 0; i < builds.length; i++) {
+        const list = builds[i] && builds[i].floorsList;
+        if (!Array.isArray(list)) continue;
+        for (let j = 0; j < list.length; j++) {
+            const f = list[j];
+            if (f && String(f.floorCode) === raw && f.floorLabel) return String(f.floorLabel);
+        }
+    }
+    return '';
+};
+
+// 외부 도면인가 — 앱 전체(핀·미마킹 공유, 번호 중복 방지, 조사표 이동, 한글 출력, 정렬)가 이 판정 하나만 쓴다.
+// 코드 규칙(EXT·EXT_n·외부·입면) 또는 표시 이름에 「외부」(공백·붙임표 무시, 이름을 나중에 바꿔도 유지). label을 주면 그 이름으로.
+window.isExteriorFloorCode = function(code, label) {
+    const fi = window.BSA && window.BSA.floorIdentity;
+    if (fi && typeof fi.isExteriorKey === 'function') {
+        if (fi.isExteriorKey(code)) return true;
+        const name = (label != null) ? label : window.lookupFloorDisplayLabelForExterior(code);
+        return fi.labelMarksExterior(name);
+    }
     const c = String(code || '').toUpperCase().trim();
     const raw = String(code || '');
     return c === 'EXT' || c.startsWith('EXT_') || raw.includes('외부') || raw.includes('입면');
@@ -771,6 +795,17 @@ window.parseFloorInfoFromFilename = function(fileName) {
     const roofInfo = window.resolveRoofFloorFromText(nameWithoutExt);
     if (roofInfo) {
         return { rank: roofInfo.rank, floorCode: roofInfo.code, floorLabel: roofInfo.label, matched: true };
+    }
+    // 2026-10-26 「지붕층」·「옥상지붕층」도 등록창 선택지·파일명 자동 인식에 넣는다(예전엔 목록에 없어 매번 「새로 등록」으로 들어갔다)
+    // 옥상·옥탑과는 서로 다른 층(2026-10-16 결정) — 코드는 이름 그대로
+    {
+        const stem = nameWithoutExt.trim();
+        if (window.isRoofTopDeckText(stem) && /^옥상\s*지붕\s*층?(\s*(평면도|평면|도면))?$/.test(stem)) {
+            return { rank: 9990.5, floorCode: '옥상지붕층', floorLabel: '옥상지붕층', matched: true };
+        }
+        if (stem.indexOf('옥탑') < 0 && stem.indexOf('옥상') < 0 && /^지붕\s*층?(\s*[-_]?\s*(평면도|평면|도면))?$|^지붕층/.test(stem)) {
+            return { rank: 9993, floorCode: '지붕층', floorLabel: '지붕층', matched: true };
+        }
     }
 
     if (cleanName.includes('외부') || cleanName.includes('외벽') || cleanName.includes('파사드') || cleanName.includes('입면') || cleanName.includes('FACADE') || cleanName.includes('ELEVATION') || cleanName.includes('EXTERIOR')) {
@@ -867,6 +902,7 @@ window.parseFloorInfoFromFilename = function(fileName) {
 };
 
 // 층 코드 수동 선택용 옵션 목록 (지하10층 ~ 지상30층 + 옥상/옥탑 + 건축물 외부)
+window.EXT_NEXT_OPTION = '__EXT_NEXT__';
 window.FLOOR_CODE_OPTION_LIST = (function() {
     const list = [];
     for (let i = 10; i >= 1; i--) list.push(`B${i}F`);
@@ -874,9 +910,10 @@ window.FLOOR_CODE_OPTION_LIST = (function() {
     list.push('ROOF');
     list.push('PH');
     list.push('PH_ROOF');
-    list.push('EXT');
-    for (let i = 1; i <= 12; i++) list.push('EXT_' + i);
-    window.EXT_DIRECTION_DEFS.forEach(d => list.push(d.code));
+    list.push('지붕층');
+    // 2026-10-26 외부 이름 미리 만들어 둔 21개(EXT·외부1~12·정면·배면·좌측면·우측면·북·동·남·서측)를 빼고 한 줄만:
+    // 고르면 외부1·외부2…로 자동 번호. 다른 이름은 「층 이름 직접 입력」(이름에 외부가 들어가면 외부 도면)
+    list.push(window.EXT_NEXT_OPTION);
     return list;
 })();
 
@@ -904,12 +941,18 @@ window.buildFloorCodeOptionsHtml = function(selectedCode) {
     // 그 값도 목록에 끼워넣어 계속 선택된 상태로 보이게 한다 (필로티/기계실/중2층 등 자유 이름)
     const isCustomSelected = selectedCode && !window.FLOOR_CODE_OPTION_LIST.includes(selectedCode);
     let html = window.FLOOR_CODE_OPTION_LIST.map(code => {
+        if (code === window.EXT_NEXT_OPTION) return `<option value="${code}">외부 (자동 번호: 외부1, 외부2…)</option>`;
         const label = (typeof window.getFloorLabelFromCode === 'function') ? window.getFloorLabelFromCode(code) : code;
         const sel = code === selectedCode ? 'selected' : '';
         return `<option value="${code}" ${sel}>${label}</option>`;
     }).join('');
     if (isCustomSelected) {
-        html += `<option value="${selectedCode}" selected>✏️ ${selectedCode} (직접 입력함)</option>`;
+        // 이미 등록된 외부 도면(EXT_n·정면 등)은 목록에서 숨겼어도 그대로 보여 준다
+        const isExtExisting = typeof window.isExteriorFloorCode === 'function' && window.isExteriorFloorCode(selectedCode, '');
+        const extLabel = (typeof window.getFloorLabelFromCode === 'function') ? window.getFloorLabelFromCode(selectedCode)
+            : ((window.BSA && window.BSA.floorIdentity) ? window.BSA.floorIdentity.labelFromCode(selectedCode) : selectedCode);
+        const shownLabel = isExtExisting ? extLabel : `✏️ ${selectedCode} (직접 입력함)`;
+        html += `<option value="${selectedCode}" selected>${shownLabel}</option>`;
     }
     html += `<option value="__CUSTOM_FLOOR__">➕ [층 이름 직접 입력...]</option>`;
     return html;

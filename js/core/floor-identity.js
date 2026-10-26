@@ -10,6 +10,34 @@
         return value == null ? '' : String(value).trim();
     }
 
+    /** 이름 비교용: 공백·붙임표·밑줄·가운뎃점·점·빗금 무시 (「외부-정면」·「외부 좌측면」·「외 부」 모두 같게) */
+    function squashName(text) {
+        return asText(text).replace(/[\s\-_\u00b7.\/]+/g, '');
+    }
+
+    /** 코드(키) 규칙: EXT · EXT_n · 이름에 외부/입면이 들어간 코드 */
+    function isExteriorKey(code) {
+        const raw = asText(code);
+        if (!raw) return false;
+        const c = raw.toUpperCase();
+        if (c === 'EXT' || c.indexOf('EXT_') === 0) return true;
+        const q = squashName(raw);
+        return q.indexOf('외부') >= 0 || q.indexOf('입면') >= 0;
+    }
+
+    /** 화면에 보이는 이름(바꾼 이름 포함)에 「외부」가 들어 있나 */
+    function labelMarksExterior(label) {
+        return squashName(label).indexOf('외부') >= 0;
+    }
+
+    /**
+     * 「외부 도면인가」 단 하나의 판정 — 코드 규칙 또는 표시 이름에 외부.
+     * 층 코드는 이름을 바꿔도 그대로라서, 이름만 바꾼 층(2F → 「외부-정면」)도 이름으로 알아본다.
+     */
+    function isExteriorFloor(code, label) {
+        return isExteriorKey(code) || labelMarksExterior(label);
+    }
+
     function isParkingZoneName(text) {
         return /주차/.test(asText(text));
     }
@@ -76,11 +104,34 @@
         }
         const b = parseBasementNumber(raw);
         if (b != null) return -b;
+        const bw = basementWordRank(raw);
+        if (bw != null) return bw;
         const g = parseGroundNumber(raw);
         if (g != null) return g;
+        const lg = looseGroundNumber(raw);
+        if (lg != null) return lg;
         const fMatch = c.match(/^([0-9]+)\s*F/);
         if (fMatch && isStandardFloorCode(raw)) return parseInt(fMatch[1], 10);
         return 0;
+    }
+
+    /** 번호 없는 지하: 반지하(-0.5)·지하층(-1). 지하주차장 같은 이름은 해당 없음 */
+    function basementWordRank(text) {
+        const q = squashName(text);
+        if (/^반지하(층)?$/.test(q)) return -0.5;
+        if (/^지하(층)?$/.test(q)) return -1;
+        return null;
+    }
+
+    /** 「3층」 「3 층」처럼 지상 표시 없는 층 — 순서에만 쓴다(이름·코드는 바꾸지 않음) */
+    function looseGroundNumber(text) {
+        const m = asText(text).match(/^([0-9]{1,2})\s*층$/);
+        return m ? parseInt(m[1], 10) : null;
+    }
+
+    function isOrderableName(text) {
+        return parseBasementNumber(text) != null || basementWordRank(text) != null
+            || parseGroundNumber(text) != null || looseGroundNumber(text) != null;
     }
 
     function labelFromCode(code) {
@@ -159,21 +210,53 @@
         return typeof root.resolveRoofFloorFromText === 'function' && !!root.resolveRoofFloorFromText(asText(code));
     }
 
+    function entryCode(f) {
+        return asText(f && typeof f === 'object' ? f.floorCode : f);
+    }
+    function entryLabel(f) {
+        return f && typeof f === 'object' ? asText(f.floorLabel) : '';
+    }
+    function isExteriorEntry(f) {
+        return isExteriorFloor(entryCode(f), entryLabel(f));
+    }
+    /** 순서값: 이름만 「외부…」로 바꾼 층은 코드와 상관없이 외부 자리(10000) */
+    function rankForEntry(f) {
+        const code = entryCode(f);
+        if (!isExteriorKey(code) && labelMarksExterior(entryLabel(f))) return 10000;
+        return rankFromCode(code);
+    }
+
     function sortFloorsLowToHigh(floorsList) {
         if (!Array.isArray(floorsList)) return [];
         const items = floorsList.map(function (f, i) {
             return { f: f, i: i };
         });
         items.sort(function (a, b) {
-            const aCode = a.f && (a.f.floorCode || a.f);
-            const bCode = b.f && (b.f.floorCode || b.f);
+            const aCode = entryCode(a.f);
+            const bCode = entryCode(b.f);
             // 2026-10-16 직접 입력한 옥탑1층·옥탑2층·RF도 지하 < 지상 < 옥상·옥탑 순서에 끼운다
-            const aStd = isStandardFloorCode(aCode) || isRoofFamilyText(aCode);
-            const bStd = isStandardFloorCode(bCode) || isRoofFamilyText(bCode);
-            if (aStd && bStd) return rankFromCode(aCode) - rankFromCode(bCode);
+            // 2026-10-26 반지하·지하층·「3층」·지붕층·이름이 외부인 층도 같은 순서에 끼운다
+            const aStd = isStandardFloorCode(aCode) || isRoofFamilyText(aCode) || isOrderableName(aCode) || isExteriorEntry(a.f);
+            const bStd = isStandardFloorCode(bCode) || isRoofFamilyText(bCode) || isOrderableName(bCode) || isExteriorEntry(b.f);
+            if (aStd && bStd) return rankForEntry(a.f) - rankForEntry(b.f);
             return a.i - b.i;
         });
         return items.map(function (x) { return x.f; });
+    }
+
+    /**
+     * 화면 목록용(위→아래): 지붕층·옥상·옥탑 맨 위 → 지상 높은 층 → 낮은 층 → 지하 → (외부는 예전처럼 맨 끝).
+     * 저장·출력 순서(저층→고층)는 그대로 두고, 보여 줄 때만 뒤집는다.
+     * ascendingList: sortFloorsLowToHigh 결과(또는 같은 방향의 목록)
+     */
+    function displayOrderFromAscending(ascendingList) {
+        const rest = [];
+        const ext = [];
+        (ascendingList || []).forEach(function (f) { (isExteriorEntry(f) ? ext : rest).push(f); });
+        return rest.reverse().concat(ext);
+    }
+    function sortFloorsForDisplay(floorsList) {
+        return displayOrderFromAscending(sortFloorsLowToHigh(floorsList));
     }
 
     /**
@@ -331,9 +414,8 @@
     function isExteriorLikeCode(code) {
         const raw = asText(code);
         if (!raw) return false;
-        if (typeof root.isExteriorFloorCode === 'function') return !!root.isExteriorFloorCode(raw);
-        const c = raw.toUpperCase();
-        return c === 'EXT' || c.indexOf('EXT_') === 0 || raw.indexOf('외부') >= 0 || raw.indexOf('입면') >= 0;
+        if (isExteriorKey(raw)) return true;
+        return typeof root.isExteriorFloorCode === 'function' ? !!root.isExteriorFloorCode(raw) : false;
     }
 
     /**
@@ -528,6 +610,13 @@
         normalizeUserLabel: normalizeUserLabel,
         lookupFloorLabel: lookupFloorLabel,
         sortFloorsLowToHigh: sortFloorsLowToHigh,
+        sortFloorsForDisplay: sortFloorsForDisplay,
+        displayOrderFromAscending: displayOrderFromAscending,
+        isExteriorKey: isExteriorKey,
+        labelMarksExterior: labelMarksExterior,
+        isExteriorFloor: isExteriorFloor,
+        squashName: squashName,
+        basementWordRank: basementWordRank,
         assembleFloors: assembleFloors,
         listFloorCodesForNdtReport: listFloorCodesForNdtReport,
         listNdtPayloadFloorCodes: listNdtPayloadFloorCodes,

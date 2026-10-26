@@ -6790,6 +6790,14 @@ document.addEventListener('DOMContentLoaded', () => {
         const res = fr.rename(bldg, floorCode, label, { codes, lookup: (c, b) => window.getFloorLabelFromCode(c, b) });
         if (!res.ok) { window.showToast(res.reason, 'warning', 4000); return false; }
         if (!res.changed) return false;
+        // 이름이 「외부…」로 바뀌었거나 외부가 아니게 되면(코드는 그대로) 자동 순서일 때 외부 자리로 다시 정렬 — 데이터는 그대로
+        try {
+            const wasExt = window.isExteriorFloorCode(floorCode, curLabel);
+            const nowExt = window.isExteriorFloorCode(floorCode, res.label);
+            if (wasExt !== nowExt && !bldg.floorsOrderManual && typeof window.sortFloorsLowToHigh === 'function') {
+                bldg.floorsList = window.sortFloorsLowToHigh(bldg.floorsList || []);
+            }
+        } catch (_e) { /* 정렬은 보조 */ }
         // 같은 건물 객체가 여러 곳에 있으면 맞춘다(state.buildings / currentBuilding / currentEditingBuilding)
         [ (window.state.buildings || []).find((b) => b && b.id === bldg.id), window.state.currentBuilding, window.currentEditingBuilding ]
             .forEach((o) => {
@@ -7914,11 +7922,45 @@ document.addEventListener('DOMContentLoaded', () => {
             window.editDrawingPreviewManualOrder = true;
             return true;
         }
+        if (code === window.EXT_NEXT_OPTION) {
+            // 「외부 (자동 번호)」: 이 건물에 이미 있는 외부·이번에 고른 외부와 겹치지 않는 다음 번호(외부1, 외부2…)
+            const fi = window.BSA && window.BSA.floorIdentity;
+            const used = [];
+            (window.selectedUploadedDrawings || []).concat(window.selectedEditUploadedDrawings || [])
+                .forEach((it) => { if (it && it !== item && it.floorCode) used.push(it.floorCode); });
+            const editing = window.currentEditingBuilding;
+            if (editing && typeof window.getBuildingAvailableFloors === 'function') {
+                (window.getBuildingAvailableFloors(editing) || []).forEach((f) => { if (f && f.floorCode) used.push(f.floorCode); });
+            }
+            const next = (fi && typeof fi.allocateNextExteriorSerial === 'function')
+                ? fi.allocateNextExteriorSerial(used)
+                : { floorCode: 'EXT_' + Date.now(), floorLabel: '외부', rank: 10000 };
+            item.floorCode = next.floorCode;
+            item.floorLabel = next.floorLabel;
+            item.rank = next.rank;
+            item.matched = true;
+            return true;
+        }
         item.floorCode = code;
         item.floorLabel = window.getFloorLabelFromCode(code);
         item.rank = window.getFloorRankFromCode(code);
         item.matched = true; // 사용자가 직접 지정했으므로 신뢰 가능
         return true;
+    }
+
+    // 도면 불러오기 목록은 위→아래 지붕층·옥상 → 지상 높은 층 → 낮은 층 → 지하(외부는 맨 끝). 저장 순서(저층→고층)는 그대로.
+    // 직접 끌어 바꾼 뒤(수동 순서)에는 목록을 그대로 뒤집어 보여 주고, 끌어 놓은 결과도 다시 뒤집어 저장한다.
+    function drawingPreviewDisplayGroups(groups, manual) {
+        const fi = window.BSA && window.BSA.floorIdentity;
+        if (!manual && fi && typeof fi.displayOrderFromAscending === 'function') {
+            const tagged = groups.map((g) => ({
+                floorCode: g.floorCode,
+                floorLabel: (g.entries[0] && g.entries[0].item && g.entries[0].item.floorLabel) || '',
+                g
+            }));
+            return fi.displayOrderFromAscending(tagged).map((x) => x.g);
+        }
+        return groups.slice().reverse();
     }
 
     // 업로드된 파일들을 인식된 층(floorCode)별로 묶어서 [{floorCode, entries:[{item, idx}]}] 형태로 반환.
@@ -8136,7 +8178,7 @@ document.addEventListener('DOMContentLoaded', () => {
             <div class="add-drawing-preview-title">총 ${items.length}개 도면 파일 · 층을 확인해 주세요${groups.length > 1 ? ' · <span class="add-drawing-preview-drag-hint">⠿ 드래그로 순서 변경</span>' : ''}</div>
             ${warningHtml}
             <div class="add-drawing-preview-list">
-                ${groups.map(groupHtml).join('')}
+                ${drawingPreviewDisplayGroups(groups, !!window.drawingPreviewManualOrder).map(groupHtml).join('')}
             </div>
         `;
 
@@ -8145,7 +8187,7 @@ document.addEventListener('DOMContentLoaded', () => {
             bindDrawingPreviewListDrag(listEl, '.add-drawing-preview-row.is-draggable', (floorCodes) => {
                 window.selectedUploadedDrawings = reorderDrawingItemsByFloorOrder(
                     window.selectedUploadedDrawings || [],
-                    floorCodes
+                    floorCodes.slice().reverse()
                 );
                 window.drawingPreviewManualOrder = true;
                 updateNewBuildingFloorsSummary();
@@ -44805,11 +44847,13 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
             const byLabel = getGrade3RoofPrefix(label.replace(/\s*\([^)]*\)\s*$/, ''));
             return (byLabel && byLabel.indexOf('RT') === 0) ? byLabel : byCode;
         }
+        // 외부 판정은 하나로(코드 또는 표시 이름에 외부) — 이름만 「외부-정면」으로 바꾼 2F도 O
+        const isExt = (typeof isExteriorFloorCode === 'function') ? isExteriorFloorCode(raw) : (c.startsWith('EXT') || raw.includes('외부'));
+        if (isExt || raw.includes('부대')) return 'O';
         const bMatch = c.match(/^B(\d+)F$/);
         if (bMatch) return `B${bMatch[1]}`;
         const fMatch = c.match(/^(\d+)F$/);
         if (fMatch) return fMatch[1];
-        if (c.startsWith('EXT') || raw.includes('외부') || raw.includes('부대')) return 'O';
         return floorCode || '';
     }
 
