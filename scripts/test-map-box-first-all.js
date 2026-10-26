@@ -30,6 +30,7 @@ function ensureAreaPinPlacement() {}
 function getAreaAabb(d) { return { w: Math.abs(d.areaX2 - d.areaX1), h: Math.abs(d.areaY2 - d.areaY1) }; }
 function areaShapeSupportsRotation() { return false; }
 function getAreaShape() { return 'rect'; }
+function isPolyPointAreaShape(v) { return v === 'polygon' || v === 'polyline'; }
 function isPointInAreaMark(d, x, y, pad) { return x >= Math.min(d.areaX1, d.areaX2) - pad && x <= Math.max(d.areaX1, d.areaX2) + pad && y >= Math.min(d.areaY1, d.areaY2) - pad && y <= Math.max(d.areaY1, d.areaY2) + pad; }
 function areaLocalToImg(d, lx, ly) { return { x: (d.areaX1 + d.areaX2) / 2 + lx, y: (d.areaY1 + d.areaY2) / 2 + ly }; }
 function areaImgToLocal(d, x, y) { return { x: x - (d.areaX1 + d.areaX2) / 2, y: y - (d.areaY1 + d.areaY2) / 2 }; }

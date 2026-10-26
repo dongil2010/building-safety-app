@@ -16680,6 +16680,43 @@ html #tab-map .defect-list-section-scroll > .defect-list-item.is-important {
     font-size: 0.82rem;
 }
 
+/* 마킹 모드 모양 고르기(핀·다각형·선) — 2026-10-26 */
+.mark-shape-bar {
+    position: absolute;
+    left: 50%;
+    top: 0.6rem;
+    transform: translateX(-50%);
+    z-index: 21;
+    display: flex;
+    align-items: center;
+    gap: 0.35rem;
+    max-width: calc(100% - 1.2rem);
+    padding: 0.28rem 0.55rem 0.28rem 0.8rem;
+    background: rgba(28, 28, 28, 0.92);
+    border: 1px solid rgba(251, 146, 60, 0.55);
+    border-radius: 999px;
+    box-shadow: 0 6px 18px rgba(0, 0, 0, 0.25);
+    color: #f5f5f5;
+    pointer-events: auto;
+}
+.mark-shape-bar[hidden] { display: none !important; }
+.mark-shape-bar-label { font-size: 0.74rem; font-weight: 800; white-space: nowrap; }
+.mark-shape-btn {
+    flex: 0 0 auto;
+    border: 1px solid rgba(254, 215, 170, 0.55);
+    background: transparent;
+    color: #fed7aa;
+    font-size: 0.78rem;
+    font-weight: 800;
+    border-radius: 999px;
+    padding: 0.26rem 0.7rem;
+    min-height: 32px;
+    cursor: pointer;
+}
+.mark-shape-btn.active { background: #ea580c; color: #fff; border-color: #fb923c; }
+html.layout-mobile .mark-shape-btn,
+html.layout-tablet .mark-shape-btn { min-height: 38px; padding: 0.3rem 0.85rem; }
+
 /* 오프라인 준비 (2026-10-07) */
 .offline-prep-card { max-width: 560px; }
 .offline-prep-status { font-weight: 600; margin: 8px 0; }

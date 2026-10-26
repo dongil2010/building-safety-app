@@ -20,13 +20,18 @@ function extract(name) {
 
 // 모양 선택지: PC와 같은 데이터 값(rect/ellipse/polygon)
 const choices = new Function(extract('areaShapeChoices') + '; return areaShapeChoices();')();
-assert.deepStrictEqual(choices.map((c) => c.shape).sort(), ['ellipse', 'polygon', 'rect']);
+assert.deepStrictEqual(choices.map((c) => c.shape).sort(), ['ellipse', 'polygon', 'polyline', 'rect']);
 
 // 터치 다각형 점 찍기: 첫 점 근처(화면 28px 안)면 완료, 아니면 점 추가
 const env = { pendingAreaPoly: null, finished: 0 };
 const commit = new Function('env', `
     let pendingAreaPoly = null;
-    const state = { mode: 'AREA', areaCreateShape: 'polygon', view: { scale: 2 } };
+    const state = { mode: 'AREA', areaCreateShape: 'polygon', markCreateShape: 'pin', view: { scale: 2 } };
+    let pendingAreaPolyRedraw = null;
+    ${extract('isPolyPointAreaShape')}
+    ${extract('getMarkPolyShape')}
+    ${extract('getActivePolyCreateShape')}
+    ${extract('addPendingPolyPoint')}
     function finishPendingAreaPolygon() { env.finished++; pendingAreaPoly = null; }
     function syncAreaPolygonRedrawBanner() {}
     function drawCanvas() {}

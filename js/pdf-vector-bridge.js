@@ -347,7 +347,7 @@
   }
 
   function areaOutlineImgPoints(area) {
-    const shape = area.shape === 'ellipse' || area.shape === 'polygon' ? area.shape : 'rect';
+    const shape = area.shape === 'ellipse' || area.shape === 'polygon' || area.shape === 'polyline' ? area.shape : 'rect';
     const ix1 = Math.min(area.x1, area.x2);
     const iy1 = Math.min(area.y1, area.y2);
     const ix2 = Math.max(area.x1, area.x2);
@@ -360,7 +360,7 @@
     if (shape === 'ellipse') {
       return ellipsePolyImg(cx, cy, Math.max(hw, 0.5), Math.max(hh, 0.5), ang, 56);
     }
-    if (Array.isArray(area.points) && area.points.length >= 3) {
+    if (Array.isArray(area.points) && area.points.length >= (shape === 'polyline' ? 2 : 3)) {
       return area.points.map((p) => ({ x: Number(p.x), y: Number(p.y) }));
     }
     const rad = (ang * Math.PI) / 180;
@@ -433,7 +433,8 @@
     if (!area) return;
     const outlineImg = areaOutlineImgPoints(area);
     const outlinePdf = pdfPtsFromImg(outlineImg, imgToPdf);
-    if (outlinePdf.length < 3) return;
+    const isLine = area.shape === 'polyline';
+    if (outlinePdf.length < (isLine ? 2 : 3)) return;
 
     const fillStyle = area.fillStyle === 'hatch' || area.fillStyle === 'none' ? area.fillStyle : 'solid';
     const borderStyle = area.borderStyle === 'dashed' ? 'dashed' : 'solid';
@@ -450,7 +451,9 @@
     const ang = Math.abs(Number(area.angle) || 0);
     const axisAlignedRect = shape === 'rect' && ang < 0.01;
 
-    if (fillStyle === 'solid') {
+    if (isLine) {
+      /* 선: 채우기·해치 없음 */
+    } else if (fillStyle === 'solid') {
       if (axisAlignedRect) {
         page.drawRectangle({
           x: minX, y: minY, width: rw, height: rh,
@@ -479,7 +482,9 @@
       }
     }
 
-    if (axisAlignedRect) {
+    if (isLine) {
+      drawStrokedPolyline(page, outlinePdf, borderW, color); // 열린 선(닫지 않음)
+    } else if (axisAlignedRect) {
       const borderOpts = {
         x: minX, y: minY, width: rw, height: rh,
         borderColor: color, borderWidth: borderW

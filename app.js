@@ -11327,25 +11327,35 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
             }, true);
             }
             if (pendingAreaPoly && pendingAreaPoly.length) {
+                const pvLine = getPendingPolyShape() === 'polyline';
+                const pvScale = Math.max(state.view.scale || 1, 0.01);
                 ctx.save();
                 ctx.strokeStyle = '#ea580c';
                 ctx.fillStyle = 'rgba(234,88,12,0.15)';
-                ctx.lineWidth = 2 / Math.max(state.view.scale || 1, 0.01);
+                ctx.lineWidth = 2 / pvScale;
+                ctx.lineJoin = 'round';
                 ctx.beginPath();
                 pendingAreaPoly.forEach((p, i) => {
                     if (i === 0) ctx.moveTo(p.x, p.y);
                     else ctx.lineTo(p.x, p.y);
                 });
-                if (pendingAreaPoly.length >= 3) {
+                if (!pvLine && pendingAreaPoly.length >= 3) {
                     ctx.closePath();
                     ctx.fill();
                 }
                 ctx.stroke();
-                pendingAreaPoly.forEach((p) => {
+                pendingAreaPoly.forEach((p, i) => {
                     ctx.beginPath();
-                    ctx.arc(p.x, p.y, 4 / Math.max(state.view.scale || 1, 0.01), 0, Math.PI * 2);
+                    ctx.arc(p.x, p.y, 4 / pvScale, 0, Math.PI * 2);
                     ctx.fillStyle = '#ea580c';
                     ctx.fill();
+                    if (pvLine) {
+                        // 선: 1번, 2번, 3번… 점 순서를 번호로 보여 준다
+                        ctx.font = `700 ${Math.round(12 / pvScale)}px sans-serif`;
+                        ctx.textBaseline = 'bottom';
+                        ctx.fillStyle = '#7c2d12';
+                        ctx.fillText(String(i + 1), p.x + 6 / pvScale, p.y - 5 / pvScale);
+                    }
                 });
                 ctx.restore();
             }
@@ -25429,7 +25439,7 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
         const shape = (shapeHint && typeof shapeHint === 'object')
             ? getAreaShape(shapeHint)
             : normalizeAreaShape(shapeHint || 'rect');
-        row.style.display = shape === 'polygon' ? 'none' : '';
+        row.style.display = isPolyPointAreaShape(shape) ? 'none' : '';
     }
 
     function setDefectAreaStylePanelVisible(isArea, shapeHint) {
@@ -25441,7 +25451,17 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
     }
 
     function normalizeAreaShape(v) {
-        return (v === 'ellipse' || v === 'polygon') ? v : 'rect';
+        // 'polyline'(열린 선)을 모르는 옛 앱은 'rect'로 읽어 영역 박스로 그린다(깨지지 않음)
+        return (v === 'ellipse' || v === 'polygon' || v === 'polyline') ? v : 'rect';
+    }
+
+    /** 점들로 이루어진 모양: 다각형(닫힘) · 선(열림, 채우기 없음) */
+    function isPolyPointAreaShape(v) {
+        return v === 'polygon' || v === 'polyline';
+    }
+
+    function areaPolyMinPoints(shape) {
+        return shape === 'polyline' ? 2 : 3;
     }
 
     function getAreaShape(defect) {
@@ -25449,7 +25469,7 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
     }
 
     function areaShapeSupportsRotation(defect) {
-        return getAreaShape(defect) !== 'polygon';
+        return !isPolyPointAreaShape(getAreaShape(defect));
     }
 
     function getAreaAngleDeg(defect) {
@@ -25502,7 +25522,8 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
     }
 
     function getAreaPolyPoints(defect) {
-        if (getAreaShape(defect) === 'polygon' && Array.isArray(defect.areaPoints) && defect.areaPoints.length >= 3) {
+        const polyKind = getAreaShape(defect);
+        if (isPolyPointAreaShape(polyKind) && Array.isArray(defect.areaPoints) && defect.areaPoints.length >= areaPolyMinPoints(polyKind)) {
             return defect.areaPoints.map((p) => ({ x: Number(p.x), y: Number(p.y) }));
         }
         return getAreaWorldCorners(defect);
@@ -25542,6 +25563,15 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
         if (!defect || defect.areaX1 === undefined) return false;
         const p = pad || 0;
         const shape = getAreaShape(defect);
+        if (shape === 'polyline') {
+            // 열린 선: 안쪽이 없고, 선분 가까이만 맞는다(마지막 점→첫 점은 잇지 않음)
+            const linePts = getAreaPolyPoints(defect);
+            const tol = Math.max(p, 0) + 8;
+            for (let i = 0; i < linePts.length - 1; i++) {
+                if (distPointToSegment(x, y, linePts[i].x, linePts[i].y, linePts[i + 1].x, linePts[i + 1].y) <= tol) return true;
+            }
+            return false;
+        }
         if (shape === 'polygon') {
             const pts = getAreaPolyPoints(defect);
             if (pointInPolygonPts(pts, x, y)) return true;
@@ -25656,7 +25686,7 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
         const { cx, cy } = areaRotatePivot;
         const rot = (p) => rotateImgPoint(p.x, p.y, cx, cy, deltaDeg);
 
-        if (getAreaShape(defect) === 'polygon' && areaRotateSnapshot.areaPoints) {
+        if (isPolyPointAreaShape(getAreaShape(defect)) && areaRotateSnapshot.areaPoints) {
             defect.areaPoints = areaRotateSnapshot.areaPoints.map((p) => rot(p));
             syncAreaBboxFromPoints(defect);
             defect.areaAngle = 0;
@@ -25775,16 +25805,16 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
             ctx.ellipse(cx, cy, Math.max(w / 2, 0.5), Math.max(h / 2, 0.5), (getAreaAngleDeg(defect) * Math.PI) / 180, 0, Math.PI * 2);
             return;
         }
-        const pts = (shape === 'polygon') ? getAreaPolyPoints(defect) : getAreaWorldCorners(defect);
+        const pts = isPolyPointAreaShape(shape) ? getAreaPolyPoints(defect) : getAreaWorldCorners(defect);
         pts.forEach((p, i) => {
             if (i === 0) ctx.moveTo(p.x, p.y);
             else ctx.lineTo(p.x, p.y);
         });
-        ctx.closePath();
+        if (shape !== 'polyline') ctx.closePath(); // 선은 열린 채로(닫지 않음)
     }
 
     function paintAreaShapeInterior(ctx, defect, color, fillStyle) {
-        if (fillStyle === 'none') return;
+        if (fillStyle === 'none' || getAreaShape(defect) === 'polyline') return; // 선은 채우지 않는다
         ctx.save();
         beginAreaShapePath(ctx, defect);
         ctx.clip();
@@ -25840,7 +25870,7 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
         const strokes = defect.areaDrawings;
         if (!Array.isArray(strokes) || !strokes.length) return;
         ctx.save();
-        clipAreaShape(ctx, defect);
+        if (getAreaShape(defect) !== 'polyline') clipAreaShape(ctx, defect);
         ctx.strokeStyle = color;
         ctx.fillStyle = color;
         ctx.globalAlpha = 0.92;
@@ -25906,7 +25936,7 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
             ctx.fillStyle = '#1e293b';
             ctx.strokeStyle = '#f8fafc';
             ctx.lineWidth = 1.4;
-            const handlePts = (getAreaShape(defect) === 'polygon')
+            const handlePts = isPolyPointAreaShape(getAreaShape(defect))
                 ? getAreaPolyPoints(defect)
                 : getAreaWorldCorners(defect);
             handlePts.forEach((c) => {
@@ -25936,6 +25966,14 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
     }
 
     function getAreaEdgeMidpoints(defect) {
+        if (getAreaShape(defect) === 'polyline') {
+            const linePts = getAreaPolyPoints(defect);
+            const mids = [];
+            for (let i = 0; i < linePts.length - 1; i++) {
+                mids.push({ x: (linePts[i].x + linePts[i + 1].x) / 2, y: (linePts[i].y + linePts[i + 1].y) / 2 });
+            }
+            return mids;
+        }
         if (getAreaShape(defect) === 'polygon') {
             const pts = getAreaPolyPoints(defect);
             return pts.map((p, i) => {
@@ -26069,6 +26107,7 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
         const s = normalizeAreaShape(shape);
         if (s === 'ellipse') return '타원';
         if (s === 'polygon') return '다각형';
+        if (s === 'polyline') return '선';
         return '네모';
     }
 
@@ -26093,8 +26132,54 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
         return pts;
     }
 
+    /** 선(polyline)이 낀 모양 변환 — 점 목록·bbox만 바꾸고 나머지(번호·사진·내용)는 그대로 */
+    function applyPolylineShapeConversion(defect, cur, next) {
+        const rnd = (p) => ({ x: Math.round(p.x), y: Math.round(p.y) });
+        if (next === 'polyline') {
+            let pts;
+            if (cur === 'ellipse') pts = approxEllipseAreaPoints(defect, 12);
+            else if (cur === 'polygon') pts = getAreaPolyPoints(defect).map(rnd);
+            else pts = getAreaWorldCorners(defect).map(rnd);
+            // 닫힌 윤곽이 눈에 그대로 남도록 첫 점으로 되돌아오는 선분까지 넣는다
+            pts = pts.concat([{ x: pts[0].x, y: pts[0].y }]);
+            defect.areaShape = 'polyline';
+            defect.areaPoints = pts;
+            defect.areaAngle = 0;
+            syncAreaBboxFromPoints(defect);
+            return;
+        }
+        // 선 → 다각형/네모/타원
+        const linePts = getAreaPolyPoints(defect).map(rnd);
+        syncAreaBboxFromPoints(defect);
+        const MIN_SIDE = 40;
+        let x1 = Math.min(defect.areaX1, defect.areaX2);
+        let x2 = Math.max(defect.areaX1, defect.areaX2);
+        let y1 = Math.min(defect.areaY1, defect.areaY2);
+        let y2 = Math.max(defect.areaY1, defect.areaY2);
+        if (x2 - x1 < MIN_SIDE) { const c = (x1 + x2) / 2; x1 = c - MIN_SIDE / 2; x2 = c + MIN_SIDE / 2; }
+        if (y2 - y1 < MIN_SIDE) { const c = (y1 + y2) / 2; y1 = c - MIN_SIDE / 2; y2 = c + MIN_SIDE / 2; }
+        if (next === 'polygon') {
+            const poly = linePts.slice();
+            if (poly.length >= 2 && poly[0].x === poly[poly.length - 1].x && poly[0].y === poly[poly.length - 1].y) poly.pop();
+            const flat = poly.length < 3 || (Math.max(...poly.map((p) => p.x)) - Math.min(...poly.map((p) => p.x)) < 1)
+                || (Math.max(...poly.map((p) => p.y)) - Math.min(...poly.map((p) => p.y)) < 1);
+            defect.areaShape = 'polygon';
+            defect.areaPoints = flat
+                ? [{ x: x1, y: y1 }, { x: x2, y: y1 }, { x: x2, y: y2 }, { x: x1, y: y2 }].map(rnd)
+                : poly;
+            defect.areaAngle = 0;
+            syncAreaBboxFromPoints(defect);
+        } else {
+            defect.areaX1 = Math.round(x1); defect.areaY1 = Math.round(y1);
+            defect.areaX2 = Math.round(x2); defect.areaY2 = Math.round(y2);
+            defect.areaShape = next;
+            defect.areaPoints = undefined;
+            defect.areaAngle = 0;
+        }
+    }
+
     /**
-     * 영역 모양 변환: 네모(rect) / 다각형(polygon) / 타원(ellipse)
+     * 영역 모양 변환: 네모(rect) / 다각형(polygon) / 선(polyline) / 타원(ellipse)
      * 번호·사진·내용·층 키·동기화 필드는 유지. 기하만 합리적 범위에서 변환.
      */
     function convertDefectAreaShape(defect, targetShape) {
@@ -26104,7 +26189,9 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
         const cur = getAreaShape(defect);
         if (next === cur) return false;
 
-        if (next === 'polygon') {
+        if (next === 'polyline' || cur === 'polyline') {
+            applyPolylineShapeConversion(defect, cur, next);
+        } else if (next === 'polygon') {
             let pts;
             if (cur === 'ellipse') {
                 pts = approxEllipseAreaPoints(defect, 12);
@@ -26155,18 +26242,21 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
             : '<i class="fa-solid fa-draw-polygon"></i> 영역 마킹으로 변경';
         btn.title = isArea ? '영역 마킹을 핀(화살표) 마킹으로 바꿉니다' : '핀 마킹을 영역(사각형) 마킹으로 바꿉니다';
         if (shapeRow) {
-            shapeRow.hidden = !isArea;
-            if (isArea) {
-                const cur = getAreaShape(existingPin);
+            const bulkNow = typeof isDefectBulkEditMode === 'function' && isDefectBulkEditMode();
+            shapeRow.hidden = bulkNow;
+            const labelEl = document.getElementById('defectAreaShapeConvertLabel');
+            if (labelEl) labelEl.textContent = isArea ? '영역 모양 변경:' : '모양 바꾸기(번호·사진 유지):';
+            if (!bulkNow) {
+                const cur = isArea ? getAreaShape(existingPin) : '';
                 shapeRow.querySelectorAll('[data-area-shape-convert]').forEach((b) => {
                     const t = normalizeAreaShape(b.getAttribute('data-area-shape-convert'));
-                    const same = t === cur;
+                    const same = isArea && t === cur;
                     b.classList.toggle('active', same);
                     b.disabled = same;
                     b.setAttribute('aria-pressed', same ? 'true' : 'false');
-                    b.title = same
-                        ? `현재 모양: ${areaShapeLabelKo(t)}`
-                        : `${areaShapeConvertPhrase(t)} 변경`;
+                    if (same) b.title = `현재 모양: ${areaShapeLabelKo(t)}`;
+                    else if (!isArea && isPolyPointAreaShape(t)) b.title = `${areaShapeConvertPhrase(t)} 변경 — 도면에 점을 찍어 그립니다`;
+                    else b.title = `${areaShapeConvertPhrase(t)} 변경`;
                 });
             }
         }
@@ -26175,9 +26265,15 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
             redrawBtn.hidden = !isArea || bulk;
             if (isArea && !bulk) {
                 const cur = getAreaShape(existingPin);
-                redrawBtn.title = cur === 'polygon'
-                    ? '외곽 꼭짓점을 새로 찍습니다. 번호·사진·내용은 유지됩니다.'
-                    : '꼭짓점을 새로 찍어 다각형으로 바꿉니다. 번호·사진·내용은 유지됩니다.';
+                const isLine = cur === 'polyline';
+                redrawBtn.innerHTML = isLine
+                    ? '<i class="fa-solid fa-pen"></i> 선 다시그리기'
+                    : '<i class="fa-solid fa-pen"></i> 다각형 다시그리기';
+                redrawBtn.title = isLine
+                    ? '선의 점을 새로 찍습니다. 번호·사진·내용은 유지됩니다.'
+                    : (cur === 'polygon'
+                        ? '외곽 꼭짓점을 새로 찍습니다. 번호·사진·내용은 유지됩니다.'
+                        : '꼭짓점을 새로 찍어 다각형으로 바꿉니다. 번호·사진·내용은 유지됩니다.');
             }
         }
     }
@@ -35727,8 +35823,10 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
                 const insideForMove = isPointInAreaMark(d, imgX, imgY, -2);
 
                 // 다각형: 꼭짓점 핸들 (AABB 모서리 리사이즈 대신)
-                if (getAreaShape(d) === 'polygon') {
+                const polyKindHit = getAreaShape(d);
+                if (isPolyPointAreaShape(polyKindHit)) {
                     const pts = getAreaPolyPoints(d);
+                    const segCountHit = polyKindHit === 'polyline' ? pts.length - 1 : pts.length;
                     const vertR = 14;
                     for (let vi = 0; vi < pts.length; vi++) {
                         if (Math.hypot(imgX - pts[vi].x, imgY - pts[vi].y) <= vertR) {
@@ -35737,7 +35835,7 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
                     }
                     if (!insideForMove) {
                         const edgeTol = 10;
-                        for (let ei = 0; ei < pts.length; ei++) {
+                        for (let ei = 0; ei < segCountHit; ei++) {
                             const a = pts[ei];
                             const b = pts[(ei + 1) % pts.length];
                             if (distPointToSegment(imgX, imgY, a.x, a.y, b.x, b.y) <= edgeTol) {
@@ -36146,6 +36244,8 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
         // 터치: 즉시 선택만 하고, 약 0.3초 길게 누른 뒤에야 드래그 시작.
         const hitInfoRaw = findHitPinPart(imgX, imgY);
         let hitInfo = hitInfoRaw;
+        // 점(다각형·선)을 이어 찍는 중에는 이미 있는 마킹 위를 눌러도 선택하지 않고 점으로 찍는다
+        if (hitInfo && pendingAreaPoly && pendingAreaPoly.length && getActivePolyCreateShape()) hitInfo = null;
         // 공유 NO.박스 클릭: 처음 41-1(대표), 다시 누르면 41-2 … 순환.
         // 영역 안쪽(AREA_MOVE)은 그 영역의 마킹 자체를 고른다(통합 마킹은 영역이 원래 자리에 따로 있다)
         // 2026-10-16 새 규칙: 선택된 통합 마킹을 다시 누르면 수정창. 순환은 수정창이 이미 열려 있을 때만
@@ -36258,17 +36358,18 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
             }
         }
 
-        if (state.mode === 'MARK') {
+        if (state.mode === 'MARK' && !getMarkPolyShape()) {
             isMarkingDrag = true;
             markingHasMoved = false;
             const rawMarkCoords = clientToImgCoords(clientX, clientY);
             const markCoords = snapImgCoordsForMarking(rawMarkCoords.x, rawMarkCoords.y);
             syncLiveMarkBoxAboveTarget(markCoords.x, markCoords.y);
             drawCanvas();
-        } else if (state.mode === 'AREA') {
-            const createShape = state.areaCreateShape || 'rect';
+        } else if (state.mode === 'AREA' || state.mode === 'MARK') {
+            // 마킹 모드에서 다각형·선을 고른 경우도 영역 마킹과 같은 길(번호 박스와 함께 생성)
+            const createShape = state.mode === 'MARK' ? (getMarkPolyShape() || 'rect') : (state.areaCreateShape || 'rect');
             const areaCoords = clientToImgCoords(clientX, clientY);
-            if (createShape === 'polygon' && isTouch) {
+            if (isPolyPointAreaShape(createShape) && isTouch) {
                 // 터치: 점은 손을 뗄 때(handleDragEnd → commitTouchPolygonTap). 끌면 도면 이동.
                 touchPolyTap = { clientX, clientY, x: areaCoords.x, y: areaCoords.y, downAt: Date.now(), maxMove: 0, multi: false };
                 startMouseX = clientX;
@@ -36278,16 +36379,14 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
                 isDragging = true;
                 return;
             }
-            if (createShape === 'polygon') {
+            if (isPolyPointAreaShape(createShape)) {
                 if (!pendingAreaPoly) pendingAreaPoly = [];
-                if (pendingAreaPoly.length >= 3
+                if (createShape === 'polygon' && pendingAreaPoly.length >= 3
                     && Math.hypot(areaCoords.x - pendingAreaPoly[0].x, areaCoords.y - pendingAreaPoly[0].y) < 16) {
                     finishPendingAreaPolygon();
                     return;
                 }
-                pendingAreaPoly.push({ x: areaCoords.x, y: areaCoords.y });
-                syncAreaPolygonRedrawBanner();
-                drawCanvas();
+                addPendingPolyPoint(areaCoords.x, areaCoords.y);
                 return;
             }
             isAreaDrag = true;
@@ -36539,7 +36638,7 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
                 const pinIdLive = document.getElementById('defectPinId')?.value;
                 if (angElLive && pinIdLive && String(pinIdLive) === String(activeDragPin.id)) {
                     let shown = Math.round(getAreaAngleDeg(activeDragPin));
-                    if (getAreaShape(activeDragPin) === 'polygon' && areaRotatePivot) {
+                    if (isPolyPointAreaShape(getAreaShape(activeDragPin)) && areaRotatePivot) {
                         const mouse = Math.atan2(currentImgY - areaRotatePivot.cy, currentImgX - areaRotatePivot.cx);
                         let d = ((mouse - areaRotateStartMouse) * 180) / Math.PI;
                         while (d > 180) d -= 360;
@@ -37395,7 +37494,7 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
                 window.BSA_gridEdit.onDblClick(e.clientX, e.clientY);
                 return;
             }
-            if (pendingAreaPoly && pendingAreaPoly.length >= 3) {
+            if (canFinishPendingPoly()) {
                 finishPendingAreaPolygon();
                 return;
             }
@@ -40720,8 +40819,8 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
         }
         // 영역 모드를 벗어날 때: 그리던 다각형이 있으면 그 모양으로 저장 (점 취소 없음)
         // 다시그리기는 점 3개 미만이면 원본 기하를 유지한 채 취소
-        if (mode !== 'AREA') {
-            if (pendingAreaPoly && pendingAreaPoly.length >= 3) {
+        if (mode !== 'AREA' && !(mode === 'MARK' && getMarkPolyShape() && !isAreaPolygonRedrawActive())) {
+            if (canFinishPendingPoly()) {
                 finishPendingAreaPolygon({ skipModeSwitch: true });
             } else if (isAreaPolygonRedrawActive()) {
                 cancelAreaPolygonRedraw({ silent: false, keepMode: true });
@@ -40775,6 +40874,54 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
         return !!(pendingAreaPolyRedraw && pendingAreaPolyRedraw.defectId);
     }
 
+    // --- 다각형·선(열린 꺾인선) 찍기 공통 (2026-10-26) ---
+    // 마킹 모드의 모양(state.markCreateShape): 'pin' | 'polygon' | 'polyline'. 핀이면 null.
+    function getMarkPolyShape() {
+        const s = state.markCreateShape;
+        if (s !== 'polygon' && s !== 'polyline') return null;
+        // 통합(그룹) 마킹 추가 중에는 기존 핀 흐름 유지
+        try {
+            if (typeof getActiveMarkingGroup === 'function' && getActiveMarkingGroup() && getActiveMarkingGroup().groupId) return null;
+        } catch (_e) { /* ignore */ }
+        return s;
+    }
+
+    /** 지금 도면을 눌렀을 때 점을 찍는 모양: 'polygon' | 'polyline' | null(점 찍기 모드 아님) */
+    function getActivePolyCreateShape() {
+        if (state.mode === 'AREA') {
+            const s = state.areaCreateShape;
+            return isPolyPointAreaShape(s) ? s : null;
+        }
+        if (state.mode === 'MARK') return getMarkPolyShape();
+        return null;
+    }
+
+    /** 찍고 있는(또는 다시 그리는) 모양 */
+    function getPendingPolyShape() {
+        if (pendingAreaPolyRedraw && pendingAreaPolyRedraw.shape) {
+            return pendingAreaPolyRedraw.shape === 'polyline' ? 'polyline' : 'polygon';
+        }
+        const s = getActivePolyCreateShape();
+        if (s) return s;
+        return state.areaCreateShape === 'polyline' ? 'polyline' : 'polygon';
+    }
+
+    function canFinishPendingPoly() {
+        return !!(pendingAreaPoly && pendingAreaPoly.length >= areaPolyMinPoints(getPendingPolyShape()));
+    }
+
+    /** 점 추가. 같은 자리(화면 3px 안)를 더블클릭·연타로 또 찍어도 점이 겹치지 않는다 */
+    function addPendingPolyPoint(x, y) {
+        if (!pendingAreaPoly) pendingAreaPoly = [];
+        const last = pendingAreaPoly[pendingAreaPoly.length - 1];
+        const scale = Math.max(0.0001, Number(state.view && state.view.scale) || 1);
+        if (last && Math.hypot(x - last.x, y - last.y) * scale < 3) return false;
+        pendingAreaPoly.push({ x, y });
+        syncAreaPolygonRedrawBanner();
+        drawCanvas();
+        return true;
+    }
+
     function syncAreaPolygonRedrawBanner() {
         const banner = document.getElementById('areaPolygonRedrawBanner');
         const finishBtn = document.getElementById('btnFinishAreaPolygonRedraw');
@@ -40782,32 +40929,41 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
         const active = isAreaPolygonRedrawActive();
         if (banner) banner.hidden = !active;
         const n = (pendingAreaPoly && pendingAreaPoly.length) || 0;
-        if (finishBtn) finishBtn.disabled = !active || n < 3;
+        const shape = getPendingPolyShape();
+        const min = areaPolyMinPoints(shape);
+        if (finishBtn) finishBtn.disabled = !active || n < min;
         if (textEl && active) {
-            textEl.textContent = n >= 3
-                ? `점 ${n}개 · 완료: 첫 점 근처 클릭 · 더블클릭 · Enter`
-                : '다각형 꼭짓점을 찍으세요. 완료: 첫 점 근처 클릭 · 더블클릭 · Enter';
+            if (shape === 'polyline') {
+                textEl.textContent = n >= min
+                    ? `점 ${n}개 · 완료: 더블클릭 · Enter · 되돌리기: Backspace · 취소: Esc`
+                    : '선의 점을 차례로 클릭하세요. 완료: 더블클릭 · Enter · 취소: Esc';
+            } else {
+                textEl.textContent = n >= 3
+                    ? `점 ${n}개 · 완료: 첫 점 근처 클릭 · 더블클릭 · Enter`
+                    : '다각형 꼭짓점을 찍으세요. 완료: 첫 점 근처 클릭 · 더블클릭 · Enter';
+            }
         }
         syncAreaPolyTouchBar();
     }
 
-    // --- 폰·태블릿 영역 마킹: 모양 고르기(다각형·타원·사각형) + 터치 다각형 (2026-10-03) ---
+    // --- 폰·태블릿 영역 마킹: 모양 고르기(다각형·선·타원·사각형) + 터치 다각형/선 (2026-10-03) ---
     // 그리기·저장은 PC와 같은 길(handleDragStart/End → openAddDefectModal, areaShape·areaPoints 그대로).
     function readAreaShapePref() {
         try {
             const v = localStorage.getItem('bsa_area_create_shape_v1');
-            return (v === 'rect' || v === 'ellipse' || v === 'polygon') ? v : null;
+            return (v === 'rect' || v === 'ellipse' || v === 'polygon' || v === 'polyline') ? v : null;
         } catch (_e) { return null; }
     }
     function writeAreaShapePref(shape) {
         try { localStorage.setItem('bsa_area_create_shape_v1', shape); } catch (_e) { /* 기기 저장 실패해도 그리기는 됨 */ }
     }
 
-    /** 터치 다각형 탭 — 첫 점 근처(화면 28px)를 다시 탭하면 닫는다 */
+    /** 터치 다각형·선 탭 — 다각형은 첫 점 근처(화면 28px)를 다시 탭하면 닫는다. 선은 닫지 않고 점만 잇는다 */
     function commitTouchPolygonTap(tap) {
-        if (!tap || state.mode !== 'AREA' || (state.areaCreateShape || 'rect') !== 'polygon') return;
+        const shape = getActivePolyCreateShape();
+        if (!tap || !shape) return;
         if (!pendingAreaPoly) pendingAreaPoly = [];
-        if (pendingAreaPoly.length >= 3) {
+        if (shape === 'polygon' && pendingAreaPoly.length >= 3) {
             const first = pendingAreaPoly[0];
             const scale = Math.max(0.0001, Number(state.view && state.view.scale) || 1);
             const screenDist = Math.hypot(tap.x - first.x, tap.y - first.y) * scale;
@@ -40816,9 +40972,7 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
                 return;
             }
         }
-        pendingAreaPoly.push({ x: tap.x, y: tap.y });
-        syncAreaPolygonRedrawBanner();
-        drawCanvas();
+        addPendingPolyPoint(tap.x, tap.y);
     }
 
     function undoTouchPolygonPoint() {
@@ -40828,24 +40982,42 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
         drawCanvas();
     }
 
-    /** 터치로 새 다각형을 그리는 중이면 아래 막대(점 수 · 점 취소 · 완료 · 취소) */
+    /** 선 그리기 취소(Esc·취소 버튼): 찍은 점을 버린다 */
+    function cancelPendingPolyline() {
+        if (isAreaPolygonRedrawActive()) {
+            cancelAreaPolygonRedraw();
+            return;
+        }
+        pendingAreaPoly = null;
+        syncAreaPolygonRedrawBanner();
+        drawCanvas();
+        window.showToast?.('선 그리기를 취소했습니다.', 'info', 2200);
+    }
+
+    /** 다각형·선을 새로 그리는 중이면 아래 막대(점 수 · 되돌리기 · 완료 · 취소). PC·터치 공통 */
     function syncAreaPolyTouchBar() {
         const bar = document.getElementById('areaPolyTouchBar');
         if (!bar) return;
-        const on = isTouchToolbarUi() && state.mode === 'AREA'
-            && (state.areaCreateShape || 'rect') === 'polygon'
-            && !isAreaPolygonRedrawActive();
+        const shape = getActivePolyCreateShape();
+        const on = !!shape && !isAreaPolygonRedrawActive();
         bar.hidden = !on;
         if (!on) return;
         const n = (pendingAreaPoly && pendingAreaPoly.length) || 0;
+        const min = areaPolyMinPoints(shape);
         const text = document.getElementById('areaPolyTouchText');
         if (text) {
-            text.textContent = n === 0
-                ? '다각형: 꼭짓점을 탭하세요'
-                : (n < 3 ? `점 ${n}개 · ${3 - n}개 더` : `점 ${n}개 · 완료 또는 첫 점 탭`);
+            if (shape === 'polyline') {
+                text.textContent = n === 0
+                    ? '선: 위치를 차례로 클릭·탭하세요'
+                    : (n < min ? `점 ${n}개 · ${min - n}개 더` : `점 ${n}개 · 완료(더블클릭·Enter) · 되돌리기(Backspace)`);
+            } else {
+                text.textContent = n === 0
+                    ? '다각형: 꼭짓점을 클릭·탭하세요'
+                    : (n < 3 ? `점 ${n}개 · ${3 - n}개 더` : `점 ${n}개 · 완료 또는 첫 점 탭`);
+            }
         }
         const done = document.getElementById('btnAreaPolyTouchDone');
-        if (done) done.disabled = n < 3;
+        if (done) done.disabled = n < min;
         const undo = document.getElementById('btnAreaPolyTouchUndo');
         if (undo) undo.disabled = n === 0;
     }
@@ -40853,6 +41025,7 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
     // 함수로 둔다 — 초기화 중 syncAreaToolPanelUi가 먼저 불려도 TDZ 오류가 안 나게
     function areaShapeChoices() { return [
         { shape: 'polygon', label: '다각형', hint: '꼭짓점을 차례로 탭 → 완료', icon: 'fa-draw-polygon' },
+        { shape: 'polyline', label: '선', hint: '점을 차례로 탭해 이어 긋기 → 완료 (닫지 않음)', icon: 'fa-chart-line' },
         { shape: 'ellipse', label: '타원', hint: '도면을 끌어서 그리기', icon: 'fa-circle' },
         { shape: 'rect', label: '사각형', hint: '도면을 끌어서 그리기 (PC 「박스」)', icon: 'fa-vector-square' }
     ]; }
@@ -40861,7 +41034,7 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
         const btn = document.getElementById('mobileBtnModeArea');
         if (!btn) return;
         const shape = state.areaCreateShape || 'rect';
-        const c = areaShapeChoices().find((x) => x.shape === shape) || areaShapeChoices()[2];
+        const c = areaShapeChoices().find((x) => x.shape === shape) || areaShapeChoices().find((x) => x.shape === 'rect');
         const icon = btn.querySelector('i');
         if (icon) icon.className = (c.shape === 'ellipse' ? 'fa-regular ' : 'fa-solid ') + c.icon;
         btn.setAttribute('title', `영역 마킹 — ${c.label} (눌러서 모양 바꾸기)`);
@@ -40918,54 +41091,75 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
     }
 
     function pickAreaShapeFromTouch(shape) {
-        const next = (shape === 'ellipse' || shape === 'polygon') ? shape : 'rect';
+        const next = (shape === 'ellipse' || shape === 'polygon' || shape === 'polyline') ? shape : 'rect';
         writeAreaShapePref(next);
         setAreaCreateShape(next);
         syncMobileAreaRailIcon();
         const c = areaShapeChoices().find((x) => x.shape === next);
         window.showToast?.(next === 'polygon'
             ? '다각형: 꼭짓점을 차례로 탭하고 「완료」 또는 첫 점을 다시 탭하세요. 끌면 도면 이동'
-            : `${c ? c.label : '영역'}: 도면을 손가락으로 끌어서 그리세요`, 'info', 3200);
+            : (next === 'polyline'
+                ? '선: 점을 차례로 탭해 이어 긋고 「완료」를 누르세요(「되돌리기」로 마지막 점 취소). 끌면 도면 이동'
+                : `${c ? c.label : '영역'}: 도면을 손가락으로 끌어서 그리세요`), 'info', 3200);
     }
     window.openAreaShapePicker = openAreaShapePicker;
 
     function discardIncompleteAreaPolygon(options) {
         const silent = !!(options && options.silent);
         const wasRedraw = isAreaPolygonRedrawActive();
+        const shape = getPendingPolyShape();
         const hadPts = !!(pendingAreaPoly && pendingAreaPoly.length);
         pendingAreaPoly = null;
         pendingAreaPolyRedraw = null;
         syncAreaPolygonRedrawBanner();
         if (silent || !hadPts) return;
-        if (wasRedraw) window.showToast?.('다각형 다시그리기를 취소했습니다.', 'info');
-        else window.showToast?.('다각형은 점 3개 이상일 때 저장됩니다.', 'info', 2500);
+        const label = shape === 'polyline' ? '선' : '다각형';
+        if (wasRedraw) window.showToast?.(`${label} 다시그리기를 취소했습니다.`, 'info');
+        else window.showToast?.(`${label}은 점 ${areaPolyMinPoints(shape)}개 이상일 때 저장됩니다.`, 'info', 2500);
     }
 
     function cancelAreaPolygonRedraw(options) {
         const silent = !!(options && options.silent);
         const keepMode = !!(options && options.keepMode);
         const had = isAreaPolygonRedrawActive();
+        const rd = pendingAreaPolyRedraw;
         pendingAreaPoly = null;
         pendingAreaPolyRedraw = null;
         syncAreaPolygonRedrawBanner();
         if (!keepMode && state.mode !== 'PAN') setDrawMode('PAN');
         else drawCanvas();
-        if (had && !silent) window.showToast?.('다각형 다시그리기를 취소했습니다.', 'info');
+        if (had && !silent) {
+            const label = rd && rd.shape === 'polyline' ? '선' : '다각형';
+            window.showToast?.(rd && rd.fromPin
+                ? `${label}으로 바꾸기를 취소했습니다. (핀 마킹 그대로)`
+                : `${label} 다시그리기를 취소했습니다.`, 'info');
+        }
     }
 
-    function applyAreaPolygonRedraw(defectId, pts) {
-        if (!defectId || !Array.isArray(pts) || pts.length < 3) return false;
+    /** 점 목록을 마킹에 적용. 핀(일반) 마킹이면 영역으로 바꾸면서 같은 번호·사진·내용을 그대로 쓴다 */
+    function applyAreaPolygonRedraw(defectId, pts, shape, fromPin) {
+        const want = shape === 'polyline' ? 'polyline' : 'polygon';
+        if (!defectId || !Array.isArray(pts) || pts.length < areaPolyMinPoints(want)) return false;
         const defect = getCurrentFloorDefects().find((d) => d && d.id === defectId);
-        if (!defect || !(defect.shapeType === 'area' && defect.areaX1 !== undefined)) {
+        const isAreaDef = !!(defect && defect.shapeType === 'area' && defect.areaX1 !== undefined);
+        if (!defect || (!isAreaDef && !fromPin)) {
             window.showToast?.('마킹을 찾을 수 없습니다.', 'warning');
             return false;
         }
         if (typeof pushDefectHistory === 'function') pushDefectHistory();
-        defect.areaShape = 'polygon';
+        const prevShape = isAreaDef ? getAreaShape(defect) : null;
+        if (!isAreaDef) convertDefectPinToArea(defect); // 번호·사진·내용·층 키는 그대로, 영역 필드만 붙음
+        defect.areaShape = want;
         defect.areaPoints = pts.map((p) => ({ x: Number(p.x), y: Number(p.y) }));
         defect.areaAngle = 0;
         if (typeof syncAreaBboxFromPoints === 'function') syncAreaBboxFromPoints(defect);
         if (typeof ensureAreaPinPlacement === 'function') ensureAreaPinPlacement(defect);
+        if (!isAreaDef || prevShape !== want) {
+            // 모양이 바뀌면 화살표 끝을 번호 박스에서 가까운 새 모양 위 지점에 다시 붙인다
+            const attach = getAreaCenterBorderAttachDefect(defect.x, defect.y, defect);
+            defect.targetX = attach.x;
+            defect.targetY = attach.y;
+        }
         if (typeof touchDefectPositionUpdatedAt === 'function') touchDefectPositionUpdatedAt(defect);
         defect.updatedAt = Date.now();
         if (typeof discardStalePendingRemoteAfterLocalPinEdit === 'function') {
@@ -40977,27 +41171,37 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
         if (typeof updateMapSelectionBar === 'function') {
             updateMapSelectionBar({ scrollToSelection: false });
         }
-        window.showToast?.('다각형을 다시 그렸습니다.', 'success');
+        const label = want === 'polyline' ? '선' : '다각형';
+        window.showToast?.(!isAreaDef
+            ? `${label}으로 변경했습니다. (번호·사진·내용 그대로)`
+            : `${label}을 다시 그렸습니다.`, 'success');
         return true;
     }
 
-    function startAreaPolygonRedraw(defect) {
-        if (!defect || !(defect.shapeType === 'area' && defect.areaX1 !== undefined) || !defect.id) {
-            window.showToast?.('저장된 영역 마킹만 다시 그릴 수 있습니다.', 'warning');
+    /**
+     * 점 찍어 그리기 시작(기존 영역 다시그리기 · 핀 마킹을 다각형/선으로 바꾸기 공용)
+     * shape: 'polygon' | 'polyline', opts.fromPin: 일반(핀) 마킹에서 시작 — 완료해야 영역으로 바뀌고, 취소하면 핀 그대로
+     */
+    function startAreaPolygonRedraw(defect, shape, opts) {
+        const want = shape === 'polyline' ? 'polyline' : 'polygon';
+        const isAreaDef = !!(defect && defect.shapeType === 'area' && defect.areaX1 !== undefined);
+        const fromPin = !!(opts && opts.fromPin) && !isAreaDef;
+        if (!defect || !defect.id || (!isAreaDef && !fromPin)) {
+            window.showToast?.('저장된 마킹만 다시 그릴 수 있습니다.', 'warning');
             return false;
         }
-        if (pendingAreaPoly && pendingAreaPoly.length >= 3 && !isAreaPolygonRedrawActive()) {
+        if (canFinishPendingPoly() && !isAreaPolygonRedrawActive()) {
             finishPendingAreaPolygon({ skipModeSwitch: true });
         } else if (pendingAreaPoly && pendingAreaPoly.length && !isAreaPolygonRedrawActive()) {
             pendingAreaPoly = null;
         }
-        pendingAreaPolyRedraw = { defectId: defect.id };
+        pendingAreaPolyRedraw = { defectId: defect.id, shape: want, fromPin };
         pendingAreaPoly = [];
         state.areaInkTool = null;
         pendingInkPoly = null;
         isAreaInkDrag = false;
         areaInkStroke = null;
-        state.areaCreateShape = 'polygon';
+        state.areaCreateShape = want;
         selectedDefectIds = new Set([defect.id]);
         if (typeof updateMapSelectionBar === 'function') {
             updateMapSelectionBar({ scrollToSelection: false });
@@ -41006,11 +41210,17 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
         else syncAreaToolPanelUi();
         syncAreaPolygonRedrawBanner();
         drawCanvas();
-        const alreadyPoly = getAreaShape(defect) === 'polygon';
+        const alreadySame = isAreaDef && getAreaShape(defect) === want;
         window.showToast?.(
-            alreadyPoly
-                ? '다각형 꼭짓점을 다시 찍으세요. 완료: 첫 점 근처 클릭 · 더블클릭 · Enter'
-                : '꼭짓점을 찍어 다각형으로 바꿉니다. 완료: 첫 점 근처 클릭 · 더블클릭 · Enter',
+            want === 'polyline'
+                ? (fromPin
+                    ? '선의 점을 차례로 찍으세요. 완료: 더블클릭 · Enter / 취소: Esc (취소하면 핀 그대로)'
+                    : '선의 점을 다시 찍으세요. 완료: 더블클릭 · Enter / 취소: Esc')
+                : (fromPin
+                    ? '꼭짓점을 찍어 다각형으로 바꿉니다. 완료: 첫 점 근처 클릭 · 더블클릭 · Enter (취소하면 핀 그대로)'
+                    : (alreadySame
+                        ? '다각형 꼭짓점을 다시 찍으세요. 완료: 첫 점 근처 클릭 · 더블클릭 · Enter'
+                        : '꼭짓점을 찍어 다각형으로 바꿉니다. 완료: 첫 점 근처 클릭 · 더블클릭 · Enter')),
             'info',
             4200
         );
@@ -41019,10 +41229,12 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
 
     function finishPendingAreaPolygon(options) {
         const skipModeSwitch = !!(options && options.skipModeSwitch);
-        if (!pendingAreaPoly || pendingAreaPoly.length < 3) {
+        const shape = getPendingPolyShape();
+        const min = areaPolyMinPoints(shape);
+        if (!pendingAreaPoly || pendingAreaPoly.length < min) {
             if (isAreaPolygonRedrawActive()) {
                 // 완료 제스처가 점 부족일 때는 세션 유지 (취소 버튼/Esc 미만만 종료)
-                window.showToast?.('다각형은 점 3개 이상일 때 저장됩니다. 점을 더 찍어 주세요.', 'info', 2800);
+                window.showToast?.(`${shape === 'polyline' ? '선' : '다각형'}은 점 ${min}개 이상일 때 저장됩니다. 점을 더 찍어 주세요.`, 'info', 2800);
                 drawCanvas();
                 return false;
             }
@@ -41036,7 +41248,7 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
         pendingAreaPolyRedraw = null;
         syncAreaPolygonRedrawBanner();
         if (redraw && redraw.defectId) {
-            applyAreaPolygonRedraw(redraw.defectId, pts);
+            applyAreaPolygonRedraw(redraw.defectId, pts, redraw.shape || shape, !!redraw.fromPin);
             if (!skipModeSwitch) setDrawMode('PAN');
             drawCanvas();
             return true;
@@ -41048,7 +41260,7 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
         });
         openAddDefectModal(x1, y1, undefined, undefined, null, {
             x1, y1, x2, y2,
-            areaShape: 'polygon',
+            areaShape: shape,
             areaAngle: 0,
             areaPoints: pts
         }, { revealMarkingAboveDrawer: true, fromCanvas: true });
@@ -41073,15 +41285,16 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
         });
         const mobInk = document.getElementById('mobileBtnAreaInk');
         if (mobInk) mobInk.classList.toggle('active', !!state.areaInkTool);
+        syncMarkShapeBar();
         syncAreaPolyTouchBar();
         syncMobileAreaRailIcon();
     }
 
     function setAreaCreateShape(shape) {
-        const next = normalizeAreaShape(shape === 'ellipse' || shape === 'polygon' ? shape : 'rect');
-        // 다른 도형 버튼으로 바꾸면 그리던 다각형은 그 모양으로 저장
-        if (pendingAreaPoly && pendingAreaPoly.length && next !== 'polygon') {
-            if (pendingAreaPoly.length >= 3) finishPendingAreaPolygon({ skipModeSwitch: true });
+        const next = normalizeAreaShape(shape === 'ellipse' || shape === 'polygon' || shape === 'polyline' ? shape : 'rect');
+        // 다른 도형 버튼으로 바꾸면 그리던 다각형·선은 그 모양으로 저장(점 모자라면 버림)
+        if (pendingAreaPoly && pendingAreaPoly.length && next !== getPendingPolyShape()) {
+            if (canFinishPendingPoly()) finishPendingAreaPolygon({ skipModeSwitch: true });
             else discardIncompleteAreaPolygon();
         }
         state.areaCreateShape = next;
@@ -41091,6 +41304,42 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
         else syncAreaToolPanelUi();
     }
 
+    /** 마킹(핀) 모드의 모양 고르기: 핀 / 다각형 / 선 — 다각형·선이면 영역 마킹과 같은 길로 번호와 함께 생성 */
+    function setMarkCreateShape(shape) {
+        const next = (shape === 'polygon' || shape === 'polyline') ? shape : 'pin';
+        if (pendingAreaPoly && pendingAreaPoly.length && !isAreaPolygonRedrawActive()) {
+            const keep = (next === 'polygon' || next === 'polyline') && next === getPendingPolyShape();
+            if (!keep) {
+                if (canFinishPendingPoly()) finishPendingAreaPolygon({ skipModeSwitch: true });
+                else discardIncompleteAreaPolygon({ silent: true });
+            }
+        }
+        state.markCreateShape = next;
+        state.areaInkTool = null;
+        pendingInkPoly = null;
+        if (state.mode !== 'MARK') setDrawMode('MARK');
+        else syncAreaToolPanelUi();
+        if (state.mode === 'MARK') {
+            window.showToast?.(next === 'polygon'
+                ? '다각형 마킹: 꼭짓점을 차례로 찍고 완료하면 번호·핀과 함께 만들어집니다'
+                : (next === 'polyline'
+                    ? '선 마킹: 점을 차례로 찍어 이어 긋고 완료(더블클릭·Enter·완료 버튼)하면 번호와 함께 만들어집니다'
+                    : '핀 마킹: 위치를 눌러 찍으세요'), 'info', 2800);
+        }
+    }
+
+    function syncMarkShapeBar() {
+        const bar = document.getElementById('markShapeBar');
+        if (!bar) return;
+        bar.hidden = state.mode !== 'MARK';
+        const cur = (state.markCreateShape === 'polygon' || state.markCreateShape === 'polyline') ? state.markCreateShape : 'pin';
+        bar.querySelectorAll('[data-mark-create]').forEach((b) => {
+            const on = b.getAttribute('data-mark-create') === cur;
+            b.classList.toggle('active', on);
+            b.setAttribute('aria-pressed', on ? 'true' : 'false');
+        });
+    }
+
     function setAreaInkTool(tool) {
         const next = (tool === 'line' || tool === 'rect' || tool === 'polygon' || tool === 'ellipse' || tool === 'path') ? tool : null;
         if (next && !getSelectedAreaForInk()) {
@@ -41098,7 +41347,7 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
             return;
         }
         if (next && pendingAreaPoly && pendingAreaPoly.length) {
-            if (pendingAreaPoly.length >= 3) finishPendingAreaPolygon({ skipModeSwitch: true });
+            if (canFinishPendingPoly()) finishPendingAreaPolygon({ skipModeSwitch: true });
             else discardIncompleteAreaPolygon();
         }
         state.areaInkTool = next;
@@ -41124,6 +41373,9 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
         document.querySelectorAll('[data-area-create]').forEach((btn) => {
             btn.addEventListener('click', () => setAreaCreateShape(btn.getAttribute('data-area-create')));
         });
+        document.querySelectorAll('[data-mark-create]').forEach((btn) => {
+            btn.addEventListener('click', () => setMarkCreateShape(btn.getAttribute('data-mark-create')));
+        });
         document.querySelectorAll('[data-area-ink]').forEach((btn) => {
             btn.addEventListener('click', () => {
                 const t = btn.getAttribute('data-area-ink');
@@ -41136,8 +41388,9 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
         if (finishRedrawBtn) {
             finishRedrawBtn.addEventListener('click', () => {
                 if (!isAreaPolygonRedrawActive()) return;
-                if (!pendingAreaPoly || pendingAreaPoly.length < 3) {
-                    window.showToast?.('다각형은 점 3개 이상일 때 저장됩니다. 점을 더 찍어 주세요.', 'info', 2800);
+                if (!canFinishPendingPoly()) {
+                    const need = areaPolyMinPoints(getPendingPolyShape());
+                    window.showToast?.(`${getPendingPolyShape() === 'polyline' ? '선' : '다각형'}은 점 ${need}개 이상일 때 저장됩니다. 점을 더 찍어 주세요.`, 'info', 2800);
                     return;
                 }
                 finishPendingAreaPolygon();
@@ -43246,6 +43499,12 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
             else if ((e.key === 'Delete' || e.key === 'Backspace') && !typing && selectedDefectIds.size) { e.preventDefault(); notifyEvalMarkingLock(); }
             return;
         }
+        // 다각형·선을 찍는 중 Backspace: 마지막 점만 되돌린다(마킹 삭제 아님)
+        if (e.key === 'Backspace' && !typing && pendingAreaPoly && pendingAreaPoly.length) {
+            e.preventDefault();
+            undoTouchPolygonPoint();
+            return;
+        }
         // Delete/Backspace: 핀 클릭→수정창이 열린 상태에서도 삭제 (기존엔 모달 열리면 무시됨)
         if ((e.key === 'Delete' || e.key === 'Backspace') && !typing) {
             e.preventDefault();
@@ -43271,6 +43530,11 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
         }
         if (k === 'escape') {
             e.preventDefault();
+            // 선 그리는 중: Esc = 그리기 취소(점 버림). 다각형은 아래처럼 지금까지 찍은 모양으로 저장
+            if (pendingAreaPoly && pendingAreaPoly.length && getPendingPolyShape() === 'polyline') {
+                cancelPendingPolyline();
+                return;
+            }
             // 다각형 그리는 중: 마지막 점 취소가 아니라, 지금까지 찍은 모양으로 저장
             if (pendingAreaPoly && pendingAreaPoly.length) {
                 if (pendingAreaPoly.length >= 3) {
@@ -43314,7 +43578,7 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
         if (typing) return;
         if (e.ctrlKey || e.metaKey || e.altKey) return;
         if (k === 'enter') {
-            if (pendingAreaPoly && pendingAreaPoly.length >= 3) {
+            if (canFinishPendingPoly()) {
                 e.preventDefault();
                 finishPendingAreaPolygon();
                 return;
@@ -43490,8 +43754,9 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
     }
     const btnAreaPolyTouchDone = document.getElementById('btnAreaPolyTouchDone');
     if (btnAreaPolyTouchDone) btnAreaPolyTouchDone.addEventListener('click', () => {
-        if (!pendingAreaPoly || pendingAreaPoly.length < 3) {
-            window.showToast?.('다각형은 점 3개 이상일 때 저장됩니다. 점을 더 찍어 주세요.', 'info', 2500);
+        if (!canFinishPendingPoly()) {
+            const need = areaPolyMinPoints(getPendingPolyShape());
+            window.showToast?.(`${getPendingPolyShape() === 'polyline' ? '선' : '다각형'}은 점 ${need}개 이상일 때 저장됩니다. 점을 더 찍어 주세요.`, 'info', 2500);
             return;
         }
         finishPendingAreaPolygon();
@@ -44657,7 +44922,7 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
     }
 
     document.querySelectorAll('[data-area-shape-convert]').forEach((btn) => {
-        btn.addEventListener('click', () => {
+        btn.addEventListener('click', async () => {
             if (btn.disabled) return;
             const targetShape = btn.getAttribute('data-area-shape-convert');
             const pinId = document.getElementById('defectPinId')?.value;
@@ -44672,12 +44937,36 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
                 window.showToast?.('마킹을 찾을 수 없습니다.', 'warning');
                 return;
             }
-            if (!(defect.shapeType === 'area' && defect.areaX1 !== undefined)) {
-                window.showToast?.('영역 마킹만 모양을 바꿀 수 있습니다.', 'warning');
+            const wasArea = defect.shapeType === 'area' && defect.areaX1 !== undefined;
+            const wantShape = normalizeAreaShape(targetShape);
+            if (!wasArea && isPolyPointAreaShape(wantShape)) {
+                // 일반(핀) 마킹 → 다각형·선: 입력창 내용을 저장하고 도면에 점을 찍어 그린다(번호·사진·내용 유지)
+                if (window._defectAutoApplyTimer) {
+                    window.clearTimeout(window._defectAutoApplyTimer);
+                    window._defectAutoApplyTimer = null;
+                }
+                if (typeof commitDefectFromForm === 'function' && isDefectModalOpen()) {
+                    try {
+                        await commitDefectFromForm({
+                            pushHistory: !window._defectEditSessionHistoryPushed,
+                            uploadPhotos: !!window._defectPhotosDirty
+                        });
+                        window._defectEditSessionHistoryPushed = true;
+                    } catch (_e) { /* 그리기는 계속 */ }
+                }
+                closeDefectModal({ discardPending: true });
+                startAreaPolygonRedraw(defect, wantShape, { fromPin: true });
                 return;
             }
             if (typeof pushDefectHistory === 'function') pushDefectHistory();
-            const ok = convertDefectAreaShape(defect, targetShape);
+            let ok;
+            if (!wasArea) {
+                // 핀 → 네모/타원 영역
+                ok = convertDefectPinToArea(defect);
+                if (ok && wantShape !== 'rect') ok = convertDefectAreaShape(defect, wantShape);
+            } else {
+                ok = convertDefectAreaShape(defect, targetShape);
+            }
             if (!ok) {
                 window.showToast?.('모양 변경에 실패했습니다.', 'error');
                 return;
@@ -44702,6 +44991,11 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
             }
             const angEl = document.getElementById('defectAreaAngle');
             if (angEl) angEl.value = String(Math.round(Number(defect.areaAngle) || 0));
+            if (!wasArea) {
+                if (typeof syncDefectAreaStyleUi === 'function') syncDefectAreaStyleUi(defect.areaFillStyle || 'solid', defect.areaBorderStyle || 'solid');
+                const titleElConv = document.getElementById('defectModalTitle');
+                if (titleElConv) titleElConv.textContent = '⬚ 결함 영역 수정';
+            }
             syncDefectShapeConvertButton(defect);
             if (typeof drawCanvas === 'function') drawCanvas();
             if (typeof renderSurveyTable === 'function') renderSurveyTable();
@@ -44739,7 +45033,7 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
                 } catch (_e) { /* 기하 다시그리기는 계속 */ }
             }
             closeDefectModal({ discardPending: true });
-            startAreaPolygonRedraw(defect);
+            startAreaPolygonRedraw(defect, getAreaShape(defect) === 'polyline' ? 'polyline' : 'polygon');
         });
     }
 
@@ -47067,7 +47361,7 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
                 y2: Math.max(src.areaY1, src.areaY2),
                 shape: getAreaShape(src),
                 angle: getAreaAngleDeg(src),
-                points: (getAreaShape(src) === 'polygon')
+                points: isPolyPointAreaShape(getAreaShape(src))
                     ? getAreaPolyPoints(src)
                     : getAreaWorldCorners(src),
                 drawings: Array.isArray(src.areaDrawings)

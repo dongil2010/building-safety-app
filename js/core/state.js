@@ -18,7 +18,8 @@ if (!window.state) {
         tipShape: 'circle',  // 'arrow' | 'circle' — 2026-10-19 기본 동그라미(직접 고르면 tipShapeChosen)
         areaFillStyle: 'solid',   // 'solid' | 'hatch' | 'none' — 영역 마킹 채우기
         areaBorderStyle: 'solid', // 'solid' | 'dashed' — 영역 마킹 테두리
-        areaCreateShape: 'rect',  // 'rect' | 'ellipse' | 'polygon'
+        areaCreateShape: 'rect',  // 'rect' | 'ellipse' | 'polygon' | 'polyline'
+    markCreateShape: 'pin',   // 마킹 모드 모양: 'pin' | 'polygon' | 'polyline' (다각형·선은 영역 마킹과 같은 길)
         areaInkTool: null,        // null | 'line' | 'rect' | 'polygon' | 'ellipse' | 'path'
         styleColors: null, // 카테고리별 사용자 지정 색상 (미지정 시 DEFAULT_STYLE_COLORS 사용)
         styleSizes: null,  // 카테고리별 사용자 지정 핀/화살표 크기 (미지정 시 DEFAULT_STYLE_SIZES 사용)
