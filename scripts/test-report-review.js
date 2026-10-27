@@ -101,6 +101,10 @@ assert.strictEqual(out[0].level, 'error');
 let rs = rules([row({ location: '', component: '', widths: [], crackLength: '' })]);
 assert.deepStrictEqual(rs, ['empty-pin'], '빈 마킹은 한 줄');
 assert.ok(rules([row({ location: '' })]).includes('empty-location'), '위치만 빔은 그대로');
+// 행·열을 설정해 둔 층은 위치 빈칸을 안 잡는다(부재 빈칸은 그대로), 행·열 없는 층은 그대로 잡는다
+assert.ok(!rules([row({ location: '', gridSet: true })]).includes('empty-location'), '행·열 층은 위치 빈칸 통과');
+assert.ok(rules([row({ location: '', gridSet: false })]).includes('empty-location'), '행·열 없는 층은 위치 빈칸 잡음');
+assert.deepStrictEqual(rules([row({ location: '', component: '', gridSet: true })]).filter((x) => /^empty-(pin|location|component)$/.test(x)), ['empty-component'], '행·열 층 빈 마킹은 부재만');
 // 결함인데 원인 「-」
 assert.ok(rules([row({ defectType: '물탱크 설치', cause: '-', widths: [], crackLength: '' })]).includes('dash-cause'));
 assert.ok(!rules([row({ defectType: '상태양호', cause: '-', widths: [], crackLength: '', good: true })]).includes('dash-cause'), '양호는 「-」 정상');

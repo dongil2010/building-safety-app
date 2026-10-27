@@ -57736,9 +57736,13 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
         if (!bldg) return [];
         const bId = bldg.id || state.currentBuildingId;
         const rows = [];
+        // 2026-10-28 행·열을 설정해 둔 층은 위치를 행·열로 보므로 위치 빈칸을 안 잡는다(행·열 없는 층은 그대로 잡음)
+        const G = gridLib();
         reportReviewFloorCodes(bldg).forEach((fc) => {
             const defects = state.defects[`${bId}_${fc}`] || (state.currentFloor === fc ? getCurrentFloorDefects() : []);
             if (!defects.length) return;
+            const rawGrid = G && state.floorGridLines && state.floorGridLines[getFloorMapStyleKey(bId, fc)];
+            const gridSet = !!rawGrid && gridHasLines(rawGrid.__gridNorm ? rawGrid : G.normalizeGrid(rawGrid));
             const floorLabel = stripFloorCodeSuffix(window.getFloorLabelFromCode(fc));
             getSurveyRowsForReport(defects).forEach((d) => {
                 const ms = Array.isArray(d.crackMeasures) && d.crackMeasures.length ? d.crackMeasures : null;
@@ -57750,6 +57754,7 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
                     good: isGoodDefectType(d.defectType),
                     // 위치는 한글에 나가는 글자로(3종은 비면 층·부재를 채운다)
                     location: getSurveyCellText('location', d, { floorCode: fc }),
+                    gridSet,
                     component: d.component || '',
                     defectType: d.defectType || '',
                     cause: d.cause || '',

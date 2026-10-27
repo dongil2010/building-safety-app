@@ -77,7 +77,8 @@
             var crack = isCrackType(dt);
 
             // ---- 빈칸 ----
-            var noLoc = !trim(r.location), noComp = !trim(r.component);
+            // 행·열을 설정해 둔 층(gridSet)은 위치를 안 적어도 된다(2026-10-28 사용자)
+            var noLoc = !trim(r.location) && !r.gridSet, noComp = !trim(r.component);
             // 위치·부재가 다 비면 마킹만 하고 내용을 안 채운 것 — 칸마다 따로 띄우지 않고 한 줄로(2026-10-20 성광교회 외부 19곳)
             var emptyPin = noLoc && noComp;
             if (!dt) push(out, r, 'error', 'empty-type', '결함 종류가 비어 있습니다.');
