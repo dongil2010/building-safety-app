@@ -119,8 +119,14 @@ function installerIsRunning() {
     }
 }
 
+/** 전체화면으로 시작. 창 모드로 쓰려면 실행 인자 --windowed 또는 환경변수 BSA_WINDOWED=1 (2026-10-27) */
+function shouldStartFullScreen() {
+    return !(process.argv.indexOf('--windowed') >= 0 || process.env.BSA_WINDOWED === '1');
+}
+
 function createWindow(startUrl) {
     const win = new BrowserWindow({
+        fullscreen: shouldStartFullScreen(),
         width: 1440,
         height: 900,
         minWidth: 1024,
@@ -133,6 +139,23 @@ function createWindow(startUrl) {
             contextIsolation: true,
             sandbox: true,
             preload: path.join(__dirname, 'preload.js')
+        }
+    });
+
+    // 전체화면 키: F11 = 전체화면 켜기/끄기, Shift+Esc = 전체화면 끄기(그냥 Esc는 앱의 창 닫기에 쓰이므로 가로채지 않음),
+    // Ctrl+Q = 종료(아래 「프로그램을 종료할까요?」 확인창을 거침). Alt+F4도 그대로 확인창을 거쳐 종료된다.
+    win.webContents.on('before-input-event', function (event, input) {
+        if (input.type !== 'keyDown') return;
+        const key = input.key;
+        if (key === 'F11') {
+            event.preventDefault();
+            win.setFullScreen(!win.isFullScreen());
+        } else if (key === 'Escape' && input.shift && !input.control && !input.alt && win.isFullScreen()) {
+            event.preventDefault();
+            win.setFullScreen(false);
+        } else if ((key === 'q' || key === 'Q') && input.control && !input.alt && !input.shift) {
+            event.preventDefault();
+            win.close();
         }
     });
 
