@@ -42368,6 +42368,10 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
                         <button type="button" data-act="clearDetail" class="danger" title="이 층 마킹 전부의 상세 위치를 비움(다시 적을 수 있게). 행·열 위치는 그대로. 3종은 위치칸에 층만 남김. 되돌리기 한 번으로 취소">상세위치 전부 지우기</button>
                         <button type="button" data-act="clearAll" class="danger">이 층 선 모두 지우기</button>
                     </div>
+                    <div class="grid-panel-row grid-panel-allfloors">
+                        <button type="button" data-act="clearDetailAll" class="danger-all" title="이 건물 모든 층 마킹의 상세 위치를 비움(외부 입면 도면 포함). 행·열 위치·마킹 위치·번호·사진은 그대로. 1·2종은 공란, 3종은 층 이름만 남김. 확인창에서 층·결함 수를 보여 주고, 이 층 화면에서 되돌리기 한 번으로 전체 취소">전체층 상세위치 지우기</button>
+                        <span class="grid-panel-muted grid-panel-allnote">이 건물 모든 층 · 행·열 위치는 그대로</span>
+                    </div>
                 </div>
             </div>`;
     }
@@ -42495,6 +42499,9 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
         }
         if (act === 'clearDetail') {
             clearDetailLocationForCurrentFloor();
+        }
+        if (act === 'clearDetailAll') {
+            clearDetailLocationForAllFloors();
         }
     }
 
@@ -43276,6 +43283,98 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
             }
         });
         afterGridBulkChange(`마킹 ${done}개의 상세 위치를 지웠습니다.`);
+    }
+
+    // ---- 2026-10-27 「전체층 상세위치 지우기」(행·열 툴바) ----
+    // 이 건물(이 회차·이 동)의 모든 층 상세 위치를 composeDefectLocation('', 층)으로 되돌린다(1·2종 '' · 3종 층 이름).
+    // 층 목록 = 건물 층 목록 ∪ 기기 메모리(state.defects)에 있는 이 건물 키(외부 입면 층 포함). 서버를 따로 읽지 않는다(읽기 폭주 방지) —
+    // 결함 데이터는 이미 기기에 있고, 바뀐 층은 markFloorKeyDirty → 보통 저장·동기화 길로 층마다 올라간다(오프라인이면 나중에).
+    /** 읽기만 하는 계획: 층마다 { fc, key, label, total, skippedUnplaced, targets } */
+    function planClearDetailForAllFloors(bldgId) {
+        const id = bldgId || state.currentBuildingId;
+        const out = { bldgId: id, floors: [], floorCount: 0, targetFloors: 0, targetCount: 0, skippedUnplaced: 0 };
+        if (!id) return out;
+        const bldg = (state.buildings || []).find((b) => b && b.id === id) || state.currentBuilding;
+        const prefix = `${id}_`;
+        const order = [];
+        const labelOf = new Map();
+        const add = (code, label) => {
+            const fc = String(code || '');
+            if (!fc || fc === 'ROUND_SKETCH_MEMO') return;
+            if (!labelOf.has(fc)) { labelOf.set(fc, String(label || fc)); order.push(fc); }
+            else if (label && labelOf.get(fc) === fc) labelOf.set(fc, String(label));
+        };
+        const avail = (typeof window.getBuildingAvailableFloors === 'function' && bldg)
+            ? (window.getBuildingAvailableFloors(bldg) || [])
+            : ((bldg && bldg.floorsList) || []);
+        avail.forEach((f) => { if (f && f.floorCode) add(f.floorCode, f.floorLabel); });
+        Object.keys(state.defects || {}).forEach((k) => {
+            if (k.indexOf(prefix) !== 0) return;
+            const owner = (typeof findBuildingForFloorKey === 'function') ? findBuildingForFloorKey(k) : null;
+            if (owner && owner.id !== id) return; // 다른 건물 키(이름이 겹치는 경우)
+            add(k.slice(prefix.length), null);
+        });
+        order.forEach((fc) => {
+            const key = `${id}_${fc}`;
+            const list = Array.isArray(state.defects && state.defects[key]) ? state.defects[key] : [];
+            const placed = filterMapPlacedDefects(list); // 「이 층」 버튼과 같은 대상(도면에 놓인 마킹)
+            const emptyLoc = composeDefectLocation('', fc);
+            const targets = placed.filter((d) => d && (String(d.location || '') !== emptyLoc || d.gridLocAuto));
+            out.floors.push({ fc, key, label: labelOf.get(fc) || fc, total: list.length, skippedUnplaced: list.length - placed.length, targets });
+            out.skippedUnplaced += list.length - placed.length;
+            if (targets.length) { out.targetFloors += 1; out.targetCount += targets.length; }
+        });
+        out.floorCount = out.floors.length;
+        return out;
+    }
+
+    async function clearDetailLocationForAllFloors() {
+        const bId = state.currentBuildingId;
+        if (!bId) { window.showToast?.('먼저 건축물을 선택하세요.', 'info', 2000); return; }
+        const plan0 = planClearDetailForAllFloors(bId);
+        if (!plan0.targetCount) {
+            window.showToast?.(`지울 상세 위치가 없습니다. (${plan0.floorCount}개 층 확인${plan0.skippedUnplaced ? ` · 도면에 안 놓인 결함 ${plan0.skippedUnplaced}개는 대상 아님` : ''})`, 'info', 3500);
+            return;
+        }
+        const bldg = state.currentBuilding || (state.buildings || []).find((b) => b && b.id === bId);
+        const dong = (bldg && typeof getBuildingDongLabel === 'function') ? String(getBuildingDongLabel(bldg) || '').trim() : '';
+        const bName = `${(bldg && bldg.name) || '이 건물'}${dong ? ` ${dong}` : ''}`;
+        const shown = plan0.floors.filter((f) => f.targets.length);
+        const lines = shown.slice(0, 8).map((f) => `  · ${f.label}: ${f.targets.length}개`).join('\n') + (shown.length > 8 ? `\n  · 외 ${shown.length - 8}개 층` : '');
+        const floorNote = isGrade3Building(bldg) ? '3종 시설물: 위치칸에는 층 이름만 남깁니다.' : '1·2종: 상세 위치를 공란으로 만듭니다.';
+        if (!await window.appConfirm(`「${bName}」 건물의 모든 층(${plan0.floorCount}개 층 확인) 상세 위치를 지웁니다.\n`
+            + `바뀌는 결함 ${plan0.targetCount}개 · ${plan0.targetFloors}개 층\n${lines}\n\n`
+            + `${floorNote}\n행·열 위치·마킹 위치·번호·사진은 그대로입니다.\n`
+            + `${plan0.skippedUnplaced ? `도면에 아직 놓지 않은 결함 ${plan0.skippedUnplaced}개는 건드리지 않습니다.\n` : ''}`
+            + `(이 층 화면에서 되돌리기 한 번으로 전체 층을 취소할 수 있습니다)`)) return;
+        // 2026-10-23 확인창을 기다리는 사이 동기화가 층 결함을 새 객체로 바꿔 끼울 수 있다 — 확인 뒤 목록을 다시 읽는다
+        if (state.currentBuildingId !== bId) {
+            window.showToast?.('건물이 바뀌어 지우지 않았습니다. 다시 시도하세요.', 'warning', 3000);
+            return;
+        }
+        const plan = planClearDetailForAllFloors(bId);
+        if (!plan.targetCount) {
+            window.showToast?.('지울 상세 위치가 이미 없습니다.', 'info', 2500);
+            return;
+        }
+        const curKey = `${bId}_${state.currentFloor}`;
+        // 되돌리기 한 번에 모든 층이 돌아가도록 바뀌는 다른 층도 같은 기록에 담는다
+        if (typeof pushDefectHistory === 'function') pushDefectHistory(plan.floors.filter((f) => f.targets.length && f.key !== curKey).map((f) => f.key));
+        let done = 0;
+        let floorsDone = 0;
+        const dirtyKeys = [];
+        plan.floors.forEach((f) => {
+            let n = 0;
+            f.targets.forEach((d) => {
+                if (clearDefectDetailLocation(d, f.fc)) {
+                    touchDefectUpdatedAt(d); // 내용 시각(contentUpdatedAt·칸 시각) → 동기화에서 이김
+                    n += 1;
+                }
+            });
+            if (n) { done += n; floorsDone += 1; dirtyKeys.push(f.key); }
+        });
+        if (typeof markFloorKeyDirty === 'function') dirtyKeys.forEach((k) => markFloorKeyDirty(k));
+        afterGridBulkChange(`전체 ${floorsDone}개 층 마킹 ${done}개의 상세 위치를 지웠습니다.${plan.skippedUnplaced ? ` (도면에 안 놓인 ${plan.skippedUnplaced}개 제외)` : ''}`);
     }
 
     // ---- 구역(한 도면에 여러 층, 2026-09-28) ----
@@ -59281,7 +59380,8 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
                     no,
                     category,
                     component: componentRaw,
-                    location: locationRaw || `${floorCode} ${componentRaw}`,
+                    // 2026-10-27 위치칸이 공란이면 상세위치도 공란(1·2종 '' · 3종 층 이름만 = 상세위치 공란). 예전엔 '2F 기둥'처럼 부재명이 상세위치로 들어갔다
+                    location: locationRaw || composeDefectLocation('', floorCode),
                     defectType,
                     cause: isGood ? '-' : (causeRaw || '건조수축'),
                     size: isGood ? '' : sizeRaw,
@@ -59292,7 +59392,7 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
                     isOpeningCrack: isGood
                         ? false
                         : detectImportOpeningCrack({
-                            location: locationRaw || `${floorCode} ${componentRaw}`,
+                            location: locationRaw || composeDefectLocation('', floorCode),
                             defectType,
                             component: componentRaw,
                             size: sizeRaw,
