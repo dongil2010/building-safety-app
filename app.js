@@ -27452,7 +27452,16 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
     }
     let _memoPushTimer = null;
     let _memoPushBusy = false;
+    let _memoPushBusySince = 0;
     let _memoRetryN = 0;
+    /** 2026-10-27 서버 응답이 안 오는 통신(반쯤 끊긴 와이파이)에서 get/set이 끝나지 않으면 「올리는 중」 표시가 영영 안 풀려 손글씨·주석 메모가 다시는 안 올라갔다 → 한 건물당 시간 제한 */
+    function memoWithTimeout(promise, ms, label) {
+        let t = null;
+        return Promise.race([
+            promise,
+            new Promise((_, rej) => { t = setTimeout(() => rej(new Error('memo-author: 시간 초과 ' + label)), ms); })
+        ]).finally(() => { if (t) clearTimeout(t); });
+    }
     function scheduleMemoAuthorPush(ms) {
         if (_memoPushTimer) clearTimeout(_memoPushTimer);
         _memoPushTimer = setTimeout(() => { _memoPushTimer = null; flushMemoAuthorPush(); }, Math.max(0, ms || 0));
@@ -27511,18 +27520,22 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
     }
     window.bsaPullMemosForBuilding = pullMemosForBuilding;
     async function flushMemoAuthorPush() {
-        if (_memoPushBusy) { scheduleMemoAuthorPush(2000); return; }
+        if (_memoPushBusy) {
+            if (_memoPushBusySince && Date.now() - _memoPushBusySince > 120000) { _memoPushBusy = false; } // 2분 넘게 안 끝난 올리기는 멈춘 것으로 보고 새로 시작
+            else { scheduleMemoAuthorPush(2000); return; }
+        }
         if (!db || !window.state.companyId || (typeof navigator !== 'undefined' && navigator.onLine === false)) { renderMemoPendingBadge(); return; }
         const set = memoPendingRead();
         if (!set.size) { _memoRetryN = 0; return; }
         _memoPushBusy = true;
+        _memoPushBusySince = Date.now();
         let failed = 0;
         try {
             for (const id of Array.from(set)) {
                 const bldg = (window.state.buildings || []).find((b) => b && b.id === id);
                 if (!bldg) { set.delete(id); continue; }
                 try {
-                    await pushMemosForBuilding(bldg);
+                    await memoWithTimeout(pushMemosForBuilding(bldg), 45000, bldg.id);
                     set.delete(id);
                 } catch (e) {
                     failed++;
@@ -27571,10 +27584,25 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
         if (set.size) scheduleMemoAuthorPush(800);
         return set.size;
     }
+    /**
+     * 2026-10-27 기기에 남은 내 주석·손글씨 메모를 모두 「올릴 것」으로 잡고 바로 올린다.
+     * 오프라인에서 쓴 메모가 「올릴 것」 표시 없이 남은 경우(표시 저장 실패·계정 확인 전 작성 등)도 건지고,
+     * 일반 올리기(온라인 복귀·앱 시작·멈춘 올리기 풀기·「지금 다시 올리기」)와 같은 시점에 함께 돈다.
+     */
+    function queueAndFlushMyMemos(reason) {
+        try {
+            _memoRetryN = 0;
+            const n = queueAllMyLocalMemos();
+            if (!n) { renderMemoPendingBadge(); return 0; }
+            scheduleMemoAuthorPush(500);
+            return n;
+        } catch (e) { console.warn('[메모] 올릴 것 잡기 실패:', reason, e && e.message); return 0; }
+    }
+    window.bsaQueueAndFlushMemos = queueAndFlushMyMemos;
     let _memoLastPulledBldg = '';
     (function bindMemoAuthorSync() {
         if (typeof window.addEventListener !== 'function' || typeof document.addEventListener !== 'function' || typeof setInterval !== 'function') return;
-        window.addEventListener('online', () => { _memoRetryN = 0; scheduleMemoAuthorPush(1000); renderMemoPendingBadge(); });
+        window.addEventListener('online', () => { _memoRetryN = 0; queueAndFlushMyMemos('online'); scheduleMemoAuthorPush(1000); renderMemoPendingBadge(); });
         window.addEventListener('offline', renderMemoPendingBadge);
         document.addEventListener('visibilitychange', () => {
             if (document.visibilityState === 'hidden') { if (memoPendingRead().size) flushMemoAuthorPush(); }
@@ -59648,6 +59676,8 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
         const v = offlineVerifyGate(); if (v) v.unpark();
         _photoSyncUploadFailCount.clear();
         clearSyncErrorRetryTimer();
+        // 손글씨·주석 메모(계정별 문서)도 같이 다시 올린다
+        try { if (typeof window.bsaQueueAndFlushMemos === 'function') window.bsaQueueAndFlushMemos('manual'); } catch (_e) { /* ignore */ }
         if (typeof scheduleSyncProgressRender === 'function') scheduleSyncProgressRender();
     };
     function onSyncParked(r) {
