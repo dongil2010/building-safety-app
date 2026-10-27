@@ -77,7 +77,7 @@ function testAppImportUsesRule() {
     const start = app.indexOf(marker);
     assert.ok(start > 0, '가져오기 병합 블록을 찾지 못했다');
     const block = app.slice(start, start + 2600);
-    assert.ok(block.indexOf("pick(getCell(row, 'component'), existing.component, '기타')") >= 0,
+    assert.ok(block.indexOf("pick(componentCellClean, existing.component, '기타')") >= 0,
         '부재는 pick()으로 기존 내용을 지켜야 한다');
     assert.ok(block.indexOf("pick(causeRaw, existing.cause, '건조수축')") >= 0,
         '원인은 pick()으로 기존 내용을 지켜야 한다');

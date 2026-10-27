@@ -347,24 +347,55 @@
         var hit = listForBuilding(st, bldgId).find(function (x) { return x.rec.id === id; });
         return hit ? hit.rec : null;
     }
-    /** 창에 보이는 메모 — 내 것 + 이전 메모(작성자 모름). 남의 계정 메모는 출력에만 */
+    /** 내 것 + 이전 메모(작성자 모름) — 2026-10-27부터 창·출력 번호는 numberedForBuilding(모든 계정)을 쓴다 */
     function visibleForMe(st, bldgId, me) {
         return listForBuilding(st, bldgId).filter(function (x) { return isMine(x.rec, me) || !ownerKey(x.rec); });
     }
+    /**
+     * 2026-10-27 「손글씨 메모도 서버에 올리면 다른 기기·계정에서 동기화돼 보이고, 먼저 동기화한 것이 1번, 나중 것은 2번…」
+     * 이 회차(건물)의 모든 계정 메모를 서버 번호표(st.sketchSeq[건물id] = { 스케치id: 번호 }) 순으로 1, 2, 3…
+     * 번호표에 없는 메모(아직 서버에 번호가 안 잡힌 것: 오프라인 작성 등)는 번호 있는 메모 뒤에 만든 순서로 이어 붙는다.
+     * 화면 번호만 정한다 — 스케치 id·내용은 그대로. 지운 메모는 목록에서 빠지므로 번호는 늘 빈틈없이 1부터.
+     * 반환: [{ rec, floorKey, no, seq(0=번호 미확정), provisional }]
+     */
+    function seqMapFor(st, bldgId) {
+        var store = (st && st.sketchSeq) || api.seqStore || {};
+        var m = store[bldgId] || {};
+        return (m && typeof m === 'object') ? m : {};
+    }
+    function numberedForBuilding(st, bldgId) {
+        var seq = seqMapFor(st, bldgId);
+        var list = listForBuilding(st, bldgId).map(function (x) {
+            var n = Math.floor(Number(seq[x.rec.id]));
+            x.seq = (isFinite(n) && n > 0) ? n : 0;
+            return x;
+        });
+        list.sort(function (a, b) {
+            if (!!a.seq !== !!b.seq) return a.seq ? -1 : 1;
+            if (a.seq !== b.seq) return a.seq - b.seq;
+            return ((a.rec.createdAt || 0) - (b.rec.createdAt || 0)) || (a.rec.id < b.rec.id ? -1 : a.rec.id > b.rec.id ? 1 : 0);
+        });
+        return list.map(function (x, i) {
+            return { rec: x.rec, floorKey: x.floorKey, no: i + 1, seq: x.seq, provisional: !x.seq };
+        });
+    }
+    function numberLabel(no) { return '메모-' + no; }
     function buildingTabs(st, bldgId, me) {
-        var mineN = 0, oldN = 0;
-        return visibleForMe(st, bldgId, me).map(function (x) {
+        return numberedForBuilding(st, bldgId).map(function (x) {
             var r = x.rec;
-            var mine = isMine(r, me);
             return {
-                id: r.id, title: r.title || '', by: authorKey(r), mine: mine,
-                label: mine ? '메모-' + (++mineN) : LEGACY_LABEL + '-' + (++oldN),
+                id: r.id, title: r.title || '', by: authorKey(r), mine: isMine(r, me),
+                label: numberLabel(x.no), no: x.no, provisional: x.provisional,
                 updatedAt: r.updatedAt || r.createdAt || 0, strokes: (r.strokes || []).length
             };
         });
     }
-    function nextMineLabel(st, bldgId, me) {
-        return '메모-' + (listForBuilding(st, bldgId).filter(function (x) { return isMine(x.rec, me); }).length + 1);
+    function nextMineLabel(st, bldgId, _me) {
+        return numberLabel(listForBuilding(st, bldgId).length + 1);
+    }
+    /** 지울 수 있는 메모인가 — 내 것, 또는 작성자 모르는 이전 메모. 다른 계정이 쓴 메모는 지울 수 없다(보기·이어 쓰기만) */
+    function canDelete(rec, me) {
+        return !!rec && (isMine(rec, me) || !ownerKey(rec));
     }
     /** 처음 보일 장 — 내가 마지막으로 고친 메모. 내 것이 없으면 null(새 종이) */
     function pickInitialForBuilding(st, bldgId, me) {
@@ -374,30 +405,17 @@
             return ((b.updatedAt || b.createdAt || 0) - (a.updatedAt || a.createdAt || 0)) || ((b.createdAt || 0) - (a.createdAt || 0));
         })[0];
     }
-    /** 한글 출력 — 모든 계정 메모를 작성자별로(처음 쓴 순서), 「홍길동 메모-1」, 작성자 모름은 「이전 메모-1」(맨 뒤) */
+    /**
+     * 한글 출력 — 모든 계정 메모를 창과 같은 순서(서버 번호 순)로 「메모-1, 메모-2 …」(작성자 이름 없음).
+     * 빈 종이·지우개만 있는 장은 빼고, 출력 번호는 빠진 번호 없이 1부터 이어 붙인다(창 번호 no는 따로 담음).
+     */
     function outputGroups(st, bldgId) {
-        var groups = [];
-        var byKey = {};
-        var all = listForBuilding(st, bldgId);
-        // 옛 메모(이름만)는 같은 이름 계정 메모와 한 묶음
-        var nameToUid = {};
-        all.forEach(function (x) { var n = authorKey(x.rec); if (x.rec.byUid && n && !nameToUid[n]) nameToUid[n] = x.rec.byUid; });
-        all.forEach(function (x) {
+        return numberedForBuilding(st, bldgId).filter(function (x) {
             var r = x.rec;
-            if (!Array.isArray(r.strokes) || !r.strokes.some(function (s) { return s && !s.e; })) return;
-            var k = ownerKey(r);
-            if (k.indexOf('n:') === 0 && nameToUid[authorKey(r)]) k = 'u:' + nameToUid[authorKey(r)];
-            if (!byKey[k]) { byKey[k] = { key: k, name: k ? (authorKey(r) || '작성자') : LEGACY_LABEL, items: [] }; groups.push(byKey[k]); }
-            byKey[k].items.push(r);
+            return Array.isArray(r.strokes) && r.strokes.some(function (s) { return s && !s.e; });
+        }).map(function (x, i) {
+            return { rec: x.rec, author: authorKey(x.rec), label: numberLabel(i + 1), no: x.no };
         });
-        groups.sort(function (a, b) { return (a.key ? 0 : 1) - (b.key ? 0 : 1); });
-        var out = [];
-        groups.forEach(function (g) {
-            g.items.forEach(function (r, i) {
-                out.push({ rec: r, author: g.name, label: (g.key ? g.name + ' 메모-' : LEGACY_LABEL + '-') + (i + 1) });
-            });
-        });
-        return out;
     }
     /** 새 메모를 저장할 층키 — 건물 층 목록의 첫 층(늘 동기화되는 층), 없으면 지금 층 */
     function homeFloorKey(bldgId, floorCodes, currentFloor) {
@@ -407,6 +425,7 @@
     }
 
     var api = {
+        seqStore: null,   // 앱이 기기에 보관한 번호표 { 건물id: { 스케치id: 번호 } }를 꽂는다(st.sketchSeq가 없을 때 기본)
         MAX_POINTS: MAX_POINTS,
         COLORS: COLORS,
         ensureMaps: ensureMaps,
@@ -437,6 +456,9 @@
         nextMineLabel: nextMineLabel,
         pickInitialForBuilding: pickInitialForBuilding,
         outputGroups: outputGroups,
+        numberedForBuilding: numberedForBuilding,
+        seqMapFor: seqMapFor,
+        canDelete: canDelete,
         homeFloorKey: homeFloorKey,
         ROUND_CODE: ROUND_CODE,
         roundKeyFor: roundKeyFor,

@@ -395,7 +395,7 @@ if (fs.existsSync(appPath)) {
         appendGrade3ProgressLeakToContent: (x) => x
     };
     vm.createContext(sandbox);
-    vm.runInContext(`${takeFn('getDefectGridRoomForReport')}\n${takeFn('getReportSurveyRowValues')}\nthis.rowVals = getReportSurveyRowValues;`, sandbox);
+    vm.runInContext(`${takeFn('getDefectGridRoomForReport')}\n${takeFn('surveyContentComponentText')}\n${takeFn('getReportSurveyRowValues')}\nthis.rowVals = getReportSurveyRowValues;`, sandbox);
     const locCell = (d) => sandbox.rowVals(d, { floorCode: '1F' }, false)[1];
     assert.strictEqual(locCell({ location: '1F 거실', gridLoc: 'X1~X2/Y2' }), 'X1~X2/Y2\n거실', '한글/PDF: 행·열 다음 줄 실 이름');
     assert.strictEqual(locCell({ location: '1F', gridLoc: 'X1~X2/Y2' }), 'X1~X2/Y2', '실 이름 없으면 행·열 한 줄');
