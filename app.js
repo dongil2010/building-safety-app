@@ -27499,17 +27499,70 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
         applyMemoAuthorPayload(bldg, merged);
         return api.countItems(merged);
     }
+    // ---- 2026-10-27 손글씨 메모 번호표(서버 floors/MEMOS_SEQ · 건물마다 한 문서) ----
+    // 「먼저 동기화한 것이 1번, 나중 것은 2번…」: 번호는 서버에서 트랜잭션으로 한 번만 주고(같은 번호 두 장 없음), 이 기기에도 보관해
+    // 오프라인에서도 같은 번호로 보인다. 번호표에 없는 메모는 번호 있는 것 뒤에 「번호 미확정」으로 이어 붙는다. 스케치 id·내용은 건드리지 않는다.
+    const SKETCH_SEQ_LS = 'bsa_sketch_seq_v1';
+    let _sketchSeqStore = null;
+    function sketchSeqStore() {
+        if (!_sketchSeqStore) {
+            try { _sketchSeqStore = JSON.parse(localStorage.getItem(SKETCH_SEQ_LS) || '{}') || {}; } catch (_e) { _sketchSeqStore = {}; }
+        }
+        // 손글씨 모듈(번호 순 정렬)이 이 번호표를 기본으로 쓴다 → 창·한글 출력이 같은 번호
+        try { if (window.BSA && window.BSA.sketchMemo) window.BSA.sketchMemo.seqStore = _sketchSeqStore; } catch (_e) { /* ignore */ }
+        return _sketchSeqStore;
+    }
+    function sketchSeqAttach(st) {
+        if (st && typeof st === 'object' && st.sketchSeq !== sketchSeqStore()) st.sketchSeq = sketchSeqStore();
+        return st;
+    }
+    function sketchSeqApply(bldgId, map) {
+        const api = memoAuthorApi();
+        if (!api || !bldgId || !map) return;
+        const store = sketchSeqStore();
+        store[bldgId] = api.mergeSeq(store[bldgId], map);
+        try { localStorage.setItem(SKETCH_SEQ_LS, JSON.stringify(store)); } catch (_e) { /* ignore */ }
+    }
+    /** 번호 없는 손글씨 메모에 번호를 준다(트랜잭션). 올릴 것이 남은 건물·오프라인이면 건너뜀. 반환: 새로 번호가 붙은 장 수 */
+    async function ensureSketchSeq(bldg) {
+        const api = memoAuthorApi();
+        if (!api || !bldg || !bldg.id || !db || !window.state.companyId || typeof db.runTransaction !== 'function') return 0;
+        if (typeof navigator !== 'undefined' && navigator.onLine === false) return 0;
+        if (memoPendingRead().has(bldg.id)) return 0;   // 내 메모가 아직 서버에 안 올라갔으면 올린 뒤에 번호를 준다(먼저 올라간 순서)
+        const items = api.sketchItems(window.state, bldg.id, MEMO_ROUND_CODE);
+        const known = sketchSeqStore()[bldg.id] || {};
+        if (!items.length || items.every((it) => known[it.id])) return 0;
+        const ref = getFloorScopeRef(bldg, api.SEQ_DOC);
+        if (!ref) return 0;
+        let result = null;
+        await db.runTransaction(async (tx) => {
+            const snap = await tx.get(ref);
+            const serverMap = snap.exists ? api.parseSeqDoc(snap.data()) : {};
+            const r = api.assignSeq(serverMap, items);
+            if (r.added) {
+                tx.set(ref, {
+                    kind: api.SEQ_KIND, buildingId: bldg.id, itemCount: Object.keys(r.map).length,
+                    payload: api.seqDocPayload(r.map), updatedAt: firebase.firestore.FieldValue.serverTimestamp()
+                });
+            }
+            result = r;
+        });
+        if (result) sketchSeqApply(bldg.id, result.map);
+        return result ? result.added : 0;
+    }
+    window.bsaEnsureSketchSeq = ensureSketchSeq;
     /** 이 건물 모든 계정의 메모 문서를 읽어 합친다(읽기만) */
     async function pullMemosForBuilding(bldg) {
         const api = memoAuthorApi();
         if (!api || !db || !window.state.companyId || !bldg) return 0;
         const ref = getFloorScopeRef(bldg, api.docIdFor('x'));
         if (!ref) return 0;
-        const qs = await ref.parent.where('kind', '==', api.KIND).get({ source: 'server' });
+        const qs = await ref.parent.where('kind', 'in', [api.KIND, api.SEQ_KIND]).get({ source: 'server' });
         let n = 0;
         qs.forEach((d) => {
             const x = d.data() || {};
             if (x.buildingId && x.buildingId !== bldg.id) return;
+            if (x.kind === api.SEQ_KIND) { try { sketchSeqApply(bldg.id, api.parseSeqDoc(x)); n++; } catch (_e) { /* 번호표 오류는 건너뜀 */ } return; }
             try { applyMemoAuthorPayload(bldg, JSON.parse(x.payload || 'null')); n++; } catch (_e) { /* 한 계정 문서 오류는 건너뜀 */ }
         });
         if (n) {
@@ -27537,6 +27590,8 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
                 try {
                     await memoWithTimeout(pushMemosForBuilding(bldg), 45000, bldg.id);
                     set.delete(id);
+                    // 올라간 뒤 번호표(올라온 순서 번호) — 실패해도 메모 저장은 끝난 것: 번호는 다음 올리기·메모 창 열기 때 다시 시도
+                    try { memoPendingWrite(set); await memoWithTimeout(ensureSketchSeq(bldg), 45000, 'seq ' + bldg.id); } catch (e) { console.warn('[메모] 번호표 갱신 실패 — 나중에 다시:', id, e && e.message); }
                 } catch (e) {
                     failed++;
                     console.warn('[메모] 서버 저장 실패 — 다시 시도합니다:', id, e && e.message);
@@ -27610,6 +27665,7 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
         });
         window.addEventListener('pagehide', () => { if (memoPendingRead().size) flushMemoAuthorPush(); });
         let started = false;
+        sketchSeqStore();   // 저장된 번호표를 손글씨 모듈에 연결(오프라인에서도 같은 번호)
         setInterval(() => {
             if (!db || !window.state.companyId || navigator.onLine === false) return;
             const me = sketchMe();
@@ -27651,7 +27707,24 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
         return n;
     }
     /** 서버의 회차 메모 묶음을 받아 합친다(층 묶음과 같은 길·같은 병합). 오프라인·로그인 전이면 조용히 건너뜀 */
+    /**
+     * 2026-10-27 회차 묶음 + 모든 계정 메모 문서 + 번호표를 받는다(메모 창 열 때·한글 출력 전·백업 전 같은 곳에서 불림).
+     * 다른 기기·계정이 올린 메모가 보이고, 번호 없는 메모에는 번호를 준다. 15초 안 재호출은 계정별 문서를 다시 읽지 않는다(읽기 폭주 방지).
+     */
     async function pullRoundSketchMemos(bldg) {
+        let ok = await pullRoundSketchBundle(bldg);
+        try {
+            if (bldg && bldg.id && db && window.state.companyId && !(typeof navigator !== 'undefined' && navigator.onLine === false)) {
+                if (Date.now() - (window.__bsaSketchPullAt || 0) > 15000 || window.__bsaSketchPullBldg !== bldg.id) {
+                    window.__bsaSketchPullAt = Date.now(); window.__bsaSketchPullBldg = bldg.id;
+                    if (await pullMemosForBuilding(bldg)) ok = true;
+                }
+                if (await ensureSketchSeq(bldg)) ok = true;
+            }
+        } catch (e) { console.warn('[메모] 서버 메모·번호표 받기 실패(기기 것으로 계속):', e && e.message); }
+        return ok;
+    }
+    async function pullRoundSketchBundle(bldg) {
         const api = sketchApi();
         if (!api || !bldg || !bldg.id || !db || !window.state.companyId) return false;
         if (typeof navigator !== 'undefined' && navigator.onLine === false) return false;
@@ -27792,7 +27865,7 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
                 class="dm-card" style="background:#fff;color:#111827;border-radius:14px;box-shadow:0 12px 40px rgba(0,0,0,0.3);width:min(560px,100%);max-height:calc(100% - 24px);display:flex;flex-direction:column;overflow:hidden;">
                 <div style="display:flex;align-items:center;gap:8px;padding:12px 14px;border-bottom:1px solid #e5e7eb;">
                     <strong style="font-size:1.05rem;">📝 도면 주석</strong>
-                    <span style="flex:1;color:#6b7280;font-size:0.8rem;">${esc(memo.by ? memo.by + ' · ' : '')}${esc(when)}</span>
+                    <span style="flex:1;color:#6b7280;font-size:0.8rem;">${esc(when)}</span>
                     <button type="button" data-mv="del" aria-label="주석 지우기" title="주석 지우기" style="border:1px solid #fca5a5;background:#fff;color:#dc2626;border-radius:8px;padding:4px 8px;cursor:pointer;"><i class="fa-solid fa-trash"></i> 지우기</button>
                     <button type="button" data-mv="close" aria-label="닫기" style="border:none;background:none;font-size:1.4rem;line-height:1;cursor:pointer;color:#6b7280;">&times;</button>
                 </div>
@@ -28031,19 +28104,12 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
                 ov.appendChild(el);
             }
             // 2026-10-16 「...으로 자르지 말고 다 보여주라」: 전체 내용, 저장된 줄바꿈 그대로(CSS white-space: pre)
-            if (el.dataset.text !== m.text || el.dataset.by !== String(m.by || '')) {
+            // 2026-10-27 「주석작성에 작성자 이름 박히는거 빼라」: 주석에는 작성자 이름을 보이지 않는다(by/byUid는 계정별 저장·동기화용으로만 보관)
+            if (el.dataset.text !== m.text || el.dataset.by !== '') {
                 el.dataset.text = m.text;
-                el.dataset.by = String(m.by || '');
+                el.dataset.by = '';
                 el.textContent = String(m.text || '').replace(/\r\n?/g, '\n');
-                // 2026-10-23 작성 계정 이름 표시
-                if (m.by) {
-                    const by = document.createElement('span');
-                    by.className = 'map-memo-by';
-                    by.textContent = ` — ${m.by}`;
-                    by.style.cssText = 'font-size:0.55em;opacity:0.75;white-space:nowrap;';
-                    el.appendChild(by);
-                }
-                el.title = m.text + (m.by ? `\n— ${m.by}` : '');
+                el.title = m.text;
                 el.setAttribute('aria-label', `도면 주석: ${m.text}`);
             }
             el.style.fontSize = `${memoFontPx.toFixed(2)}px`;
@@ -28317,15 +28383,16 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
         const esc = (t) => String(t).replace(/[<>&"]/g, '');
         const curId = (sketchUi.sheet && sketchUi.sheet.id) || '';
         // 2026-10-20 층 구분 없이 건물 전체 · 내 계정 메모(+ 작성자 모르는 이전 메모)
+        sketchSeqAttach(window.state);
         const tabs = api.buildingTabs(window.state, sketchUi.bldgId, me);
         const html = tabs.map((t) => `<button type="button" role="tab" class="sk-tab${t.id === curId ? ' active' : ''}${t.mine ? ' mine' : ''}" data-sk-tab="${esc(t.id)}" aria-selected="${t.id === curId}" title="${esc((t.by || '작성자 없음') + (t.title ? ' · ' + t.title : ''))}">`
-            + `<span class="sk-tab-name">${esc(t.label)}</span>${t.title ? `<span class="sk-tab-sub">${esc(t.title)}</span>` : ''}</button>`);
+            + `<span class="sk-tab-name">${esc(t.label)}</span>${t.title ? `<span class="sk-tab-sub">${esc(t.title)}</span>` : (t.provisional ? '<span class="sk-tab-sub">번호 미확정</span>' : '')}</button>`);
         if (!curId || !tabs.some((t) => t.id === curId)) {
             html.push(`<button type="button" role="tab" class="sk-tab sk-tab-new active" data-sk-tab="" aria-selected="true"><span class="sk-tab-name">새 ${esc(api.nextMineLabel(window.state, sketchUi.bldgId, me))}</span><span class="sk-tab-sub">작성 중</span></button>`);
         }
         box.innerHTML = html.join('');
         const cnt = sketchUi.el.querySelector('[data-sk-count]');
-        if (cnt) cnt.textContent = tabs.length ? `내 메모 ${tabs.length}개` : '';
+        if (cnt) cnt.textContent = tabs.length ? `메모 ${tabs.length}개${tabs.some((t) => !t.mine) ? ` (내 것 ${tabs.filter((t) => t.mine).length})` : ''}` : '';
         const act = box.querySelector('.sk-tab.active');
         if (act && typeof act.scrollIntoView === 'function') {
             try { act.scrollIntoView({ block: 'nearest', inline: 'nearest' }); } catch (_e) { /* ignore */ }
@@ -28398,6 +28465,8 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
         const api = sketchApi();
         if (!sketchUi.sheet) return;
         if (!sketchUi.sheet.id) { sketchOpenSheet(null); return; }
+        const cur = api.findInBuilding(window.state, sketchUi.bldgId, sketchUi.sheet.id);
+        if (cur && !api.canDelete(cur, sketchMe())) { window.showToast('다른 계정이 쓴 메모는 지울 수 없습니다(이어 쓰기만 가능)', 'warning', 3500); return; }
         const ok = await window.confirmDelete('이 손글씨 메모 장을 지울까요?');
         if (!ok) return;
         api.deleteSheet(window.state, sketchUi.floorKey, sketchUi.sheet.id);
@@ -42368,6 +42437,10 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
                         <button type="button" data-act="clearDetail" class="danger" title="이 층 마킹 전부의 상세 위치를 비움(다시 적을 수 있게). 행·열 위치는 그대로. 3종은 위치칸에 층만 남김. 되돌리기 한 번으로 취소">상세위치 전부 지우기</button>
                         <button type="button" data-act="clearAll" class="danger">이 층 선 모두 지우기</button>
                     </div>
+                    <div class="grid-panel-row grid-panel-allfloors">
+                        <button type="button" data-act="clearDetailAll" class="danger-all" title="이 건물 모든 층 마킹의 상세 위치를 비움(외부 입면 도면 포함). 행·열 위치·마킹 위치·번호·사진은 그대로. 1·2종은 공란, 3종은 층 이름만 남김. 확인창에서 층·결함 수를 보여 주고, 이 층 화면에서 되돌리기 한 번으로 전체 취소">전체층 상세위치 지우기</button>
+                        <span class="grid-panel-muted grid-panel-allnote">이 건물 모든 층 · 행·열 위치는 그대로</span>
+                    </div>
                 </div>
             </div>`;
     }
@@ -42495,6 +42568,9 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
         }
         if (act === 'clearDetail') {
             clearDetailLocationForCurrentFloor();
+        }
+        if (act === 'clearDetailAll') {
+            clearDetailLocationForAllFloors();
         }
     }
 
@@ -43276,6 +43352,98 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
             }
         });
         afterGridBulkChange(`마킹 ${done}개의 상세 위치를 지웠습니다.`);
+    }
+
+    // ---- 2026-10-27 「전체층 상세위치 지우기」(행·열 툴바) ----
+    // 이 건물(이 회차·이 동)의 모든 층 상세 위치를 composeDefectLocation('', 층)으로 되돌린다(1·2종 '' · 3종 층 이름).
+    // 층 목록 = 건물 층 목록 ∪ 기기 메모리(state.defects)에 있는 이 건물 키(외부 입면 층 포함). 서버를 따로 읽지 않는다(읽기 폭주 방지) —
+    // 결함 데이터는 이미 기기에 있고, 바뀐 층은 markFloorKeyDirty → 보통 저장·동기화 길로 층마다 올라간다(오프라인이면 나중에).
+    /** 읽기만 하는 계획: 층마다 { fc, key, label, total, skippedUnplaced, targets } */
+    function planClearDetailForAllFloors(bldgId) {
+        const id = bldgId || state.currentBuildingId;
+        const out = { bldgId: id, floors: [], floorCount: 0, targetFloors: 0, targetCount: 0, skippedUnplaced: 0 };
+        if (!id) return out;
+        const bldg = (state.buildings || []).find((b) => b && b.id === id) || state.currentBuilding;
+        const prefix = `${id}_`;
+        const order = [];
+        const labelOf = new Map();
+        const add = (code, label) => {
+            const fc = String(code || '');
+            if (!fc || fc === 'ROUND_SKETCH_MEMO') return;
+            if (!labelOf.has(fc)) { labelOf.set(fc, String(label || fc)); order.push(fc); }
+            else if (label && labelOf.get(fc) === fc) labelOf.set(fc, String(label));
+        };
+        const avail = (typeof window.getBuildingAvailableFloors === 'function' && bldg)
+            ? (window.getBuildingAvailableFloors(bldg) || [])
+            : ((bldg && bldg.floorsList) || []);
+        avail.forEach((f) => { if (f && f.floorCode) add(f.floorCode, f.floorLabel); });
+        Object.keys(state.defects || {}).forEach((k) => {
+            if (k.indexOf(prefix) !== 0) return;
+            const owner = (typeof findBuildingForFloorKey === 'function') ? findBuildingForFloorKey(k) : null;
+            if (owner && owner.id !== id) return; // 다른 건물 키(이름이 겹치는 경우)
+            add(k.slice(prefix.length), null);
+        });
+        order.forEach((fc) => {
+            const key = `${id}_${fc}`;
+            const list = Array.isArray(state.defects && state.defects[key]) ? state.defects[key] : [];
+            const placed = filterMapPlacedDefects(list); // 「이 층」 버튼과 같은 대상(도면에 놓인 마킹)
+            const emptyLoc = composeDefectLocation('', fc);
+            const targets = placed.filter((d) => d && (String(d.location || '') !== emptyLoc || d.gridLocAuto));
+            out.floors.push({ fc, key, label: labelOf.get(fc) || fc, total: list.length, skippedUnplaced: list.length - placed.length, targets });
+            out.skippedUnplaced += list.length - placed.length;
+            if (targets.length) { out.targetFloors += 1; out.targetCount += targets.length; }
+        });
+        out.floorCount = out.floors.length;
+        return out;
+    }
+
+    async function clearDetailLocationForAllFloors() {
+        const bId = state.currentBuildingId;
+        if (!bId) { window.showToast?.('먼저 건축물을 선택하세요.', 'info', 2000); return; }
+        const plan0 = planClearDetailForAllFloors(bId);
+        if (!plan0.targetCount) {
+            window.showToast?.(`지울 상세 위치가 없습니다. (${plan0.floorCount}개 층 확인${plan0.skippedUnplaced ? ` · 도면에 안 놓인 결함 ${plan0.skippedUnplaced}개는 대상 아님` : ''})`, 'info', 3500);
+            return;
+        }
+        const bldg = state.currentBuilding || (state.buildings || []).find((b) => b && b.id === bId);
+        const dong = (bldg && typeof getBuildingDongLabel === 'function') ? String(getBuildingDongLabel(bldg) || '').trim() : '';
+        const bName = `${(bldg && bldg.name) || '이 건물'}${dong ? ` ${dong}` : ''}`;
+        const shown = plan0.floors.filter((f) => f.targets.length);
+        const lines = shown.slice(0, 8).map((f) => `  · ${f.label}: ${f.targets.length}개`).join('\n') + (shown.length > 8 ? `\n  · 외 ${shown.length - 8}개 층` : '');
+        const floorNote = isGrade3Building(bldg) ? '3종 시설물: 위치칸에는 층 이름만 남깁니다.' : '1·2종: 상세 위치를 공란으로 만듭니다.';
+        if (!await window.appConfirm(`「${bName}」 건물의 모든 층(${plan0.floorCount}개 층 확인) 상세 위치를 지웁니다.\n`
+            + `바뀌는 결함 ${plan0.targetCount}개 · ${plan0.targetFloors}개 층\n${lines}\n\n`
+            + `${floorNote}\n행·열 위치·마킹 위치·번호·사진은 그대로입니다.\n`
+            + `${plan0.skippedUnplaced ? `도면에 아직 놓지 않은 결함 ${plan0.skippedUnplaced}개는 건드리지 않습니다.\n` : ''}`
+            + `(이 층 화면에서 되돌리기 한 번으로 전체 층을 취소할 수 있습니다)`)) return;
+        // 2026-10-23 확인창을 기다리는 사이 동기화가 층 결함을 새 객체로 바꿔 끼울 수 있다 — 확인 뒤 목록을 다시 읽는다
+        if (state.currentBuildingId !== bId) {
+            window.showToast?.('건물이 바뀌어 지우지 않았습니다. 다시 시도하세요.', 'warning', 3000);
+            return;
+        }
+        const plan = planClearDetailForAllFloors(bId);
+        if (!plan.targetCount) {
+            window.showToast?.('지울 상세 위치가 이미 없습니다.', 'info', 2500);
+            return;
+        }
+        const curKey = `${bId}_${state.currentFloor}`;
+        // 되돌리기 한 번에 모든 층이 돌아가도록 바뀌는 다른 층도 같은 기록에 담는다
+        if (typeof pushDefectHistory === 'function') pushDefectHistory(plan.floors.filter((f) => f.targets.length && f.key !== curKey).map((f) => f.key));
+        let done = 0;
+        let floorsDone = 0;
+        const dirtyKeys = [];
+        plan.floors.forEach((f) => {
+            let n = 0;
+            f.targets.forEach((d) => {
+                if (clearDefectDetailLocation(d, f.fc)) {
+                    touchDefectUpdatedAt(d); // 내용 시각(contentUpdatedAt·칸 시각) → 동기화에서 이김
+                    n += 1;
+                }
+            });
+            if (n) { done += n; floorsDone += 1; dirtyKeys.push(f.key); }
+        });
+        if (typeof markFloorKeyDirty === 'function') dirtyKeys.forEach((k) => markFloorKeyDirty(k));
+        afterGridBulkChange(`전체 ${floorsDone}개 층 마킹 ${done}개의 상세 위치를 지웠습니다.${plan.skippedUnplaced ? ` (도면에 안 놓인 ${plan.skippedUnplaced}개 제외)` : ''}`);
     }
 
     // ---- 구역(한 도면에 여러 층, 2026-09-28) ----
@@ -45758,6 +45926,17 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
     }
 
     // 컬럼 키별 표시 텍스트를 계산하는 단일 소스. 화면/PDF/엑셀 3곳이 모두 이 함수를 사용해 값을 동기화한다.
+    /**
+     * 조사내용(부재 + 결함 내용) 앞에 붙는 부재명. 결함 내용이 이미 「창 상부 벽체 수직균열」처럼 개구부 위치 + 벽체로 시작하면
+     * 부재 「벽체」를 또 붙이지 않는다(「벽체 창 상부 벽체 수직균열」 방지). 다른 부재(기둥 등)는 그대로.
+     */
+    function surveyContentComponentText(d, ctx) {
+        const comp = getSurveyCellText('component', d, ctx);
+        const t = String(getSurveyCellText('defectType', d, ctx) || '').trim();
+        if (String(comp || '').trim() === '벽체' && /^(?:창|문) (?:상부|하부|측면) 벽체(?:\s|,|$)/.test(t)) return '';
+        return comp;
+    }
+
     function getSurveyCellText(colKey, d, ctx) {
         ctx = ctx || {};
         const isCrack = d.defectType === '균열';
@@ -45767,7 +45946,7 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
             case 'floorGroup': return grade3DivisionText(d, ctx, ctx.floorDisplayLabel || ctx.floorCode || state.currentFloor || '');
             case 'inspectionContent': {
                 // 부재 + 조사내용 + 크기를 한 줄로 출력 (화면/HWPX/엑셀 공통)
-                const headParts = [getSurveyCellText('component', d, ctx), getSurveyCellText('defectType', d, ctx)]
+                const headParts = [surveyContentComponentText(d, ctx), getSurveyCellText('defectType', d, ctx)]
                     .map(s => (s || '').trim())
                     .filter(s => s && s !== '-');
                 const head = headParts.join(' ');
@@ -46029,7 +46208,7 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
         const gridLocCell = (typeof getDefectGridRoomForReport === 'function') ? getDefectGridRoomForReport(d, ctx.floorCode) : '';
         const loc = gridLocCell || extractDefectLocationDetail(d.location, ctx.floorCode)
             || getSurveyCellText('location', d, { floorCode: ctx.floorCode });
-        const content = [getSurveyCellText('component', d), getSurveyCellText('defectType', d)]
+        const content = [surveyContentComponentText(d), getSurveyCellText('defectType', d)]
             .map(s => (s || '').trim()).filter(s => s && s !== '-').join(' ') || '-';
         return [
             no,
@@ -56272,7 +56451,7 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
                         setPicImage(pics[0], imgId1, slot1.w, slot1.h, maxW, maxH);
                         setTcText(capTcs[0], slot1.label);
                         setHwpxPhotoLocText(capTcs[2], slot1.d, floorCode);
-                        setTcText(descTcs[1], [getSurveyCellText('component', slot1.d), getSurveyCellText('defectType', slot1.d)].map(t => (t || '').trim()).filter(t => t && t !== '-').join(' ') || '-');
+                        setTcText(descTcs[1], [surveyContentComponentText(slot1.d), getSurveyCellText('defectType', slot1.d)].map(t => (t || '').trim()).filter(t => t && t !== '-').join(' ') || '-');
 
                         if (slot2) {
                             imgCounter++;
@@ -56282,7 +56461,7 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
                             setPicImage(pics[1], imgId2, slot2.w, slot2.h, maxW, maxH);
                             setTcText(capTcs[4], slot2.label);
                             setHwpxPhotoLocText(capTcs[6], slot2.d, floorCode);
-                            setTcText(descTcs[3], [getSurveyCellText('component', slot2.d), getSurveyCellText('defectType', slot2.d)].map(t => (t || '').trim()).filter(t => t && t !== '-').join(' ') || '-');
+                            setTcText(descTcs[3], [surveyContentComponentText(slot2.d), getSurveyCellText('defectType', slot2.d)].map(t => (t || '').trim()).filter(t => t && t !== '-').join(' ') || '-');
                         } else {
                             stripPhotoTblRightHalf(newTbl);
                         }
@@ -59040,9 +59219,37 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
         return !IMPORT_NEGATIVE_FLAG_PATTERNS.some((re) => re.test(compact));
     }
 
+    /**
+     * 2026-10-27 엑셀/한글 가져오기: 부재명칭 칸에 개구부 말(문 상부·문 측면·창 상부·창 하부·창 측면 — 띄어쓰기 무관, 개구부 주위, 개구부)이 있으면
+     * 그 말을 부재명칭에서 지우고 { found, pos(창 상부 …, 종류를 알 수 있을 때), component(남은 부재명) }로 돌려준다. 없으면 found=false, component는 원문 그대로.
+     * 「출입문 상부」처럼 한글에 바로 붙은 「문」은 다른 낱말의 일부라 글은 지우지 않고 종류만 알아 둔다.
+     */
+    function extractOpeningFromMemberName(raw) {
+        const orig = String(raw == null ? '' : raw);
+        const out = { found: false, pos: '', component: orig.trim() };
+        if (!orig.trim()) return out;
+        let work = orig;
+        work = work.replace(/(창|문)[\s\u3000]*(상부|하부|측면)/g, (m, a, b, off, all) => {
+            const name = `${a} ${b}`;
+            if (OPENING_POS_NAMES.indexOf(name) < 0) return m;
+            out.found = true;
+            if (!out.pos) out.pos = name;
+            return (off > 0 && /[가-힣]/.test(all.charAt(off - 1))) ? m : ' ';
+        });
+        work = work.replace(/개구부[\s\u3000]*주위|개구부/g, () => { out.found = true; return ' '; });
+        if (!out.found) return out;
+        work = work.replace(/[(（]\s*[)）]|\[\s*\]/g, ' ')
+            .replace(/^[\s\u3000,;:·ㆍ\/\-_()（）\[\]]+|[\s\u3000,;:·ㆍ\/\-_()（）\[\]]+$/g, '')
+            .replace(/[\s\u3000]{2,}/g, ' ')
+            .trim();
+        out.component = work;
+        return out;
+    }
+
     /** 엑셀/한글 가져오기: 문상부·창하부·창측면 등 개구부 위치·내용이면 개구부 균열 체크 */
     function detectImportOpeningCrack(fields) {
         if (!fields || fields.isGood) return false;
+        if (fields.openingFromMember) return true; // 부재명칭에서 개구부 말을 찾아 지운 경우
         const compact = [fields.location, fields.defectType, fields.component, fields.size]
             .map((s) => String(s || ''))
             .join(' ')
@@ -59156,7 +59363,12 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
             sheetInfo.rows.forEach((row, i) => {
                 const noRaw = getCell(row, 'no');
                 const defectTypeRaw = getCell(row, 'defectType');
-                const componentRaw = getCell(row, 'component') || '기타';
+                // 2026-10-27 부재명칭 칸의 개구부 말(문 상부·창 하부·개구부 주위 …)은 지우고 「개구부 결함」 체크 + 개구부 종류로 옮긴다.
+                // 다 지워져 비면 개구부는 벽에 나는 것이라 「벽체」(그 밖의 빈 칸은 예전처럼 「기타」)
+                const componentCellRaw = getCell(row, 'component');
+                const openingFromMember = extractOpeningFromMemberName(componentCellRaw);
+                const componentCellClean = openingFromMember.found ? (openingFromMember.component || '벽체') : componentCellRaw;
+                const componentRaw = componentCellClean || '기타';
                 const categoryRaw = getCell(row, 'category');
                 const locationRaw = getCell(row, 'location');
                 const sizeRaw = getCell(row, 'size');
@@ -59216,13 +59428,13 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
                         : (String(incoming || '').trim() || String(current || '').trim() || String(fallback || '').trim()));
                     if (importMerge && typeof importMerge.countKeptExistingOnImport === 'function') {
                         keptExistingOnImport += importMerge.countKeptExistingOnImport([
-                            { incoming: getCell(row, 'component'), existing: existing.component },
+                            { incoming: componentCellClean, existing: existing.component },
                             { incoming: defectTypeRaw, existing: existing.defectType },
                             { incoming: causeRaw, existing: existing.cause }
                         ]);
                     }
                     existing.category = category;
-                    existing.component = pick(getCell(row, 'component'), existing.component, '기타');
+                    existing.component = pick(componentCellClean, existing.component, '기타');
                     if (locationRaw) existing.location = locationRaw;
                     existing.defectType = pick(defectTypeRaw, existing.defectType, '기타');
                     // 합친 결과로 다시 판정한다 — 빈 가져오기 값으로 '기타'가 되어 있으면 안 된다
@@ -59245,8 +59457,15 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
                             defectType: existing.defectType,
                             component: existing.component,
                             size: existing.size,
-                            isGood: isGoodMerged
+                            isGood: isGoodMerged,
+                            openingFromMember: openingFromMember.found
                         });
+                    // 부재명칭에서 찾은 개구부 종류를 칩(openingPos)으로 — 가져온 부재명칭이 우선, 없으면 비어 있을 때만 결함 내용·위치 글에서
+                    if (!isGoodMerged) {
+                        const opPosM = openingFromMember.pos
+                            || (existing.openingPos ? '' : (findOpeningPosInText(existing.defectType) || findOpeningPosInText(locationRaw)));
+                        if (opPosM) existing.openingPos = opPosM;
+                    }
                     // 엑셀 가져오기는 항상 전차(전회차) 조사내용으로 분류
                     existing.isCarriedOver = true;
                     // 위치 칸 '외부'만으로 외부 시트로 보내지 않음 — 시트↔층 배정(floorCode)만 본다.
@@ -59286,7 +59505,8 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
                     no,
                     category,
                     component: componentRaw,
-                    location: locationRaw || `${floorCode} ${componentRaw}`,
+                    // 2026-10-27 위치칸이 공란이면 상세위치도 공란(1·2종 '' · 3종 층 이름만 = 상세위치 공란). 예전엔 '2F 기둥'처럼 부재명이 상세위치로 들어갔다
+                    location: locationRaw || composeDefectLocation('', floorCode),
                     defectType,
                     cause: isGood ? '-' : (causeRaw || '건조수축'),
                     size: isGood ? '' : sizeRaw,
@@ -59297,15 +59517,16 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
                     isOpeningCrack: isGood
                         ? false
                         : detectImportOpeningCrack({
-                            location: locationRaw || `${floorCode} ${componentRaw}`,
+                            location: locationRaw || composeDefectLocation('', floorCode),
                             defectType,
                             component: componentRaw,
                             size: sizeRaw,
-                            isGood
+                            isGood,
+                            openingFromMember: openingFromMember.found
                         }),
-                    // 2026-10-27 새로 가져온 개구부 결함의 위치(창 상부…)는 결함 내용·위치 글에서 찾아 둔다(이미 있는 결함은 건드리지 않음)
+                    // 2026-10-27 새로 가져온 개구부 결함의 위치(창 상부…)는 부재명칭·결함 내용·위치 글에서 찾아 둔다(이미 있는 결함은 건드리지 않음)
                     ...(isGood ? {} : (() => {
-                        const op = findOpeningPosInText(defectType) || findOpeningPosInText(locationRaw) || findOpeningPosInText(componentRaw);
+                        const op = openingFromMember.pos || findOpeningPosInText(defectType) || findOpeningPosInText(locationRaw) || findOpeningPosInText(componentRaw);
                         return op ? { openingPos: op } : {};
                     })()),
                     photos: [],
@@ -59892,7 +60113,7 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
     window._justRegistering = false;
 
     // 앱 번호. 포팅하면 이 번호가 1 오르고, 같은 번호가 Storage releases/latest.json 에 올라간다.
-    window.BSA_APP_BUILD = { versionCode: 24, versionName: '1.3.16' };
+    window.BSA_APP_BUILD = { versionCode: 25, versionName: '1.3.17' };
 
     function isNativeAndroidApp() {
         try {

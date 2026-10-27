@@ -12,6 +12,10 @@
     'use strict';
     var PREFIX = 'MEMOS_BY_';
     var KIND = 'memosByAuthor';
+    // 2026-10-27 손글씨 메모 번호(건물마다 한 문서): { id: 서버에 올라온 순서 번호 } — 먼저 서버에 번호가 잡힌 메모가 1번, 나중 것은 다음 번호.
+    // 번호 부여는 트랜잭션(동시에 올려도 같은 번호를 두 장에 주지 않음). 스케치 id·내용은 건드리지 않고, 화면에 보이는 번호만 이 순서로 정한다.
+    var SEQ_DOC = 'MEMOS_SEQ';
+    var SEQ_KIND = 'memoSeq';
 
     function docIdFor(uid) { return PREFIX + String(uid || '').replace(/[^A-Za-z0-9_-]/g, '_'); }
     function normMe(me) { return { uid: String((me && me.uid) || '').trim(), name: String((me && me.name) || '').trim() }; }
@@ -106,6 +110,47 @@
 
     function countItems(p) { return itemsOf(p).length; }
 
+    // ---- 2026-10-27 손글씨 메모 번호 ----
+    function cleanSeq(m) {
+        var out = {};
+        Object.keys(m || {}).forEach(function (id) {
+            var n = Math.floor(Number(m[id]));
+            if (id && isFinite(n) && n > 0) out[id] = n;
+        });
+        return out;
+    }
+    /** 서버 번호 문서 → { id: 번호 } (깨졌으면 {}) */
+    function parseSeqDoc(data) {
+        try {
+            var o = JSON.parse((data && data.payload) || 'null');
+            return cleanSeq(o && o.seq);
+        } catch (_e) { return {}; }
+    }
+    function seqDocPayload(map) { return JSON.stringify({ v: 1, seq: cleanSeq(map) }); }
+    /** 이 기기가 아는 손글씨 메모(살아 있는 것) 전부 [{ id, createdAt }] — 번호를 줄 대상 */
+    function sketchItems(st, bldgId, roundCode) {
+        var rk = String(bldgId) + '_' + roundCode;
+        return (((st && st.sketchMemos) || {})[rk] || []).filter(function (r) { return r && r.id; })
+            .map(function (r) { return { id: r.id, createdAt: Number(r.createdAt) || 0 }; });
+    }
+    /**
+     * 서버 번호 + 아직 번호 없는 메모 → 새 번호표. 이미 있는 번호는 그대로(안 바뀜), 없는 것은 (만든 시각, id) 순으로 가장 큰 번호 다음부터.
+     * 반환: { map, added }
+     */
+    function assignSeq(serverMap, items) {
+        var map = cleanSeq(serverMap);
+        var max = 0;
+        Object.keys(map).forEach(function (id) { if (map[id] > max) max = map[id]; });
+        var add = (items || []).filter(function (it) { return it && it.id && !map[it.id]; })
+            .sort(function (a, b) { return ((Number(a.createdAt) || 0) - (Number(b.createdAt) || 0)) || (a.id < b.id ? -1 : a.id > b.id ? 1 : 0); });
+        add.forEach(function (it) { map[it.id] = ++max; });
+        return { map: map, added: add.length };
+    }
+    /** 이 기기 번호표 + 서버 번호표 → 합친 번호표(같은 id는 서버 것) */
+    function mergeSeq(localMap, serverMap) {
+        return Object.assign({}, cleanSeq(localMap), cleanSeq(serverMap));
+    }
+
     /** 문서 내용 → 층 묶음 모양(합치기용). { memoPacks: { 층키: pack }, sketchPack } */
     function toPacks(p, bldgId, roundCode, extraFloorKeys) {
         var prefix = String(bldgId) + '_';
@@ -127,7 +172,8 @@
         return { memoPacks: memoPacks, sketchPack: sk, sketchKey: prefix + roundCode };
     }
 
-    var api = { PREFIX: PREFIX, KIND: KIND, docIdFor: docIdFor, isMine: isMine, collectMine: collectMine, collectTombs: collectTombs, mergeDocs: mergeDocs, toPacks: toPacks, countItems: countItems };
+    var api = { PREFIX: PREFIX, KIND: KIND, docIdFor: docIdFor, isMine: isMine, collectMine: collectMine, collectTombs: collectTombs, mergeDocs: mergeDocs, toPacks: toPacks, countItems: countItems,
+        SEQ_DOC: SEQ_DOC, SEQ_KIND: SEQ_KIND, parseSeqDoc: parseSeqDoc, seqDocPayload: seqDocPayload, sketchItems: sketchItems, assignSeq: assignSeq, mergeSeq: mergeSeq };
     root.BSA = root.BSA || {};
     root.BSA.memoAuthorSync = api;
     if (typeof module !== 'undefined' && module.exports) module.exports = api;

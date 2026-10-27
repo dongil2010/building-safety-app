@@ -14,7 +14,7 @@ const ctx = { window: { BSA: { sketchMemo: sketch } } };
 vm.createContext(ctx);
 vm.runInContext(extractFunction(app, 'function collectBuildingSketchMemos(') + '\nthis.collect = collectBuildingSketchMemos;', ctx);
 
-// 2026-10-20 층 구분 없이 건물 전체 · 계정(작성자)별 — 자세한 규칙은 test-sketch-memo-building-account.js
+// 2026-10-20 층 구분 없이 건물 전체. 2026-10-27부터 모든 계정 메모를 서버 번호(없으면 만든 순서) 순 「메모-N」(이름 없음) — 자세한 규칙은 test-sketch-seq-sync.js
 const S = (id, t, strokes, by, byUid) => Object.assign({ id, createdAt: t, w: 100, h: 50, strokes }, by ? { by } : {}, byUid ? { byUid } : {});
 const ink = [{ c: '#111827', w: 3, e: 0, p: [1, 1, 50, 9, 9, 50] }];
 const st = {
@@ -28,7 +28,7 @@ sketch.migrateFloorMemosToRound(st, 'B');
 sketch.migrateFloorMemosToRound(st, 'BB');
 const bldg = { id: 'B' };
 const got = JSON.parse(JSON.stringify(ctx.collect(st, bldg))).map((m) => `${m.label}:${m.rec.id}`);
-assert.deepStrictEqual(got, ['김 메모-1:a', '김 메모-2:c', '이 메모-1:b', '이전 메모-1:o'], '층 없이 작성자별, 이전 메모는 맨 뒤, 다른 건물·빈 장·지우개만 뺌');
+assert.deepStrictEqual(got, ['메모-1:a', '메모-2:o', '메모-3:c', '메모-4:b'], '층 없이 모든 계정 한 번호 줄(만든 순서), 다른 건물·빈 장·지우개만 뺌, 출력 번호는 빠짐없이 1부터');
 assert.strictEqual(ctx.collect({}, bldg).length, 0);
 assert.strictEqual(ctx.collect(st, null).length, 0);
 
