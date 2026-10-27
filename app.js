@@ -11885,15 +11885,27 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
     /** 터치·조작 UI: 화면(CSS) px 기준 최소 지름 — 줌 배율과 무관하게 손가락 크기 확보 */
     const MAP_TIP_MIN_TOUCH_DIAMETER_CSS = 52;
 
-    function getMapTipHitRadius(arrowScale, isTouch) {
+    /** 스타일러스(펜) 최소 지름 — 마우스(눈에 보이는 화살촉 크기)보다 크고 손가락(52px)보다 작게 */
+    const MAP_TIP_MIN_PEN_DIAMETER_CSS = 40;
+
+    /**
+     * 화살촉 판정 반경(이미지 좌표). pointerKind: 'mouse' | 'pen' | 'touch' (생략하면 isTouch로 추정)
+     * 크기 순서: 마우스(화살촉 실제 반경+1) ≤ 펜(화면 지름 40px) ≤ 손가락(화면 지름 52px)
+     */
+    function getMapTipHitRadius(arrowScale, isTouch, pointerKind) {
+        const kind = pointerKind || (isTouch ? 'touch' : 'mouse');
         const visualR = getArrowVisualTipRadius(arrowScale, false);
-        const coarse = isTouch
+        const coarse = isTouch || kind === 'pen' || kind === 'touch'
             || (window.matchMedia && window.matchMedia('(pointer: coarse)').matches);
         if (!coarse) return visualR + 1;
         const arrowR = getArrowTouchCharacteristicSize(arrowScale);
         const viewScale = getMapCanvasViewScale();
-        const minScreenRadiusImg = (MAP_TIP_MIN_TOUCH_DIAMETER_CSS / 2) / viewScale;
-        return Math.max(arrowR, minScreenRadiusImg);
+        const fingerR = Math.max(arrowR, (MAP_TIP_MIN_TOUCH_DIAMETER_CSS / 2) / viewScale);
+        if (kind === 'pen') {
+            const penR = Math.max(visualR + 1, (MAP_TIP_MIN_PEN_DIAMETER_CSS / 2) / viewScale);
+            return Math.min(fingerR, penR);
+        }
+        return fingerR;
     }
 
     /** 삼각 화살촉: 세모 무게중심. 원형 화살촉: target(측정점) 그대로 */
@@ -24027,6 +24039,7 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
                         };
                     }
                     rowEl.onclick = (e) => {
+                        e.stopPropagation(); // 팝업을 누른 것이 도면·다른 마킹으로 새지 않게
                         if (assignBtn && assignBtn.contains(e.target)) return;
                         if (editBtn && editBtn.contains(e.target)) return;
                         openItemDetail();
@@ -24097,7 +24110,10 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
             editBtn.onclick = (e) => { e.stopPropagation(); openDetail(); };
         }
         popup.onclick = (e) => {
+            e.stopPropagation(); // 팝업을 누른 것이 도면·다른 마킹으로 새지 않게
             if (editBtn && editBtn.contains(e.target)) return;
+            // 마킹 여러 개를 뽑아 둔 상태(통합 묶음이 아님)에서 팝업 몸통을 눌러도 선택이 한 개로 바뀌지 않게 — 연필 버튼으로만 연다
+            if (sel.size > 1 && !d.groupId) return;
             openDetail();
         };
     }
@@ -35785,7 +35801,9 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
     function findHitPinPart(imgX, imgY) {
         // 2026-10-16 숨긴(부재 종류·필터로 끈) 마킹은 터치·클릭·커서·균열모니터 판정에서 빠진다 — 그리는 목록과 같게
         const defects = getCurrentFloorMapPlacedDefects();
+        const ptrKindHit = getMapPointerKind();
         // 2026-10-20 고른 마킹이 먼저: 그 화살표 끝·NO.박스·지시선 근처를 누르면 옆 마킹·박스가 아니라 고른 마킹을 잡는다
+        // (2026-10-27 터치·펜은 고른 마킹 몸체/점 중심 바로 위일 때만, 그 밖에는 가장 가까운 마킹 — claimSelectedPinPart)
         const claimed = claimSelectedPinPart(imgX, imgY, defects);
         if (claimed) return claimed;
         // 터치/조밀 배치: 화살표(TIP)가 박스 안·근처에 있어도 TIP을 잡을 수 있게
@@ -35800,7 +35818,7 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
             const dSize = getStyleSize(getDefectStyleKey(d.category, d.defectType));
             const scale = dSize.pin;
             const arrowScale = dSize.arrow;
-            const tipR = getMapTipHitRadius(arrowScale, activePointerIsTouch);
+            const tipR = getMapTipHitRadius(arrowScale, activePointerIsTouch, ptrKindHit);
 
             if (d.shapeType === 'area' && d.areaX1 !== undefined) {
                 ensureAreaPinPlacement(d);
@@ -35935,34 +35953,72 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
         return null;
     }
 
-    /** 고른 마킹의 넉넉한 판정 범위(화면 14px, 터치 20px) 안이면 { defect, part } */
+    /** 지금 도면을 누른 도구 종류: 'mouse' | 'pen' | 'touch' */
+    function getMapPointerKind() {
+        if (mapLastPointerType === 'pen') return 'pen';
+        if (activePointerIsTouch || mapLastPointerType === 'touch') return 'touch';
+        return 'mouse';
+    }
+
+    /** 고른 마킹의 우선 판정 여분(화면 px) — 마우스 14(예전 그대로) ≤ 펜 16 ≤ 손가락 18 */
+    const SELECTED_CLAIM_PAD_CSS = { mouse: 14, pen: 16, touch: 18 };
+
+    /**
+     * 고른 마킹의 우선 판정 범위 안이면 { defect, part }.
+     * 마우스: 화면 14px 여분 + 화살촉 반경 안이면 항상 고른 마킹(2026-10-20, 그대로).
+     * 터치·펜(2026-10-27): 고른 마킹의 몸체(NO.박스 안·화살촉 실제 크기+여분) 바로 위일 때만 우선하고,
+     *   누른 곳에서 더 가까운 다른 마킹(박스·화살촉)이 있으면 우선을 포기해 그 마킹이 눌리게 한다
+     *   (넓은 손가락 반경이 이웃 마킹 탭을 삼키던 문제).
+     */
     function claimSelectedPinPart(imgX, imgY, defects) {
         const SH = window.BSA && window.BSA.selectedHit;
         if (!SH || typeof selectedDefectIds === 'undefined' || !selectedDefectIds || !selectedDefectIds.size) return null;
+        const kind = getMapPointerKind();
+        const fine = kind !== 'mouse';
         const viewScale = Math.max(getMapCanvasViewScale() || 1, 0.02);
-        const pad = (activePointerIsTouch ? 20 : 14) / viewScale;
+        const pad = (SELECTED_CLAIM_PAD_CSS[kind] || 14) / viewScale;
         const byId = new Map();
         const cands = [];
+        let nearestOther = Infinity;
         (defects || []).forEach((d) => {
-            if (!d || !selectedDefectIds.has(d.id)) return;
-            // 영역은 꼭짓점·변 손잡이가 있으니, 영역 둘레 근처면 예전 판정에 맡긴다
-            if (d.shapeType === 'area' && d.areaX1 !== undefined && isPointInAreaMark(d, imgX, imgY, 16)) return;
+            if (!d) return;
+            const isSel = selectedDefectIds.has(d.id);
             const dSize = getStyleSize(getDefectStyleKey(d.category, d.defectType));
             const bx = d.x || 100;
             const by = d.y || 100;
-            const boxDim = getPinBoxDimensions(dSize.pin, formatPinNumberLabel(d.groupNo || d.no || 'NO.01', getDefectStyleKey(d.category, d.defectType)), state.ctx);
             const hasTip = d.targetX !== undefined && d.targetY !== undefined;
+            const isAreaD = d.shapeType === 'area' && d.areaX1 !== undefined;
+            if (!isSel) {
+                if (!fine) return;
+                // 터치·펜: 이웃 마킹이 누른 곳에서 얼마나 가까운지(박스는 안이면 0, 화살촉은 중심까지 거리)
+                const boxDimO = getPinBoxDimensions(dSize.pin, formatPinNumberLabel(d.groupNo || d.no || 'NO.01', getDefectStyleKey(d.category, d.defectType)), state.ctx);
+                const bd = SH.boxDist(imgX, imgY, { cx: bx, cy: by, w: boxDimO.w, h: boxDimO.h, rot: state.rotationAngle || 0 });
+                const otherR = getMapTipHitRadius(dSize.arrow, true, kind);
+                if (bd <= otherR) nearestOther = Math.min(nearestOther, bd);
+                if (hasTip) {
+                    const tipO = getMapArrowTipHitCenter(d.targetX, d.targetY, bx, by, dSize.arrow);
+                    const td = Math.hypot(imgX - tipO.x, imgY - tipO.y);
+                    if (td <= otherR) nearestOther = Math.min(nearestOther, td);
+                }
+                if (isAreaD && isPointInAreaMark(d, imgX, imgY, -2)) nearestOther = Math.min(nearestOther, 0);
+                return;
+            }
+            // 영역은 꼭짓점·변 손잡이가 있으니, 영역 둘레 근처면 예전 판정에 맡긴다
+            if (isAreaD && isPointInAreaMark(d, imgX, imgY, 16)) return;
+            const boxDim = getPinBoxDimensions(dSize.pin, formatPinNumberLabel(d.groupNo || d.no || 'NO.01', getDefectStyleKey(d.category, d.defectType)), state.ctx);
             const tip = hasTip ? getMapArrowTipHitCenter(d.targetX, d.targetY, bx, by, dSize.arrow) : null;
             byId.set(d.id, d);
             cands.push({
                 id: d.id,
                 tip,
-                tipR: getMapTipHitRadius(dSize.arrow, activePointerIsTouch),
+                // 터치·펜은 넓은 손가락 반경 대신 화살촉 실제 크기만(넓은 탭 판정은 가까운 순 선택에 맡김)
+                tipR: fine ? getMapTipHitRadius(dSize.arrow, false, 'mouse') : getMapTipHitRadius(dSize.arrow, activePointerIsTouch),
                 box: { cx: bx, cy: by, w: boxDim.w, h: boxDim.h, rot: state.rotationAngle || 0 },
                 leader: hasTip ? { x1: bx, y1: by, x2: d.targetX, y2: d.targetY } : null
             });
         });
         const r = SH.claimSelected(imgX, imgY, cands, pad);
+        if (r && fine && nearestOther < r.dist) return null; // 더 가까운 다른 마킹이 있으면 그 마킹이 눌리게
         return r ? { defect: byId.get(r.id), part: r.part } : null;
     }
 
@@ -37409,6 +37465,49 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
     window.setDrawingCrosshairEnabled = setDrawingCrosshairEnabled;
     // @@DRAWING_CROSSHAIR_END
 
+    /** 도면 위에 떠 있는 UI(선택 결함 팝업·모양 막대·툴바·패널). 이 안을 누른 입력은 도면이 받지 않는다 */
+    const MAP_FLOATING_OVERLAY_SELECTOR = [
+        '#mapSelectedDefectPopup', '.map-selected-defect-popup', '#markShapeBar', '#areaPolyTouchBar', '#areaPolygonRedrawBanner',
+        '#areaToolPanel', '#mapStyleSizeToolbar', '#mapGuideBar', '#mapCountBar', '#mapEvalMemberBar', '#evalUnitBar',
+        '#areaShapePicker', '.canvas-top-toolbar', '.canvas-bottom-toolbar', '#mobileMapSideRail', '.map-selection-bar', '#mapSelectionBar'
+    ].join(', ');
+
+    function isMapFloatingOverlayTarget(target) {
+        try {
+            return !!(target && typeof target.closest === 'function' && target.closest(MAP_FLOATING_OVERLAY_SELECTOR));
+        } catch (_e) { return false; }
+    }
+
+    function isMapGestureInProgress() {
+        return !!(isDragging || isMarkingDrag || isAreaDrag || isAreaInkDrag || isDraggingPin || isDraggingPinGroup
+            || pendingDragHit || isDraggingLegend || isResizingLegend || isMarqueeSelecting || isPinching);
+    }
+
+    /**
+     * 도면 컨테이너 안의 떠 있는 UI를 누르면(pointerdown·mousedown·touchstart·touchend…) 이벤트가 위로(문서·창 단위 도면 처리기)
+     * 퍼지지 않게 막고, 뒤따르는 합성 마우스 이벤트(터치 뒤 mousedown/click)도 700ms 동안 도면이 무시하게 한다.
+     * 팝업 안 스크롤은 기본 동작이라 그대로. 도면에서 시작한 끌기(마우스 놓기 등)는 막지 않는다.
+     */
+    function mapFloatingOverlayIsolationHandler(e) {
+        if (!isMapFloatingOverlayTarget(e.target)) return;
+        const t = e.type;
+        if (t === 'mouseup' && isMapGestureInProgress()) return; // 도면에서 끌던 중 팝업 위에서 놓음 → 끌기 마무리는 그대로
+        if (t === 'pointerup' && (e.pointerType === 'mouse' || isMapGestureInProgress())) return;
+        e.stopPropagation();
+        if (t === 'touchstart' || t === 'touchend' || t === 'pointerdown' && e.pointerType !== 'mouse') {
+            mapSuppressMouseUntil = Date.now() + 700;
+        }
+    }
+
+    function bindMapFloatingOverlayIsolation() {
+        const host = document.getElementById('canvasContainer');
+        if (!host || host._bsaOverlayIsolationBound) return;
+        host._bsaOverlayIsolationBound = true;
+        ['pointerdown', 'pointerup', 'mousedown', 'mouseup', 'touchstart', 'touchend', 'touchcancel'].forEach((type) => {
+            host.addEventListener(type, mapFloatingOverlayIsolationHandler, { passive: true });
+        });
+    }
+
     function getMapCanvasCursor() {
         if (state.mode === 'MARK' || state.mode === 'AREA' || state.areaInkTool) return 'crosshair';
         if (state.mode === 'MEMO') return 'copy';
@@ -37418,12 +37517,16 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
 
     if (elements.planCanvas) {
         elements.planCanvas.addEventListener('pointerdown', (e) => {
+            if (isMapFloatingOverlayTarget(e.target)) return;
             mapLastPointerType = e.pointerType || 'mouse';
         }, true);
+        // 도면 위에 뜬 팝업·막대·패널을 누른 터치·클릭이 도면(뒤쪽 마킹)으로 새지 않게 (2026-10-27)
+        bindMapFloatingOverlayIsolation();
         // Mouse Events
         elements.planCanvas.addEventListener('mousedown', (e) => {
             // 터치 제스처 중·직후 합성 마우스 이벤트는 무시 (드래그 중 끊김 방지)
             if (activePointerIsTouch || Date.now() < mapSuppressMouseUntil) return;
+            if (isMapFloatingOverlayTarget(e.target)) return;
             if (window.cadCalibrationState && e.button === 0) {
                 e.preventDefault();
                 e.stopPropagation();
@@ -37516,6 +37619,7 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
 
         // Touch Events (Galaxy Tab & Smartphone Support with Multi-Touch Pinch Zoom & Pan)
         elements.planCanvas.addEventListener('touchstart', (e) => {
+            if (isMapFloatingOverlayTarget(e.target)) return;
             if (typeof cancelCanvasPanAnimation === 'function') cancelCanvasPanAnimation();
             mapTouchStartedOnCanvas = true;
             mapSuppressMouseUntil = Date.now() + 700;

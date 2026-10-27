@@ -22,6 +22,7 @@ function getCurrentFloorMapPlacedDefects() { return list; }
 function getStyleSize() { return { pin: 1, arrow: 1 }; }
 function getDefectStyleKey() { return 'k'; }
 function getMapTipHitRadius(a, t) { return t ? 30 : 20; }
+function getMapPointerKind() { return activePointerIsTouch ? 'touch' : 'mouse'; }
 function getPinBoxDimensions() { return { w: 60, h: 30 }; }
 function formatPinNumberLabel(v) { return v; }
 function getMapArrowTipHitCenter(tx, ty) { return { x: tx, y: ty }; }
