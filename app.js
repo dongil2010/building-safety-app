@@ -20765,6 +20765,35 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
         return true;
     }
 
+    /**
+     * 방금 새로 찍은(저장된) 마킹을 바로 선택 상태로 — 강조 표시·좌상단 팝업·「한 번 더 누르면 수정」 상태.
+     * 터치로 마킹을 두 번 눌렀을 때와 같은 상태가 되도록, 만들자마자 선택해 둔다. (2026-10-27)
+     * keepAfterModalClose: 새 마킹 수정창을 닫아도 선택을 유지(끌어서 위치 잡기 바로 가능)
+     */
+    function selectNewlyCreatedMarking(d, opts) {
+        if (!d || !d.id) return;
+        if (d.groupId) window._groupBoxCycle = { groupId: d.groupId, lastId: d.id };
+        selectedDefectIds = new Set([d.id]);
+        window._bsaNewMarkingKeepSelId = (opts && opts.keepAfterModalClose) ? d.id : null;
+        if (typeof updateMapSelectionBar === 'function') updateMapSelectionBar({ scrollToSelection: false });
+    }
+
+    /** 수정창을 닫을 때 선택 정리: 방금 새로 만든 마킹은 선택 유지, 그 밖은 기존처럼 선택 해제 */
+    function applySelectionAfterDefectModalClose(discardPending) {
+        const keepId = window._bsaNewMarkingKeepSelId || null;
+        window._bsaNewMarkingKeepSelId = null;
+        let keep = null;
+        if (keepId && !discardPending && state.currentBuildingId) {
+            const key = `${state.currentBuildingId}_${state.currentFloor}`;
+            keep = (state.defects[key] || []).find((d) => d && d.id === keepId) || null;
+        }
+        if (keep) {
+            selectedDefectIds = new Set([keep.id]);
+        } else if (typeof selectedDefectIds !== 'undefined' && selectedDefectIds && typeof selectedDefectIds.clear === 'function') {
+            selectedDefectIds.clear();
+        }
+    }
+
     function finishMarkingGroupCommit() {
         window._pendingMarkingGroup = null;
         clearDefectMarkingTemplate({ keepGroup: true });
@@ -20869,6 +20898,7 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
 
         finishMarkingGroupCommit();
         saveStateToLocalStorage();
+        selectNewlyCreatedMarking(newDefect);
         drawCanvas();
         if (typeof renderDefectListPanel === 'function') renderDefectListPanel();
         if (typeof renderSurveyTable === 'function') renderSurveyTable();
@@ -24227,6 +24257,7 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
         window._pendingMapRegisterDefectId = null;
         saveStateToLocalStorage();
         renderSurveyTable();
+        selectNewlyCreatedMarking(defect);
         drawCanvas();
         if (typeof renderDefectListPanel === 'function') renderDefectListPanel();
         window.showToast(`${defect.no || '결함'} 도면 배치 완료`, 'success', 2500);
@@ -38232,9 +38263,8 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
             }, 280);
         }
         // 수정창을 닫으면 선택 해제 → 좌측 조사표 '선택됨' 상단 고정 해제
-        if (typeof selectedDefectIds !== 'undefined' && selectedDefectIds && typeof selectedDefectIds.clear === 'function') {
-            selectedDefectIds.clear();
-        }
+        // (단, 방금 새로 찍은 마킹은 선택·강조 유지 — applySelectionAfterDefectModalClose)
+        applySelectionAfterDefectModalClose(discardPending);
         if (typeof updateMapSelectionBar === 'function') updateMapSelectionBar({ scrollToSelection: false });
         else if (typeof renderDefectListPanel === 'function') renderDefectListPanel();
         drawCanvas();
@@ -38282,6 +38312,7 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
 
     function openAddDefectModal(boxX, boxY, targetX, targetY, existingPin = null, areaRect = null, options = {}) {
         if (window.__bsaEvalMapOn === true) { notifyEvalMarkingLock(); return; }
+        window._bsaNewMarkingKeepSelId = null; // 새 창마다 "방금 만든 마킹 유지" 표시 초기화
         clearDefectBulkEditState();
         syncDefectBulkEditChrome(false);
         if (typeof bindDefectHandwriteTabOrder === 'function') bindDefectHandwriteTabOrder();
@@ -40355,6 +40386,8 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
                 const pinIdEl = document.getElementById('defectPinId');
                 if (pinIdEl && !pinIdEl.value) pinIdEl.value = savedDefect.id;
             }
+            // 새로 저장된 마킹은 바로 선택(강조·팝업) — 창을 닫아도 유지
+            selectNewlyCreatedMarking(savedDefect, { keepAfterModalClose: isDefectModalOpen() });
         }
 
         if (savedDefect) applyPendingRepairPhotoToDefect(savedDefect);
