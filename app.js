@@ -24420,7 +24420,7 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
         if (window.state.priorityManageOnlyFilter) {
             list = list.filter(d => !!d.isPriorityManage);
         }
-        // 개구부 균열 목록/도면 표시 토글 (기본 ON)
+        // 개구부 결함 목록/도면 표시 토글 (기본 ON)
         if (window.state.showOpeningCracks === false) {
             list = list.filter(d => !d.isOpeningCrack);
         }
@@ -24943,7 +24943,7 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
             {
                 const openOn = window.state.showOpeningCracks !== false;
                 const openOff = openOn ? '' : ' is-off';
-                html += `<button type="button" class="defect-summary-badge cat-opening-crack${openOff}" data-opening-crack-filter="1" title="개구부 균열 ${openingCrackCount}건 · 표시 ${openOn ? '끄기' : '켜기'}"><span class="defect-summary-label">개구</span><span class="defect-summary-count">${openingCrackCount}</span></button>`;
+                html += `<button type="button" class="defect-summary-badge cat-opening-crack${openOff}" data-opening-crack-filter="1" title="개구부 결함 ${openingCrackCount}건 · 표시 ${openOn ? '끄기' : '켜기'}"><span class="defect-summary-label">개구</span><span class="defect-summary-count">${openingCrackCount}</span></button>`;
             }
             summaryEl.innerHTML = html;
             summaryEl.querySelectorAll('[data-cat-filter]').forEach(btn => {
@@ -30826,6 +30826,36 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
         return (document.getElementById('defectOpeningPos')?.value || '').trim();
     }
     window.setDefectOpeningPosUi = setDefectOpeningPosUi;
+
+    /**
+     * 결함 내용에 창 상부·창 하부·창 측면·문 상부·문 측면(띄어쓰기 무관)이 있으면 「개구부 결함」을 자동으로 체크하고 위치 버튼도 맞춘다.
+     * 사용자가 직접 끈 체크는 다시 켜지 않는다(그 글이 지워질 때까지). 이미 체크된 것은 절대 끄지 않는다. 창을 막 열 때(채우는 중)는 건드리지 않는다.
+     */
+    function autoDetectOpeningFromDefectContent() {
+        if (window._defectFormHydrating) return;
+        if (typeof isDefectBulkEditMode === 'function' && isDefectBulkEditMode()) return;
+        const chk = document.getElementById('defectOpeningCrackCheck');
+        if (!chk) return;
+        const text = getDefectComboValue(document.getElementById('defectType'), document.getElementById('defectTypeInput')) || '';
+        const pos = findOpeningPosInText(text);
+        if (!pos) { delete chk.dataset.openingManualOff; return; }
+        if (chk.dataset.openingManualOff === '1') return;
+        if (chk.checked) return; // 이미 체크됨(직접 체크 포함) — 끄지도, 위치 버튼을 바꾸지도 않는다
+        chk.checked = true;
+        chk.dispatchEvent(new Event('change', { bubbles: true }));
+        if (!readDefectOpeningPosUi()) setDefectOpeningPosUi(pos);
+        else refreshDefectOpeningPosRow();
+    }
+    window.autoDetectOpeningFromDefectContent = autoDetectOpeningFromDefectContent;
+    (function bindDefectOpeningManualOff() {
+        const chk = document.getElementById('defectOpeningCrackCheck');
+        if (!chk || chk.dataset.manualOffBound) return;
+        chk.dataset.manualOffBound = '1';
+        chk.addEventListener('change', (e) => {
+            if (!e.isTrusted) return; // 자동 체크(프로그램)는 제외 — 사람이 끈 것만 기억
+            if (chk.checked) delete chk.dataset.openingManualOff; else chk.dataset.openingManualOff = '1';
+        });
+    })();
     (function bindDefectOpeningPosChips() {
         const row = document.getElementById('defectOpeningPosRow');
         if (!row || row.dataset.bound) return;
@@ -30849,18 +30879,44 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
         document.addEventListener('click', (e) => { if (e.target && e.target.closest && e.target.closest('#defectComponentChips, .defect-component-chip, [data-component]')) setTimeout(refreshDefectOpeningPosRow, 0); }, true);
     })();
 
-    /** 개구부 균열이면 조사내용에 "개구부 주위 수직균열" 형태로 표기 */
+    // ---- 2026-10-27 개구부 결함 위치 인식(창 상부·창 하부·창 측면·문 상부·문 측면 — 띄어쓰기 있든 없든) ----
+    const OPENING_POS_NAMES = ['창 상부', '창 하부', '창 측면', '문 상부', '문 측면'];
+    /** 글 안에서 개구부 위치 이름을 찾아 표준 이름(창 상부 …)으로 돌려준다. 없으면 ''. 「문 하부」처럼 목록에 없는 조합은 무시 */
+    function findOpeningPosInText(text) {
+        const s = String(text == null ? '' : text);
+        const re = /(창|문)[\s\u3000]*(상부|하부|측면)/g;
+        let m;
+        while ((m = re.exec(s))) {
+            const name = `${m[1]} ${m[2]}`;
+            if (OPENING_POS_NAMES.indexOf(name) >= 0) return name;
+            re.lastIndex = m.index + 1;
+        }
+        return '';
+    }
+    /** 결함 내용 맨 앞의 「개구부 주위」·「창 상부 (벽체)」 표기를 떼어 낸 나머지 */
+    function stripOpeningPosPrefix(t) {
+        return String(t || '').replace(/^\s*(?:개구부[\s\u3000]*주위[\s\u3000]*)?(?:(?:창|문)[\s\u3000]*(?:상부|하부|측면)[\s\u3000]*(?:벽체[\s\u3000]*)?)?/, '').trim();
+    }
+
+    /**
+     * 개구부 결함 조사내용 표기 (한글·엑셀·PDF·표 공통 — getSurveyCellText('defectType')).
+     * 위치(창 상부·창 하부·창 측면·문 상부·문 측면)를 골랐거나 결함 내용 글에 그 이름이 있으면 「창 상부 벽체 수직균열」 식으로,
+     * 위치를 모르는 개구부 결함만 예전처럼 「개구부 주위 수직균열」.
+     */
     function formatOpeningAwareDefectType(d) {
         const raw = (d && d.defectType) ? String(d.defectType) : '';
-        // 2026-10-23 개구부 위치(창 상부·창 하부·창 측면·문 상부·문 측면)를 골랐으면 「개구부 주위」 대신 그 위치를 앞에 붙인다
-        const pos = d && d.openingPos ? String(d.openingPos).trim() : '';
+        // 골라 둔 위치가 우선, 없으면 결함 내용 글에서 찾는다(저장된 값은 건드리지 않고 표기만)
+        let pos = d && d.openingPos ? String(d.openingPos).trim() : '';
+        if (pos) pos = findOpeningPosInText(pos) || pos;
+        else pos = findOpeningPosInText(raw);
         if (pos) {
+            const head = `${pos} 벽체`;
             const ps = parseDefectTypeList(raw);
-            if (!ps.length) return `${pos} 균열`;
+            if (!ps.length) return `${head} 균열`;
             return joinDefectTypeList(ps.map((t) => {
                 if (!t || (typeof isGoodDefectType === 'function' ? isGoodDefectType(t) : t === '상태양호')) return t;
-                const bare = t.replace(/^개구부\s*주위\s*/, '');
-                return bare.startsWith(pos) ? bare : `${pos} ${bare}`;
+                const bare = stripOpeningPosPrefix(t);
+                return bare ? `${head} ${bare}` : `${head} 균열`;
             }));
         }
         if (!d || !d.isOpeningCrack) return raw;
@@ -38019,7 +38075,7 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
         if (bulkFieldConsensus(defects, d => getDefectCrackMeasureSignature(d)).mixed) labels.push('폭·길이·개수');
         if (bulkBoolConsensus(defects, d => d.isProgress).mixed) labels.push('진행중');
         if (bulkBoolConsensus(defects, d => d.isLeak).mixed) labels.push('누수');
-        if (bulkBoolConsensus(defects, d => d.isOpeningCrack).mixed) labels.push('개구부 균열');
+        if (bulkBoolConsensus(defects, d => d.isOpeningCrack).mixed) labels.push('개구부 결함');
         if (bulkBoolConsensus(defects, d => d.isCarriedOver).mixed) labels.push('전회차');
         if (bulkBoolConsensus(defects, d => d.isBookmark).mixed) labels.push('중요');
         if (bulkBoolConsensus(defects, d => d.isPriorityManage).mixed) labels.push('중점관리');
@@ -38317,6 +38373,7 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
         syncDefectBulkEditChrome(false);
         if (typeof bindDefectHandwriteTabOrder === 'function') bindDefectHandwriteTabOrder();
         window._defectFormHydrating = true;
+        { const _oc = document.getElementById('defectOpeningCrackCheck'); if (_oc) delete _oc.dataset.openingManualOff; } // 새 창마다 「직접 끔」 기억 초기화
         // 사진이 다 내려왔는지는 폼을 다 채운 뒤에 판단한다. 그 전에 사진을 바꾸면 시각을 안 찍는다.
         window._defectPhotosComplete = false;
         // 이 창 열기의 번호. 사진을 기다리는 사이 다른 결함 창이 열리면, 옛 창의 마무리
@@ -40429,6 +40486,8 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
     function scheduleDefectAutoApply() {
         if (window._defectFormHydrating) return;
         if (!isDefectModalOpen()) return;
+        // 결함 내용에 창 상부·문 측면 등이 있으면 개구부 결함 자동 체크(저장 전에 체크박스를 먼저 맞춘다)
+        try { autoDetectOpeningFromDefectContent(); } catch (_e) { /* ignore */ }
         window.clearTimeout(window._defectAutoApplyTimer);
         window._defectAutoApplyTimer = window.setTimeout(async () => {
             if (window._defectFormHydrating || !isDefectModalOpen()) return;
@@ -58957,6 +59016,7 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
             .replace(/\s+/g, '');
         if (!compact) return false;
         if (/개구부/.test(compact)) return true;
+        if (findOpeningPosInText(compact)) return true; // 창 상부·창 하부·창 측면·문 상부·문 측면
         // 문상부, 창하부, 창측면, 문측면, 창좌측 등
         if (/(?:문|창)(?:상부|하부|측면|좌측|우측|주위|틀)/.test(compact)) return true;
         if (/(?:문|창)측/.test(compact)) return true;
@@ -59210,6 +59270,11 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
                             size: sizeRaw,
                             isGood
                         }),
+                    // 2026-10-27 새로 가져온 개구부 결함의 위치(창 상부…)는 결함 내용·위치 글에서 찾아 둔다(이미 있는 결함은 건드리지 않음)
+                    ...(isGood ? {} : (() => {
+                        const op = findOpeningPosInText(defectType) || findOpeningPosInText(locationRaw) || findOpeningPosInText(componentRaw);
+                        return op ? { openingPos: op } : {};
+                    })()),
                     photos: [],
                     inspectorName: window.state.userName || ''
                 };
