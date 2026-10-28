@@ -1,6 +1,6 @@
 'use strict';
 // 2026-10-20 「한글출력할때 3종에 범례 붙는데 거기서 층수 꼬이는 거 있는지 확인」
-//  1) 3종 번호 접두사: 지붕 쪽 층이 겹치지 않게(옥상층 R · 옥상지붕층 RR · 지붕층 RF · 옥탑층 RT · 옥탑N층 RT{N} · 옥탑 지붕층 RTR)
+//  1) 3종 번호 접두사: 지붕 쪽 층이 겹치지 않게(옥상층 R · 옥상지붕층 RR · 지붕층 RF · 옥탑층 PH · 옥탑N층 PH{N} · 옥탑 지붕층 PHR)
 //  2) 위치도 범례는 그리는 도면의 층 기준(1·2종 중점관리 줄), 출력 중 저장된 범례 박스를 다른 층 크기로 덮어쓰지 않음
 const assert = require('assert');
 const fs = require('fs');
@@ -22,8 +22,8 @@ vm.runInContext(rti + ';\n' + extractFunction(app, 'function getGrade3RoofPrefix
     + extractFunction(app, 'function getGrade3FloorPrefix(') + '\nthis.p = getGrade3FloorPrefix;', ctx);
 
 const cases = {
-    ROOF: 'R', 옥상층: 'R', 옥상지붕층: 'RR', 지붕층: 'RF', 옥탑층: 'RT', 옥탑1층: 'RT1', '옥탑 2층': 'RT2', PH1: 'RT1', RF2: 'RT2',
-    PH_ROOF: 'RTR', 옥탑지붕층: 'RTR', '옥탑 지붕층': 'RTR', PH: 'RT2',
+    ROOF: 'R', 옥상층: 'R', 옥상지붕층: 'RR', 지붕층: 'RF', 옥탑층: 'PH', 옥탑1층: 'PH1', '옥탑 2층': 'PH2', PH1: 'PH1', RF2: 'PH2',
+    PH_ROOF: 'PHR', 옥탑지붕층: 'PHR', '옥탑 지붕층': 'PHR', PH: 'PH2',
     '1F': '1', B1F: 'B1', '10F': '10', EXT_FRONT: 'O', 외부: 'O', 부대시설: 'O'
 };
 Object.keys(cases).forEach((c) => assert.strictEqual(ctx.p(c), cases[c], c));

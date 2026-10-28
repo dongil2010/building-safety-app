@@ -45501,18 +45501,18 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
     // (hwpx_priority_compare_grade3.hwpx 범례: O-외부 — A 아님)
     // 2026-10-20 지붕 쪽 층은 서로 다른 층 — 접두사도 겹치지 않게(예전엔 옥상층·옥상지붕층이 둘 다 R,
     // 옥탑층·옥탑1층·옥탑2층·옥탑 지붕층이 모두 RT라 번호(R-1 등)가 두 층에 겹쳤다):
-    //   옥상층 R · 옥상지붕층 RR · 지붕층 RF · 옥탑층 RT · 옥탑N층 RT{N} · 옥탑 지붕층 RTR (옥탑N층은 N층이 아님)
+    //   옥상층 R · 옥상지붕층 RR · 지붕층 RF · 옥탑층 PH · 옥탑N층 PH{N} · 옥탑 지붕층 PHR (옥탑N층은 N층이 아님)
     function getGrade3RoofPrefix(raw) {
         const t = String(raw || '').trim();
         if (!t) return '';
         const c = t.toUpperCase();
-        if ((t.includes('옥탑') && t.includes('지붕')) || /PH[\s_-]*ROOF|ROOF[\s_-]*PH/.test(c)) return 'RTR';
+        if ((t.includes('옥탑') && t.includes('지붕')) || /PH[\s_-]*ROOF|ROOF[\s_-]*PH/.test(c)) return 'PHR';
         const rooftop = t.includes('옥탑') || c.includes('PENTHOUSE')
             || /(^|[^A-Z0-9])PH([^A-Z0-9]|$)/.test(c)
             || /(^|[^A-Z0-9])(?:PH|RF)[\s_-]*[0-9]{1,2}(?![0-9])/.test(c);
         if (rooftop) {
             const n = (typeof window.parseRooftopIndex === 'function') ? window.parseRooftopIndex(t) : null;
-            return n ? `RT${n}` : 'RT';
+            return n ? `PH${n}` : 'PH';
         }
         if (t.includes('옥상') && t.includes('지붕')) return 'RR';
         if (/^지붕\s*층?(?:\s*\(.*\))?$/.test(t)) return 'RF';
@@ -45527,11 +45527,11 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
         // 코드로 모르면 등록된 층 이름(예: 코드 PH + 이름 「옥탑2층」)으로 본다.
         const byCode = getGrade3RoofPrefix(raw);
         if (byCode) {
-            if (byCode !== 'RT') return byCode;
+            if (byCode !== 'PH') return byCode;
             let label = '';
             try { label = (typeof window.getFloorLabelFromCode === 'function') ? String(window.getFloorLabelFromCode(raw) || '') : ''; } catch (_e) { label = ''; }
             const byLabel = getGrade3RoofPrefix(label.replace(/\s*\([^)]*\)\s*$/, ''));
-            return (byLabel && byLabel.indexOf('RT') === 0) ? byLabel : byCode;
+            return (byLabel && byLabel.indexOf('PH') === 0) ? byLabel : byCode;
         }
         // 외부 판정은 하나로(코드 또는 표시 이름에 외부) — 이름만 「외부-정면」으로 바꾼 2F도 O
         const isExt = (typeof isExteriorFloorCode === 'function') ? isExteriorFloorCode(raw) : (c.startsWith('EXT') || raw.includes('외부'));
@@ -45540,6 +45540,30 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
         if (bMatch) return `B${bMatch[1]}`;
         const fMatch = c.match(/^(\d+)F$/);
         if (fMatch) return fMatch[1];
+        // 2026-10-28 직접 입력한 층 이름(코드가 B1F·1F 형태가 아닌 것)도 접두사를 만든다 — 예전엔 이름 그대로
+        // (「지하층-1」「피트-1」)로 나왔다. 이미 위에서 정해진 것(지상·B{n}F·옥상 계열·외부/부대 O)은 건드리지 않는다.
+        //   지하층·지하(번호 없음) → B1 · 지하N층/지하NF/B N → BN · 피트 → P · 그리드아이언 → G · 부대 → O
+        // 지하주차장·반지하 같은 이름은 해당 없음(그대로). 코드로 모르면 등록된 층 이름(label)으로 한 번 더 본다.
+        const namedPrefix = (text) => {
+            const t = String(text || '').replace(/\s*\([^)]*\)\s*$/, '').trim();
+            if (!t) return '';
+            const q = t.replace(/[\s_-]+/g, '');
+            const u = q.toUpperCase();
+            if (/그리드아이언|GRIDIRON/.test(u)) return 'G';
+            if (/피트/.test(q) || /^PIT(?![A-Z])/.test(u)) return 'P';
+            if (/부대/.test(q)) return 'O';
+            if (/주차/.test(q)) return '';
+            let m = u.match(/^B(\d{1,2})F?$/) || u.match(/^지하(\d{1,2})(?:층|F)?$/);
+            if (m) return `B${parseInt(m[1], 10)}`;
+            if (/^지하층?$/.test(q)) return 'B1';
+            return '';
+        };
+        const byName = namedPrefix(raw);
+        if (byName) return byName;
+        let nameLabel = '';
+        try { nameLabel = (typeof window.getFloorLabelFromCode === 'function') ? String(window.getFloorLabelFromCode(raw) || '') : ''; } catch (_e) { nameLabel = ''; }
+        const byNameLabel = nameLabel && nameLabel !== raw.trim() ? namedPrefix(nameLabel) : '';
+        if (byNameLabel) return byNameLabel;
         return floorCode || '';
     }
 
