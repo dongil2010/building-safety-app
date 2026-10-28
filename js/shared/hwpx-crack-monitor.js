@@ -21,9 +21,8 @@
     var HEADER_ROWS = 3;          // 0~2
     var INITIAL_ROW = 3;
     var FIRST_DATA_ROW = 4;
-    var TEMPLATE_SLOTS = 3;       // 양식에 그려진 게이지 열 수
     var TEMPLATE_DATA_ROWS = 11;  // 양식에 그려진 측정 줄 수 (이만큼은 글자 그대로)
-    var MAX_SLOTS_PER_TABLE = 6;
+    var MAX_SLOTS_PER_TABLE = 4;  // 2026-10-28 「가로 4칸씩」(예전 6)
     var MIN_SCALE = 0.6;
     var INITIAL_LABEL = '초기 부착 data';
     var CHANGE_LABEL = '변화량(초기값-금회측정)';
@@ -151,26 +150,24 @@
         return gaugeText(fmt, reading.yMm, reading.xMm, prev && prev.yMm, prev && prev.xMm, {});
     }
 
-    /** 게이지를 표 하나에 들어갈 만큼씩 나눈다 */
+    /** 게이지를 표 하나에 MAX_SLOTS_PER_TABLE개씩 채워 나눈다(2026-10-28 「가로 4칸씩」 — 6개면 4+2) */
     function groupSlots(slots, maxPer) {
         var list = slots || [];
         var max = maxPer || MAX_SLOTS_PER_TABLE;
-        // 고르게 나눈다: 7개면 6+1이 아니라 4+3
-        var tables = Math.max(1, Math.ceil(list.length / max));
-        var per = Math.ceil(list.length / tables) || 1;
         var out = [];
         list.forEach(function (s, i) {
-            if (i % per === 0) out.push([]);
+            if (i % max === 0) out.push([]);
             out[out.length - 1].push(s);
         });
         return out;
     }
 
-    /** 글자 배율: 양식(게이지 3열·측정 11줄)보다 많으면 비례해서 줄인다, MIN_SCALE까지 */
+    /**
+     * 줄 배율: 측정 줄이 양식(11줄)보다 많으면 줄 높이·글자를 비례해서 줄인다, MIN_SCALE까지.
+     * 열은 표당 4칸까지라 줄이지 않는다(2026-10-28 글자 7.5pt 기준). nSlots는 예전 호출과 맞추려고 남김.
+     */
     function fontScale(nSlots, nDataRows) {
-        var c = nSlots <= TEMPLATE_SLOTS ? 1 : TEMPLATE_SLOTS / nSlots;
-        var r = nDataRows <= TEMPLATE_DATA_ROWS ? 1 : TEMPLATE_DATA_ROWS / nDataRows;
-        var s = Math.min(c, r);
+        var s = nDataRows <= TEMPLATE_DATA_ROWS ? 1 : TEMPLATE_DATA_ROWS / nDataRows;
         s = Math.floor(s * 20) / 20; // 0.05 단위
         return Math.max(MIN_SCALE, Math.min(1, s));
     }

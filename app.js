@@ -51673,26 +51673,44 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
     }
 
     /** 글자 줄이기: 기준 글자 모양(charPr)을 복제해 크기만 바꾼 새 id (같은 크기는 재사용) */
-    function ensureHwpxScaledCharPr(hwpxHeaderState, baseId, scale) {
-        if (!hwpxHeaderState || !hwpxHeaderState.text || !baseId || !(scale < 1)) return null;
-        hwpxHeaderState.scaledCharPr = hwpxHeaderState.scaledCharPr || {};
-        const cacheKey = `${baseId}@${scale}`;
-        if (hwpxHeaderState.scaledCharPr[cacheKey]) return hwpxHeaderState.scaledCharPr[cacheKey];
+    // 2026-10-28 균열게이지 글자 크기: 측정표 7.5pt, 비교사진 표 9pt (한글 charPr height = pt × 100)
+    const HWPX_CRACK_MEASURE_HEIGHT = 750;
+    const HWPX_CRACK_SUMMARY_HEIGHT = 900;
+
+    function hwpxCharPrHeight(headerText, id) {
+        const m = String(headerText || '').match(new RegExp(`<hh:charPr id="${id}"[^>]*\\bheight="(\\d+)"`));
+        return m ? parseInt(m[1], 10) : 0;
+    }
+
+    /** baseId 글자 모양을 복제해 크기만 height로 바꾼 글자 모양 id(같은 크기는 한 번만 만든다) */
+    function ensureHwpxSizedCharPr(hwpxHeaderState, baseId, height) {
+        if (!hwpxHeaderState || !hwpxHeaderState.text || !baseId || !(height > 0)) return null;
+        hwpxHeaderState.sizedCharPr = hwpxHeaderState.sizedCharPr || {};
+        const cacheKey = `${baseId}@${height}`;
+        if (hwpxHeaderState.sizedCharPr[cacheKey]) return hwpxHeaderState.sizedCharPr[cacheKey];
         let hdr = hwpxHeaderState.text;
         const m = hdr.match(new RegExp(`<hh:charPr id="${baseId}"[^>]*>[\\s\\S]*?</hh:charPr>`));
         if (!m) return null;
         const ids = [...hdr.matchAll(/<hh:charPr id="(\d+)"/g)].map((x) => parseInt(x[1], 10));
         const newId = String((ids.length ? Math.max(...ids) : 0) + 1);
         const block = m[0].replace(/^<hh:charPr id="\d+"/, `<hh:charPr id="${newId}"`)
-            .replace(/(<hh:charPr[^>]*\bheight=")(\d+)(")/, (all, a, h, b) => `${a}${Math.max(400, Math.round(parseInt(h, 10) * scale / 10) * 10)}${b}`);
+            .replace(/(<hh:charPr[^>]*\bheight=")(\d+)(")/, (all, a, h, b) => `${a}${height}${b}`);
         if (!hdr.includes('</hh:charProperties>')) return null;
         hdr = hdr.replace('</hh:charProperties>', block + '</hh:charProperties>');
         const cnt = (hdr.match(/<hh:charPr id="/g) || []).length;
         hdr = hdr.replace(/(<hh:charProperties[^>]*itemCnt=")(\d+)(")/, `$1${cnt}$3`);
         hwpxHeaderState.text = hdr;
         hwpxHeaderState.dirty = true;
-        hwpxHeaderState.scaledCharPr[cacheKey] = newId;
+        hwpxHeaderState.sizedCharPr[cacheKey] = newId;
         return newId;
+    }
+
+    /** 표 안 글자를 height 크기로(줄 정보 lineseg는 원래 글자 크기와의 비율만큼) */
+    function setHwpxCrackTableTextHeight(tbl, hwpxHeaderState, baseId, height) {
+        const sizedId = ensureHwpxSizedCharPr(hwpxHeaderState, baseId, height);
+        if (!sizedId) return;
+        const baseH = hwpxCharPrHeight(hwpxHeaderState.text, baseId) || height;
+        scaleHwpxTableText(tbl, sizedId, height / baseH);
     }
 
     function scaleHwpxTableText(tbl, charPrId, scale) {
@@ -52193,10 +52211,9 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
                     }
                     applyHwpxCellMap(tbl, layout.cells, setTcText);
                     polishHwpxCrackMonitorNode(tbl, crackStyleIds, purpleBfIds);
-                    if (layout.scale < 1) {
-                        const scaledId = ensureHwpxScaledCharPr(hwpxHeaderState, crackStyleIds.gulimCharPrId, layout.scale);
-                        scaleHwpxTableText(tbl, scaledId, layout.scale);
-                    }
+                    // 글자 7.5pt — 측정 줄이 양식보다 많으면 줄 높이와 같이 줄인다(최소 4pt)
+                    const measureH = Math.max(400, Math.round(HWPX_CRACK_MEASURE_HEIGHT * (layout.scale || 1) / 10) * 10);
+                    setHwpxCrackTableTextHeight(tbl, hwpxHeaderState, crackStyleIds.gulimCharPrId, measureH);
                     ensureTblTreatAsChar(tbl);
                     sec.appendChild(para);
                 });
@@ -52241,6 +52258,8 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
                 if (sumTbl) {
                     await fillSummaryPhotoTable(sumTbl, slots[si], si + 1);
                     polishHwpxCrackMonitorNode(sumTbl, crackStyleIds, purpleBfIds);
+                    // 비교사진 표 글자는 모두 9pt (2026-10-28)
+                    setHwpxCrackTableTextHeight(sumTbl, hwpxHeaderState, crackStyleIds.gulimCharPrId, HWPX_CRACK_SUMMARY_HEIGHT);
                     ensureTblTreatAsChar(sumTbl);
                 }
                 sec.appendChild(sumPara);
