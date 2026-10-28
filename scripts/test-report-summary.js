@@ -74,6 +74,11 @@ assert.strictEqual(byNo(1, 8).category, 'aux');
 assert.strictEqual(byNo(1, 13).category, 'public');
 assert.strictEqual(byNo(1, 15).category, 'public');
 assert.strictEqual(byNo(1, 16).category, 'attachment');
+// 기둥-벽체·보-벽체 접합부 균열·이격은 구조 체크가 있어도 비구조체
+['기둥-벽체 접합부 이격', '보-조적벽체 균열', '기둥과 벽체 사이 균열', '벽체-보 접합부 이격 (균열폭:0.3mm)']
+    .forEach((c) => assert.strictEqual(api.classify({ content: c, floor: '지상1층', structural: true }), 'nonStructure', c));
+assert.strictEqual(api.classify({ content: '기둥 균열', floor: '지상1층', structural: true }), 'structure');
+assert.strictEqual(api.classify({ content: '보 하부 균열', floor: '지상1층', structural: true }), 'structure');
 
 // 균열폭 표기와 이상값
 assert.strictEqual(api.itemText(byNo(0, 2)), '지하1층 슬래브 균열 (균열폭:0.45mm)');
@@ -213,7 +218,9 @@ assert.strictEqual(alt.listCauseReviews(dB).length, 2);
 assert.strictEqual(alt.itemText(nB(6)), '지상2층 방송실 하부 벽체 수평·경사균열(보수부위 재균열) (균열폭:1.2mm)', 'B안은 비구조 균열도 폭을 적는다');
 
 const selB = alt.pickDefaults(dB);
-assert.strictEqual(selB.structure[0], '0:1', '가장 중요한 것이 먼저');
+assert.strictEqual(selB.structure[0], '0:7', '기둥 균열은 폭이 작아도 최우선');
+assert.strictEqual(selB.structure[1], '0:1', '그다음은 중요도 순');
+assert.strictEqual(alt.importanceOf(nB(7)).grade, '상', '기둥 균열은 상');
 assert.strictEqual(selB.structure.length, api.MAX_ITEMS);
 assert.ok(selB.structure.indexOf('0:3') < 0, '사진이 있어도 경미한 균열은 밀린다');
 
@@ -224,7 +231,37 @@ assert.strictEqual(slab.rep.no, '4', '대표는 묶음에서 가장 중요한 �
 assert.ok(/금회 최대 0.35mm/.test(slab.repair.short));
 const prio = alt.buildPriorityRows(gB);
 assert.strictEqual(prio[0].cells[1], '상');
-assert.ok(/단면결손/.test(prio[0].cells[3]));
+assert.ok(/기둥/.test(prio[0].cells[3]), '우선순위표도 기둥 균열이 맨 위');
+assert.ok(/단면결손/.test(prio[1].cells[3]));
+// 구조체 0.5mm 이상 균열이 많으면 묶음 문구 (앰코 부평 형식)
+assert.deepStrictEqual(api.buildStructureDigest(dB), [], '0.5mm 이상이 4건 이하면 묶지 않는다');
+const digRows = [];
+['U자형 균열', 'U자형 균열(관통)', '경사균열', '수직균열', 'U자형 균열'].forEach((c, i) => digRows.push(row(i + 1, '상부 보 ' + c, (0.6 + i * 0.35).toFixed(2) + '/2.0', true)));
+digRows.push(row(6, '상부 슬래브 균열', '1.0/2.0', true));
+const digD = api.buildDefects([
+    { floorLabel: 'A동지상3층', rows: digRows },
+    { floorLabel: 'A동지상5층', rows: [row(1, '기둥 콘크리트 들뜸', '-', true), row(2, '보 콘크리트 박락', '-', true), row(3, '천장슬래브 콘크리트 박락 및 철근노출', '-', true)] },
+    { floorLabel: 'A동지하1층', rows: [row(1, '상부 보 수직균열', '0.5/1.0', true)] }]);
+const dig = JSON.parse(JSON.stringify(api.buildStructureDigest(digD).map((x) => x.text)));
+assert.deepStrictEqual(dig, [
+    'A동 지하1층~지상3층 상부 보 수직, U자형, 경사균열 발생 (0.5mm 이상 6개소, 관통균열 포함, 최대 균열폭:2.0mm)',
+    'A동 슬래브 균열 (0.5mm 이상 1개소, 최대 균열폭:1.0mm)',
+    'A동 지상5층 기둥 및 보, 슬래브 콘크리트 들뜸 및 박락, 철근노출'
+]);
+// 기둥 콘크리트 들뜸·박락도 최우선, 기둥 내화피복 박락은 아님
+const colB = api.buildDefects([{ floorLabel: '지상1층', rows: [
+    row(1, '기둥 콘크리트 들뜸', '0.3x0.2', true), row(2, '기둥 모서리 박락', '0.1x0.1', true),
+    row(3, '기둥 뿜칠 박락', '0.5x0.5', true)] }]);
+assert.strictEqual(alt.importanceOf(colB[0]).score, 95);
+assert.strictEqual(alt.importanceOf(colB[1]).score, 95);
+assert.ok(alt.importanceOf(colB[2]).score < 95, '내화피복 박락은 최우선 아님');
+// RC벽체 균열·콘크리트 들뜸·박락은 상위권(상), 0.5mm 이상 균열보다는 아래
+const hiB = api.buildDefects([{ floorLabel: '지상1층', rows: [
+    row(1, 'RC벽체 수직균열', '0.2/1.0', true), row(2, '상부 슬래브 콘크리트 들뜸', '-', true), row(3, '보 하부 콘크리트 박락', '-', true)] }]);
+hiB.forEach((d) => {
+    const s = alt.importanceOf(d).score;
+    assert.ok(s >= 80 && s < 85, d.content + ' ' + s);
+});
 assert.ok(/\[중요도 상\]/.test(alt.buildOpinion('structure', gB, {})));
 
 // A안은 B안 추가 뒤에도 그대로다(묶는 기준을 주지 않으면 유형으로만 묶는다)

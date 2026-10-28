@@ -20,6 +20,12 @@
         return /(^|[\s\-])보(\(|\s|-|$)|테두리보|철골보/.test(d.content.replace(/보수/g, ''));
     };
     const isColumn = function (d) { return /기둥/.test(d.content); };
+    /** 기둥 균열·콘크리트 들뜸·박락·박리: B안 구조체에서 최우선으로 넣는다(사용자 규칙) */
+    const isColumnPriority = function (d) {
+        if (d.good || d.category !== 'structure' || !isColumn(d)) return false;
+        if (d.typeKey === '균열') return true;
+        return d.typeKey !== '내화피복 박락' && /들뜸|박락|박리/.test(d.content);
+    };
 
     /**
      * 중요도. grade: '상'(안전·내력에 직접 영향, 우선 조치) | '중'(내구성 저하, 계획 보수) | '하'(미관·경미)
@@ -39,7 +45,19 @@
         const cat = d.category;
 
         if (cat === 'structure') {
+            if (isColumnPriority(d)) {
+                return R(95, t === '균열'
+                    ? '기둥은 건물 하중을 받치는 주요 부재라 균열은 폭과 관계없이 우선 확인한다.'
+                    : '기둥 콘크리트 들뜸·박락은 피복 손실과 철근 부식으로 이어져 우선 조치한다.');
+            }
             if (t === '단면결손') return R(90, '주요 구조부재의 단면이 줄어 내력에 직접 영향을 준다.');
+            // 콘크리트 들뜸·박락, RC벽체 균열은 상위권(2026-10-28 사용자 규칙). 0.5mm 이상 균열(85)보다는 아래.
+            if (t !== '내화피복 박락' && t !== '녹 발생' && has(d, /들뜸|박락|박리|층분리/)) {
+                return R(82, '콘크리트 들뜸·박락은 낙하 위험이 있고 피복이 떨어지면 철근 부식으로 이어진다.');
+            }
+            if (t === '균열' && core.memberOf(d.content) === '벽체' && !(w != null && w >= 0.5)) {
+                return R(80, 'RC벽체는 하중을 받는 구조부재라 균열은 폭이 작아도 원인과 진행 여부를 확인한다.');
+            }
             if (t === '배부름') return R(78, '부재 변형이다. 시공 오차인지 진행성 변형인지 구분이 필요하다.');
             if (t === '철근노출') {
                 return R(isBeam(d) || isColumn(d) ? 80 : 74, '철근이 드러나 있어 부식이 진행되면 단면 손실과 피복 박락으로 이어진다.');
@@ -259,6 +277,13 @@
             const perType = {};
             const seenText = {};
             picked.forEach(function (d) { perType[d.typeKey] = (perType[d.typeKey] || 0) + 1; seenText[itemText(d)] = true; });
+            // 기둥 균열·들뜸·박락은 유형별 두 건 제한 없이 먼저 넣는다(같은 문구 중복만 뺀다).
+            bad.filter(isColumnPriority).forEach(function (d) {
+                if (picked.length >= core.MAX_ITEMS || picked.indexOf(d) >= 0 || seenText[itemText(d)]) return;
+                perType[d.typeKey] = (perType[d.typeKey] || 0) + 1;
+                seenText[itemText(d)] = true;
+                picked.push(d);
+            });
             bad.forEach(function (d) {
                 if (picked.length >= core.MAX_ITEMS || picked.indexOf(d) >= 0) return;
                 if ((perType[d.typeKey] || 0) >= 2 || seenText[itemText(d)]) return;

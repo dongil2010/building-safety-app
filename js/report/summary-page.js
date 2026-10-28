@@ -55,7 +55,7 @@
 
     // opLine·repLine: 결함 id별 의견 한 줄·보수방안(최종안에 담을 때 B안·AI안에서 따라온 것)
     // order: 분류별 항목 순서(끌어서 바꾼 것). 'd:결함id' 또는 'c:직접 적은 글'의 목록
-    const VARIANT_KEYS = ['sel', 'text', 'custom', 'opinion', 'cellEdit', 'opLine', 'repLine', 'order'];
+    const VARIANT_KEYS = ['sel', 'text', 'custom', 'opinion', 'cellEdit', 'opLine', 'repLine', 'order', 'digestOf'];
     const VARIANTS = ['A', 'B', 'F'];
     const isB = () => state.variant === 'B';
     const isFinal = () => state.variant === 'F';
@@ -67,6 +67,65 @@
         const o = {};
         VARIANT_KEYS.forEach((k) => { o[k] = state[k]; });
         state.vars[state.variant] = o;
+    }
+
+    /**
+     * 구조체 0.5mm 이상 균열이 너무 많으면(4건 초과) 낱개 대신 묶음 문구를 직접 적은 항목으로 넣는다.
+     * 묶음에 들어간 결함은 고르기에서 빼고, 남는 자리만 추천 항목으로 채운다.
+     */
+    function applyStructureDigest(keepSel) {
+        const digest = core.buildStructureDigest(state.defects);
+        if (!digest.length) return;
+        const covered = digestCovered(digest);
+        const room = Math.max(0, core.MAX_ITEMS - digest.length);
+        const rest = (state.sel.structure || []).filter((id) => !covered[id] && !core.isForced(state.byId[id] || {}));
+        if (!keepSel) {
+            // 남는 자리는 묶이지 않은 결함 가운데 그 안의 추천으로 채운다
+            const others = state.defects.filter((d) => !covered[d.id]);
+            const more = (isB() ? alt.pickDefaults(others) : core.pickDefaults(others)).structure || [];
+            more.forEach((id) => { if (rest.indexOf(id) < 0) rest.push(id); });
+        }
+        state.sel.structure = keepSel ? rest : rest.slice(0, room);
+        const texts = digest.map((x) => x.text);
+        state.custom.structure = texts.concat((state.custom.structure || []).filter((t) => t && texts.indexOf(t) < 0 && !state.digestOf[t]));
+        state.order.structure = texts.map((t) => 'c:' + t);
+        digest.forEach((x) => { state.digestOf[x.text] = x.key; });
+    }
+
+    /** 묶음에 들어간 결함 id 모음 */
+    function digestCovered(digest) {
+        const covered = {};
+        digest.forEach((x) => x.ids.forEach((id) => { covered[id] = true; }));
+        return covered;
+    }
+
+    /** 직접 적은 항목이 묶음 문구이면 그 묶음(지금 조사표로 다시 셈). 문구를 고쳐도 key로 찾는다. */
+    function digestOfText(text) {
+        const digest = core.buildStructureDigest(state.defects);
+        const key = (state.digestOf || {})[text];
+        return digest.filter((x) => (key ? x.key === key : x.text === text))[0] || null;
+    }
+
+    /** 저장된 안이 0.5mm 이상 균열을 낱개로 너무 많이 고른 경우(묶어 쓰기 전에 만든 안) */
+    function tooManyForcedPicked() {
+        return (state.sel.structure || []).filter((id) => state.byId[id] && core.isForced(state.byId[id])).length > core.MAX_ITEMS;
+    }
+
+    /** 묶음 문구 아래에 펼쳐 보는 낱개 결함(층별). 고르기 화면은 체크해서 낱개로도 넣을 수 있다. */
+    function digestListHtml(dig, pickedSet) {
+        const list = dig.ids.map((id) => state.byId[id]).filter((d) => d && !(pickedSet && pickedSet.has(d.id)));
+        if (!list.length) return '';
+        return '<details class="digest"><summary>묶인 결함 ' + list.length + '건 펼쳐 보기 (층별)</summary>'
+            + list.map((d) => itemRowHtml(d, false, null)).join('') + '</details>';
+    }
+
+    /** 비교표용: 묶인 결함을 글자로만 층별 나열 */
+    function digestTextListHtml(ids) {
+        const list = (ids || []).map((id) => state.byId[id]).filter(Boolean);
+        if (!list.length) return '';
+        return '<details class="digest"><summary>' + list.length + '건 보기 (층별)</summary><div class="diglist">'
+            + list.map((d) => '<div>' + esc(d.floor + ' #' + d.no + ' ' + d.content + (d.width != null && !d.widthSuspicious ? ' (' + d.width + 'mm)' : '')) + '</div>').join('')
+            + '</div></details>';
     }
 
     /** 작성안을 화면에 올린다. 처음 여는 안이면 그 안의 추천으로 채운다(최종안은 비워 두고 사람이 담는다). */
@@ -81,6 +140,8 @@
         state.opLine = o.opLine || {};
         state.repLine = o.repLine || {};
         state.order = o.order || {};
+        state.digestOf = o.digestOf || {};
+        if (v !== 'F' && (!o.sel || tooManyForcedPicked())) applyStructureDigest();
         core.CATEGORIES.forEach((c) => {
             state.sel[c.key] = (state.sel[c.key] || []).filter((id) => state.byId[id]);
         });
@@ -512,12 +573,15 @@
         }
         const inCat = state.defects.filter((d) => d.category === catKey);
         const pickedSet = new Set(entries.filter((e) => e.d).map((e) => e.d.id));
-        const bad = ranked(inCat.filter((d) => !d.good && !pickedSet.has(d.id)));
+        const digs = entries.map((e) => (!e.d && catKey === 'structure' ? digestOfText(e.text) : null));
+        const covered = digestCovered(digs.filter(Boolean));
+        const bad = ranked(inCat.filter((d) => !d.good && !pickedSet.has(d.id) && !covered[d.id]));
         const good = core.byScore(inCat.filter((d) => d.good && !pickedSet.has(d.id)));
         let h = '<div class="curbox">' + (state.prev ? '<div class="colhead">금회차</div>' : '');
         entries.forEach((e, i) => {
             const kind = cmp ? cmp.cur[i].kind : null;
             h += e.d ? itemRowHtml(e.d, true, kind) : customRowHtml(catKey, e.customIdx, e.text, kind);
+            if (digs[i]) h += digestListHtml(digs[i], pickedSet);
         });
         // 방금 「직접 추가」로 만든 빈 줄
         (state.custom[catKey] || []).forEach((t, i) => {
@@ -775,6 +839,11 @@
             state.sel[cat.key] = ids;
             state.custom[cat.key] = [];
         });
+        // 큰 균열이 너무 많은 건물은 낱개 대신 묶음 문구를 넣는다(전회에서 고른 낱개 항목은 그대로 둔다)
+        if (core.buildStructureDigest(state.defects).length) {
+            applyStructureDigest(true);
+            return;
+        }
         state.defects.forEach((d) => {
             if (core.isForced(d) && used.indexOf(d.id) < 0) {
                 (state.sel[d.category] || (state.sel[d.category] = [])).push(d.id);
@@ -817,12 +886,15 @@
 
     /** AI안이 분류에 고른 결함(분류를 옮겼거나 조사표에서 사라진 것은 뺀다) */
     function aiDefects(catKey) {
+        const covered = catKey === 'structure' ? digestCovered(core.buildStructureDigest(state.defects)) : {};
         return ((state.ai && state.ai.sel && state.ai.sel[catKey]) || [])
-            .map((id) => state.byId[id]).filter((d) => d && d.category === catKey);
+            .map((id) => state.byId[id]).filter((d) => d && d.category === catKey && !covered[d.id]);
     }
 
     /** 1단계에 보낼 내용: 분류별 결함 전체. 번호(n)로 답을 받아 byN으로 결함을 되찾는다. */
     function aiPickInput() {
+        // 큰 균열이 너무 많아 묶음으로 쓰는 건물은 그 균열들을 「필수」로 보내지 않는다
+        const covered = digestCovered(core.buildStructureDigest(state.defects));
         const cats = [];
         const byN = {};
         let n = 0;
@@ -838,7 +910,7 @@
                     byN[n] = d;
                     return {
                         n: n, floor: d.floor, location: d.location, content: d.content, size: d.size, cause: d.cause,
-                        progress: d.progress, leak: d.leak, photo: d.photoNos.length > 0, forced: core.isForced(d)
+                        progress: d.progress, leak: d.leak, photo: d.photoNos.length > 0, forced: core.isForced(d) && !covered[d.id]
                     };
                 })
             });
@@ -856,14 +928,19 @@
         core.CATEGORIES.forEach((cat) => {
             if (cat.key === 'load') { sel[cat.key] = []; return; }
             const inCat = state.defects.filter((d) => d.category === cat.key);
-            const forced = core.byScore(inCat.filter(core.isForced));
+            // 묶음 문구가 있으면 그 줄 수만큼 자리를 비우고, 묶인 결함은 낱개로 넣지 않는다
+            const digest = cat.key === 'structure' ? core.buildStructureDigest(state.defects) : [];
+            const covered = digestCovered(digest);
+            const forced = digest.length ? [] : core.byScore(inCat.filter(core.isForced));
+            const cap = digest.length ? Math.max(0, core.MAX_ITEMS - digest.length) : Math.max(core.MAX_ITEMS, forced.length);
             const list = forced.slice();
             (picks[cat.key] || []).forEach((p) => {
                 const d = byN[p.n];
-                if (!d) return;
+                if (!d || covered[d.id]) return;
                 if (p.why) why[d.id] = p.why;
-                if (list.indexOf(d) < 0 && list.length < Math.max(core.MAX_ITEMS, forced.length)) list.push(d);
+                if (list.indexOf(d) < 0 && list.length < cap) list.push(d);
             });
+            if (digest.length && !list.length) { sel[cat.key] = []; return; }
             if (!list.length) {
                 const good = core.byScore(inCat.filter((d) => d.good))[0];
                 if (good) list.push(good);
@@ -961,6 +1038,7 @@
             out[cat.key] = {
                 entries: entries.map((e) => ({
                     text: e.text, id: e.d ? e.d.id : null,
+                    dig: !e.d && cat.key === 'structure' ? digestOfText(e.text) : null,
                     op: e.d ? opLineTextOf(e.d) : '', rep: e.d ? repairTextOf(e.d) : ''
                 })),
                 // 의견을 손으로 고친 분류는 항목별 줄이 실제 의견과 다르므로 비교표에 고친 글 그대로 보여 준다
@@ -1012,6 +1090,10 @@
 
     /** 비교표의 한 줄이 가리키는 항목: { text, d(없으면 글자만), line(따라갈 의견 줄) } */
     function sourceItem(src, catKey, idx, snaps) {
+        if (src === 'D') {
+            const x = core.buildStructureDigest(state.defects)[idx];
+            return x ? { text: x.text, d: null, line: '', digestKey: x.key } : null;
+        }
         if (src === 'AI') {
             const d = aiDefects(catKey)[idx];
             return d ? { text: core.itemText(d), d: d, line: aiLineOf(catKey, idx), repair: aiRepairOf(catKey, idx) } : null;
@@ -1028,7 +1110,7 @@
         if (!e) return null;
         const d = e.id ? state.byId[e.id] : null;
         const fromB = d && src === 'B' && !d.good;
-        return { text: e.text, d: d, line: fromB ? bLineOf(d) : '', repair: fromB ? alt.repairOf(d) : '' };
+        return { text: e.text, d: d, line: fromB ? bLineOf(d) : '', repair: fromB ? alt.repairOf(d) : '', digestKey: e.dig ? e.dig.key : '' };
     }
 
     /** 최종안을 화면에 올린다(담기·빼기는 최종안을 보면서 한다. 아래 표와 한글 파일도 최종안으로 바뀐다) */
@@ -1048,6 +1130,7 @@
         if (!item.d) {
             const list = state.custom[catKey] || (state.custom[catKey] = []);
             if (list.indexOf(item.text) < 0) list.push(item.text);
+            if (item.digestKey) state.digestOf[item.text] = item.digestKey;
             return;
         }
         const id = item.d.id;
@@ -1156,7 +1239,8 @@
                 const cmp = state.prev ? core.compareLines(prevList, entries.map((e) => e.text)) : null;
                 return '<td class="items' + (v === cur ? ' cur' : '') + '">' + (entries.length ? entries.map((e, i) => '<div class="it">'
                     + plus(v, k, i, e.id ? finalIds.indexOf(e.id) >= 0 : finalTexts.indexOf(e.text) >= 0)
-                    + '<span>' + blueIf(cmp && cmp.cur[i].kind !== 'same', esc((i + 1) + '. ' + e.text)) + '</span></div>').join('') + allBtn(v, k, entries.length) : '-')
+                    + '<span>' + blueIf(cmp && cmp.cur[i].kind !== 'same', esc((i + 1) + '. ' + e.text))
+                    + (e.dig ? digestTextListHtml(e.dig.ids) : '') + '</span></div>').join('') + allBtn(v, k, entries.length) : '-')
                     + (v === 'A' ? aggBlock : '') + '</td>';
             };
             // 묶어 쓰기 후보(A안 칸 아래): 같은 부재·유형이 여러 건일 때 한 줄로 쓰는 문구. 쓸지는 사람이 정한다.
@@ -1184,11 +1268,15 @@
             const aiCmp = state.prev ? core.compareLines(prevList, aiLines) : null;
             const inAB = (id) => ['A', 'B'].some((v) => snaps[v][k].entries.some((e) => e.id === id));
             const aiEmpty = k === 'load' || hasAi ? '-' : '<span class="muted">위 「AI안 만들기」를 누르면 나옵니다</span>';
-            const aiCell = aiList.length ? aiList.map((d, i) => '<div class="it">' + plus('AI', k, i, finalIds.indexOf(d.id) >= 0) + '<span>'
-                + blueIf(aiCmp && aiCmp.cur[i].kind !== 'same', esc((i + 1) + '. ' + aiLines[i]))
+            // 묶음 문구(구조체 큰 균열이 많을 때)는 AI안에도 맨 앞에 둔다
+            const aiDig = hasAi && k === 'structure' ? core.buildStructureDigest(state.defects) : [];
+            const aiDigHtml = aiDig.map((x, j) => '<div class="it">' + plus('D', k, j, finalTexts.indexOf(x.text) >= 0)
+                + '<span>' + esc((j + 1) + '. ' + x.text) + digestTextListHtml(x.ids) + '</span></div>').join('');
+            const aiCell = aiDigHtml + (aiList.length ? aiList.map((d, i) => '<div class="it">' + plus('AI', k, i, finalIds.indexOf(d.id) >= 0) + '<span>'
+                + blueIf(aiCmp && aiCmp.cur[i].kind !== 'same', esc((aiDig.length + i + 1) + '. ' + aiLines[i]))
                 + (inAB(d.id) ? '' : ' <span class="badge chg">AI만</span>')
                 + (core.isForced(d) ? ' <span class="badge must">0.5mm 이상</span>' : '')
-                + (aiWhy[d.id] ? '<span class="why">' + esc(aiWhy[d.id]) + '</span>' : '') + '</span></div>').join('') + allBtn('AI', k, aiList.length) : aiEmpty;
+                + (aiWhy[d.id] ? '<span class="why">' + esc(aiWhy[d.id]) + '</span>' : '') + '</span></div>').join('') + allBtn('AI', k, aiList.length) : (aiDigHtml ? '' : aiEmpty));
             const odd = (state.ai && state.ai.odd && state.ai.odd[k]) || [];
 
             const prevCell = !state.prev ? '<span class="muted">전회차 보고서(.hwp)를 읽으면 나옵니다</span>'
@@ -1618,7 +1706,9 @@
             const catKey = t.getAttribute('data-cat');
             const idx = parseInt(t.getAttribute('data-idx') || '-1', 10);
             if (act === 'customText') {
+                const old = state.custom[catKey][idx];
                 state.custom[catKey][idx] = t.value.trim();
+                if (state.digestOf[old]) { state.digestOf[t.value.trim()] = state.digestOf[old]; delete state.digestOf[old]; }
             } else if (act === 'customOff') {
                 state.custom[catKey].splice(idx, 1);
             } else {

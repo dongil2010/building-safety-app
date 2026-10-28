@@ -115,6 +115,12 @@
         return /외부/.test(String(floor || ''));
     }
 
+    // 「기둥-벽체」「보-조적벽체」「벽체-기둥」「기둥과 벽체」 같은 접합부 표기
+    function isMemberWallJoint(t) {
+        return /(기둥|보)\s*(?:[-–~·/]|와|과)\s*\S*벽/.test(t) ||
+            /벽체?\s*(?:[-–~·/]|와|과)\s*(기둥|보)(?![가-힣])/.test(t);
+    }
+
     /**
      * 조사내용 낱말로 8개 분류를 추정한다. 조사표에는 구조/비구조 표시만 있어서 나머지는
      * 낱말로 가른다. 틀릴 수 있으므로 화면에서 항목마다 고칠 수 있게 한다.
@@ -122,6 +128,8 @@
     function classify(d) {
         const t = String(d.content || '');
         const outside = isOutsideFloor(d.floor) || /옥상/.test(String(d.floor || ''));
+        // 기둥-벽체·보-벽체 접합부 균열·이격은 구조 체크와 상관없이 비구조체로 본다(사용자 규칙).
+        if (isMemberWallJoint(t) && /균열|이격/.test(t)) return 'nonStructure';
         if (/사면|옹벽|축대|석축|비탈/.test(t)) return 'aux';
         if (/간판|앵커|비가림|캐노피|볼트\s*누락|나사산|실외기|안테나/.test(t)) return 'attachment';
         if (/점검로|난간|환기구|덮개|포장|D\.A|신축이음|추락/.test(t)) return 'public';
@@ -396,6 +404,119 @@
                 count: g.items.length, floorCount: floors.length, floorTotal: total
             };
         }).sort(function (a, b) { return b.count - a.count; });
+    }
+
+    /** 「A동지상3층」「A동 지상3층」 → { dong: 'A동', floor: '지상3층' } */
+    function splitDong(floor) {
+        const f = floorText(floor);
+        const m = f.match(/^(.*?동)\s*((?:지하|지상|PIT|옥상|지붕|옥탑).*)$/);
+        return m ? { dong: m[1].trim(), floor: m[2].trim() } : { dong: '', floor: f };
+    }
+
+    /** 층 순서: 지하 깊은 층 → 지상 → 옥상·지붕 */
+    function floorRank(f) {
+        let m = f.match(/지하\s*(\d+)/);
+        if (m) return -Number(m[1]);
+        if (/PIT/i.test(f)) return -50;
+        m = f.match(/지상\s*(\d+)/);
+        if (m) return Number(m[1]);
+        return /옥상|지붕|옥탑/.test(f) ? 900 : 500;
+    }
+
+    function floorRange(floors) {
+        const list = floors.slice().sort(function (a, b) { return floorRank(a) - floorRank(b); });
+        if (list.length <= 1) return list[0] || '';
+        return list[0] + '~' + list[list.length - 1];
+    }
+
+    /** 층 순서로 늘어놓기: 동 → 지하 깊은 층 → 지상 → 옥상, 같은 층은 조사표 번호순 */
+    function sortByFloor(list) {
+        return (list || []).map(function (d, i) { const s = splitDong(d.floor); return { d: d, i: i, dong: s.dong, r: floorRank(s.floor), n: parseFloat(d.no) }; })
+            .sort(function (a, b) {
+                return (a.dong < b.dong ? -1 : (a.dong > b.dong ? 1 : 0)) || a.r - b.r
+                    || (isNaN(a.n) || isNaN(b.n) ? 0 : a.n - b.n) || a.i - b.i;
+            })
+            .map(function (x) { return x.d; });
+    }
+
+    /** 「기둥」「기둥 및 보」「기둥 및 보, 슬래브」 */
+    function joinMembers(list) {
+        return list.length >= 2 ? list[0] + ' 및 ' + list.slice(1).join(', ') : (list[0] || '');
+    }
+
+    const CONCRETE_DAMAGE_RE = /들뜸|박락|박리|층분리|철근\s*노출|철근\s*부식/;
+    /** 한 층에 이만큼 이상 모여 있어야 콘크리트 손상을 한 줄로 묶는다 */
+    const DAMAGE_DIGEST_MIN = 3;
+
+    /**
+     * 구조체 0.5mm 이상 균열이 MAX_ITEMS를 넘을 때(앰코 부평처럼 큰 균열이 수십 개) 낱개 대신 쓰는 묶음 문구.
+     *   「A동 지하1층~지상4층 상부 보 수직, U자형, 경사균열 발생 (0.5mm 이상 63개소, 관통균열 포함, 최대 균열폭:2.0mm)」
+     *   「A동 슬래브 균열 (0.5mm 이상 10개소, 최대 균열폭:1.0mm)」
+     *   「A동 지상5층 기둥 및 보, 슬래브 콘크리트 들뜸 및 박락, 철근노출」
+     * 개소 수와 최대폭은 0.5mm 이상 균열만 센다(2026-10-28 사용자 형식). 해당 없으면 빈 배열.
+     * ids는 층 순서(동 → 지하 깊은 층 → 지상 → 옥상, 같은 층은 번호순)로 늘어놓는다.
+     * @returns {Array<{key: string, text: string, ids: string[]}>}
+     */
+    function buildStructureDigest(defects) {
+        const bad = (defects || []).filter(function (d) { return d.category === 'structure' && !d.good; });
+        const forced = bad.filter(isForced);
+        if (forced.length <= MAX_ITEMS) return [];
+        const out = [];
+        const dongs = [];
+        bad.forEach(function (d) { const k = splitDong(d.floor).dong; if (dongs.indexOf(k) < 0) dongs.push(k); });
+        dongs.sort();
+        const pre = function (dong) { return dong ? dong + ' ' : ''; };
+        const ids = function (list) { return sortByFloor(list).map(function (d) { return d.id; }); };
+        // 최대폭은 「2.0mm」처럼 소수 한 자리는 남긴다
+        const maxW = function (list) { const w = Math.max.apply(null, list.map(function (d) { return d.width; })); return w % 1 === 0 ? w.toFixed(1) : fmtNum(w); };
+        dongs.forEach(function (dong) {
+            const inDong = function (d) { return splitDong(d.floor).dong === dong; };
+            const f = forced.filter(inDong);
+            const beams = f.filter(function (d) { return memberOf(d.content) === '보'; });
+            const others = f.filter(function (d) { return beams.indexOf(d) < 0; });
+            if (beams.length) {
+                const forms = [[/수직/, '수직'], [/U자/i, 'U자형'], [/경사/, '경사'], [/수평/, '수평']]
+                    .filter(function (r) { return beams.some(function (d) { return r[0].test(d.content); }); })
+                    .map(function (r) { return r[1]; });
+                const floors = [];
+                beams.forEach(function (d) { const fl = splitDong(d.floor).floor; if (floors.indexOf(fl) < 0) floors.push(fl); });
+                out.push({
+                    text: pre(dong) + floorRange(floors) + ' 상부 보 ' + (forms.length ? forms.join(', ') : '') + '균열 발생 (0.5mm 이상 '
+                        + beams.length + '개소' + (beams.some(function (d) { return /관통/.test(d.content); }) ? ', 관통균열 포함' : '')
+                        + ', 최대 균열폭:' + maxW(beams) + 'mm)',
+                    key: 'beam|' + dong,
+                    ids: ids(beams)
+                });
+            }
+            if (others.length) {
+                const members = [];
+                others.forEach(function (d) { const m = memberOf(d.content) || '부재'; if (members.indexOf(m) < 0) members.push(m); });
+                members.sort(function (a, b) { return (a === '슬래브' ? 0 : 1) - (b === '슬래브' ? 0 : 1); });
+                out.push({
+                    text: pre(dong) + joinMembers(members) + ' 균열 (0.5mm 이상 ' + others.length + '개소, 최대 균열폭:' + maxW(others) + 'mm)',
+                    key: 'crack|' + dong,
+                    ids: ids(others)
+                });
+            }
+            // 콘크리트 들뜸·박락·철근노출이 가장 많이 모인 층 하나
+            const dmg = bad.filter(function (d) { return inDong(d) && CONCRETE_DAMAGE_RE.test(d.content) && d.typeKey !== '내화피복 박락'; });
+            const byFloor = {};
+            dmg.forEach(function (d) { const fl = splitDong(d.floor).floor; (byFloor[fl] = byFloor[fl] || []).push(d); });
+            const top = Object.keys(byFloor).sort(function (a, b) { return byFloor[b].length - byFloor[a].length; })[0];
+            if (top && byFloor[top].length >= DAMAGE_DIGEST_MIN) {
+                const list = byFloor[top];
+                const members = ['기둥', '보', '슬래브', '벽체'].filter(function (m) {
+                    return list.some(function (d) { return memberOf(d.content) === m; });
+                });
+                const has = function (re) { return list.some(function (d) { return re.test(d.content); }); };
+                const conc = [[/들뜸|층분리/, '들뜸'], [/박락/, '박락'], [/박리/, '박리']]
+                    .filter(function (r) { return has(r[0]); }).map(function (r) { return r[1]; });
+                const steel = has(/철근\s*노출/) ? '철근노출' : (has(/철근\s*부식/) ? '철근부식' : '');
+                const what = (conc.length ? '콘크리트 ' + (conc.length > 1 ? conc.slice(0, -1).join(', ') + ' 및 ' + conc[conc.length - 1] : conc[0]) : '') + (conc.length && steel ? ', ' : '') + steel;
+                out.push({ text: pre(dong) + top + ' ' + joinMembers(members) + (members.length ? ' ' : '') + what, key: 'damage|' + dong, ids: ids(list) });
+            }
+        });
+        return out;
     }
 
     /**
@@ -699,6 +820,8 @@
         buildGroups: buildGroups,
         memberOf: memberOf,
         buildAggregates: buildAggregates,
+        buildStructureDigest: buildStructureDigest,
+        sortByFloor: sortByFloor,
         buildSummaryRows: buildSummaryRows,
         buildPartRows: buildPartRows,
         buildCauseRows: buildCauseRows,
