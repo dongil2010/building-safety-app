@@ -49646,9 +49646,16 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
             const key = `${currentBldgId}_${floorCode}`;
             let ndtItems = (state.ndtData ? (state.ndtData[key] || []) : []).filter((item) => !isCrackGaugeNdtItem(item));
             let displacementGroups = state.ndtDisplacementGroups ? (state.ndtDisplacementGroups[key] || []) : [];
+            // 균열게이지 위치도(2026-10-28): 화면 「균열모니터」 탭과 같게 — 예전 방식(균열 결함에 연결) 게이지는 그 결함 핀으로
+            let pinDefects = [];
 
             if (categoryFilter) {
-                if (categoryFilter === '기울기') {
+                if (categoryFilter === '균열모니터') {
+                    ndtItems = (state.ndtData ? (state.ndtData[key] || []) : []).filter(isCrackGaugeNdtItem);
+                    displacementGroups = [];
+                    const floorDefects = (state.defects && state.defects[key]) || [];
+                    pinDefects = filterMapPlacedDefects(floorDefects).filter(isLegacyCrackMonitorDefect);
+                } else if (categoryFilter === '기울기') {
                     ndtItems = ndtItems.filter(item => item.category === '기울기');
                     displacementGroups = [];
                 } else if (categoryFilter === '변위') {
@@ -49688,7 +49695,7 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
                     // 2026-10-19 비파괴 위치도 출력 범위가 정해진 층은 그 부분만 종이에 꽉 차게(없으면 아래 기본: 도면 전체)
                     const ndtCrop = getNdtPrintCrop(currentBldgId, floorCode, imgW, imgH);
                     if (ndtCrop) {
-                        return renderNdtPrintCropCanvas(imgObj, imgW, imgH, ndtCrop, ndtItems, displacementGroups, ndtDarken)
+                        return renderNdtPrintCropCanvas(imgObj, imgW, imgH, ndtCrop, ndtItems, displacementGroups, ndtDarken, pinDefects)
                             .toDataURL('image/png');
                     }
 
@@ -49712,6 +49719,7 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
                         ctx.translate(-imgW / 2, -imgH / 2);
 
                         drawFloorDrawingImage(ctx, imgObj, imgW, imgH, ndtDarken);
+                        pinDefects.forEach(d => drawPin(ctx, d));
                         ndtItems.forEach(item => drawNdtPin(ctx, item, ndtItems));
                         displacementGroups.forEach(g => drawNdtDisplacementGroup(ctx, g));
                     } else {
@@ -49723,6 +49731,7 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
                         ctx.scale(scale, scale);
 
                         drawFloorDrawingImage(ctx, imgObj, imgW, imgH, ndtDarken);
+                        pinDefects.forEach(d => drawPin(ctx, d));
                         ndtItems.forEach(item => drawNdtPin(ctx, item, ndtItems));
                         displacementGroups.forEach(g => drawNdtDisplacementGroup(ctx, g));
                     }
@@ -49765,7 +49774,7 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
     }
 
     /** 비파괴 위치도 — 출력 범위만 그린 그림(결함 위치도 renderFloorPrintCropCanvas와 같은 맞춤·회전, 범례 없음) */
-    function renderNdtPrintCropCanvas(imgObj, imgW, imgH, crop, ndtItems, displacementGroups, darken) {
+    function renderNdtPrintCropCanvas(imgObj, imgW, imgH, crop, ndtItems, displacementGroups, darken, pinDefects) {
         const fit = printCropApi().fitCrop(crop.w, crop.h, 1800, 2540);
         const canvas = document.createElement('canvas');
         canvas.width = fit.canvasW;
@@ -49787,6 +49796,7 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
         ctx.rect(crop.x, crop.y, crop.w, crop.h);
         ctx.clip();
         drawFloorDrawingImage(ctx, imgObj, imgW, imgH, darken);
+        (pinDefects || []).forEach(d => drawPin(ctx, d));
         (ndtItems || []).forEach(item => drawNdtPin(ctx, item, ndtItems));
         (displacementGroups || []).forEach(g => drawNdtDisplacementGroup(ctx, g));
         ctx.restore();
@@ -51723,6 +51733,7 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
             : [{ b: bldg, id: bldgId, label: getFloorLabel }];
         const items = [];
         const slots = [];
+        const mapFloors = []; // 균열게이지 위치도를 낼 층(동·층 순서)
         for (const owner of crackOwners) {
             // 비교사진은 IndexedDB·클라우드에 있다 — 한글에 넣기 전에 메모리로 채운다
             if (typeof ensureGaugePhotosLoaded === 'function') await ensureGaugePhotosLoaded(owner.id);
@@ -51730,6 +51741,8 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
             const one = collectHwpxCrackMonitorExportItems(owner.b, owner.id, crackFloorsData, owner.label);
             one.items.forEach((it) => items.push(it));
             one.slots.forEach((s) => slots.push(s));
+            const itemFloors = new Set(one.items.map((it) => it.floorCode));
+            crackFloorsData.forEach((row) => { if (itemFloors.has(row.floorCode)) mapFloors.push({ owner, floorCode: row.floorCode }); });
         }
         if (crackOwners.length > 1) slots.forEach((slot, idx) => { slot.no = idx + 1; slot.col = idx + 1; });
         if (!items.length || !slots.length) return;
@@ -51866,6 +51879,59 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
             }
         };
 
+        // 균열게이지 위치도(2026-10-28): 게이지가 있는 층마다 한 장. 표 틀은 이 문서에 이미 들어간
+        // 결함 위치도 표(그림 칸 + 캡션 칸)를 복제한다 — 정밀·정기·1·2종·3종 양식마다 스타일 번호가 달라도 맞는다.
+        const findLocationMapProto = () => Array.from(sec.children).find((p) => {
+            if (p.localName !== 'p') return false;
+            const tbl = p.getElementsByTagNameNS(HWPX_HP_NS, 'tbl')[0];
+            if (!tbl || tbl.getAttribute('rowCnt') !== '2' || !tbl.getElementsByTagNameNS(HWPX_HP_NS, 'pic').length) return false;
+            return Array.from(tbl.getElementsByTagNameNS(HWPX_HP_NS, 't'))
+                .some((t) => (t.textContent || '').indexOf(HWPX_FIG_MARK) === 0 && /상태조사위치도/.test(t.textContent));
+        });
+        const appendCrackGaugeLocationMaps = async () => {
+            if (!mapFloors.length) return;
+            const proto = findLocationMapProto();
+            if (!proto) {
+                console.warn('균열게이지 위치도: 복제할 결함 위치도 표가 없어 뺍니다(도면 미등록).');
+                return;
+            }
+            for (const { owner, floorCode } of mapFloors) {
+                const prevOverride = _hwpxRenderBldgOverride;
+                _hwpxRenderBldgOverride = owner.b;
+                let mapUrl = null;
+                try {
+                    mapUrl = await renderNdtFloorPlanCanvasDataUrlAsync(floorCode, '균열모니터');
+                } catch (e) {
+                    console.warn('균열게이지 위치도 렌더 실패:', floorCode, e);
+                } finally {
+                    _hwpxRenderBldgOverride = prevOverride;
+                }
+                if (!mapUrl) continue;
+                const para = proto.cloneNode(true);
+                para.setAttribute('pageBreak', '1');
+                reassignStampIds(para);
+                const tbl = para.getElementsByTagNameNS(HWPX_HP_NS, 'tbl')[0];
+                const tcs = Array.from(tbl.getElementsByTagNameNS(HWPX_HP_NS, 'tc'));
+                const pic = tcs[0] && tcs[0].getElementsByTagNameNS(HWPX_HP_NS, 'pic')[0];
+                if (!pic) continue;
+                const cellSz = tcs[0].getElementsByTagNameNS(HWPX_HP_NS, 'cellSz')[0];
+                const cellMargin = tcs[0].getElementsByTagNameNS(HWPX_HP_NS, 'cellMargin')[0];
+                const margin = (k) => (cellMargin ? parseInt(cellMargin.getAttribute(k) || '0', 10) : 0);
+                const maxW = cellSz ? parseInt(cellSz.getAttribute('width'), 10) - margin('left') - margin('right') : undefined;
+                const maxH = cellSz ? parseInt(cellSz.getAttribute('height'), 10) - margin('top') - margin('bottom') : undefined;
+                const { bytes, mime, ext } = await dataUrlToBytes(mapUrl);
+                const size = await loadImageSize(mapUrl);
+                counters.imgCounter += 1;
+                const imgId = `crackGaugeMap${counters.imgCounter}`;
+                zip.file(`BinData/${imgId}.${ext}`, bytes);
+                manifestAdds.push(`<opf:item id="${imgId}" href="BinData/${imgId}.${ext}" media-type="${mime}" isEmbeded="1"/>`);
+                setPicImage(pic, imgId, size.w, size.h, maxW, maxH);
+                const captionT = tcs[1] && tcs[1].getElementsByTagNameNS(HWPX_HP_NS, 't')[0];
+                if (captionT) captionT.textContent = `${HWPX_FIG_MARK}${owner.label(floorCode)} 균열게이지 위치도`;
+                sec.appendChild(para);
+            }
+        };
+
         // 문단 안의 맨 바깥 표만 (칸 속 표 제외)
         const topTablesOfPara = (para) => Array.from(para.getElementsByTagNameNS(HWPX_HP_NS, 'tbl')).filter((tbl) => {
             let n = tbl.parentNode;
@@ -51932,6 +51998,13 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
                     ensureTblTreatAsChar(currentTbl);
                 }
                 sec.appendChild(dataPara);
+            }
+
+            // 측정표 뒤, 비교사진 앞에 층별 균열게이지 위치도
+            try {
+                await appendCrackGaugeLocationMaps();
+            } catch (mapErr) {
+                console.error('균열게이지 위치도 삽입 실패(나머지는 유지):', mapErr);
             }
 
             // 요약 사진표는 모든 게이지에 같은 원본(사진 2장짜리)을 쓴다. 예전엔 [2,3,4]번 문단을 골랐는데
