@@ -64,19 +64,35 @@
     }
 
     /**
+     * 구역 레벨값의 단위. 새로 만든 구역은 levelUnit:'mm'(입력칸 라벨과 같음).
+     * levelUnit이 없는 옛 구역은 예전 계산대로 cm로 읽는다 — 저장된 숫자를 임의로 바꾸지 않는다.
+     * 현장 입력이 mm였던 옛 구역은 구역 편집에서 단위를 mm로 바꾸면 된다(숫자는 그대로).
+     */
+    function levelUnitOf(group) {
+        return (group && group.levelUnit === 'mm') ? 'mm' : 'cm';
+    }
+    /** 레벨 1단위가 몇 mm인가 */
+    function levelToMm(group) {
+        return levelUnitOf(group) === 'mm' ? 1 : 10;
+    }
+
+    /**
      * 구역(부동침하 또는 부재처짐) 하나의 변위량·등급.
      *
-     * group.points[].level은 cm로 입력받는다(입력칸 라벨은 "mm"로 잘못 적혀 있지만 현장
-     * 관행이 cm). 등급 함수는 mm를 받으므로 등급 계산 직전에만 ×10 한다. 돌려주는
-     * delta/absDelta는 화면 표시용이라 cm 그대로 둔다.
+     * group.points[].level의 단위는 levelUnitOf(group)(새 구역 mm, 옛 구역 cm). 등급 함수는
+     * mm를 받으므로 등급 계산 직전에 levelToMm 배를 한다. 돌려주는 delta/absDelta는 구역
+     * 단위 그대로(화면 표시용), deltaMm/absDeltaMm은 mm로 환산한 값(표·통계용), unit은 구역 단위.
+     * (2026-10-28: 입력칸 라벨은 mm인데 계산은 cm로 읽어 42.5m·35mm가 1/121로 나오던 10배 오류 정정)
      */
     function calcGroupDisplacement(group) {
         var points = (group && group.points) || [];
+        var unit = levelUnitOf(group);
+        var f = levelToMm(group);
         if (!points.length) {
-            return { delta: 0, absDelta: 0, tiltRatio: '-', grade: '', incomplete: true };
+            return { delta: 0, absDelta: 0, deltaMm: 0, absDeltaMm: 0, unit: unit, tiltRatio: '-', grade: '', incomplete: true };
         }
         if (!groupLevelsComplete(group) || !(Number(group.measureLength) > 0)) {
-            return { delta: 0, absDelta: 0, tiltRatio: '-', grade: '', incomplete: true };
+            return { delta: 0, absDelta: 0, deltaMm: 0, absDeltaMm: 0, unit: unit, tiltRatio: '-', grade: '', incomplete: true };
         }
 
         var isMemberDisp = group.category === '부재변위';
@@ -97,16 +113,16 @@
                 delta = lv(points[0]);
             }
             var absMember = Math.abs(delta);
-            var mcalc = calcMemberDispGrade(lengthMm, absMember * 10, group.hasMinorDamage);
-            return { delta: delta, absDelta: absMember, tiltRatio: mcalc.tiltRatio, grade: mcalc.grade, incomplete: false };
+            var mcalc = calcMemberDispGrade(lengthMm, absMember * f, group.hasMinorDamage);
+            return { delta: delta, absDelta: absMember, deltaMm: delta * f, absDeltaMm: absMember * f, unit: unit, tiltRatio: mcalc.tiltRatio, grade: mcalc.grade, incomplete: false };
         }
 
         var head = points[0];
         var tail = points[points.length - 1];
         delta = (head && tail) ? (lv(head) - lv(tail)) : 0;
         var absTilt = Math.abs(delta);
-        var tcalc = calcTiltGrade(lengthMm, absTilt * 10);
-        return { delta: delta, absDelta: absTilt, tiltRatio: tcalc.tiltRatio, grade: tcalc.grade, incomplete: false };
+        var tcalc = calcTiltGrade(lengthMm, absTilt * f);
+        return { delta: delta, absDelta: absTilt, deltaMm: delta * f, absDeltaMm: absTilt * f, unit: unit, tiltRatio: tcalc.tiltRatio, grade: tcalc.grade, incomplete: false };
     }
 
     /**
@@ -183,6 +199,8 @@
         calcTiltGrade: calcTiltGrade,
         calcMemberDispGrade: calcMemberDispGrade,
         calcGroupDisplacement: calcGroupDisplacement,
+        levelUnitOf: levelUnitOf,
+        levelToMm: levelToMm,
         sectionRatioGrade: sectionRatioGrade,
         gradeLetter: gradeLetter,
         parseFireproofDesignThickness: parseFireproofDesignThickness,

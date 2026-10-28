@@ -11847,7 +11847,9 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
         if (!strVal) return '';
         const digits = strVal.replace(/[^0-9.]/g, '');
         if (digits) {
-            const num = parseFloat(digits);
+            let num = parseFloat(digits);
+            // "42.5m"처럼 단위를 m로 적었으면 mm로 환산한다(mm는 그대로). 단위 없는 숫자는 mm로 본다.
+            if (!isNaN(num) && /\d\s*m(?![a-z])/i.test(strVal)) num = Math.round(num * 1000 * 1000) / 1000;
             if (!isNaN(num)) {
                 const prefix = /L\s*=/i.test(strVal) ? 'L' : 'H';
                 return `${prefix} = ${num.toLocaleString()}mm`;
@@ -13769,6 +13771,11 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
         return window.BSA.ndtGrade.calcGroupDisplacement(group);
     }
 
+    /** 구역 레벨값 단위: 'mm'(새 구역) 또는 'cm'(levelUnit 없는 옛 구역) */
+    function ndtDispLevelUnit(group) {
+        return window.BSA.ndtGrade.levelUnitOf(group);
+    }
+
     // ---- 측기 이동 보정(2026-10-12 재설계, js/core/ndt-disp-transfer.js) ----
     // 적은 레벨은 그대로 두고, 계산·그래프·보고서 값만 보정한다.
     function ndtDispTransferApi() { return window.BSA && window.BSA.ndtDispTransfer; }
@@ -13778,7 +13785,7 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
     }
     /** 표시: 적은 값이 먼저, 보정으로 달라졌으면 「→ 보정값」 */
     function formatNdtDispLevelText(group, idx, unit) {
-        const u = unit == null ? 'cm' : unit;
+        const u = unit == null ? ndtDispLevelUnit(group) : unit;
         const p = (group.points || [])[idx];
         const c = ndtDispCalcLevels(group)[idx];
         const raw = p && isNdtDispLevelFilled(p.level) ? Number(p.level) : null;
@@ -13812,9 +13819,12 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
         if (!calc || calc.incomplete) {
             return { delta: '-', deltaCm: '-', tiltRatio: '-', grade: '미입력' };
         }
+        // delta: mm 값(표 머리글 "(mm)"과 일치). deltaCm: 이름은 옛 그대로지만 구역 단위(mm/cm)를 붙인 값.
+        const unit = calc.unit || 'cm';
+        const deltaMm = (calc.deltaMm != null) ? calc.deltaMm : calc.delta * 10;
         return {
-            delta: calc.delta.toFixed(1),
-            deltaCm: `${calc.delta.toFixed(1)}cm`,
+            delta: deltaMm.toFixed(1),
+            deltaCm: `${calc.delta.toFixed(1)}${unit}`,
             tiltRatio: calc.tiltRatio || '-',
             grade: calc.grade || '-'
         };
@@ -13866,6 +13876,7 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
             groupNo: nextDisplacementGroupNo(cat),
             locationType: '보',
             measureLength: null,
+            levelUnit: 'mm',
             hasMinorDamage: false,
             color,
             boxX: imgX - 40,
@@ -15236,11 +15247,11 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
                 cols.push({ label: firstLabel, value: first ? formatNdtDispLevelText(group, 0) : '-' });
                 cols.push({ label: midLabel, value: mid ? formatNdtDispLevelText(group, midIdx) : '-' });
                 cols.push({ label: lastLabel, value: last ? formatNdtDispLevelText(group, points.length - 1) : '-' });
-                cols.push({ label: `처짐량총합\n((${firstLabel}+${lastLabel})/2-${midLabel})`, value: `${arrow}${deltaAbs.toFixed(1)}cm` });
+                cols.push({ label: `처짐량총합\n((${firstLabel}+${lastLabel})/2-${midLabel})`, value: `${arrow}${deltaAbs.toFixed(1)}${calc.unit || 'cm'}` });
             } else {
                 cols.push({ label: firstLabel, value: first ? formatNdtDispLevelText(group, 0) : '-' });
                 cols.push({ label: lastLabel, value: last ? formatNdtDispLevelText(group, points.length - 1) : '-' });
-                cols.push({ label: '변위량총합', value: `${arrow}${deltaAbs.toFixed(1)}cm` });
+                cols.push({ label: '변위량총합', value: `${arrow}${deltaAbs.toFixed(1)}${calc.unit || 'cm'}` });
             }
             cols.push({ label: `변위평가\n(L=${lengthMmText})`, value: calc.tiltRatio || '-' });
 
@@ -16747,7 +16758,7 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
         tbody.innerHTML = groups.map(group => {
             const calc = calcGroupDisplacement(group);
             const lenText = (Number(group.measureLength) > 0) ? group.measureLength : '—';
-            const deltaText = calc.incomplete ? '미입력' : calc.delta.toFixed(1);
+            const deltaText = calc.incomplete ? '미입력' : calc.deltaMm.toFixed(1);
             const ratioText = calc.incomplete ? '—' : calc.tiltRatio;
             const gradeHtml = calc.incomplete
                 ? '<span style="color:#a3a3a3; font-weight:700;">미입력</span>'
@@ -20014,6 +20025,11 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
             ensureNdtDispPointModalTransferUi(null, null);
         }
 
+        // 레벨 입력 단위 라벨: 기존 구역에 넣으면 그 구역 단위, 새 구역은 mm
+        const lvlGroup = existingGroup || continueGroup
+            || (tmpl ? getCurrentFloorDisplacementGroups(cat).find(g => g.id === tmpl.groupId) : null);
+        const lblLevel = document.getElementById('lblNdtDispLevel');
+        if (lblLevel) lblLevel.textContent = `📊 레벨값 (${lvlGroup ? ndtDispLevelUnit(lvlGroup) : 'mm'})`;
         refreshNdtDispLocationChips('ndtDispLocationType', 'ndtDispLocationChips');
         document.body.classList.add('ndt-modal-open');
         modal.style.display = 'flex';
@@ -20117,6 +20133,7 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
             groupNo: nextDisplacementGroupNo(cat),
             locationType,
             measureLength: resolvedLength,
+            levelUnit: 'mm',
             hasMinorDamage,
             color,
             boxX: coords.x - 40,
@@ -20414,6 +20431,24 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
         }
     }
 
+    /** 레벨 단위 선택 안내문·입력칸 placeholder를 선택한 단위에 맞춘다(저장된 숫자는 건드리지 않음) */
+    function refreshNdtDispEditLevelUnitUi(group) {
+        const sel = document.getElementById('ndtDispEditLevelUnit');
+        const unit = (sel && sel.value === 'mm') ? 'mm' : 'cm';
+        const hint = document.getElementById('ndtDispEditLevelUnitHint');
+        if (hint) {
+            const legacy = group && group.levelUnit !== 'mm' && group.levelUnit !== 'cm';
+            hint.textContent = (unit === 'mm'
+                ? '레벨을 mm로 읽습니다. 예) 35 → 35mm.'
+                : '레벨을 cm로 읽습니다. 예) 3.5 → 35mm.')
+                + ' 단위를 바꿔도 적은 숫자는 그대로이고 읽는 단위만 바뀝니다.'
+                + (legacy ? ' (예전에 만든 구역이라 cm로 계산 중입니다. 현장에서 mm로 적었다면 mm로 바꾸세요.)' : '');
+        }
+        document.querySelectorAll('#ndtDispEditPointList .ndt-disp-edit-level-input').forEach((inp) => {
+            inp.placeholder = `레벨(${unit})`;
+        });
+    }
+
     function openNdtDisplacementGroupEditModal(group) {
         if (ndtDispTransferApi() && ndtDispTransferApi().migrateLegacyGroup(group)) {
             touchNdtDispGroup(group);
@@ -20432,6 +20467,9 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
         const isMemberDisp = group.category === '부재변위';
         if (damageRow) damageRow.style.display = isMemberDisp ? '' : 'none';
         if (damageEl) damageEl.checked = !!group.hasMinorDamage;
+        const unitSel = document.getElementById('ndtDispEditLevelUnit');
+        if (unitSel) unitSel.value = ndtDispLevelUnit(group);
+        refreshNdtDispEditLevelUnitUi(group);
         const hintEl = document.getElementById('ndtDispEditPointListHint');
         if (hintEl) {
             hintEl.textContent = '마킹한 지점 레벨을 입력·수정하세요. 측기 이동 시 해당 지점의 「이동 보정」에서 이전값·이후값만 넣으면 됩니다.';
@@ -20497,7 +20535,7 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
             <div class="option-manager-item ndt-disp-edit-point-row" data-point-id="${p.id}">
                 <span class="ndt-disp-edit-point-label">${formatNdtDisplacementPointLabel(idx + 1)}${role}</span>
                 <input type="number" class="form-control ndt-disp-edit-level-input" data-point-id="${p.id}"
-                    step="0.1" placeholder="레벨" value="${val}" inputmode="decimal" aria-label="${formatNdtDisplacementPointLabel(idx + 1)} 레벨">
+                    step="0.1" placeholder="레벨(${ndtDispLevelUnit(group)})" value="${val}" inputmode="decimal" aria-label="${formatNdtDisplacementPointLabel(idx + 1)} 레벨(${ndtDispLevelUnit(group)})">
                 ${calcHint}
                 <button type="button" class="btn ${hasX ? 'btn-primary' : 'btn-outline'} ndt-disp-mark-station-btn" title="이 지점에서 측기 이동 보정(이전값·이후값)"
                     data-group-id="${group.id}" data-point-id="${p.id}" style="font-size:0.7rem;padding:0.2rem 0.35rem;">이동 보정</button>
@@ -20614,6 +20652,15 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
         const btnClose = document.getElementById('btnCloseNdtDisplacementModal');
         if (btnClose) btnClose.addEventListener('click', closeNdtDisplacementModal);
 
+        const unitSelEdit = document.getElementById('ndtDispEditLevelUnit');
+        if (unitSelEdit) {
+            unitSelEdit.addEventListener('change', () => {
+                const gid = document.getElementById('ndtDispEditGroupId').value;
+                const g = (state.ndtDisplacementGroups[`${state.currentBuildingId}_${state.currentFloor}`] || []).find(x => x.id === gid);
+                refreshNdtDispEditLevelUnitUi(g);
+            });
+        }
+
         const btnSaveGroupEdit = document.getElementById('btnSaveNdtDispGroupEdit');
         if (btnSaveGroupEdit) {
             btnSaveGroupEdit.addEventListener('click', () => {
@@ -20649,6 +20696,8 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
                 }
                 group.locationType = document.getElementById('ndtDispEditLocationType').value || '보';
                 group.measureLength = len;
+                const unitSelSave = document.getElementById('ndtDispEditLevelUnit');
+                if (unitSelSave) group.levelUnit = unitSelSave.value === 'mm' ? 'mm' : 'cm';
                 const colorVal = document.getElementById('ndtDispEditColor')?.value;
                 if (colorVal) group.color = colorVal;
                 if (group.category === '부재변위') {
