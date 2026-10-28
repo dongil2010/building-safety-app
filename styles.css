@@ -17881,3 +17881,53 @@ html:not(.layout-tablet) #tab-ndt.ndt-split-on .ndt-split-bar {
 .stats-bin-popup-title{font-weight:600;margin-bottom:6px;color:#0f766e}
 .stats-bin-popup-list{display:flex;flex-wrap:wrap;gap:4px 6px}
 .stats-bin-popup-list span{background:#f1f5f9;border-radius:4px;padding:1px 6px;white-space:nowrap}
+
+/* ==== 목록창 가림 방지 + 태블릿 하단 툴바 한 줄 (20261027) ====
+   1) 결함 수정창(바닥 시트)·올려진 하단 툴바가 좌측 목록창 하단을 덮지 않도록, 가려지는 높이만큼
+      목록창 아래 여백을 준다. 높이는 app.js(syncDefectListObstruction)가 --bsa-list-obstruct 로 넣고
+      html.bsa-list-obstructed 를 켠다. 창을 닫으면 둘 다 사라져 원래 크기로 돌아간다.
+      (예전 padding-bottom: 60dvh / 56dvh 규칙은 이후의 `padding: … !important` 일괄 지정에 덮여 죽어 있었음 →
+       더 강한 선택자 + !important 로 마지막에 한 번 더 지정)
+   2) 태블릿 하단 툴바는 6칸 고정 그리드라 버튼이 7개 이상이면 두 줄로 꺾였다 → 보이는 버튼 수만큼 한 줄 균등 분할. */
+html.bsa-list-obstructed:not(.layout-desktop) body.defect-modal-open #tab-map .inspect-sidebar-left {
+    padding-bottom: var(--bsa-list-obstruct) !important;
+    box-sizing: border-box;
+}
+@media (max-width: 768px) and (orientation: portrait) {
+    /* 태블릿(세로 768 이하)은 시트가 56dvh 이므로 툴바도 그 위에 붙인다 */
+    html.layout-tablet body.defect-modal-open #tab-map #mobileMapDock.mobile-canvas-dock {
+        bottom: calc(56dvh + 0.22rem) !important;
+    }
+}
+/* 태블릿 세로(769px~): 결함창이 도면 오른쪽 위 플로팅 창이라 툴바를 시트 높이로 올릴 필요가 없다 → 도면 아래에 그대로 */
+@media (orientation: portrait) and (min-width: 769px) {
+    html.layout-tablet body.defect-modal-open #tab-map #mobileMapDock.mobile-canvas-dock {
+        position: absolute !important;
+        bottom: max(0.14rem, env(safe-area-inset-bottom, 0px)) !important;
+    }
+}
+/* 태블릿 하단 툴바: 한 줄 */
+html.layout-tablet #tab-map #mobileMapFabBar.mobile-map-fab,
+html.layout-tablet #tab-map .mobile-canvas-dock #mobileMapFabBar.mobile-map-fab,
+html.layout-tablet body.defect-modal-open #tab-map #mobileMapFabBar.mobile-map-fab,
+html.layout-tablet body.defect-modal-open #tab-map #mobileMapFabBar.has-add-marking,
+html.layout-tablet body.defect-modal-open #tab-map #mobileMapFabBar.has-add-marking.has-assign-no {
+    grid-template-columns: none !important;
+    grid-template-rows: none !important;
+    grid-auto-flow: column !important;
+    grid-auto-columns: minmax(0, 1fr) !important;
+}
+html.layout-tablet #tab-map #mobileMapFabBar .mobile-fab-btn span {
+    overflow: hidden;
+    max-width: 100%;
+    text-overflow: ellipsis;
+}
+html.layout-tablet #tab-map #mobileMapFabBar .mobile-fab-btn {
+    padding-left: 0.06rem !important;
+    padding-right: 0.06rem !important;
+}
+@media (max-width: 900px) {
+    html.layout-tablet #tab-map #mobileMapFabBar .mobile-fab-btn {
+        font-size: 0.54rem !important;
+    }
+}

@@ -38052,6 +38052,86 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
         overlay.style.height = '';
     }
 
+    /**
+     * 결함 수정창이 열려 있을 때 좌측 목록창 하단이 수정창(바닥 시트)·올려진 하단 툴바에 가려지지 않도록
+     * 가려지는 높이만큼 목록창 아래 여백(--bsa-list-obstruct)을 잡아 목록창이 줄어들게 한다.
+     * 창을 닫으면 변수를 지워 원래 크기로 돌아간다. (styles.css: body.defect-modal-open … .inspect-sidebar-left)
+     */
+    function computeDefectListObstruction() {
+        const side = document.querySelector('#tab-map .inspect-sidebar-left');
+        if (!side || !document.body.classList.contains('defect-modal-open')) return 0;
+        const sr = side.getBoundingClientRect();
+        if (sr.width < 8 || sr.height < 8) return 0;
+        const candidates = [
+            document.querySelector('#defectModal.open .defect-drawer-card'),
+            document.getElementById('mobileMapDock')
+        ];
+        let need = 0;
+        candidates.forEach((el) => {
+            if (!el) return;
+            const cs = window.getComputedStyle(el);
+            if (cs.display === 'none' || cs.visibility === 'hidden') return;
+            const r = el.getBoundingClientRect();
+            if (r.width < 8 || r.height < 8) return;
+            if (r.right <= sr.left + 1 || r.left >= sr.right - 1) return; // 목록창과 가로로 겹치지 않음(우측 서랍 등)
+            if (r.bottom <= sr.top || r.top >= sr.bottom) return;
+            need = Math.max(need, sr.bottom - Math.max(r.top, sr.top));
+        });
+        return Math.max(0, Math.round(need));
+    }
+
+    let defectListObstructTimers = [];
+    function syncDefectListObstruction() {
+        const root = document.documentElement;
+        const px = computeDefectListObstruction();
+        if (px > 0) {
+            root.style.setProperty('--bsa-list-obstruct', `${px}px`);
+            root.classList.add('bsa-list-obstructed');
+        } else {
+            root.style.removeProperty('--bsa-list-obstruct');
+            root.classList.remove('bsa-list-obstructed');
+        }
+    }
+    function scheduleDefectListObstructionSync() {
+        defectListObstructTimers.forEach((t) => window.clearTimeout(t));
+        defectListObstructTimers = [];
+        syncDefectListObstruction();
+        // 시트가 올라오는 전환(0.28s)이 끝난 뒤와 툴바 재배치 뒤에 한 번 더 맞춘다
+        [120, 360, 700].forEach((ms) => {
+            defectListObstructTimers.push(window.setTimeout(syncDefectListObstruction, ms));
+        });
+    }
+    function initDefectListObstructionSync() {
+        if (window.__bsaDefectListObstructInit || !document.body) return;
+        window.__bsaDefectListObstructInit = true;
+        let wasOpen = document.body.classList.contains('defect-modal-open');
+        if (typeof MutationObserver === 'function') {
+            new MutationObserver(() => {
+                const open = document.body.classList.contains('defect-modal-open');
+                if (open === wasOpen) return;
+                wasOpen = open;
+                scheduleDefectListObstructionSync();
+            }).observe(document.body, { attributes: true, attributeFilter: ['class'] });
+        }
+        window.addEventListener('resize', () => {
+            if (document.body.classList.contains('defect-modal-open')) scheduleDefectListObstructionSync();
+        });
+        window.addEventListener('orientationchange', () => {
+            if (document.body.classList.contains('defect-modal-open')) scheduleDefectListObstructionSync();
+        });
+        if (typeof ResizeObserver === 'function') {
+            const ro = new ResizeObserver(() => {
+                if (document.body.classList.contains('defect-modal-open')) syncDefectListObstruction();
+            });
+            ['mobileMapDock', 'defectModal'].forEach((id) => {
+                const el = document.getElementById(id);
+                if (el) ro.observe(el);
+            });
+        }
+    }
+    if (document.readyState === 'loading') document.addEventListener('DOMContentLoaded', initDefectListObstructionSync);
+    else initDefectListObstructionSync();
+
     function isDefectBulkEditMode() {
         return Array.isArray(window._defectBulkEditIds) && window._defectBulkEditIds.length > 1;
     }
