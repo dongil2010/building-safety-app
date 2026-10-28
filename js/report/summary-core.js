@@ -130,11 +130,19 @@
      * 낱말로 가른다. 틀릴 수 있으므로 화면에서 항목마다 고칠 수 있게 한다.
      */
     function classify(d) {
+        const c = classifyBase(d);
+        // 부대시설 층(담장·옹벽 등 건물 밖 시설)의 조적벽체 등은 비구조체가 아니라 부대시설로 본다(2026-10-28 사용자)
+        return c === 'nonStructure' && /부대/.test(String(d.floor || '')) ? 'aux' : c;
+    }
+
+    function classifyBase(d) {
         const t = String(d.content || '');
         const outside = isOutsideFloor(d.floor) || /옥상/.test(String(d.floor || ''));
         // 기둥-벽체·보-벽체 접합부 균열·이격은 구조 체크와 상관없이 비구조체로 본다(사용자 규칙).
         if (isMemberWallJoint(t) && /균열|이격/.test(t)) return 'nonStructure';
         if (/사면|옹벽|축대|석축|비탈/.test(t)) return 'aux';
+        // 담장 균열, 철재 담장·울타리 부식 등도 부대시설(2026-10-28 사용자)
+        if (/담장|담벼락|울타리|펜스|휀스/.test(t)) return 'aux';
         if (/간판|앵커|비가림|캐노피|볼트\s*누락|나사산|실외기|안테나/.test(t)) return 'attachment';
         if (/점검로|난간|환기구|덮개|포장|D\.A|신축이음|추락/.test(t)) return 'public';
         if (/외벽|패널|실링|파라펫/.test(t)) return 'exterior';

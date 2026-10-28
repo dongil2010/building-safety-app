@@ -287,6 +287,16 @@ const stB = api.buildDefects([{ floorLabel: '지붕층', rows: [
     row(4, '슬래브 균열', '0.1/1.0', true), row(5, '슬래브 균열 및 백태', '0.2/1.0', true)] }]);
 stB.slice(0, 3).forEach((d) => assert.strictEqual(alt.importanceOf(d).score, 88, d.content));
 assert.ok(/접합부/.test(alt.importanceOf(stB[1]).reason));
+// 부대시설 층의 비구조 조적벽체, 담장·울타리 결함은 부대시설로
+const auxB = api.buildDefects([{ floorLabel: '부대시설', rows: [row(1, '조적벽체 균열', '0.3/1.0', false), row(2, '포장 균열', '-', false)] },
+    { floorLabel: '외부', rows: [row(1, '담장 균열', '0.3/1.0', false), row(2, '철재담장 부식', '-', false), row(3, '울타리 녹 발생', '-', true), row(4, '조적벽체 균열', '0.2/1', false)] }]);
+assert.deepStrictEqual(auxB.map((d) => d.category), ['aux', 'public', 'aux', 'aux', 'aux', 'nonStructure']);
+// 비구조체 조적 쌓기 불량(사춤 불량 포함)은 상위권(상)
+const msB = api.buildDefects([{ floorLabel: '지하1층', rows: [
+    row(1, '조적벽체 보 하부 사춤 불량', '-', false), row(2, '조적 쌓기 불량', '-', false), row(3, '조적벽체 균열', '0.2/1.0', false)] }]);
+assert.strictEqual(alt.importanceOf(msB[0]).score, 70);
+assert.strictEqual(alt.importanceOf(msB[1]).grade, '상');
+assert.ok(alt.importanceOf(msB[2]).score < 70);
 assert.deepStrictEqual(alt.pickDefaults(stB, 4).structure.slice(0, 3), stB.slice(0, 3).map((d) => d.id), '같은 유형 두 건 제한 없이 먼저');
 
 // A안은 B안 추가 뒤에도 그대로다(묶는 기준을 주지 않으면 유형으로만 묶는다)
