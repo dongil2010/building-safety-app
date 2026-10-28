@@ -38,16 +38,18 @@ const cases = {
 };
 Object.keys(cases).forEach((c) => assert.strictEqual(ctx.p(c), cases[c], `${c} → ${cases[c]} (실제 ${ctx.p(c)})`));
 
-// 해당 없음 — 이름 그대로(임의 접두사를 만들지 않는다)
-['지하주차장', '지하 1층 주차장', '반지하', '필로티', '기계실', '중2층', '루프', 'PITCH', 'IMG_9'].forEach((c) => {
+// 지하·피트·그리드 규칙에 해당 없음 — 지하(B1) 규칙으로는 안 잡힌다(초성 규칙은 test-grade3-floor-prefix-odd.js).
+// 초성이 R·P·G·O·B 와 겹치는 이름은 이름 그대로 남는다.
+['반지하', '필로티', '기계실', '루프', 'PITCH'].forEach((c) => {
     assert.strictEqual(ctx.p(c), c, `${c} 는 그대로`);
 });
+['지하주차장', '지하 1층 주차장'].forEach((c) => assert.ok(!/^B/.test(ctx.p(c)), `${c} 는 지하(B) 접두사가 아니다`));
 // 등록된 이름(label)으로 알아보기: 코드는 임의 문자열이어도 이름이 피트층·그리드 아이언·부대시설·지하층이면 맞춘다
 assert.strictEqual(ctx.p('X1'), 'P');
 assert.strictEqual(ctx.p('X2'), 'G');
 assert.strictEqual(ctx.p('X3'), 'O');
 assert.strictEqual(ctx.p('X4'), 'B1');
-assert.strictEqual(ctx.p('X5'), 'X5', '지하 주차장 이름은 해당 없음');
+assert.ok(!/^B/.test(ctx.p('X5')), '지하 주차장 이름은 지하(B) 규칙이 아니다');
 // 코드가 정해져 있으면 이름보다 코드가 우선(2F 를 「지하층」으로 이름만 바꿔도 번호는 2)
 labels['2F'] = '지하층';
 assert.strictEqual(ctx.p('2F'), '2');

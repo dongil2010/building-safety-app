@@ -33829,25 +33829,38 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
     const defectCategorySelect = document.getElementById('defectCategory');
     if (defectCategorySelect) {
         defectCategorySelect.addEventListener('change', (e) => {
-            // 구조 분류를 바꾸면 부재·종류는 새 분류 목록만 쓰도록 초기화
-            // (미장균열 → 비구조체 자동 전환 시에는 종류·부재를 유지)
+            // 구조 분류(구조체·비구조체·마감재)를 바꿔도 이미 입력한 부재 명칭·결함 종류는 지우지 않는다(2026-10-28).
+            // 목록(칩)만 새 분류 기준으로 다시 만들고, 새 목록에 없는 값은 직접 입력한 값처럼 그대로 남긴다.
+            // (예전엔 부재·종류 입력을 비워서 종류가 없으니 폭·길이 칸까지 숨겨져 「치수가 초기화」된 것처럼 보였다)
+            // 미장균열 → 비구조체 자동 전환은 같은 값을 명시적으로 넘기는 경로(preserve 플래그)라 그대로 둔다.
             const cat = e.target.value;
             const preserveType = window._preserveDefectTypeOnCategoryChange;
             const preserveComp = window._preserveDefectComponentOnCategoryChange;
             window._preserveDefectTypeOnCategoryChange = null;
             window._preserveDefectComponentOnCategoryChange = null;
-            const compInput = document.getElementById('defectComponentInput');
-            const typeInput = document.getElementById('defectTypeInput');
             if (preserveType) {
                 populateDefectComponentDropdown(cat, preserveComp || '');
                 updateDefectTypeDropdown(cat, preserveType);
             } else {
-                if (compInput) compInput.value = '';
-                if (typeInput) typeInput.value = '';
-                populateDefectComponentDropdown(cat, '');
-                updateDefectTypeDropdown(cat, '');
+                const compSel = document.getElementById('defectComponent');
+                const compInp = document.getElementById('defectComponentInput');
+                const typeSel = document.getElementById('defectType');
+                const typeInp = document.getElementById('defectTypeInput');
+                const keepComp = getDefectComboValue(compSel, compInp) || '';
+                const keepType = getDefectComboValue(typeSel, typeInp) || '';
+                const causesBefore = getSelectedCausesFromUi();
+                populateDefectComponentDropdown(cat, keepComp);
+                updateDefectTypeDropdown(cat, keepType);
+                // 종류가 그대로니 직접 고른 발생 원인도 그대로(종류가 바뀌면 원인 목록이 달라지므로 같은 종류일 때만)
+                if (keepType && causesBefore.length && hasActionableDefectType(keepType)) {
+                    updateDefectCauseDropdown(keepType, joinCauseList(causesBefore));
+                }
             }
             toggleDefectSizeInputMode();
+            // 미장 결함은 구조체로 저장되지 않는다(저장 시 비구조체로 바뀜) → 구조체를 눌렀는데 미장 종류가 남아 있으면 바로 비구조체로 되돌리고 알린다
+            if (cat === '구조체' && typeof maybeReclassifyPlasterCrackToNonStructural === 'function') {
+                maybeReclassifyPlasterCrackToNonStructural();
+            }
             if (typeof scheduleDefectAutoApply === 'function') scheduleDefectAutoApply();
             refreshDefectQuickPickBar();
         });
@@ -45564,6 +45577,33 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
         try { nameLabel = (typeof window.getFloorLabelFromCode === 'function') ? String(window.getFloorLabelFromCode(raw) || '') : ''; } catch (_e) { nameLabel = ''; }
         const byNameLabel = nameLabel && nameLabel !== raw.trim() ? namedPrefix(nameLabel) : '';
         if (byNameLabel) return byNameLabel;
+        // 2026-10-28 어떤 규칙에도 안 걸린 특이한 층(필로티·중2층·직접 입력한 이름 …)은 층 이름 첫 글자의 초성(로마자)으로.
+        //   ㄱG ㄴN ㄷD ㄹR ㅁM ㅂB ㅅS ㅈJ ㅊC ㅋK ㅌT ㅍP ㅎH (쌍자음은 평자음), ㅇ은 건너뛰고 다음 글자, 영문은 첫 글자 대문자.
+        //   이름에 숫자가 있으면 초성+숫자(중2층 → J2). 지하주차장 → J.
+        //   이미 정해진 접두사(숫자층·B·R·RR·RF·PH·PH{N}·PHR·P·G·O)와 겹치는 글자(R·P·G·O·B)는 접두사를 만들지 않고
+        //   이름 그대로 둔다(예: 필로티·기계실·반지하 — 어떻게 구분할지 정해지기 전까지 보류). 숫자로 시작하는 이름(3층)과
+        //   지상N층도 건드리지 않는다. 한 건물에 첫 글자가 같은 특이한 층이 둘 이상이면 접두사가 겹칠 수 있다.
+        const oddInitialPrefix = (text) => {
+            const t = String(text || '').replace(/\s*\([^)]*\)\s*$/, '').trim();
+            if (!t || /^(?:지상\s*)?\d+\s*(?:층|F)?$/i.test(t)) return '';
+            const CHO = ['G', 'G', 'N', 'D', 'D', 'R', 'M', 'B', 'B', 'S', 'S', '', 'J', 'J', 'C', 'K', 'T', 'P', 'H'];
+            let letter = '';
+            for (const ch of t) {
+                const cc = ch.charCodeAt(0);
+                if (cc >= 0xAC00 && cc <= 0xD7A3) {
+                    letter = CHO[Math.floor((cc - 0xAC00) / 588)];
+                    if (letter) break;
+                    continue;
+                }
+                if (/[A-Za-z]/.test(ch)) { letter = ch.toUpperCase(); break; }
+                if (/[0-9]/.test(ch)) return '';
+            }
+            if (!letter || 'RPGOB'.indexOf(letter) >= 0) return '';
+            const dm = t.match(/[0-9]+/);
+            return dm ? `${letter}${parseInt(dm[0], 10)}` : letter;
+        };
+        const byOdd = oddInitialPrefix(nameLabel || raw);
+        if (byOdd) return byOdd;
         return floorCode || '';
     }
 
