@@ -279,6 +279,15 @@ hiB.forEach((d) => {
     assert.ok(s >= 80 && s < 85, d.content + ' ' + s);
 });
 assert.ok(/\[중요도 상\]/.test(alt.buildOpinion('structure', gB, {})));
+// 철골 보 변형·접합부 변형은 상위권(88), 0.5mm 이상 균열(85)보다 위·기둥(95)보다 아래
+assert.strictEqual(api.typeKeyOf('기둥 단면 감소'), '단면결손', '띄어 써도 단면결손');
+assert.strictEqual(api.typeKeyOf('철골보 처짐'), '변형');
+const stB = api.buildDefects([{ floorLabel: '지붕층', rows: [
+    row(1, '철골보 변형', '-', true), row(2, '철골 보 접합부 변형', '-', true), row(3, '철골보 처짐', '-', true),
+    row(4, '슬래브 균열', '0.1/1.0', true), row(5, '슬래브 균열 및 백태', '0.2/1.0', true)] }]);
+stB.slice(0, 3).forEach((d) => assert.strictEqual(alt.importanceOf(d).score, 88, d.content));
+assert.ok(/접합부/.test(alt.importanceOf(stB[1]).reason));
+assert.deepStrictEqual(alt.pickDefaults(stB, 4).structure.slice(0, 3), stB.slice(0, 3).map((d) => d.id), '같은 유형 두 건 제한 없이 먼저');
 
 // A안은 B안 추가 뒤에도 그대로다(묶는 기준을 주지 않으면 유형으로만 묶는다)
 const gA = api.buildGroups(dB, []);

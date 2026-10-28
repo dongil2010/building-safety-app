@@ -27,6 +27,11 @@
         return d.typeKey !== '내화피복 박락' && /들뜸|박락|박리/.test(d.content);
     };
 
+    /** 철골 보·접합부 변형: B안에서 상위권(2026-10-28 사용자 규칙) */
+    const isSteelDeform = function (d) {
+        return !d.good && d.typeKey === '변형' && (/철골|형강|접합부|브레이스|트러스|볼트|이음/.test(d.content) || isBeam(d));
+    };
+
     /**
      * 중요도. grade: '상'(안전·내력에 직접 영향, 우선 조치) | '중'(내구성 저하, 계획 보수) | '하'(미관·경미)
      * @returns {{grade: string, score: number, reason: string}}
@@ -40,6 +45,11 @@
             return { grade: s >= 68 ? '상' : (s >= 40 ? '중' : '하'), score: s, reason: why };
         };
         if (d.good) return { grade: '-', score: 0, reason: '' };
+        if (isSteelDeform(d)) {
+            return R(88, /접합부|볼트|이음/.test(d.content)
+                ? '철골 접합부 변형은 힘을 전달하는 부위의 결함이라 내력에 바로 영향을 준다.'
+                : '철골 보 변형은 과하중·좌굴 등 내력 문제일 수 있어 우선 확인한다.');
+        }
         const t = d.typeKey;
         const w = d.widthSuspicious ? null : d.width;
         const cat = d.category;
@@ -58,6 +68,7 @@
             if (t === '균열' && core.memberOf(d.content) === '벽체' && !(w != null && w >= 0.5)) {
                 return R(80, 'RC벽체는 하중을 받는 구조부재라 균열은 폭이 작아도 원인과 진행 여부를 확인한다.');
             }
+            if (t === '변형') return R(76, '부재 변형이다. 변형량과 진행 여부를 확인해야 한다.');
             if (t === '배부름') return R(78, '부재 변형이다. 시공 오차인지 진행성 변형인지 구분이 필요하다.');
             if (t === '철근노출') {
                 return R(isBeam(d) || isColumn(d) ? 80 : 74, '철근이 드러나 있어 부식이 진행되면 단면 손실과 피복 박락으로 이어진다.');
@@ -118,6 +129,10 @@
                 : '부식·충격 등에 의한 부재 단면 감소로 추정(원인 확인 필요)';
         }
         if (t === '배부름') return '타설 시 거푸집 변형에 의한 시공 오차로 추정';
+        if (t === '변형') {
+            return /접합부|볼트|이음/.test(c) ? '접합부 볼트 체결 불량 또는 과하중에 의한 변형으로 추정(원인 확인 필요)'
+                : '과하중·좌굴 또는 충격에 의한 부재 변형으로 추정(원인 확인 필요)';
+        }
         if (t === '철근노출') {
             if (/천공|배관|파취/.test(c) || /후속|파취|인위/.test(d.cause)) return '후속 공정(설비 배관 등)에서 콘크리트를 파취하여 철근이 노출';
             if (/재료분리|공극/.test(c)) return '타설 시 다짐 부족으로 생긴 공극(재료분리)에 철근이 노출';
@@ -194,6 +209,7 @@
         const w = d.widthSuspicious ? null : d.width;
         if (t === '단면결손') return '구조검토로 잔존 단면의 내력을 확인한 뒤 덧판 보강 등 보강 조치(보수가 아닌 보강 대상)';
         if (t === '배부름') return '변형량을 계측해 기록하고 추적 관찰, 변화가 있으면 구조검토';
+        if (t === '변형') return '변형량 계측 → 구조검토로 내력 확인 → 부재 교정·보강, 접합부는 볼트 체결 상태 점검·재체결';
         if (t === '철근노출' || t === '재료분리') return '들뜬 콘크리트 제거 → 철근 녹 제거·방청 → 폴리머 시멘트 모르타르로 단면복구';
         if (t === '누수') return '상부 방수층 보수로 수분 유입을 먼저 차단 → 균열부 발포 우레탄 주입 → 백태 제거';
         if (t === '백태') return '수분 유입 경로 차단 후 균열부 습식 에폭시 주입, 백태 제거';
@@ -281,8 +297,8 @@
             const perType = {};
             const seenText = {};
             picked.forEach(function (d) { perType[d.typeKey] = (perType[d.typeKey] || 0) + 1; seenText[itemText(d)] = true; });
-            // 기둥 균열·들뜸·박락은 유형별 두 건 제한 없이 먼저 넣는다(같은 문구 중복만 뺀다).
-            bad.filter(isColumnPriority).forEach(function (d) {
+            // 기둥 균열·들뜸·박락, 철골 보·접합부 변형은 유형별 두 건 제한 없이 먼저 넣는다(같은 문구 중복만 뺀다).
+            bad.filter(function (d) { return isColumnPriority(d) || isSteelDeform(d); }).forEach(function (d) {
                 if (picked.length >= limit || picked.indexOf(d) >= 0 || seenText[itemText(d)]) return;
                 perType[d.typeKey] = (perType[d.typeKey] || 0) + 1;
                 seenText[itemText(d)] = true;

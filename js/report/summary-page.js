@@ -787,13 +787,20 @@
         $('blueWrap').classList.toggle('hidden', !state.prev);
         $('btnAlignPrev').classList.toggle('hidden', !state.prev);
         $('markBlue').checked = state.markBlue;
+        // 최종안의 ②조치 필요사항·⑥보수방안은 AI가 쓴다(AI 답이 있을 때). 머리글에 (AI)로 표시한다.
+        const nAi = groups.filter((g) => g.repairByAi).length;
+        const aiMark = nAi && nAi === groups.length ? '(AI)' : (nAi ? '(일부 AI)' : '');
+        const aiRepNote = !isFinal() ? ''
+            : '<p class="muted">' + (!nAi ? '보수방안은 지금 우리 보고서 문구입니다. 「AI안 만들기」나 「최종안 의견 AI로 쓰기」를 누르면 AI가 줄마다 보수방안을 씁니다.'
+                : (nAi < groups.length ? 'AI가 쓴 줄: ' + groups.filter((g) => g.repairByAi).map((g) => core.categoryLabel(g.category) + ' ' + g.typeKey).join(', ') + '. 나머지는 우리 보고서 문구입니다.'
+                    : '보수방안은 AI(Gemini)가 썼습니다. 칸을 눌러 고칠 수 있습니다.')) + '</p>';
         const blocks = [
             outBlock('main', '① 점검 주요결과 (결과표 · 5.1 현장조사 결과)', mainResultsHtml()),
-            outBlock('summary', '② 실시결과 요약표', rowsTable(['위치', '부재', '점검결과', '조치 필요사항'], core.buildSummaryRows(groups), [0, 1, 2])),
+            outBlock('summary', '② 실시결과 요약표', rowsTable(['위치', '부재', '점검결과', '조치 필요사항' + aiMark], core.buildSummaryRows(groups), [0, 1, 2]) + aiRepNote),
             outBlock('survey', '③ 주요 외관조사 결과 (3.3)', surveyTablesHtml(groups)),
             outBlock('part', '④ 부분별 점검결과 (3.3)', rowsTable(['구분', '손상유형', '점검부위', '점검결과', '발생원인', '비고'], withImportance(core.buildPartRows(groups), groups), [0, 1, 2, 5])),
             outBlock('analysis', '⑤ 현장조사 결과분석 (3.3)', analysisHtml(groups)),
-            outBlock('cause', '⑥ 주요 결함사항 원인 및 보수방안 (종합결론 4)', rowsTable(['구분', '조사내용', '원 인', '보수방안', '비 고'], withImportance(core.buildCauseRows(groups), groups), [0, 4]))
+            outBlock('cause', '⑥ 주요 결함사항 원인 및 보수방안 (종합결론 4)', rowsTable(['구분', '조사내용', '원 인', '보수방안' + aiMark, '비 고'], withImportance(core.buildCauseRows(groups), groups), [0, 4]) + aiRepNote)
         ];
         if (isB()) {
             blocks.push(outBlock('prio', '⑦ 보수 우선순위 제안 (B안 전용, 보고서 표에는 없는 참고 자료)',
@@ -807,7 +814,7 @@
     function renderVariantTabs() {
         VARIANTS.forEach((v) => $('tab' + v).classList.toggle('on', state.variant === v));
         $('variantNote').textContent = isFinal()
-            ? '최종안: 위 비교표에서 +로 담은 항목만 들어갑니다. 의견은 담은 항목 순서대로 한 줄씩 자동으로 써지고(B안·AI안에서 담으면 그 안의 줄, 그 밖에는 A안 말투), 아래에서 항목을 더 고르거나 문구를 고칠 수 있습니다. 보수방안 등 나머지 표는 A안 방식입니다.'
+            ? '최종안: 위 비교표에서 +로 담은 항목만 들어갑니다. 의견은 담은 항목 순서대로 한 줄씩 자동으로 써지고(B안·AI안에서 담으면 그 안의 줄, 그 밖에는 A안 말투), 비교표 의견 칸에서 항목마다 A·B·AI 의견 중 하나로 바꿀 수 있습니다. ②조치 필요사항·⑥보수방안은 AI 답이 있으면 AI가 쓴 것입니다.'
             : isB()
             ? 'B안: 결함 유형·부재·균열폭으로 중요도를 매겨 중요한 것부터 고르고, 원인과 보수방안도 조사표와 별개로 판단해 적습니다. 현장을 보지 않고 조사표 글자만으로 만든 초안이므로 책임기술자 검토가 필요합니다.'
             : 'A안: 우리 보고서의 문구를 따릅니다. 원인은 조사표의 원인추정 그대로, 보수방안은 기존 보고서의 짝을 씁니다.';
@@ -1009,14 +1016,99 @@
             });
         });
         // ②실시결과 요약표·⑥원인 및 보수방안 줄(분류+유형 묶음)마다 보수방안을 받는다
-        const groups = core.buildGroups(state.defects, []).map((g) => {
+        const groups = aiGroupsInput(core.buildGroups(state.defects, []));
+        return { buildingName: state.meta.buildingName, roundLabel: state.meta.roundLabel, cats: cats, groups: groups, digN: digN };
+    }
+
+    /** AI에 보낼 보고서 줄(분류+유형 묶음): ②조치 필요사항·⑥보수방안을 줄마다 받는다 */
+    function aiGroupsInput(groups) {
+        return groups.map((g) => {
             const ws = g.items.filter((d) => d.width != null && !d.widthSuspicious).map((d) => d.width);
             return {
                 key: g.key, label: core.categoryLabel(g.category), type: g.typeKey, count: g.items.length,
                 location: g.location, maxWidth: ws.length ? Math.max.apply(null, ws) : null, cause: g.cause
             };
         });
-        return { buildingName: state.meta.buildingName, roundLabel: state.meta.roundLabel, cats: cats, groups: groups, digN: digN };
+    }
+
+    /** 최종안 항목(분류별, 담은 순서)을 AI 의견 요청용으로. keys는 답의 줄을 항목에 짝지을 열쇠. */
+    function aiFinalInput() {
+        const cats = [];
+        const keys = {};
+        core.CATEGORIES.forEach((cat) => {
+            if (cat.key === 'load') return;
+            const entries = entriesOf(cat.key);
+            if (!entries.length) return;
+            keys[cat.key] = entries.map(finalLineKey);
+            cats.push({
+                key: cat.key,
+                label: cat.label,
+                items: entries.map((e) => {
+                    if (!e.d) {
+                        const dig = digestOfText(e.text, cat.key);
+                        const ds = dig ? dig.ids.map((id) => state.byId[id]).filter(Boolean) : [];
+                        return { text: e.text, cause: commonCause(ds), digestCount: ds.length || undefined, sameTypeCount: ds.length };
+                    }
+                    const d = e.d;
+                    return {
+                        text: e.text, location: d.location, size: d.size, cause: d.cause, progress: d.progress, leak: d.leak, good: d.good,
+                        sameTypeCount: d.good ? 0 : state.defects.filter((x) => !x.good && x.category === d.category && x.typeKey === d.typeKey).length
+                    };
+                })
+            });
+        });
+        const groups = aiGroupsInput(core.buildGroups(state.defects, selectedIds()));
+        return { input: { buildingName: state.meta.buildingName, roundLabel: state.meta.roundLabel, cats: cats, groups: groups }, keys: keys };
+    }
+
+    /** 최종안 의견 AI로 쓰기: 최종안에 담은 항목마다 AI 의견 한 줄과 ②⑥ 보수방안을 받는다(비교표 AI안 칸에 나온다) */
+    async function runAiFinal() {
+        const key = window.GEMINI_DIRECT_API_KEY || '';
+        if (!key) {
+            setAiNote('이 화면에는 AI 키가 없습니다. 배포된 사이트(GitHub Pages)에서 열어야 쓸 수 있습니다.', 'err');
+            return;
+        }
+        showFinal();
+        const req = aiFinalInput();
+        const n = req.input.cats.reduce((s, c) => s + c.items.length, 0);
+        if (!n) {
+            setAiNote('최종안에 담은 항목이 없습니다. 비교표에서 +로 먼저 담아 주세요.', 'err');
+            renderAll();
+            return;
+        }
+        if (!window.confirm('최종안에 담은 항목 ' + n + '건의 글자(건물명·층·위치·결함 내용·크기·원인추정)를 Google Gemini로 보내 '
+            + '항목마다 AI 의견과 보수방안(②조치 필요사항·⑥보수방안)을 받습니다. 사진은 보내지 않습니다.\n받은 의견은 비교표 AI안 칸에 나오고, 최종안 의견은 +를 눌러야 바뀝니다. 계속할까요?')) {
+            renderAll();
+            return;
+        }
+        const btn = $('btnAiFinal');
+        btn.disabled = true;
+        try {
+            setAiNote('AI가 최종안 항목마다 의견을 쓰는 중...', 'muted');
+            const got = await ai.requestOpinions(key, req.input);
+            const finalOp = {};
+            let miss = 0;
+            req.input.cats.forEach((c) => {
+                const lines = String(got.opinion[c.key] || '').split('\n').filter(Boolean);
+                const ks = req.keys[c.key];
+                if (lines.length !== ks.length) { miss += 1; return; }
+                finalOp[c.key] = {};
+                ks.forEach((k, i) => { finalOp[c.key][k] = lines[i]; });
+            });
+            if (!state.ai) state.ai = { sel: null, why: {}, opinion: {}, note: {}, repair: {}, odd: {} };
+            state.ai.finalOp = finalOp;
+            state.ai.note = Object.assign({}, state.ai.note, got.note);
+            state.ai.groupRepair = Object.assign({}, state.ai.groupRepair, got.groupRepair || {});
+            save();
+            renderAll();
+            if (!Object.keys(finalOp).length) throw new Error('AI 의견의 줄 수가 최종안 항목 수와 맞지 않아 쓰지 못했습니다. 다시 눌러 주세요.');
+            setAiNote('최종안 의견(AI)을 받았습니다. 비교표 의견 칸에서 항목마다 A·B·AI 줄 중 쓸 것을 +로 고르세요.'
+                + (miss ? ' (' + miss + '개 분류는 줄 수가 맞지 않아 빠졌습니다. 다시 누르면 다시 받습니다.)' : ''), 'ok');
+        } catch (e) {
+            setAiNote(e.message || String(e), 'err');
+        } finally {
+            btn.disabled = false;
+        }
     }
 
     /** AI안 만들기: ① 결함 전체에서 주요 점검결과를 고르게 하고 ② 고른 항목으로 의견을 쓰게 한다 */
@@ -1091,7 +1183,8 @@
                 entries: entries.map((e) => ({
                     text: e.text, id: e.d ? e.d.id : null,
                     dig: !e.d ? digestOfText(e.text, cat.key) : null,
-                    op: e.d ? opLineTextOf(e.d) : customOpLine(cat.key, e.text), rep: e.d ? repairTextOf(e.d) : ''
+                    op: e.d ? opLineTextOf(e.d) : customOpLine(cat.key, e.text), rep: e.d ? repairTextOf(e.d) : '',
+                    cand: v === 'F' && cat.key !== 'load' ? finalOpCandidates(cat.key, e) : null
                 })),
                 // 의견을 손으로 고친 분류는 항목별 줄이 실제 의견과 다르므로 비교표에 고친 글 그대로 보여 준다
                 edited: state.opinion[cat.key] != null,
@@ -1183,10 +1276,64 @@
      */
     function customOpLine(catKey, text) {
         if (state.opLine['c:' + text]) return state.opLine['c:' + text];
+        return digestALine(catKey, text);
+    }
+
+    /** 묶음 문구의 A안 말투 의견 한 줄(묶인 결함들의 가장 많은 원인추정). 묶음이 아니면 '' */
+    function digestALine(catKey, text) {
         const dig = digestOfText(text, catKey);
         if (!dig) return '';
         const cause = commonCause(dig.ids.map((id) => state.byId[id]).filter(Boolean));
         return cause ? core.opinionLine(text.replace(/\s*\([^()]*\)\s*$/, ''), cause) : '';
+    }
+
+    /** 최종안 항목의 의견 줄 열쇠(state.opLine·state.ai.finalOp) */
+    function finalLineKey(e) {
+        return e.d ? e.d.id : 'c:' + e.text;
+    }
+
+    /** AI가 최종안 항목에 쓴 의견 줄. 최종안 의견을 따로 받기 전에는 AI안에서 고른 항목·묶음 줄의 의견을 쓴다. */
+    function aiFinalLine(catKey, e) {
+        const fo = state.ai && state.ai.finalOp && state.ai.finalOp[catKey];
+        if (fo && fo[finalLineKey(e)]) return fo[finalLineKey(e)];
+        if (e.d) {
+            const i = aiDefects(catKey).findIndex((d) => d.id === e.d.id);
+            return i >= 0 ? aiLineOf(catKey, i) : '';
+        }
+        const j = digestFor(catKey).findIndex((x) => x.text === e.text);
+        return j >= 0 ? aiDigLineOf(catKey, j) : '';
+    }
+
+    /**
+     * 최종안 항목 한 건에 A안·B안·AI안이 쓰는 의견 줄(보수방안 없이). 항목을 고른 뒤 의견을 안별로 비교해
+     * 고르게 한다(2026-10-28 사용자). 근거가 없으면 ''.
+     */
+    function finalOpCandidates(catKey, e) {
+        const ai = aiFinalLine(catKey, e);
+        if (e.d) {
+            const d = e.d;
+            return { A: d.good ? '' : core.opinionLine(d.content, d.cause), B: d.good ? '' : noRepair(bLineOf(d)), AI: ai };
+        }
+        const dig = digestOfText(e.text, catKey);
+        const ds = dig ? dig.ids.map((id) => state.byId[id]).filter((d) => d && !d.good) : [];
+        const top = ds.length ? alt.byImportance(ds)[0] : null;
+        return {
+            A: digestALine(catKey, e.text),
+            B: top ? '- [중요도 ' + alt.importanceOf(top).grade + '] ' + e.text.replace(/\s*\([^()]*\)\s*$/, '') + ': ' + alt.causeOf(top) + '.' : '',
+            AI: ai
+        };
+    }
+
+    /** 최종안 항목 e의 의견 줄을 line으로 바꾼다. 의견을 손으로 고친 분류는 그 글 안의 줄만 바꾼다(못 찾으면 끝에 붙인다). */
+    function setFinalOpLine(catKey, e, line) {
+        const now = () => noRepair(e.d ? opLineTextOf(e.d) : customOpLine(catKey, e.text));
+        const before = now();
+        state.opLine[finalLineKey(e)] = line;
+        const after = now();
+        if (state.opinion[catKey] != null && after && after !== before) {
+            const cur = state.opinion[catKey];
+            state.opinion[catKey] = before && cur.indexOf(before) >= 0 ? cur.replace(before, after) : cur.replace(/\s+$/, '') + '\n' + after;
+        }
     }
 
     /** 비교표의 한 줄이 가리키는 항목: { text, d(없으면 글자만), line(따라갈 의견 줄) } */
@@ -1249,39 +1396,6 @@
         }
     }
 
-    /**
-     * 의견 줄만(part 'op') 또는 보수방안만(part 'rep') 그 안의 것으로 바꾼다. 항목이 아직 최종안에 없으면
-     * 항목을 담되 고른 쪽만 그 안의 것으로 하고 나머지는 기본(A안)으로 둔다.
-     */
-    function applyPart(item, catKey, part) {
-        if (item && !item.d && item.text && catKey !== 'load') {
-            // 직접 적은 항목(묶음 문구): 없으면 담고, 의견 줄만 따로 둔다(보수방안은 ②⑥이 묶음별로 정한다)
-            addToFinal({ text: item.text, d: null, line: '', digestKey: item.digestKey }, catKey);
-            if (part === 'op') {
-                if (item.line) state.opLine['c:' + item.text] = item.line; else delete state.opLine['c:' + item.text];
-            }
-            return;
-        }
-        if (!item || !item.d) return;
-        const d = item.d;
-        if ((state.sel[catKey] || []).indexOf(d.id) < 0) {
-            addToFinal({ text: item.text, d: d, line: part === 'op' ? item.line : '', repair: part === 'rep' ? item.repair : '' }, catKey);
-            return;
-        }
-        if (part === 'rep') {
-            if (item.repair) state.repLine[d.id] = item.repair; else delete state.repLine[d.id];
-            return;
-        }
-        const before = opLineTextOf(d);
-        if (item.line) state.opLine[d.id] = item.line; else delete state.opLine[d.id];
-        const after = opLineTextOf(d);
-        // 의견을 손으로 고쳐 둔 분류는 자동으로 다시 쓰지 않으므로, 그 글 안에서 이 항목의 줄만 바꾼다(못 찾으면 끝에 붙인다)
-        if (state.opinion[catKey] != null && after && after !== before) {
-            const cur = state.opinion[catKey];
-            state.opinion[catKey] = before && cur.indexOf(before) >= 0 ? cur.replace(before, after) : cur.replace(/\s+$/, '') + '\n' + after;
-        }
-    }
-
     function removeFromFinal(catKey, idx) {
         const e = entriesOf(catKey)[idx];
         if (!e) return;
@@ -1309,30 +1423,32 @@
     function compareHtml() {
         const cur = state.variant;
         const snaps = { A: snapshotOf('A'), B: snapshotOf('B'), F: snapshotOf('F') };
-        const aiOp = (state.ai && state.ai.opinion) || {};
         const aiWhy = (state.ai && state.ai.why) || {};
         const aiNote = (state.ai && state.ai.note) || {};
         const hasAi = !!(state.ai && state.ai.sel);
         const aggs = aggregatesNow();
         const th = (v, label) => '<th' + (v === cur ? ' class="cur"' : '') + '>' + label + (v === cur ? ' <small>아래 표에 나오는 안</small>' : '') + '</th>';
         const plus = (src, k, i, inFinal) => '<button type="button" class="plus' + (inFinal ? ' in' : '') + '" data-add="' + src + '" data-cat="' + k + '" data-idx="' + i + '" title="'
-            + (inFinal ? '최종안에 담겨 있음 — 누르면 문구·의견·보수방안을 모두 이 안의 것으로 바꿉니다' : '최종안에 담기 (의견·보수방안도 이 안의 것으로)') + '">' + (inFinal ? '✓' : '+') + '</button>';
-        // 의견 줄·보수방안 줄만 따로 고르는 버튼
-        const partBtn = (part, src, k, i, on) => '<button type="button" class="plus' + (on ? ' in' : '') + '" data-part="' + part + '" data-add="' + src + '" data-cat="' + k + '" data-idx="' + i + '" title="'
-            + (on ? '최종안이 지금 쓰고 있는 ' : '최종안의 이 항목 ') + (part === 'op' ? '의견' : '보수방안') + (on ? '' : '만 이것으로 바꾸기 (항목이 없으면 담습니다)') + '">' + (on ? '✓' : '+') + '</button>';
-        const partList = (part, src, k, rows) => {
-            const list = rows.filter((x) => x.text);
-            if (!list.length) return '-';
-            const fin = snaps.F[k].entries;
-            return list.map((x) => {
-                const f = fin.filter((e) => (x.id ? e.id === x.id : !e.id && e.text === x.ftext))[0];
-                return '<div class="it">' + partBtn(part, src, k, x.i, !!f && (part === 'op' ? f.op : f.rep) === x.text)
-                    + '<span>' + esc((x.no || x.i + 1) + '. ' + x.text.replace(/^-\s*/, '')) + '</span></div>';
-            }).join('');
+            + (inFinal ? '최종안에 담겨 있음 — 누르면 문구를 이 안의 것으로 바꿉니다' : '최종안에 담기') + '">' + (inFinal ? '✓' : '+') + '</button>';
+        // 의견 칸: 최종안 항목마다 이 안(A·B·AI)이 쓴 의견 줄. +로 최종안의 그 항목 의견을 이 줄로 바꾼다.
+        const candCell = (src, k) => {
+            const fin = snaps.F[k];
+            if (k === 'load') return '-';
+            if (!fin.entries.length) return '<span class="muted">최종안에 항목을 담으면 항목마다 이 안의 의견이 나옵니다</span>';
+            const rows = fin.entries.map((e, i) => {
+                const line = e.cand ? e.cand[src] : '';
+                if (!line) return '<div class="it"><span class="plus-gap"></span><span class="muted">' + (i + 1) + '. -</span></div>';
+                const on = noRepair(e.op) === line;
+                return '<div class="it"><button type="button" class="plus' + (on ? ' in' : '') + '" data-fop="' + src + '" data-cat="' + k + '" data-fidx="' + i + '" title="'
+                    + (on ? '최종안이 지금 쓰고 있는 의견' : '최종안 ' + (i + 1) + '번 항목의 의견을 이 줄로 바꾸기') + '">' + (on ? '✓' : '+') + '</button>'
+                    + '<span>' + esc((i + 1) + '. ' + line.replace(/^-\s*/, '')) + '</span></div>';
+            });
+            return rows.join('') + (fin.edited ? '<div class="muted">(최종안 의견을 손으로 고쳐 두었습니다. +를 누르면 그 글 안의 해당 줄만 바뀝니다)</div>' : '');
         };
         const allBtn = (src, k, n) => (n > 1 ? '<div><button type="button" class="btn ghost small" data-add-all="' + src + '" data-cat="' + k + '">모두 담기</button></div>' : '');
         const opBtn = (src, k, has) => (has
             ? '<div><button type="button" class="btn ghost small" data-use="' + src + '" data-cat="' + k + '">이 의견을 최종안에 쓰기</button></div>' : '');
+        const hasFinalAi = !!(state.ai && state.ai.finalOp);
 
         let h = '<table class="cmp4"><tr><th style="width:8%">구분</th><th style="width:4%"></th>'
             + '<th>전회차 보고서</th>' + th('A', 'A안 · 우리 보고서 스타일') + th('B', 'B안 · 중요도 중심')
@@ -1362,15 +1478,7 @@
                         + (on ? '최종안에 담겨 있음' : '이 문구로 최종안에 담기 (대표 사진·의견은 ' + esc(a.rep.floor) + ' #' + esc(a.rep.no) + ' 결함 기준)') + '">' + (on ? '✓' : '+') + '</button>'
                         + '<span>' + esc(a.text) + '<span class="why">' + a.count + '건 · ' + (a.floorCount ? a.floorCount + '/' + a.floorTotal + '개 층' : '외부') + '</span></span></div>';
                 }).join('') + '</div>' : '';
-            const opCell = (v) => {
-                const s = snaps[v][k];
-                if (s.edited) {
-                    return '<td' + (v === cur ? ' class="cur"' : '') + '>' + (esc(s.opinion) || '-')
-                        + '<div class="muted">(직접 고친 의견이라 줄별로 고를 수 없습니다)</div>' + opBtn(v, k, !!s.opinion) + '</td>';
-                }
-                return '<td class="items' + (v === cur ? ' cur' : '') + '">'
-                    + partList('op', v, k, s.entries.map((e, i) => ({ i: i, id: e.id, ftext: e.text, text: e.op }))) + '</td>';
-            };
+            const opCell = (v) => '<td class="items' + (v === cur ? ' cur' : '') + '">' + candCell(v, k) + '</td>';
 
             // AI안 항목: A안·B안 어디에도 없는 것은 「AI만」, 고른 이유는 줄 아래에 작게
             const aiList = aiDefects(k);
@@ -1400,22 +1508,12 @@
                 + '<span>' + esc((i + 1) + '. ' + e.text) + '</span></div>').join('')
                 : '<span class="muted">' + (k === 'load' ? '-' : '왼쪽 항목의 +를 눌러 담으세요') + '</span>';
 
-            const repList = (list) => {
-                const rows = list.filter((x) => x.rep);
-                return rows.length ? esc(rows.map((x) => x.no + '. ' + x.rep).join('\n')) : '-';
-            };
-            const repCell = (v) => '<td class="items' + (v === cur ? ' cur' : '') + '">'
-                + partList('rep', v, k, snaps[v][k].entries.map((e, i) => ({ i: i, id: e.id, text: e.rep }))) + '</td>';
-            const aiRepCell = partList('rep', 'AI', k, aiList.map((d, i) => ({ i: i, no: aiDig.length + i + 1, id: d.id, text: aiRepairOf(k, i) })));
-            // AI 의견: 줄 수가 항목 수와 맞으면 줄별로 고르게 하고, 안 맞으면 통째로만 쓸 수 있다
-            const aiOpRows = aiList.map((d, i) => ({ i: i, no: aiDig.length + i + 1, id: d.id, text: aiLineOf(k, i) }));
-            const aiDigRows = aiDig.map((x, j) => ({ i: j, id: null, ftext: x.text, text: aiDigLineOf(k, j) }));
-            const aiOpByLine = aiOpRows.some((x) => x.text) || aiDigRows.some((x) => x.text);
-            const aiOpCell = !aiOp[k] ? aiEmpty : (aiOpByLine
-                ? (aiDigRows.some((x) => x.text) ? partList('op', 'D', k, aiDigRows) : '') + (aiOpRows.some((x) => x.text) ? partList('op', 'AI', k, aiOpRows) : '')
-                : esc(aiOp[k]) + opBtn('AI', k, true));
+            // AI 의견: 최종안 항목마다. 「최종안 의견 AI로 쓰기」 전에는 AI안에서 고른 항목의 줄만 있다
+            const aiFinalMissing = k !== 'load' && snaps.F[k].entries.some((e) => e.cand && !e.cand.AI);
+            const aiOpCell = candCell('AI', k)
+                + (aiFinalMissing ? '<div class="muted">위 「최종안 의견 AI로 쓰기」를 누르면 최종안 항목마다 AI 의견을 받습니다</div>' : '');
 
-            h += '<tr><td class="c" rowspan="3">' + esc(cat.label) + '</td><td class="c">주요<br>결과</td>'
+            h += '<tr><td class="c" rowspan="2">' + esc(cat.label) + '</td><td class="c">주요<br>결과</td>'
                 + '<td class="items">' + prevCell + '</td>' + lineCell('A') + lineCell('B')
                 + '<td class="items">' + aiCell + '</td>'
                 + '<td class="items final">' + finalCell + '</td></tr>'
@@ -1423,12 +1521,9 @@
                 + '<td>' + (esc(prevOp) || '-') + opBtn('prev', k, !!prevOp) + '</td>'
                 + opCell('A') + opCell('B')
                 + '<td class="items">' + aiOpCell
-                + (odd.length ? '<div><span class="badge must" title="AI가 든 기준값(예: 0.3mm)일 수 있습니다. 층·치수가 조사표와 맞는지만 확인하세요.">조사표에 없는 숫자: ' + esc(odd.join(', ')) + '</span></div>' : '')
+                + (odd.length && !hasFinalAi ? '<div><span class="badge must" title="AI가 든 기준값(예: 0.3mm)일 수 있습니다. 층·치수가 조사표와 맞는지만 확인하세요.">조사표에 없는 숫자: ' + esc(odd.join(', ')) + '</span></div>' : '')
                 + (aiNote[k] ? '<div class="ainote"><b>AI 검토 메모</b> ' + esc(aiNote[k]) + '</div>' : '') + '</td>'
-                + '<td class="final">' + (esc(snaps.F[k].opinion) || '-') + '</td></tr>'
-                + '<tr><td class="c">보수<br>방안</td><td>-</td>' + repCell('A') + repCell('B')
-                + '<td class="items">' + (aiList.length ? aiRepCell : aiEmpty) + '</td>'
-                + '<td class="final">' + repList(snaps.F[k].entries.map((e, i) => ({ no: i + 1, rep: e.rep }))) + '</td></tr>';
+                + '<td class="final">' + (esc(snaps.F[k].opinion) || '-') + '</td></tr>';
         });
         return h + '</table>';
     }
@@ -1640,7 +1735,7 @@
         state.prev = prevLoadedNow || (saved && saved.prev) || null;
         applyOverrides();
         // 항목을 고르기 전(의견만 받던 때)의 AI안은 잇지 않는다
-        state.ai = (saved && saved.ai && saved.ai.sel) ? saved.ai : null;
+        state.ai = (saved && saved.ai && (saved.ai.sel || saved.ai.finalOp)) ? saved.ai : null;
         state.vars = (saved && saved.vars) || { A: null, B: null };
         // 작성안을 나누기 전(2026-10-08 오전)에 저장한 내용은 A안으로 잇는다
         if (saved && !saved.vars && saved.sel) {
@@ -1692,6 +1787,7 @@
 
     $('btnExportHwpx').addEventListener('click', () => { if (state.defects.length) exportHwpx(); });
     $('btnAiOpinion').addEventListener('click', () => { if (state.defects.length) runAi(); });
+    $('btnAiFinal').addEventListener('click', () => { if (state.defects.length) runAiFinal(); });
     // 최종안 항목을 끌어서 위아래 순서 바꾸기(같은 분류 안에서만)
     let dragFrom = null;
     const dragRow = (ev) => {
@@ -1765,12 +1861,14 @@
             showFinal();
             addToFinal({ text: core.itemText(d), d: d, line: '', repair: '' }, catKey);
             note = '묶음 안의 ' + d.floor + ' #' + d.no + ' 결함을 낱개로 최종안에 담았습니다.';
-        } else if (src && t.getAttribute('data-part')) {
-            const part = t.getAttribute('data-part');
-            const item = sourceItem(src, catKey, parseInt(t.getAttribute('data-idx'), 10));
+        } else if (t.getAttribute('data-fop')) {
             showFinal();
-            applyPart(item, catKey, part);
-            note = '최종안의 ' + (part === 'op' ? '의견 줄' : '보수방안') + '을 바꿨습니다.';
+            const e = entriesOf(catKey)[parseInt(t.getAttribute('data-fidx'), 10)];
+            const fop = t.getAttribute('data-fop');
+            const line = e ? finalOpCandidates(catKey, e)[fop] : '';
+            if (!line) return;
+            setFinalOpLine(catKey, e, line);
+            note = '최종안 의견 줄을 ' + (fop === 'AI' ? 'AI안' : fop + '안') + ' 것으로 바꿨습니다.';
         } else if (src) {
             const item = sourceItem(src, catKey, parseInt(t.getAttribute('data-idx'), 10));
             showFinal();
