@@ -41,7 +41,8 @@ const got = ai.parseResponse('```json\n{"structure": {"lines": ["- 첫 줄", "�
 assert.deepStrictEqual(got, {
     opinion: { structure: '- 첫 줄\n- 둘째 줄 이어짐\n- 셋째 줄', public: '- 난간은 양호함.' },
     note: { structure: '반복 균열은 추적 관찰 필요.' },
-    repair: {}
+    repair: {},
+    groupRepair: {}
 });
 // 보수방안: 항목 순서대로의 배열(빈 줄도 자리를 지킨다 — 줄 수가 항목 수와 맞아야 짝을 짓는다)
 assert.ok(prompt.includes('repairs: 항목마다 정확히 한 줄'));
@@ -51,8 +52,8 @@ assert.deepStrictEqual(
 );
 // 예전 모양(글자·배열)으로 답해도 받는다
 assert.deepStrictEqual(ai.parseResponse('{"structure": "- 가\\n나", "public": ["다"]}', keys),
-    { opinion: { structure: '- 가\n- 나', public: '- 다' }, note: {}, repair: {} });
-assert.deepStrictEqual(ai.parseResponse('{"structure": {"lines": [], "note": ""}, "public": null}', keys), { opinion: {}, note: {}, repair: {} }, '빈 의견은 넣지 않는다');
+    { opinion: { structure: '- 가\n- 나', public: '- 다' }, note: {}, repair: {}, groupRepair: {} });
+assert.deepStrictEqual(ai.parseResponse('{"structure": {"lines": [], "note": ""}, "public": null}', keys), { opinion: {}, note: {}, repair: {}, groupRepair: {} }, '빈 의견은 넣지 않는다');
 assert.throws(() => ai.parseResponse('죄송합니다', keys), /찾지 못했습니다/);
 assert.throws(() => ai.parseResponse('{"structure": }', keys), /읽지 못했습니다/);
 // 조사표에 없는 숫자 찾기
@@ -98,3 +99,14 @@ assert.deepStrictEqual(ai.parsePicks('{"structure":[1,2],"public":"없음"}', al
 assert.throws(() => ai.parsePicks('모르겠습니다', allowed), /찾지 못했습니다/);
 
 console.log('test-report-summary-ai: ok');
+
+// 묶음별 보수방안(groupRepairs): 보낸 묶음키만, action/detail 둘 중 하나만 와도 서로 채운다
+const gp = ai.buildPrompt({ buildingName: 'X', cats: input.cats, groups: [{ key: 'structure|균열', label: '구조체', type: '균열', count: 12, maxWidth: 2 }] });
+assert.ok(gp.includes('structure|균열 | 구조체 | 균열 | 12건'));
+assert.ok(gp.includes('lines에는 보수공법·보수방안을 쓰지 않는다'));
+assert.deepStrictEqual(
+    ai.parseResponse('{"structure": {"lines": ["가"]}, "groupRepairs": {"structure|균열": {"action": "에폭시 주입공법", "detail": "균열폭에 따라 주입함."}, "structure|백태": "백태 제거 후 방수함.", "other|x": {"action": "버림"}}}',
+        keys, ['structure|균열', 'structure|백태']).groupRepair,
+    { 'structure|균열': { action: '에폭시 주입공법', detail: '균열폭에 따라 주입함.' }, 'structure|백태': { action: '백태 제거 후 방수함.', detail: '백태 제거 후 방수함.' } }
+);
+console.log('test-report-summary-ai groupRepairs: ok');

@@ -360,7 +360,7 @@
     const MEMBER_RULES = [
         [/슬래브|스라브|슬라브/, '슬래브'],
         [/기둥/, '기둥'],
-        [/(^|[\s\-])보(\(|\s|-|$)|테두리보|철골보|거더/, '보'],
+        [/(^|[\s\-])보(\(|\s|-|$)|테두리보|철골보|거더|빔/, '보'],
         [/계단/, '계단'],
         [/옹벽/, '옹벽'],
         [/조적|블록|벽돌|ALC/, '조적벽체'],
@@ -513,16 +513,26 @@
                     ids: ids(beams)
                 });
             }
-            if (others.length) {
-                const members = [];
-                others.forEach(function (d) { const m = memberOf(d.content) || '부재'; if (members.indexOf(m) < 0) members.push(m); });
-                members.sort(function (a, b) { return (a === '슬래브' ? 0 : 1) - (b === '슬래브' ? 0 : 1); });
+            // 보 밖의 부재는 부재마다 따로 한 줄(슬래브와 벽체는 성격이 다른 부재라 묶지 않는다, 2026-10-28 사용자)
+            const ORDER = ['슬래브', '기둥', '벽체', '조적벽체', '계단', '옹벽'];
+            const byMember = {};
+            others.forEach(function (d) { const m = memberOf(d.content) || '부재'; (byMember[m] = byMember[m] || []).push(d); });
+            Object.keys(byMember).sort(function (a, b) {
+                const ia = ORDER.indexOf(a) < 0 ? 99 : ORDER.indexOf(a);
+                const ib = ORDER.indexOf(b) < 0 ? 99 : ORDER.indexOf(b);
+                return ia - ib;
+            }).forEach(function (m) {
+                const list = byMember[m];
+                // 한 건뿐이면 「1개소」로 묶지 않고 낱개처럼 층·내용·균열폭을 적는다
+                const one = list.length === 1 ? list[0] : null;
                 out.push({
-                    text: pre(dong) + joinMembers(members) + ' 균열 (0.5mm 이상 ' + others.length + '개소, 최대 균열폭:' + maxW(others) + ')',
-                    key: 'crack|' + dong,
-                    ids: ids(others)
+                    text: one
+                        ? pre(dong) + splitDong(one.floor).floor + ' ' + one.content + ' (균열폭:' + maxW(list) + ')'
+                        : pre(dong) + m + ' 균열 (0.5mm 이상 ' + list.length + '개소, 최대 균열폭:' + maxW(list) + ')',
+                    key: 'crack|' + dong + '|' + m,
+                    ids: ids(list)
                 });
-            }
+            });
             // 콘크리트 들뜸·박락·철근노출이 가장 많이 모인 층 하나
             const dmg = bad.filter(function (d) { return inDong(d) && CONCRETE_DAMAGE_RE.test(d.content) && d.typeKey !== '내화피복 박락'; });
             const byFloor = {};

@@ -245,7 +245,7 @@ const digD = api.buildDefects([
 const dig = JSON.parse(JSON.stringify(api.buildStructureDigest(digD).map((x) => x.text)));
 assert.deepStrictEqual(dig, [
     'A동 지하1층~지상3층 상부 보 수직, U자형, 경사균열 발생 (0.5mm 이상 6개소, 관통균열 포함, 최대 균열폭:2.0mm/지상3층)',
-    'A동 슬래브 균열 (0.5mm 이상 1개소, 최대 균열폭:1.0mm)',
+    'A동 지상3층 상부 슬래브 균열 (균열폭:1.0mm)',
     'A동 지상5층 기둥 및 보, 슬래브 콘크리트 들뜸 및 박락, 철근노출'
 ]);
 // 비구조체·마감재 묶음: 결함이 10건 넘을 때만, 같은 동·부재·유형 3건 이상을 한 줄로
@@ -319,3 +319,17 @@ assert.strictEqual(agg3[0].text, '일부 슬래브 균열 (최대 균열폭:0.45
 assert.strictEqual(api.buildGroups(api.buildDefects(aggFloors), []).filter((g) => g.key === 'structure|균열')[0].location, '각 층');
 
 console.log('report-summary ok');
+
+// 슬래브와 벽체는 따로 묶고, 거더·빔은 보와 같이 묶는다(2026-10-28)
+(function () {
+    const r = (no, c, s) => row(no, c, s, true);
+    const ds = api.buildDefects([{ floorLabel: '지상1층', rows: [
+        r(1, '상부 슬래브 균열', '0.6/1.0'), r(2, '상부 슬래브 균열', '0.7/1.0'), r(3, 'RC벽체 수직균열', '0.8/1.0'), r(4, 'RC벽체 경사균열', '0.5/1.0'),
+        r(5, '철골 빔 하부 균열', '0.6/1.0'), r(6, '거더 수직균열', '0.9/1.0')] }]);
+    const t = JSON.parse(JSON.stringify(api.buildStructureDigest(ds).map((x) => x.text)));
+    assert.ok(t.some((x) => /^지상1층 상부 보 수직균열 발생 \(0\.5mm 이상 2개소/.test(x)), t.join(' / '));
+    assert.ok(t.indexOf('슬래브 균열 (0.5mm 이상 2개소, 최대 균열폭:0.7mm)') >= 0, t.join(' / '));
+    assert.ok(t.indexOf('벽체 균열 (0.5mm 이상 2개소, 최대 균열폭:0.8mm)') >= 0, t.join(' / '));
+    assert.ok(!t.some((x) => /슬래브 및 벽체/.test(x)));
+})();
+console.log('report-summary 부재별 묶음 ok');
