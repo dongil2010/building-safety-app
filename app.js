@@ -31421,7 +31421,7 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
         if (!/[x×*]/i.test(size) || !isMeasureOnlySizeText(size)) return false;
         const idx = defect.crackMeasures.indexOf(measure);
         if (idx < 0) return false;
-        const parsed = parseSizeTextToCrackMeasures(size);
+        const parsed = parseSizeTextToCrackMeasures(size, { defectType: defect.defectType });
         if (parsed.length !== defect.crackMeasures.length) return false;
         const p = parsed[idx];
         if (!p || p.join !== 'x') return false;
@@ -31439,7 +31439,7 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
         const size = String(defect.size == null ? '' : defect.size).trim();
         if (!size || size === '-' || size === String(prevSize == null ? '' : prevSize).trim()) return false;
         if (!isMeasureOnlySizeText(size)) return false;
-        const parsed = parseSizeTextToCrackMeasures(size);
+        const parsed = parseSizeTextToCrackMeasures(size, { defectType: defect.defectType });
         if (!parsed.length) return false;
         applyCrackMeasuresEditToDefect(defect, parsed);
         return true;
@@ -31450,8 +31450,19 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
      * "0.3/3.00.2/3.0" → [{0.3,3.0,/},{0.2,3.0,/}]
      * "0.3/2.00.3*0.3" → [{0.3,2.0,/},{0.3,0.3,x}]
      * 콤마·공백으로 나뉜 경우도 동일. -nEA 개수 유지.
+     *
+     * 2026-10-28 폭 범위·망상균열 범위:
+     *  - 「Cw:0.1~0.6」·「0.3~0.7/0.5 -12EA」: ~ 범위는 폭 한 값(width '0.1~0.6')으로 읽는다(예전엔 앞 숫자만 남기고 버렸다).
+     *  - 「Cw:0.1~0.6/1.5*2.0」: 폭 0.1~0.6 + 망상균열 범위 가로×세로 1.5×2.0 → 행 두 개
+     *    [{폭 0.1~0.6}, {1.5 x 2.0 (join 'x' = 면적)}]. 앱의 기존 망상균열 표기(「Cw:0.2, 2.0x2.0」, 측정 구분 면적)와 같다.
+     *    「폭/가로*세로」에서 세 번째 값이 소수(2.0)면 개수일 수 없으므로 범위, 정수(3)면 개수인지 범위인지 몰라
+     *    결함 종류가 망상균열(opts.defectType)일 때만 범위로 본다. 그 밖에는 풀지 않는다.
+     *  - 문자열 전체를 풀지 못하면(뒤에 남는 글자가 있으면) [] — 일부만(예: 0.1) 돌려주면 호출한 쪽이 규모 글자를
+     *    그 일부로 덮어써 나머지가 사라지므로, 풀지 못한 규모는 원문 그대로 규모 칸에 남게 한다.
      */
-    function parseSizeTextToCrackMeasures(raw) {
+    function parseSizeTextToCrackMeasures(raw, opts) {
+        const meshType = !!(opts && /망상/.test(String(opts.defectType == null ? '' : opts.defectType)));
+        const isMeshRangeValue = (bText) => meshType || /\./.test(String(bText));
         let rest = String(raw == null ? '' : raw)
             .replace(/㎜/gi, 'mm')
             .replace(/\u00d7/g, 'x') // ×
@@ -31472,6 +31483,16 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
             if (!num || !/^\d+(?:\.\d+)?$/.test(num)) return null;
             return { num, after };
         };
+        // 폭: 숫자 하나 또는 「0.1~0.6」 범위(한 값으로)
+        const takeWidth = (s) => {
+            const a = takeNumber(s);
+            if (!a) return null;
+            const rg = a.after.match(/^\s*~\s*/);
+            if (!rg) return a;
+            const b = takeNumber(a.after.slice(rg[0].length));
+            if (!b) return a; // 「0.3~」: ~ 가 남아 끝까지 못 푼 것으로 처리
+            return { num: `${normalizeCrackDecimalText(a.num)}~${normalizeCrackDecimalText(b.num)}`, after: b.after };
+        };
 
         const out = [];
         let guard = 0;
@@ -31491,9 +31512,24 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
             let m = rest.match(/^Cw\s*[:=]\s*/i);
             if (m) {
                 rest = rest.slice(m[0].length);
-                const w = takeNumber(rest);
+                const w = takeWidth(rest);
                 if (!w) break;
                 rest = w.after.replace(/^\s*mm\b/i, '');
+                // 「Cw:0.3/2.0」 폭/길이 · 「Cw:0.1~0.6/1.5*2.0」 폭 + 망상균열 범위(가로*세로, 다음 줄에서 면적 행으로)
+                let cwLen = '';
+                const cwSlash = rest.match(/^\s*\/\s*/);
+                if (cwSlash) {
+                    const a = takeNumber(rest.slice(cwSlash[0].length));
+                    if (a) {
+                        const bM = a.after.match(/^\s*[x*]\s*(\d+(?:\.\d+)?)/i);
+                        if (!bM) {
+                            cwLen = normalizeCrackDecimalText(a.num);
+                            rest = a.after.replace(/^\s*(?:mm|m)\b/i, '');
+                        } else if (!isMeshRangeValue(bM[1])) {
+                            break; // 「Cw:0.3/2.0*3」: 길이×개수인지 범위인지 알 수 없어 풀지 않는다(원문 보존)
+                        }
+                    }
+                }
                 let count = '';
                 const ea = rest.match(/^\s*-\s*(\d+)\s*EA(?![A-Za-z])/i);
                 if (ea) {
@@ -31502,14 +31538,14 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
                 }
                 out.push({
                     width: normalizeCrackDecimalText(w.num),
-                    length: '',
+                    length: cwLen,
                     count,
                     join: '/'
                 });
                 continue;
             }
 
-            const w = takeNumber(rest);
+            const w = takeWidth(rest);
             if (!w) break;
             rest = w.after.replace(/^\s*mm\b/i, '');
             const joinM = rest.match(/^\s*([/x*])\s*/i);
@@ -31552,9 +31588,21 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
             }
             const join = /[x*]/i.test(joinM[1]) ? 'x' : '/';
             rest = rest.slice(joinM[0].length);
+            const restAtLength = rest;
             const l = takeNumber(rest);
             if (!l) break;
-            rest = l.after.replace(/^\s*m\b(?![m])/i, '');
+            // 「폭/가로*세로」(0.1/1.5*2.0): 폭 한 행 + 가로×세로(망상균열 범위) 면적 행. 세 번째 값이 소수면 개수가 아니므로 범위,
+            // 정수면(0.3/2.0*3) 개수인지 범위인지 몰라 망상균열일 때만 범위로 본다. 아니면 풀지 않는다(원문 보존).
+            if (join === '/') {
+                const bM = l.after.match(/^\s*[x*]\s*(\d+(?:\.\d+)?)/i);
+                if (bM) {
+                    if (!isMeshRangeValue(bM[1])) break;
+                    out.push({ width: normalizeCrackDecimalText(w.num), length: '', count: '', join: '/' });
+                    rest = restAtLength;
+                    continue;
+                }
+            }
+            rest = l.after.replace(/^\s*(?:mm|m)\b/i, '');
             let count = '';
             const ea = rest.match(/^\s*-\s*(\d+)\s*EA(?![A-Za-z])/i);
             // 2026-10-15 엑셀 등 「폭*길이*개수」·「폭x길이x개수」: 세 번째 정수는 개수 (0.3*2.0*3 → 폭 0.3, 길이 2.0, 개수 3)
@@ -31576,6 +31624,8 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
                 join
             });
         }
+        // 끝까지 풀지 못했으면(남은 글자가 있음) 일부만 돌려주지 않는다 — 규모 원문은 호출한 쪽이 그대로 둔다
+        if (rest.replace(/^[\s,;|/·]+/, '')) return [];
         return out;
     }
 
@@ -31664,8 +31714,8 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
         if (!t || t === '-') return true;
         const num = '\\d+(?:\\.\\d+)?';
         const ea = '(?:-?\\d+ea)?';
-        const item = `(?:(?:cw[:=])?${num}(?:mm)?(?:[/x*]${num}m?)?${ea}|${num}m${ea}|\\d+ea)`;
-        return new RegExp(`^${item}(?:[,;·]?${item})*$`).test(t);
+        const item = `(?:(?:cw[:=])?${num}(?:~${num})?(?:mm)?(?:[/x*]${num}(?:mm|m)?)?${ea}|${num}m${ea}|\\d+ea)`;
+        return new RegExp(`^${item}(?:[,;·/]?${item})*$`).test(t);
     }
 
     /** 폭·길이·개수 행 목록 — 기본은 결함 수정창, 조사표 크기 팝업은 자기 목록을 넘긴다 */
@@ -31879,7 +31929,7 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
         }
         // 폭·길이·개수가 비었는데 규모 글자만 있으면("Cw:0.3", "0.3/2.0 -2EA", "0.3/3.00.2/3.0") 그걸 풀어 쓴다
         if (!measures.length && defect && String(defect.size || '').trim()) {
-            measures = parseSizeTextToCrackMeasures(defect.size);
+            measures = parseSizeTextToCrackMeasures(defect.size, { defectType: defect.defectType });
         }
         return measures.map(normalizeCrackMeasureForEdit);
     }
@@ -45255,8 +45305,128 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
         window.showToast?.(`마킹 ${n}개의 내용을 비웠습니다(핀 위치 유지). 되돌리기: Ctrl+Z`, 'success', 5000);
     }
     window.clearDefectContentsOnFloor = clearDefectContentsOnFloor;
+
+    // ---- 2026-10-28 「내용 비우기」 → 이 층만 / 전체 층 / 취소 선택 ----
+    // 버튼은 먼저 범위를 묻는다(앱 모달 appChoose, 취소 = 아무것도 안 함). 이 층만 = 위 clearDefectContentsOnFloor 그대로.
+    // 전체 층 = 이 건물(이번 회차·이 동)의 모든 층(층 목록은 「전체층 상세위치 지우기」와 같은 계획 함수를 재사용 —
+    // 건물 층 목록 ∪ 기기 메모리의 이 건물 키). 서버를 따로 읽지 않는다. 확인창을 기다리는 사이 동기화가 목록을
+    // 새 객체로 바꿔 끼울 수 있어 확인·백업 뒤에 목록을 다시 읽어 적용하고, 되돌리기는 한 번에 모든 층이 돌아간다.
+    // 비우는 칸·보존하는 것은 「이 층만」과 같다(핀·박스·지시선·번호·이전 회차 사진·위치 칸은 그대로).
+    const DEFECT_CONTENT_CLEAR_FIELDS_TEXT = '종류·부재·원인·크기·폭·길이·개수·비고·진행 표시';
+
+    /** 읽기만 하는 계획: 층마다 { fc, key, label, total, targets, photoN } + 합계 */
+    function planClearContentsForAllFloors(bldgId) {
+        const C = window.BSA && window.BSA.defectContentClear;
+        const id = bldgId || state.currentBuildingId;
+        const out = { bldgId: id, floors: [], floorCount: 0, targetFloors: 0, targetCount: 0, photoCount: 0 };
+        if (!id || !C) return out;
+        const base = planClearDetailForAllFloors(id); // 층 목록만 빌려 쓴다(대상 판정은 아래에서 내용 기준으로 다시)
+        base.floors.forEach((f) => {
+            const list = Array.isArray(state.defects && state.defects[f.key]) ? state.defects[f.key] : [];
+            const targets = list.filter((d) => d && C.hasContent(d));
+            const photoN = targets.reduce((s, d) => s + C.currentPhotoCount(d), 0);
+            out.floors.push({ fc: f.fc, key: f.key, label: f.label, total: list.length, targets, photoN });
+            if (targets.length) { out.targetFloors += 1; out.targetCount += targets.length; out.photoCount += photoN; }
+        });
+        out.floorCount = out.floors.length;
+        return out;
+    }
+
+    /** 한 마킹의 내용 비우기(이 층만과 같은 처리) */
+    function applyDefectContentClearTo(d, C) {
+        const photoCount = C.currentPhotoCount(d);
+        const beforeIds = photoCount ? defectPhotoIdList(d, photoCount) : [];
+        const changed = C.clearContentFields(d);
+        if (changed) touchDefectUpdatedAt(d);
+        if (photoCount) {
+            C.unlinkCurrentPhotos(d, beforeIds);
+            recordDefectPhotoState(d, beforeIds, []);
+            stampDefectPhotosChangedIfSafe(d);
+            if (!changed) d.updatedAt = bsaStampAfter(d.updatedAt);
+        }
+    }
+
+    function describeBuildingForClear(bldgId) {
+        const bldg = (state.buildings || []).find((b) => b && b.id === bldgId) || state.currentBuilding;
+        const dong = (bldg && typeof getBuildingDongLabel === 'function') ? String(getBuildingDongLabel(bldg) || '').trim() : '';
+        const nm = String((bldg && bldg.name) || '이 건물').replace(/^🏢\s*/, '');
+        return `${nm}${dong && nm.indexOf(dong) < 0 ? ` ${dong}` : ''}`;
+    }
+
+    async function clearDefectContentsForAllFloors(bId) {
+        const C = window.BSA && window.BSA.defectContentClear;
+        if (!C) return;
+        const plan0 = planClearContentsForAllFloors(bId);
+        if (!plan0.targetCount) { window.showToast?.(`비울 결함 내용이 없습니다. (${plan0.floorCount}개 층 확인)`, 'info', 3000); return; }
+        const shown = plan0.floors.filter((f) => f.targets.length);
+        const lines = shown.slice(0, 8).map((f) => `  · ${f.label}: ${f.targets.length}개`).join('\n') + (shown.length > 8 ? `\n  · 외 ${shown.length - 8}개 층` : '');
+        const ok = await window.appConfirm(
+            `「${describeBuildingForClear(bId)}」 건물의 모든 층(${plan0.floorCount}개 층 확인)에서\n` +
+            `마킹 ${plan0.targetCount}개 · ${plan0.targetFloors}개 층의 결함 내용을 비웁니다.\n${lines}\n\n` +
+            `(${DEFECT_CONTENT_CLEAR_FIELDS_TEXT}${plan0.photoCount ? ` · 이번 회차 사진 ${plan0.photoCount}장 떼기` : ''})\n\n` +
+            '핀·박스·지시선·번호·위치 칸은 그대로이고, 이전 회차 사진·다른 동은 건드리지 않습니다.\n' +
+            '이 층 화면에서 되돌리기(Ctrl+Z) 한 번으로 전체 층을 취소할 수 있습니다.',
+            { title: '내용 비우기 — 전체 층', okText: `전체 ${plan0.targetCount}개 비우기`, danger: true }
+        );
+        if (!ok) return;
+        if (state.currentBuildingId !== bId) { window.showToast?.('건물이 바뀌어 비우지 않았습니다. 다시 시도하세요.', 'warning', 3000); return; }
+        // 작업 전 자동 백업(층마다) — 확인 뒤 목록을 다시 읽어 그 층들로
+        const keys0 = planClearContentsForAllFloors(bId).floors.filter((f) => f.targets.length).map((f) => f.key);
+        let snaps = [];
+        if (typeof snapshotBeforeBulkOp === 'function' && keys0.length) {
+            try { snaps = await snapshotBeforeBulkOp('내용 비우기(전체 층)', keys0); } catch (_e) { snaps = []; }
+        }
+        if (state.currentBuildingId !== bId) { window.showToast?.('건물이 바뀌어 비우지 않았습니다. 다시 시도하세요.', 'warning', 3000); return; }
+        // 확인창·백업을 기다리는 사이 동기화가 층 결함을 새 객체로 바꿔 끼울 수 있다 — 적용 직전에 다시 읽는다
+        const plan = planClearContentsForAllFloors(bId);
+        if (!plan.targetCount) { window.showToast?.('비울 결함 내용이 이미 없습니다.', 'info', 2500); return; }
+        const curKey = `${bId}_${state.currentFloor}`;
+        const hit = plan.floors.filter((f) => f.targets.length);
+        pushDefectHistory(hit.filter((f) => f.key !== curKey).map((f) => f.key)); // 한 번에 모든 층 되돌리기
+        let n = 0;
+        hit.forEach((f) => { f.targets.forEach((d) => { applyDefectContentClearTo(d, C); n++; }); });
+        if (typeof markFloorKeyDirty === 'function') hit.forEach((f) => markFloorKeyDirty(f.key));
+        saveStateToLocalStorage();
+        if (typeof recordAfterBulkOp === 'function') recordAfterBulkOp(snaps);
+        refreshAfterDefectNumberChange();
+        window.showToast?.(`전체 ${hit.length}개 층 마킹 ${n}개의 내용을 비웠습니다(핀 위치 유지). 되돌리기: Ctrl+Z`, 'success', 5000);
+    }
+    window.clearDefectContentsForAllFloors = clearDefectContentsForAllFloors;
+
+    /** 「내용 비우기」 버튼: 범위(이 층만 / 전체 층 / 취소)를 묻고 그 동작을 한다 */
+    async function clearDefectContentsChooseScope() {
+        if (window.__bsaEvalMapOn === true) { window.showToast?.('평가 탭에서는 쓸 수 없습니다.', 'info', 2500); return; }
+        if (!state.currentBuildingId || !state.currentFloor) {
+            window.showToast?.('먼저 점검할 대상 건축물과 층을 선택해 주세요.', 'warning', 3500);
+            return;
+        }
+        const C = window.BSA && window.BSA.defectContentClear;
+        if (!C) return;
+        const bId = state.currentBuildingId;
+        const floorKey = `${bId}_${state.currentFloor}`;
+        const here = ((state.defects && state.defects[floorKey]) || []).filter((d) => d && C.hasContent(d));
+        const all = planClearContentsForAllFloors(bId);
+        if (!here.length && !all.targetCount) { window.showToast?.(`비울 결함 내용이 없습니다. (${all.floorCount || 1}개 층 확인)`, 'info', 3000); return; }
+        // 다른 층에는 비울 것이 없으면 물을 필요가 없다 → 이 층만 (기존 흐름)
+        if (here.length && all.targetCount === here.length) { await clearDefectContentsOnFloor(); return; }
+        const fl = String((typeof window.getFloorLabelFromCode === 'function') ? window.getFloorLabelFromCode(state.currentFloor) : state.currentFloor).replace(/\s*\([^)]*\)\s*$/, '');
+        const choices = [];
+        if (here.length) choices.push({ key: 'floor', label: `이 층만 (${fl})`, detail: `마킹 ${here.length}개` });
+        choices.push({ key: 'all', label: `전체 층 (${all.floorCount}개 층 확인)`, detail: `마킹 ${all.targetCount}개 · ${all.targetFloors}개 층` });
+        const idx = await window.appChoose(
+            `「${describeBuildingForClear(bId)}」\n내용을 비울 범위를 고르세요.\n` +
+            `비우는 칸: ${DEFECT_CONTENT_CLEAR_FIELDS_TEXT} (이번 회차 사진은 떼기만)\n` +
+            '핀·박스·지시선·번호·위치 칸은 그대로입니다.' + (here.length ? '' : `\n(이 층 ${fl}에는 비울 내용이 없습니다)`),
+            choices.map((c) => ({ label: c.label, detail: c.detail })),
+            { title: '내용 비우기 (핀 위치 유지)', okText: '다음', defaultIndex: 0 }
+        );
+        if (idx == null || !choices[idx]) return;
+        if (choices[idx].key === 'floor') await clearDefectContentsOnFloor();
+        else await clearDefectContentsForAllFloors(bId);
+    }
+    window.clearDefectContentsChooseScope = clearDefectContentsChooseScope;
     document.getElementById('btnClearDefectContents')?.addEventListener('click', () => {
-        clearDefectContentsOnFloor().catch((e) => { console.warn('[내용 비우기] 실패', e); window.showToast?.('내용 비우기에 실패했습니다: ' + (e && e.message), 'error', 5000); });
+        clearDefectContentsChooseScope().catch((e) => { console.warn('[내용 비우기] 실패', e); window.showToast?.('내용 비우기에 실패했습니다: ' + (e && e.message), 'error', 5000); });
     });
 
     // 2026-10-23 당긴 직후 진행 중이던 동기화가 옛 번호를 다시 얹으면 빈 칸이 되살아나 여러 번 눌러야 했다 —
@@ -46821,7 +46991,7 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
                     defect.cause = value;
                     break;
                 case 'size': {
-                    const parsed = parseSizeTextToCrackMeasures(value);
+                    const parsed = parseSizeTextToCrackMeasures(value, { defectType: defect.defectType });
                     if (parsed.some((m) => m && m.width && m.length) || parsed.length > 1
                         || (parsed.length === 1 && (parsed[0].count || parsed[0].width))) {
                         applyParsedCrackMeasuresToDefect(defect, parsed, value);
@@ -59603,7 +59773,7 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
                 // crackMeasures 행으로 분리 ( / → 슬래시, *·x → x 조인 )
                 let parsedMeasures = [];
                 if (!isGood && sizeRaw) {
-                    parsedMeasures = parseSizeTextToCrackMeasures(sizeRaw);
+                    parsedMeasures = parseSizeTextToCrackMeasures(sizeRaw, { defectType });
                 }
                 const hasParsedPairs = parsedMeasures.some((m) => m && m.width && m.length);
                 const typeHasCrack = /균열/.test(defectType);
