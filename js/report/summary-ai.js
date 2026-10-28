@@ -151,7 +151,7 @@
             '아래는 상태조사표의 결함 목록이다. 분류마다 보고서 「주요 점검결과」에 실을 대표 결함을 골라라.',
             '',
             '규칙',
-            '- 분류마다 가장 중요한 것부터 최대 ' + max + '건. 경미한 결함뿐이면 더 적게 골라도 되지만, 결함이 있는 분류는 1건 이상 고른다.',
+            '- 분류마다 가장 중요한 것부터 최대 ' + max + '건(분류 머리에 최대 건수가 따로 적혀 있으면 그것). 경미한 결함뿐이면 더 적게 골라도 되지만, 결함이 있는 분류는 1건 이상 고른다.',
             '- [필수] 표시가 있는 결함은 반드시 포함한다.',
             '- 중요도는 구조 안전·내력에 미치는 영향, 이용자 안전(추락·낙하), 진행 중·누수 중 여부, 균열폭, 같은 결함이 여러 곳에 반복되는지를 보고 판단한다.',
             '- 같은 유형이 반복되면 그중 가장 심한 것 하나를 대표로 고르고, 남는 자리는 다른 유형으로 채운다.',
@@ -163,7 +163,7 @@
             '건물: ' + (input.buildingName || '(이름 없음)') + (input.roundLabel ? ' / ' + input.roundLabel + ' 점검' : '')
         ];
         (input.cats || []).forEach(function (cat) {
-            lines.push('', '[분류키 ' + cat.key + '] ' + cat.label + ' (' + cat.defects.length + '건)');
+            lines.push('', '[분류키 ' + cat.key + '] ' + cat.label + ' (' + cat.defects.length + '건' + (cat.max ? ', 이 분류는 최대 ' + cat.max + '건' : '') + ')');
             cat.defects.forEach(function (d) {
                 const extra = [];
                 if (d.location) extra.push('위치 ' + d.location);

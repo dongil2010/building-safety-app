@@ -112,7 +112,10 @@ assert.ok(!rules([row({ defectType: '상태양호', cause: '-', widths: [], crac
 assert.ok(!rules([row({ defectType: '이격균열', widths: ['6.0'] })]).includes('width-range'));
 assert.ok(rules([row({ defectType: '경사균열', widths: ['6.0'] })]).includes('width-range'));
 // 메모 문구
-assert.ok(rules([row({ defectType: '수직균열 (균열폭 표시)' })]).includes('memo-text'));
+assert.ok(!rules([row({ defectType: '수직균열 (균열폭 표시)' })]).includes('memo-text'), '(균열폭 표시)는 쓰는 표기(10-28)');
+assert.ok(!rules([row({ defectType: '경사균열(균열폭표시)' })]).includes('memo-text'));
+assert.ok(rules([row({ defectType: '수직균열 (추후 기재)' })]).includes('memo-text'));
+assert.ok(rules([row({ defectType: '수직균열 (폭 확인요)' })]).includes('memo-text'));
 assert.ok(!rules([row({ defectType: '경사균열(2EA), 수평균열' })]).includes('memo-text'), '(2EA)는 메모 아님');
 // 오타
 out = R.reviewRows([row({ component: '천정 마감재' })]);

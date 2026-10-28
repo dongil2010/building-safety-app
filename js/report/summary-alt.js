@@ -113,7 +113,10 @@
     function causeOf(d) {
         const t = d.typeKey;
         const c = d.content;
-        if (t === '단면결손') return '설비 배관 관통을 위한 현장 천공으로 추정(구조검토 없이 낸 개구)';
+        if (t === '단면결손') {
+            return /천공|관통|개구|배관|슬리브/.test(c + d.cause) ? '설비 배관 관통을 위한 현장 천공으로 추정(구조검토 없이 낸 개구)'
+                : '부식·충격 등에 의한 부재 단면 감소로 추정(원인 확인 필요)';
+        }
         if (t === '배부름') return '타설 시 거푸집 변형에 의한 시공 오차로 추정';
         if (t === '철근노출') {
             if (/천공|배관|파취/.test(c) || /후속|파취|인위/.test(d.cause)) return '후속 공정(설비 배관 등)에서 콘크리트를 파취하여 철근이 노출';
@@ -267,7 +270,8 @@
     }
 
     /** B안 추천: 사진 유무가 아니라 중요도 순으로 고른다. 같은 유형은 분류당 두 건까지만. */
-    function pickDefaults(defects) {
+    function pickDefaults(defects, max) {
+        const limit = max || core.MAX_ITEMS;
         const sel = {};
         core.CATEGORIES.forEach(function (cat) {
             if (cat.key === 'load') { sel[cat.key] = []; return; }
@@ -279,13 +283,13 @@
             picked.forEach(function (d) { perType[d.typeKey] = (perType[d.typeKey] || 0) + 1; seenText[itemText(d)] = true; });
             // 기둥 균열·들뜸·박락은 유형별 두 건 제한 없이 먼저 넣는다(같은 문구 중복만 뺀다).
             bad.filter(isColumnPriority).forEach(function (d) {
-                if (picked.length >= core.MAX_ITEMS || picked.indexOf(d) >= 0 || seenText[itemText(d)]) return;
+                if (picked.length >= limit || picked.indexOf(d) >= 0 || seenText[itemText(d)]) return;
                 perType[d.typeKey] = (perType[d.typeKey] || 0) + 1;
                 seenText[itemText(d)] = true;
                 picked.push(d);
             });
             bad.forEach(function (d) {
-                if (picked.length >= core.MAX_ITEMS || picked.indexOf(d) >= 0) return;
+                if (picked.length >= limit || picked.indexOf(d) >= 0) return;
                 if ((perType[d.typeKey] || 0) >= 2 || seenText[itemText(d)]) return;
                 perType[d.typeKey] = (perType[d.typeKey] || 0) + 1;
                 seenText[itemText(d)] = true;

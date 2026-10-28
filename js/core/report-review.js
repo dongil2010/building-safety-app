@@ -137,8 +137,10 @@
                 var rep = findRepeat(v);
                 if (rep) push(out, r, 'warn', 'repeat', f[1] + '에 같은 말이 두 번 들어갔습니다: 「' + rep + '」');
                 else if (/\S {2,}\S/.test(v)) push(out, r, 'info', 'space', f[1] + '에 띄어쓰기가 두 칸 이상입니다: 「' + v.trim() + '」');
-                // 현장 메모가 남은 것: 「수직균열 (균열폭 표시)」
+                // 현장 메모가 남은 것: 「(추후 기재)」「(확인요)」
+                // 「(균열폭 표시)」는 현장에 균열폭을 표시해 둔 결함이라 그대로 쓰는 표기다(2026-10-28 사용자) — 빼고 본다
                 var memo = v.match(/\([^()]*(?:표시|기재|입력|작성|확인요|추후)[^()]*\)/);
+                if (memo && /^\(\s*균열\s*폭\s*표시\s*\)$/.test(memo[0])) memo = null;
                 if (memo) push(out, r, 'warn', 'memo-text', f[1] + '에 메모 문구가 남아 있습니다: 「' + memo[0] + '」');
                 TYPOS.forEach(function (t) {
                     var m = v.match(t[0]);

@@ -244,10 +244,26 @@ const digD = api.buildDefects([
     { floorLabel: 'A동지하1층', rows: [row(1, '상부 보 수직균열', '0.5/1.0', true)] }]);
 const dig = JSON.parse(JSON.stringify(api.buildStructureDigest(digD).map((x) => x.text)));
 assert.deepStrictEqual(dig, [
-    'A동 지하1층~지상3층 상부 보 수직, U자형, 경사균열 발생 (0.5mm 이상 6개소, 관통균열 포함, 최대 균열폭:2.0mm)',
+    'A동 지하1층~지상3층 상부 보 수직, U자형, 경사균열 발생 (0.5mm 이상 6개소, 관통균열 포함, 최대 균열폭:2.0mm/지상3층)',
     'A동 슬래브 균열 (0.5mm 이상 1개소, 최대 균열폭:1.0mm)',
     'A동 지상5층 기둥 및 보, 슬래브 콘크리트 들뜸 및 박락, 철근노출'
 ]);
+// 비구조체·마감재 묶음: 결함이 10건 넘을 때만, 같은 동·부재·유형 3건 이상을 한 줄로
+const nsRows = [];
+for (let i = 1; i <= 8; i++) nsRows.push(row(i, i % 2 ? '조적벽체 수직균열' : '조적벽체 이격', '0.' + i + '/1.0', false));
+for (let i = 9; i <= 11; i++) nsRows.push(row(i, '계단 논슬립 탈락', '', false));
+for (let i = 12; i <= 23; i++) nsRows.push(row(i, '천장 마감재 오염', '', false));
+const nsD = api.buildDefects([{ floorLabel: 'B동지하1층', rows: nsRows.slice(0, 6) }, { floorLabel: 'B동지상1층', rows: nsRows.slice(6) }]);
+const nsDig = JSON.parse(JSON.stringify(api.buildDigest(nsD, 'nonStructure').map((x) => x.text)));
+// 논슬립 탈락은 유형이 「기타」라 묶지 않는다
+assert.deepStrictEqual(nsDig, ['B동 지하1층~지상1층 조적벽체 균열 및 이격 (8개소, 최대 균열폭:0.8mm/지상1층)']);
+assert.deepStrictEqual(JSON.parse(JSON.stringify(api.buildDigest(nsD, 'interior').map((x) => x.text))), ['B동 지상1층 천장 마감재 오염 (12개소)']);
+assert.strictEqual(api.buildDigest(nsD.filter((d) => d.category === 'nonStructure').slice(0, 10), 'nonStructure').length, 0, '10건 이하면 묶지 않는다');
+// 「단면감소」도 단면결손으로 본다(앰코 지붕층 기둥)
+assert.strictEqual(api.typeKeyOf('기둥 단면감소'), '단면결손');
+// 묶음 건물은 구조체를 10개까지 낼 수 있게 개수를 넘겨받는다
+assert.strictEqual(api.DRAFT_MAX_ITEMS, 10);
+assert.ok(api.pickDefaults(dB, 10).structure.length > api.MAX_ITEMS);
 // 기둥 콘크리트 들뜸·박락도 최우선, 기둥 내화피복 박락은 아님
 const colB = api.buildDefects([{ floorLabel: '지상1층', rows: [
     row(1, '기둥 콘크리트 들뜸', '0.3x0.2', true), row(2, '기둥 모서리 박락', '0.1x0.1', true),

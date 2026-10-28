@@ -27,6 +27,9 @@
 
     /** 분류마다 주요 점검결과에 싣는 최대 개수 */
     const MAX_ITEMS = 4;
+    const MAX_ITEMS_DEFAULT = MAX_ITEMS;
+    /** 큰 균열을 묶음으로 쓰는 건물(앰코 부평)은 안마다 차이가 보이게 구조체를 이만큼까지 낸다(2026-10-28 사용자) */
+    const DRAFT_MAX_ITEMS = 10;
 
     /** 구조체 균열은 이 폭(mm) 이상이면 주요 점검결과에 반드시 넣는다 */
     const STRUCT_CRACK_FORCE_MM = 0.5;
@@ -87,7 +90,7 @@
     const TYPE_RULES = [
         [/철근\s*노출/, '철근노출'],
         [/재료분리|공극/, '재료분리'],
-        [/단면결손/, '단면결손'],
+        [/단면s*(?:결손|감소|손실)/, '단면결손'],
         [/배부름/, '배부름'],
         [/녹|부식/, '녹 발생'],
         [/(뿜칠|내화).*(박락|들뜸)/, '내화피복 박락'],
@@ -219,7 +222,8 @@
      * 유형을 넓히는 단계는 사진·누수·진행처럼 내세울 근거가 있는 것만 본다(근거 없는 유형이
      * 사진 있는 균열을 밀어내지 않게).
      */
-    function pickDefaults(defects) {
+    function pickDefaults(defects, max) {
+        const MAX_ITEMS = max || MAX_ITEMS_DEFAULT;
         const sel = {};
         CATEGORIES.forEach(function (cat) {
             if (cat.key === 'load') { sel[cat.key] = []; return; }
@@ -235,8 +239,12 @@
                 seenType[d.typeKey] = true;
                 picked.push(d);
             });
+            // 남는 자리: 이미 고른 것과 문구가 똑같은 결함(같은 층 같은 균열폭)은 건너뛴다
+            const seenLine = {};
+            picked.forEach(function (d) { seenLine[itemText(d)] = true; });
             bad.forEach(function (d) {
-                if (picked.length >= MAX_ITEMS || picked.indexOf(d) >= 0) return;
+                if (picked.length >= MAX_ITEMS || picked.indexOf(d) >= 0 || seenLine[itemText(d)]) return;
+                seenLine[itemText(d)] = true;
                 picked.push(d);
             });
             // 결함이 적은 분류는 샘플 보고서처럼 '상태양호' 항목으로 채운다
@@ -457,6 +465,24 @@
      * ids는 층 순서(동 → 지하 깊은 층 → 지상 → 옥상, 같은 층은 번호순)로 늘어놓는다.
      * @returns {Array<{key: string, text: string, ids: string[]}>}
      */
+    /**
+     * 「2.0mm/지상3층」: 소수 한 자리는 남기고, 여러 층에 걸친 묶음이면 최대폭이 나온 층을 붙인다(같은 폭이 여러 층이면 모두).
+     * 폭을 잰 결함이 없으면 ''.
+     */
+    function maxWidthLabel(list) {
+        const measured = list.filter(function (d) { return d.width != null && !d.widthSuspicious; });
+        if (!measured.length) return '';
+        const w = Math.max.apply(null, measured.map(function (d) { return d.width; }));
+        const floors = [];
+        list.forEach(function (d) { const fl = splitDong(d.floor).floor; if (floors.indexOf(fl) < 0) floors.push(fl); });
+        const at = [];
+        sortByFloor(measured.filter(function (d) { return d.width === w; })).forEach(function (d) {
+            const fl = splitDong(d.floor).floor;
+            if (at.indexOf(fl) < 0) at.push(fl);
+        });
+        return (w % 1 === 0 ? w.toFixed(1) : fmtNum(w)) + 'mm' + (floors.length >= 2 && at.length ? '/' + at.join('·') : '');
+    }
+
     function buildStructureDigest(defects) {
         const bad = (defects || []).filter(function (d) { return d.category === 'structure' && !d.good; });
         const forced = bad.filter(isForced);
@@ -467,8 +493,7 @@
         dongs.sort();
         const pre = function (dong) { return dong ? dong + ' ' : ''; };
         const ids = function (list) { return sortByFloor(list).map(function (d) { return d.id; }); };
-        // 최대폭은 「2.0mm」처럼 소수 한 자리는 남긴다
-        const maxW = function (list) { const w = Math.max.apply(null, list.map(function (d) { return d.width; })); return w % 1 === 0 ? w.toFixed(1) : fmtNum(w); };
+        const maxW = maxWidthLabel;
         dongs.forEach(function (dong) {
             const inDong = function (d) { return splitDong(d.floor).dong === dong; };
             const f = forced.filter(inDong);
@@ -483,7 +508,7 @@
                 out.push({
                     text: pre(dong) + floorRange(floors) + ' 상부 보 ' + (forms.length ? forms.join(', ') : '') + '균열 발생 (0.5mm 이상 '
                         + beams.length + '개소' + (beams.some(function (d) { return /관통/.test(d.content); }) ? ', 관통균열 포함' : '')
-                        + ', 최대 균열폭:' + maxW(beams) + 'mm)',
+                        + ', 최대 균열폭:' + maxW(beams) + ')',
                     key: 'beam|' + dong,
                     ids: ids(beams)
                 });
@@ -493,7 +518,7 @@
                 others.forEach(function (d) { const m = memberOf(d.content) || '부재'; if (members.indexOf(m) < 0) members.push(m); });
                 members.sort(function (a, b) { return (a === '슬래브' ? 0 : 1) - (b === '슬래브' ? 0 : 1); });
                 out.push({
-                    text: pre(dong) + joinMembers(members) + ' 균열 (0.5mm 이상 ' + others.length + '개소, 최대 균열폭:' + maxW(others) + 'mm)',
+                    text: pre(dong) + joinMembers(members) + ' 균열 (0.5mm 이상 ' + others.length + '개소, 최대 균열폭:' + maxW(others) + ')',
                     key: 'crack|' + dong,
                     ids: ids(others)
                 });
@@ -517,6 +542,99 @@
             }
         });
         return out;
+    }
+
+    /** 비구조체·마감재 묶음에서 쓰는 부재 이름(마감재 먼저 본다) */
+    const FINISH_MEMBER_RULES = [
+        [/천장|천정/, '천장 마감재'],
+        [/바닥/, '바닥 마감재'],
+        [/조적|블록|벽돌|ALC/i, '조적벽체'],
+        [/타일/, '타일'],
+        [/판넬|패널/, '패널'],
+        [/실링|코킹/, '실링재'],
+        [/석재/, '석재'],
+        [/창호|창틀|유리/, '창호'],
+        [/계단/, '계단'],
+        [/난간/, '난간'],
+        [/도장|페인트/, '도장'],
+        [/벽/, '벽체']
+    ];
+
+    function finishMemberOf(content) {
+        const t = String(content || '');
+        for (let i = 0; i < FINISH_MEMBER_RULES.length; i++) {
+            if (FINISH_MEMBER_RULES[i][0].test(t)) return FINISH_MEMBER_RULES[i][1];
+        }
+        return memberOf(t);
+    }
+
+    /** 유형 이름: 묶인 결함에 실제로 나온 말로 적는다(균열 및 이격, 들뜸 및 박락) */
+    const TYPE_WORDS = {
+        '균열': [[/균열/, '균열'], [/이격/, '이격']],
+        '들뜸': [[/들뜸/, '들뜸'], [/박락/, '박락'], [/탈락/, '탈락'], [/어긋남/, '어긋남']],
+        '누수흔적': [[/누수\s*흔적/, '누수흔적']],
+        '시공 미흡': [[/미시공/, '미시공'], [/미흡|불량|누락/, '시공 미흡']]
+    };
+
+    function typeLabelOf(typeKey, list) {
+        const words = (TYPE_WORDS[typeKey] || [])
+            .filter(function (r) { return list.some(function (d) { return r[0].test(d.content); }); })
+            .map(function (r) { return r[1]; });
+        return words.length ? words.join(' 및 ') : typeKey;
+    }
+
+    /** 묶음을 쓰는 분류 */
+    const DIGEST_CATEGORIES = ['structure', 'nonStructure', 'interior', 'exterior'];
+    /** 비구조체·마감재는 결함이 이보다 많을 때만 묶는다(다 실을 수 없을 때) */
+    const GROUP_DIGEST_MIN_DEFECTS = DRAFT_MAX_ITEMS;
+    /** 같은 동·부재·유형이 이만큼 이상이어야 한 줄로 묶는다 */
+    const GROUP_DIGEST_MIN_ITEMS = 3;
+    /** 분류마다 묶음 줄은 이만큼까지(건수 많은 순) */
+    const GROUP_DIGEST_MAX_LINES = 4;
+
+    /**
+     * 비구조체·내장재·외장재 묶음 문구(2026-10-28 사용자). 같은 동·부재·유형을 한 줄로:
+     *   「A동 지하1층~지상5층 조적벽체 균열 및 이격 (12개소, 최대 균열폭:4.0mm/지하1층)」
+     *   「A동 지상1층~지상3층 천장 마감재 오염 (5개소)」
+     */
+    function buildGroupDigest(defects, catKey) {
+        const bad = (defects || []).filter(function (d) { return d.category === catKey && !d.good; });
+        if (bad.length <= GROUP_DIGEST_MIN_DEFECTS) return [];
+        const groups = [];
+        const index = {};
+        bad.forEach(function (d) {
+            if (d.typeKey === '기타') return;
+            const member = finishMemberOf(d.content);
+            if (!member) return;
+            const dong = splitDong(d.floor).dong;
+            const key = catKey + '|' + dong + '|' + member + '|' + d.typeKey;
+            if (index[key] == null) {
+                index[key] = groups.length;
+                groups.push({ key: key, dong: dong, member: member, typeKey: d.typeKey, items: [] });
+            }
+            groups[index[key]].items.push(d);
+        });
+        return groups.filter(function (g) { return g.items.length >= GROUP_DIGEST_MIN_ITEMS; })
+            .sort(function (a, b) { return b.items.length - a.items.length; })
+            .slice(0, GROUP_DIGEST_MAX_LINES)
+            .map(function (g) {
+                const floors = [];
+                g.items.forEach(function (d) { const fl = splitDong(d.floor).floor; if (floors.indexOf(fl) < 0) floors.push(fl); });
+                const w = g.typeKey === '균열' ? maxWidthLabel(g.items) : '';
+                return {
+                    key: g.key,
+                    text: (g.dong ? g.dong + ' ' : '') + floorRange(floors) + ' ' + g.member + ' ' + typeLabelOf(g.typeKey, g.items)
+                        + ' (' + g.items.length + '개소' + (w ? ', 최대 균열폭:' + w : '') + ')',
+                    ids: sortByFloor(g.items).map(function (d) { return d.id; })
+                };
+            });
+    }
+
+    /** 분류별 묶음 문구: 구조체는 큰 균열 기준, 비구조체·마감재는 결함 수 기준. 묶지 않는 분류는 [] */
+    function buildDigest(defects, catKey) {
+        if (catKey === 'structure') return buildStructureDigest(defects);
+        if (DIGEST_CATEGORIES.indexOf(catKey) >= 0) return buildGroupDigest(defects, catKey);
+        return [];
     }
 
     /**
@@ -806,6 +924,7 @@
         findDefectForPrev: findDefectForPrev,
         CATEGORIES: CATEGORIES,
         MAX_ITEMS: MAX_ITEMS,
+        DRAFT_MAX_ITEMS: DRAFT_MAX_ITEMS,
         STRUCT_CRACK_FORCE_MM: STRUCT_CRACK_FORCE_MM,
         parseSize: parseSize,
         typeKeyOf: typeKeyOf,
@@ -821,6 +940,8 @@
         memberOf: memberOf,
         buildAggregates: buildAggregates,
         buildStructureDigest: buildStructureDigest,
+        buildDigest: buildDigest,
+        DIGEST_CATEGORIES: DIGEST_CATEGORIES,
         sortByFloor: sortByFloor,
         buildSummaryRows: buildSummaryRows,
         buildPartRows: buildPartRows,
