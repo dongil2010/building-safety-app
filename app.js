@@ -6333,6 +6333,10 @@ document.addEventListener('DOMContentLoaded', () => {
             });
 
             const multiDong = isSiteMultiDong(selectedSiteKey);
+            // 2026-10-29 폰·태블릿 회차 화면: 점검 종류 고르기·회차 삭제는 숨기고(PC에서만),
+            // 남는 자리에 점검/도면 수정/오프라인 버튼을 글자와 함께 크게. 저장된 점검 종류는 그대로.
+            const roundMobile = !!(window.BSA && typeof window.BSA.prefersMobileLayout === 'function' && window.BSA.prefersMobileLayout());
+            const roundRowMobileCls = roundMobile ? ' round-row-mobile' : '';
             grid.innerHTML = roundKeys.map((rk) => {
                 const members = byRound.get(rk) || [];
                 const roundLabel = rk === '_none' ? '회차 미지정' : formatSurveyRoundLabel(rk);
@@ -6353,7 +6357,7 @@ document.addEventListener('DOMContentLoaded', () => {
                 const safeSite = escapeHtml(selectedSiteKey);
                 const safeRound = escapeHtml(rk);
                 // 회차별 점검 종류(정밀/정기/진단) 선택. 같은 회차의 모든 동에 함께 적용된다.
-                const typeSelect = `
+                const typeSelect = roundMobile ? '' : `
                     <select class="round-type-select" data-action="round-type" data-site-key="${safeSite}" data-round-key="${safeRound}"
                         title="이 회차의 점검 종류" aria-label="${escapeHtml(roundLabel)} 점검 종류">
                         ${buildInspectionTypeOptionsHtml(typeLabel, { short: true })}
@@ -6370,7 +6374,7 @@ document.addEventListener('DOMContentLoaded', () => {
                 // 단일: 회차 = 점검 시작 + 도면·전경. 여러 동: 회차 = 동 선택으로 진입
                 if (multiDong) {
                     return `
-                        <div class="building-row building-row-round" data-round-key="${safeRound}">
+                        <div class="building-row building-row-round${roundRowMobileCls}" data-round-key="${safeRound}">
                             <div class="building-row-info" data-action="open-round" data-site-key="${safeSite}" data-round-key="${safeRound}">
                                 <span class="building-row-name">${escapeHtml(roundLabel)}</span>
                                 <span class="building-row-meta">${escapeHtml(metaHint)} · 동 선택</span>
@@ -6378,9 +6382,9 @@ document.addEventListener('DOMContentLoaded', () => {
                             <div class="building-row-actions building-row-actions-compact">
                                 ${dateInput}
                                 ${typeSelect}
-                                <button type="button" class="icon-btn icon-btn-trash" title="이 회차 삭제(휴지통)" data-action="delete-round" data-site-key="${safeSite}" data-round-key="${safeRound}" aria-label="회차 삭제">
+${roundMobile ? '' : `<button type="button" class="icon-btn icon-btn-trash" title="이 회차 삭제(휴지통)" data-action="delete-round" data-site-key="${safeSite}" data-round-key="${safeRound}" aria-label="회차 삭제">
                                     <i class="fa-solid fa-trash"></i>
-                                </button>
+                                </button>`}
                             </div>
                         </div>
                     `;
@@ -6389,7 +6393,7 @@ document.addEventListener('DOMContentLoaded', () => {
                 if (!b0) return '';
                 const safeId = escapeHtml(b0.id);
                 return `
-                    <div class="building-row building-row-round building-row-round-single" data-round-key="${safeRound}" data-id="${safeId}">
+                    <div class="building-row building-row-round building-row-round-single${roundRowMobileCls}" data-round-key="${safeRound}" data-id="${safeId}">
                         <div class="building-row-info" data-action="inspect" data-bldg-id="${safeId}">
                             <span class="building-row-name">${escapeHtml(roundLabel)}</span>
                             <span class="building-row-meta">${escapeHtml(metaHint)}</span>
@@ -6403,15 +6407,15 @@ document.addEventListener('DOMContentLoaded', () => {
                             </button>
                             <button type="button" class="icon-btn icon-btn-drawing" title="도면 추가/교체" data-action="drawing" data-bldg-id="${safeId}" aria-label="도면">
                                 <i class="fa-solid fa-images"></i>
-                                <span class="icon-btn-label">도면</span>
+                                <span class="icon-btn-label">${roundMobile ? '도면 수정' : '도면'}</span>
                             </button>
                             <button type="button" class="icon-btn icon-btn-offline" title="오프라인 준비 — 모든 층·도면·사진을 이 기기에 받기" data-action="offline-prep" data-bldg-id="${safeId}" aria-label="오프라인 준비">
                                 <i class="fa-solid fa-cloud-arrow-down"></i>
                                 <span class="icon-btn-label">오프라인</span>
                             </button>
-                            <button type="button" class="icon-btn icon-btn-trash" title="이 회차 삭제(휴지통)" data-action="delete-round" data-site-key="${safeSite}" data-round-key="${safeRound}" aria-label="회차 삭제">
+                            ${roundMobile ? '' : `<button type="button" class="icon-btn icon-btn-trash" title="이 회차 삭제(휴지통)" data-action="delete-round" data-site-key="${safeSite}" data-round-key="${safeRound}" aria-label="회차 삭제">
                                 <i class="fa-solid fa-trash"></i>
-                            </button>
+                            </button>`}
                         </div>
                     </div>
                 `;

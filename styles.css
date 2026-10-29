@@ -18052,3 +18052,37 @@ html.layout-tablet #tab-map #mobileMapFabBar .mobile-fab-btn {
     .dashboard-summary .ds-chip { font-size: 0.74rem; padding: 0.15rem 0.5rem; }
     .dashboard-summary-remain { width: 100%; text-align: center; margin-left: 0; }
 }
+/* 2026-10-29 폰·태블릿 회차 화면(JS가 prefersMobileLayout일 때만 .round-row-mobile을 붙임 — PC는 그대로):
+   점검 종류·삭제를 뺀 자리에 점검/도면 수정/오프라인 버튼을 글자와 함께 넓게 */
+#tab-home .building-row.round-row-mobile {
+    flex-wrap: wrap !important;
+}
+#tab-home .building-row.round-row-mobile .building-row-actions.building-row-actions-compact {
+    flex: 1 1 100% !important;
+    width: 100% !important;
+    display: flex !important;
+    flex-wrap: nowrap !important;
+    gap: 0.4rem !important;
+    justify-content: stretch !important;
+    margin-top: 0.35rem;
+}
+#tab-home .building-row.round-row-mobile .building-row-actions-compact .icon-btn {
+    flex: 1 1 0 !important;
+    width: auto !important;
+    min-width: 0 !important;
+    max-width: none !important;
+    height: 2.6rem !important;
+    padding: 0 0.4rem !important;
+    gap: 0.35rem !important;
+    font-size: 0.95rem !important;
+    border-radius: 10px !important;
+    display: inline-flex !important;
+    align-items: center;
+    justify-content: center;
+}
+#tab-home .building-row.round-row-mobile .building-row-actions-compact .icon-btn-label {
+    display: inline !important;
+    font-size: 0.88rem !important;
+    font-weight: 700;
+    white-space: nowrap;
+}
