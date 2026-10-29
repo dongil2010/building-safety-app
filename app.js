@@ -52900,7 +52900,7 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
         const dongs = getSiteBuildingsSorted(siteKey).filter((b) => getBuildingSurveyRoundKey(b) === roundKey);
         if (dongs.length < 2) return [bldg];
         const picked = await window.appChooseMany(
-            '한글 한 파일에 넣을 동을 고르세요.\n층 머리글 번호·도면 번호는 아래 순서대로 이어집니다.\n(순서 바꾸기: 홈 → 현장 → 회차 → 동 목록의 「위로/아래로」)',
+            '한글 한 파일에 넣을 동을 고르세요.\n층 머리글 번호·도면 번호는 아래 순서대로 이어집니다.',
             dongs.map((b) => ({ label: formatDongRowLabel(b), detail: b.id === bldg.id ? '지금 연 동' : '' })),
             { title: '한글로 저장 — 동 선택', okText: '한글로 저장' }
         );
