@@ -184,8 +184,11 @@ const g = (no, log, name) => ({ no, kind: 'gauge', name: name || ('G' + no), gau
     assert.strictEqual(cm.fontScale(4, 14), 0.75);
     assert.strictEqual(cm.fontScale(6, 40), 0.6, '최소 배율 0.6');
     assert.deepStrictEqual(cm.groupSlots([1, 2, 3, 4, 5, 6, 7]).map((x) => x.length), [4, 3]);
-    assert.deepStrictEqual(cm.groupSlots([1, 2, 3, 4, 5, 6]).map((x) => x.length), [6]);
-    assert.deepStrictEqual(cm.groupSlots(new Array(13).fill(0)).map((x) => x.length), [5, 5, 3]);
+    // 2026-10-28 가로 4칸씩 채운다
+    assert.deepStrictEqual(cm.groupSlots([1, 2, 3, 4]).map((x) => x.length), [4]);
+    assert.deepStrictEqual(cm.groupSlots([1, 2, 3, 4, 5, 6]).map((x) => x.length), [4, 2]);
+    assert.deepStrictEqual(cm.groupSlots(new Array(13).fill(0)).map((x) => x.length), [4, 4, 4, 1]);
+    assert.strictEqual(cm.fontScale(4, 11), 1, '4칸은 글자를 안 줄인다');
 })();
 
 // --- 입력 안 한 게이지 → 값 칸 전부 빈칸 ---
@@ -210,7 +213,10 @@ const g = (no, log, name) => ({ no, kind: 'gauge', name: name || ('G' + no), gau
     assert.ok(app.includes('cmPlanApi.buildTableLayout(group'), '측정표를 공용 규칙으로 만들지 않는다');
     assert.ok(app.includes('cmPlanApi.groupSlots(slots)'), '게이지가 많을 때 표를 나누지 않는다');
     assert.ok(app.includes('reshapeHwpxCrackMonitorTable(tbl, layout)'), '측정표 줄·열을 바꾸지 않는다');
-    assert.ok(app.includes('ensureHwpxScaledCharPr(hwpxHeaderState'), '많을 때 글자를 줄이지 않는다');
+    assert.ok(app.includes('setHwpxCrackTableTextHeight(tbl, hwpxHeaderState, crackStyleIds.gulimCharPrId, measureH)'), '측정표 글자 크기를 정하지 않는다');
+    assert.ok(/HWPX_CRACK_MEASURE_HEIGHT = 750;/.test(app), '측정표 7.5pt');
+    assert.ok(app.includes('setHwpxCrackTableTextHeight(sumTbl, hwpxHeaderState, crackStyleIds.gulimCharPrId, HWPX_CRACK_SUMMARY_HEIGHT)')
+        && /HWPX_CRACK_SUMMARY_HEIGHT = 900;/.test(app), '비교사진 표 9pt');
     assert.ok(app.includes('cmApi.buildSummaryCells(item'), '요약표를 공용 규칙으로 채우지 않는다');
     assert.ok(!app.includes('gaugeItems.slice(0, 2)'), '게이지 3개 제한이 남아 있다');
     const html = fs.readFileSync(path.join(ROOT, 'index.html'), 'utf8');

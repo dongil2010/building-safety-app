@@ -883,8 +883,9 @@
                 var calc = calcGroupDisp(group);
                 var bucket = group.category === '부재변위' ? memberDisp : settlement;
                 if (!calc || calc.incomplete) bucket.pending += 1;
-                // 구역의 absDelta는 cm라서 ×10으로 mm에 맞춘다(항목과 단위를 섞으면 안 된다)
-                else addGradeSpot(bucket, calc.grade, calc.tiltRatio, calc.absDelta * 10);
+                // 구역 레벨 단위는 구역마다 다르다(새 구역 mm, 옛 구역 cm). absDeltaMm은 mm로 환산한 값이라
+                // 항목(mm)과 단위가 섞이지 않는다
+                else addGradeSpot(bucket, calc.grade, calc.tiltRatio, (calc.absDeltaMm != null) ? calc.absDeltaMm : calc.absDelta * 10);
             });
 
             var strength = summarizeStrengthSamples(strengthSamples);

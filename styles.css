@@ -17931,3 +17931,124 @@ html.layout-tablet #tab-map #mobileMapFabBar .mobile-fab-btn {
         font-size: 0.54rem !important;
     }
 }
+
+/* ===== 홈 개편 (2026-10-28): 요약·진행/완료 탭·점검일 줄·설정 안 계정 버튼 ===== */
+.dashboard-summary {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    flex-wrap: wrap;
+    gap: 0.4rem 0.75rem;
+    margin: 0 0 0.6rem;
+    padding: 0.55rem 0.75rem;
+    border: 1px solid #e2e8f0;
+    border-radius: var(--radius-md, 10px);
+    background: #f8fafc;
+}
+.dashboard-summary[hidden],
+.dashboard-tabs[hidden] { display: none !important; }
+.dashboard-summary-stats {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 0.35rem 0.4rem;
+    min-width: 0;
+}
+.dashboard-summary .ds-chip {
+    display: inline-flex;
+    align-items: center;
+    gap: 0.3rem;
+    padding: 0.2rem 0.6rem;
+    border-radius: 999px;
+    border: 1px solid #cbd5e1;
+    background: #ffffff;
+    color: #334155;
+    font-size: 0.8rem;
+    font-weight: 700;
+    white-space: nowrap;
+}
+.dashboard-summary .ds-chip b { font-weight: 900; color: #0f172a; }
+.dashboard-summary .ds-chip-unwritten { border-color: #fbbf24; background: #fffbeb; color: #92400e; }
+.dashboard-summary .ds-chip-unwritten b { color: #b45309; }
+.dashboard-summary .ds-chip-done { border-color: #86efac; background: #f0fdf4; color: #166534; }
+.dashboard-summary .ds-chip-done b { color: #15803d; }
+.dashboard-summary-remain {
+    margin-left: auto;
+    padding: 0.25rem 0.7rem;
+    border-radius: 8px;
+    background: #1e40af;
+    color: #ffffff;
+    font-size: 0.85rem;
+    font-weight: 800;
+    white-space: nowrap;
+}
+.dashboard-summary-remain b { font-size: 1.05rem; font-weight: 900; margin-left: 0.2rem; }
+
+.dashboard-tabs {
+    display: flex;
+    gap: 0.35rem;
+    margin: 0 0 0.6rem;
+}
+.dashboard-tab {
+    flex: 1 1 0;
+    min-height: 2.4rem;
+    padding: 0.35rem 0.6rem;
+    border: 1px solid #cbd5e1;
+    border-radius: 10px;
+    background: #ffffff;
+    color: #475569;
+    font-size: 0.9rem;
+    font-weight: 800;
+    cursor: pointer;
+}
+.dashboard-tab .dashboard-tab-count {
+    display: inline-block;
+    min-width: 1.4rem;
+    margin-left: 0.25rem;
+    padding: 0 0.4rem;
+    border-radius: 999px;
+    background: #e2e8f0;
+    color: #334155;
+    font-size: 0.75rem;
+    font-weight: 900;
+}
+.dashboard-tab.active {
+    border-color: #1e40af;
+    background: #eff6ff;
+    color: #1e40af;
+}
+.dashboard-tab.active .dashboard-tab-count { background: #1e40af; color: #ffffff; }
+
+.building-row-site .building-row-site-visit {
+    display: block;
+    margin-top: 0.15rem;
+    color: #1e40af;
+    font-weight: 700;
+    white-space: normal;
+}
+.building-row-site .building-row-site-visit.need-report { color: #b45309; }
+
+.home-settings-account {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: 0.4rem 0.6rem;
+    padding: 0.5rem 0.65rem;
+    border: 1px solid #e2e8f0;
+    border-radius: 8px;
+    background: #f8fafc;
+}
+.home-settings-account-label {
+    font-size: 0.82rem;
+    font-weight: 800;
+    color: #334155;
+    white-space: nowrap;
+}
+.home-settings-account-actions { flex: 1 1 auto; min-width: 0; }
+
+/* 모바일: 회차 줄의 별도 점검일 입력은 숨김(현장 목록 줄과 회차 줄 글머리에 점검일이 이미 보임) */
+@media (max-width: 768px) {
+    #tab-home .round-date-wrap { display: none !important; }
+    .dashboard-summary { padding: 0.5rem 0.6rem; }
+    .dashboard-summary .ds-chip { font-size: 0.74rem; padding: 0.15rem 0.5rem; }
+    .dashboard-summary-remain { width: 100%; text-align: center; margin-left: 0; }
+}

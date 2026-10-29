@@ -39,7 +39,7 @@
     <meta name="apple-mobile-web-app-status-bar-style" content="default">
     <meta name="apple-mobile-web-app-title" content="스마트 안전점검">
     <link rel="stylesheet" href="https://cdn.jsdelivr.net/gh/orioncactus/pretendard@v1.3.9/dist/web/static/pretendard.min.css">
-    <link rel="stylesheet" href="styles.css?v=20261028_143739">
+    <link rel="stylesheet" href="styles.css?v=20261029_181211">
 
     <!-- FontAwesome icons for clean engineering UI -->
     <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
@@ -190,7 +190,7 @@
                     </div>
                 </div>
 
-                <!-- 계정: 설정 패널 밖에 항상 표시 (회사 나가기·계정 삭제·로그아웃) -->
+                <!-- 계정: 회사·이메일·자동 로그인·로그아웃만 밖에 두고, 나머지 계정 버튼은 톱니바퀴 설정 패널 안(2026-10-28, 자동 로그인은 밖 2026-10-29) -->
                 <div id="heroAccountBar" class="hero-account-bar" hidden>
                     <div id="headerUserProfileGroup" class="hero-user-group">
                         <span id="userProfileText" class="hero-user-name">
@@ -203,17 +203,8 @@
                             <button type="button" id="btnAutoLoginAccount" class="btn btn-sm btn-outline auto-login-toggle" aria-pressed="false" title="켜 두면 다음에 이 계정으로 바로 들어갑니다">
                                 <i class="fa-solid fa-toggle-off" aria-hidden="true"></i> 자동 로그인
                             </button>
-                            <button type="button" id="btnOpenMemberApproval" class="btn btn-sm btn-outline hero-btn-approve" style="display: none;" title="가입 승인 관리">
-                                <i class="fa-solid fa-user-check"></i> 가입 승인
-                            </button>
-                            <button type="button" id="btnLeaveCompany" class="btn btn-sm btn-outline hero-btn-leave-company" style="display: none;" title="회사 나가기">
-                                <i class="fa-solid fa-building-circle-xmark"></i> 회사 나가기
-                            </button>
                             <button type="button" id="btnLogout" class="btn btn-sm btn-outline hero-btn-logout" title="로그아웃">
                                 <i class="fa-solid fa-right-from-bracket"></i> 로그아웃
-                            </button>
-                            <button type="button" id="btnDeleteAccount" class="btn btn-sm btn-danger-outline hero-btn-delete-account" title="계정 삭제">
-                                <i class="fa-solid fa-user-xmark"></i> 계정 삭제
                             </button>
                         </div>
                     </div>
@@ -221,6 +212,21 @@
 
                 <div id="homeSettingsPanel" class="home-settings-panel" hidden>
                     <div class="home-settings-panel-inner">
+                        <!-- 계정 버튼(로그아웃 제외). 관리자 전용 버튼(회사 이름·회사 삭제·사진 되살리기)은 app.js가 이 줄에 끼워 넣는다 -->
+                        <div class="home-settings-account" id="homeSettingsAccount">
+                            <span class="home-settings-account-label"><i class="fa-solid fa-user-gear"></i> 계정</span>
+                            <div class="hero-account-actions home-settings-account-actions">
+                                <button type="button" id="btnOpenMemberApproval" class="btn btn-sm btn-outline hero-btn-approve" style="display: none;" title="가입 승인 관리">
+                                    <i class="fa-solid fa-user-check"></i> 가입 승인
+                                </button>
+                                <button type="button" id="btnLeaveCompany" class="btn btn-sm btn-outline hero-btn-leave-company" style="display: none;" title="회사 나가기">
+                                    <i class="fa-solid fa-building-circle-xmark"></i> 회사 나가기
+                                </button>
+                                <button type="button" id="btnDeleteAccount" class="btn btn-sm btn-danger-outline hero-btn-delete-account" title="계정 삭제">
+                                    <i class="fa-solid fa-user-xmark"></i> 계정 삭제
+                                </button>
+                            </div>
+                        </div>
                         <div class="hero-company-row">
                             <span class="hero-company-label"><i class="fa-solid fa-building-user"></i> 🏢 점검 수행회사:</span>
                             <input type="text" id="inputHomeCompanyName" class="form-control hero-company-input" placeholder="(주)한국안전진단기술원" value="(주)한국안전진단기술원">
@@ -266,6 +272,9 @@
                         </button>
                         <span id="dashboardSiteNavTitle" class="dashboard-site-nav-title"></span>
                     </div>
+                    <!-- 요약(보고서 미작성·다녀온·전체 현장 / 남은 보고서)과 진행·완료 탭: 현장 목록 첫 화면에서만 보인다 -->
+                    <div id="dashboardSummary" class="dashboard-summary" hidden></div>
+                    <div id="dashboardTabs" class="dashboard-tabs" role="tablist" hidden></div>
                     <form class="building-search-bar" role="search" autocomplete="off" action="#" onsubmit="return false;">
                         <div class="bsa-autofill-trap" aria-hidden="true">
                             <input type="text" name="bsa_trap_username" tabindex="-1" autocomplete="username">
@@ -2416,6 +2425,14 @@
                     </div>
                 </div>
                 <div class="form-group">
+                    <label class="form-label" for="ndtDispEditLevelUnit">📐 레벨 입력 단위</label>
+                    <select id="ndtDispEditLevelUnit" class="form-select">
+                        <option value="mm">mm (밀리미터)</option>
+                        <option value="cm">cm (센티미터)</option>
+                    </select>
+                    <div id="ndtDispEditLevelUnitHint" class="ndt-disp-modal-hint" style="margin-top:0.3rem;"></div>
+                </div>
+                <div class="form-group">
                     <label class="form-label">🎨 구역 색상</label>
                     <input type="color" id="ndtDispEditColor" class="ndt-disp-color-input" title="도면·그래프·표에서 이 구역을 표시하는 색">
                 </div>
@@ -3516,93 +3533,95 @@
 
     <!-- Core → 탭 분류 → 기존 엔진(app.js) -->
     <!-- 오류 기록은 맨 먼저 — 아래 스크립트들이 읽히다 터져도 잡아야 한다 -->
-    <script src="js/core/error-log.js?v=20261028_143739"></script>
-    <script src="js/core/floor-identity.js?v=20261028_143739"></script>
-    <script src="js/core/floor-rename.js?v=20261028_143739"></script>
-    <script src="js/core/survey-xlsx.js?v=20261028_143739"></script>
-    <script src="js/core/state.js?v=20261028_143739"></script>
-    <script src="js/core/ndt-disp-transfer.js?v=20261028_143739"></script>
-    <script src="js/core/ndt-grade.js?v=20261028_143739"></script>
-    <script src="js/tabs/registry.js?v=20261028_143739"></script>
-    <script src="js/pdf-vector-bridge.js?v=20261028_143739"></script>
-    <script src="js/pdf-vector-snap.js?v=20261028_143739"></script>
-    <script src="js/core/layout-mode.js?v=20261028_143739"></script>
-    <script src="js/core/performance.js?v=20261028_143739"></script>
-    <script src="js/shared/app-dialog.js?v=20261028_143739"></script>
-    <script src="js/core/mobile-app-update.js?v=20261028_143739"></script>
-    <script src="js/shared/app-update-button.js?v=20261028_143739"></script>
-    <script src="js/shared/measure-keypad.js?v=20261028_143739"></script>
-    <script src="js/shared/photo-crop.js?v=20261028_143739"></script>
-    <script src="js/shared/photo-drop.js?v=20261028_143739"></script>
-    <script src="js/shared/hwpx-survey-row-fit.js?v=20261028_143739"></script>
-    <script src="js/shared/hwpx-font-8pt.js?v=20261028_143739"></script>
-    <script src="js/core/mobile-keyboard.js?v=20261028_143739"></script>
-    <script src="js/tabs/home.js?v=20261028_143739"></script>
-    <script src="js/tabs/map.js?v=20261028_143739"></script>
-    <script src="js/tabs/survey.js?v=20261028_143739"></script>
-    <script src="js/core/report-review.js?v=20261028_143739"></script>
-    <script src="js/core/good-type.js?v=20261028_143739"></script>
-    <script src="js/core/r-bar-check.js?v=20261028_143739"></script>
-    <script src="js/tabs/stats.js?v=20261028_143739"></script>
-    <script src="js/tabs/ndt.js?v=20261028_143739"></script>
-    <script src="js/shared/report.js?v=20261028_143739"></script>
-    <script src="js/shared/hwpx-survey-slots.js?v=20261028_143739"></script>
-    <script src="js/shared/hwpx-ndt-maps.js?v=20261028_143739"></script>
-    <script src="js/shared/cad-unmarked-place.js?v=20261028_143739"></script>
-    <script src="js/shared/arrow-survey-number.js?v=20261028_143739"></script>
-    <script src="js/shared/defect-merge.js?v=20261028_143739"></script>
-    <script src="js/shared/korean-text-wrap.js?v=20261028_143739"></script>
-    <script src="js/shared/hwpx-import.js?v=20261028_143739"></script>
-    <script src="js/shared/hwpx-validate.js?v=20261028_143739"></script>
-    <script src="js/shared/hwpx-crack-monitor.js?v=20261028_143739"></script>
-    <script src="js/shared/auth.js?v=20261028_143739"></script>
-    <script src="js/core/firebase-storage-assets.js?v=20261028_143739"></script>
-    <script src="js/core/drawing-floor-tombstone.js?v=20261028_143739"></script>
-    <script src="js/core/ls-quota.js?v=20261028_143739"></script>
-    <script src="js/core/cad-desktop-import.js?v=20261028_143739"></script>
-    <script src="js/core/selected-hit.js?v=20261028_143739"></script>
-    <script src="js/core/ndt-split.js?v=20261028_143739"></script>
-    <script src="js/core/defect-content-clear.js?v=20261028_143739"></script>
-    <script src="js/core/drawing-resize.js?v=20261028_143739"></script>
-    <script src="js/core/data-health.js?v=20261028_143739"></script>
-    <script src="js/core/defect-lint.js?v=20261028_143739"></script>
-    <script src="js/core/round-done.js?v=20261028_143739"></script>
-    <script src="js/core/building-meta-merge.js?v=20261028_143739"></script>
-    <script src="js/core/edit-history.js?v=20261028_143739"></script>
-    <script src="js/core/no-conflict.js?v=20261028_143739"></script>
-    <script src="js/core/sync-merge.js?v=20261028_143739"></script>
-    <script src="js/core/floor-sync-guard.js?v=20261028_143739"></script>
-    <script src="js/core/gauge-photo-store.js?v=20261028_143739"></script>
-    <script src="js/core/offline-prep.js?v=20261028_143739"></script>
-    <script src="js/core/sync-progress.js?v=20261028_143739"></script>
-    <script src="js/core/sync-retry.js?v=20261028_143739"></script>
-    <script src="js/core/strength-age.js?v=20261028_143739"></script>
-    <script src="js/core/ndt-measure-opts.js?v=20261028_143739"></script>
-    <script src="js/core/company-settings-merge.js?v=20261028_143739"></script>
-    <script src="js/core/cache-purge-guard.js?v=20261028_143739"></script>
-    <script src="js/core/drawing-memo.js?v=20261028_143739"></script>
-    <script src="js/core/sketch-memo.js?v=20261028_143739"></script>
-    <script src="js/core/memo-author-sync.js?v=20261028_143739"></script>
-    <script src="js/core/eval-units.js?v=20261028_143739"></script>
-    <script src="js/core/member-count.js?v=20261028_143739"></script>
-    <script src="js/core/guide-shapes.js?v=20261028_143739"></script>
-    <script src="js/core/struct-members.js?v=20261028_143739"></script>
-    <script src="js/core/safetyman-export.js?v=20261028_143739"></script>
-    <script src="js/core/eval-member.js?v=20261028_143739"></script>
-    <script src="js/core/s357-prefill.js?v=20261028_143739"></script>
-    <script src="js/core/prev-round-photo-match.js?v=20261028_143739"></script>
-    <script src="js/shared/defect-quick-presets.js?v=20261028_143739"></script>
-    <script src="js/shared/grid-lines.js?v=20261028_143739"></script>
-    <script src="js/shared/box-auto-layout.js?v=20261028_143739"></script>
-    <script src="js/shared/print-crop.js?v=20261028_143739"></script>
-    <script src="js/core/legend-layout.js?v=20261028_143739"></script>
-    <script src="js/core/error-log-view.js?v=20261028_143739"></script>
-    <script src="js/core/photo-relay-native.js?v=20261028_143739"></script>
-    <script src="js/core/middle-drag-pan.js?v=20261028_143739"></script>
-    <script src="app.js?v=20261028_143739"></script>
+    <script src="js/core/error-log.js?v=20261029_181211"></script>
+    <script src="js/core/floor-identity.js?v=20261029_181211"></script>
+    <script src="js/core/floor-rename.js?v=20261029_181211"></script>
+    <script src="js/core/survey-xlsx.js?v=20261029_181211"></script>
+    <script src="js/core/state.js?v=20261029_181211"></script>
+    <script src="js/core/ndt-disp-transfer.js?v=20261029_181211"></script>
+    <script src="js/core/ndt-grade.js?v=20261029_181211"></script>
+    <script src="js/core/last-location.js?v=20261029_181211"></script>
+    <script src="js/core/home-sites.js?v=20261029_181211"></script>
+    <script src="js/tabs/registry.js?v=20261029_181211"></script>
+    <script src="js/pdf-vector-bridge.js?v=20261029_181211"></script>
+    <script src="js/pdf-vector-snap.js?v=20261029_181211"></script>
+    <script src="js/core/layout-mode.js?v=20261029_181211"></script>
+    <script src="js/core/performance.js?v=20261029_181211"></script>
+    <script src="js/shared/app-dialog.js?v=20261029_181211"></script>
+    <script src="js/core/mobile-app-update.js?v=20261029_181211"></script>
+    <script src="js/shared/app-update-button.js?v=20261029_181211"></script>
+    <script src="js/shared/measure-keypad.js?v=20261029_181211"></script>
+    <script src="js/shared/photo-crop.js?v=20261029_181211"></script>
+    <script src="js/shared/photo-drop.js?v=20261029_181211"></script>
+    <script src="js/shared/hwpx-survey-row-fit.js?v=20261029_181211"></script>
+    <script src="js/shared/hwpx-font-8pt.js?v=20261029_181211"></script>
+    <script src="js/core/mobile-keyboard.js?v=20261029_181211"></script>
+    <script src="js/tabs/home.js?v=20261029_181211"></script>
+    <script src="js/tabs/map.js?v=20261029_181211"></script>
+    <script src="js/tabs/survey.js?v=20261029_181211"></script>
+    <script src="js/core/report-review.js?v=20261029_181211"></script>
+    <script src="js/core/good-type.js?v=20261029_181211"></script>
+    <script src="js/core/r-bar-check.js?v=20261029_181211"></script>
+    <script src="js/tabs/stats.js?v=20261029_181211"></script>
+    <script src="js/tabs/ndt.js?v=20261029_181211"></script>
+    <script src="js/shared/report.js?v=20261029_181211"></script>
+    <script src="js/shared/hwpx-survey-slots.js?v=20261029_181211"></script>
+    <script src="js/shared/hwpx-ndt-maps.js?v=20261029_181211"></script>
+    <script src="js/shared/cad-unmarked-place.js?v=20261029_181211"></script>
+    <script src="js/shared/arrow-survey-number.js?v=20261029_181211"></script>
+    <script src="js/shared/defect-merge.js?v=20261029_181211"></script>
+    <script src="js/shared/korean-text-wrap.js?v=20261029_181211"></script>
+    <script src="js/shared/hwpx-import.js?v=20261029_181211"></script>
+    <script src="js/shared/hwpx-validate.js?v=20261029_181211"></script>
+    <script src="js/shared/hwpx-crack-monitor.js?v=20261029_181211"></script>
+    <script src="js/shared/auth.js?v=20261029_181211"></script>
+    <script src="js/core/firebase-storage-assets.js?v=20261029_181211"></script>
+    <script src="js/core/drawing-floor-tombstone.js?v=20261029_181211"></script>
+    <script src="js/core/ls-quota.js?v=20261029_181211"></script>
+    <script src="js/core/cad-desktop-import.js?v=20261029_181211"></script>
+    <script src="js/core/selected-hit.js?v=20261029_181211"></script>
+    <script src="js/core/ndt-split.js?v=20261029_181211"></script>
+    <script src="js/core/defect-content-clear.js?v=20261029_181211"></script>
+    <script src="js/core/drawing-resize.js?v=20261029_181211"></script>
+    <script src="js/core/data-health.js?v=20261029_181211"></script>
+    <script src="js/core/defect-lint.js?v=20261029_181211"></script>
+    <script src="js/core/round-done.js?v=20261029_181211"></script>
+    <script src="js/core/building-meta-merge.js?v=20261029_181211"></script>
+    <script src="js/core/edit-history.js?v=20261029_181211"></script>
+    <script src="js/core/no-conflict.js?v=20261029_181211"></script>
+    <script src="js/core/sync-merge.js?v=20261029_181211"></script>
+    <script src="js/core/floor-sync-guard.js?v=20261029_181211"></script>
+    <script src="js/core/gauge-photo-store.js?v=20261029_181211"></script>
+    <script src="js/core/offline-prep.js?v=20261029_181211"></script>
+    <script src="js/core/sync-progress.js?v=20261029_181211"></script>
+    <script src="js/core/sync-retry.js?v=20261029_181211"></script>
+    <script src="js/core/strength-age.js?v=20261029_181211"></script>
+    <script src="js/core/ndt-measure-opts.js?v=20261029_181211"></script>
+    <script src="js/core/company-settings-merge.js?v=20261029_181211"></script>
+    <script src="js/core/cache-purge-guard.js?v=20261029_181211"></script>
+    <script src="js/core/drawing-memo.js?v=20261029_181211"></script>
+    <script src="js/core/sketch-memo.js?v=20261029_181211"></script>
+    <script src="js/core/memo-author-sync.js?v=20261029_181211"></script>
+    <script src="js/core/eval-units.js?v=20261029_181211"></script>
+    <script src="js/core/member-count.js?v=20261029_181211"></script>
+    <script src="js/core/guide-shapes.js?v=20261029_181211"></script>
+    <script src="js/core/struct-members.js?v=20261029_181211"></script>
+    <script src="js/core/safetyman-export.js?v=20261029_181211"></script>
+    <script src="js/core/eval-member.js?v=20261029_181211"></script>
+    <script src="js/core/s357-prefill.js?v=20261029_181211"></script>
+    <script src="js/core/prev-round-photo-match.js?v=20261029_181211"></script>
+    <script src="js/shared/defect-quick-presets.js?v=20261029_181211"></script>
+    <script src="js/shared/grid-lines.js?v=20261029_181211"></script>
+    <script src="js/shared/box-auto-layout.js?v=20261029_181211"></script>
+    <script src="js/shared/print-crop.js?v=20261029_181211"></script>
+    <script src="js/core/legend-layout.js?v=20261029_181211"></script>
+    <script src="js/core/error-log-view.js?v=20261029_181211"></script>
+    <script src="js/core/photo-relay-native.js?v=20261029_181211"></script>
+    <script src="js/core/middle-drag-pan.js?v=20261029_181211"></script>
+    <script src="app.js?v=20261029_181211"></script>
 
     <script>
-        window.BSA_APP_VERSION = '20261028_143739';
+        window.BSA_APP_VERSION = '20261028_170205';
 
         (function () {
             var el = document.getElementById('appVersionText');
@@ -3635,7 +3654,7 @@
                     if (window.caches && caches.keys) caches.keys().then(function(ks) { ks.forEach(function(k) { caches.delete(k); }); }).catch(function() {});
                     return;
                 }
-                navigator.serviceWorker.register('./sw.js?v=20261028_143739')
+                navigator.serviceWorker.register('./sw.js?v=20261029_181211')
 
                     .then(function(registration) {
                         console.log('✅ ServiceWorker Registered Successfully with scope:', registration.scope);

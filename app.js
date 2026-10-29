@@ -3015,6 +3015,7 @@ document.addEventListener('DOMContentLoaded', () => {
             if (window.state.companyId) {
                 try { localStorage.setItem('bsa_last_active_company_id', window.state.companyId); } catch (_e) { /* ignore */ }
             }
+            try { if (typeof recordLastLocation === 'function') recordLastLocation(); } catch (_e) { /* ignore */ }
             // 2026-10-19 회사 공통 설정: 이 기기에서 바뀐 칸만 「올릴 칸」으로(js/core/company-settings-merge.js)
             try { if (typeof trackCompanySettingsLocal === 'function') trackCompanySettingsLocal(); } catch (_e) { /* ignore */ }
             _localStorageSaveFailedNotified = false;
@@ -5542,6 +5543,68 @@ document.addEventListener('DOMContentLoaded', () => {
     }
 
     // --- 5. TAB MANAGER (진입 로직은 js/tabs/*.js) ---
+    // ---- 마지막 작업 위치 기억·복원 (js/core/last-location.js, 2026-10-28) ----
+    // 로그인 직후 복원 시도가 끝나기 전에는 기록·삭제를 하지 않는다(부팅 중 switchTab('tab-home')이 기록을 지우지 않게).
+    let _lastLocTracking = false;
+    function lastLocApi() { return window.BSA && window.BSA.lastLocation; }
+    function recordLastLocation() {
+        const LL = lastLocApi();
+        const s = window.state;
+        if (!LL || !_lastLocTracking || !s || !s.uid || !s.companyId) return;
+        try {
+            LL.save(localStorage, {
+                uid: s.uid, companyId: s.companyId,
+                buildingId: s.currentBuildingId, floor: s.currentFloor, tab: s.currentTab
+            });
+        } catch (_e) { /* 기록 실패가 작업을 막으면 안 된다 */ }
+    }
+    function clearLastLocation(uid, companyId) {
+        const LL = lastLocApi();
+        if (!LL) return;
+        try { LL.clear(localStorage, uid || (window.state && window.state.uid), companyId || (window.state && window.state.companyId)); } catch (_e) { /* ignore */ }
+    }
+    /** 로그인 직후 1회: 저장된 위치로 들어간다. 들어갔으면 true, 아니면 false(홈 유지) */
+    async function tryRestoreLastLocation(profile) {
+        const LL = lastLocApi();
+        if (!LL || !profile || window._lastLocRestoreDone) return false;
+        window._lastLocRestoreDone = true;
+        try {
+            const loc = LL.load(localStorage, profile.uid, profile.companyId);
+            if (!loc) return false;
+            const r = LL.resolve(loc, window.state.buildings, {
+                isTrashed: isBuildingTrashed,
+                getFloorCodes: (b) => ((typeof window.getBuildingAvailableFloors === 'function' ? window.getBuildingAvailableFloors(b) : (b.floorsList || [])) || [])
+                    .map((f) => f && f.floorCode).filter(Boolean)
+            });
+            if (!r.ok) {
+                // 건물이 사라졌거나 휴지통이면 기록을 비우고 홈. (층만 사라진 경우는 resolve가 건물 첫 층으로 안내)
+                LL.clear(localStorage, profile.uid, profile.companyId);
+                return false;
+            }
+            window.state.currentFloor = r.floor || null;
+            await window.selectBuildingAndInspect(r.buildingId);
+            if (window.state.currentBuildingId !== r.buildingId) return false;
+            if (r.tab && r.tab !== 'tab-map') window.switchTab(r.tab);
+            const bldg = (window.state.buildings || []).find((b) => b && b.id === r.buildingId);
+            if (typeof window.showToast === 'function') {
+                window.showToast('마지막 작업 위치로 이동했습니다' + (bldg && bldg.name ? ' · ' + String(bldg.name).replace(/^🏢\s*/, '') : '')
+                    + (window.state.currentFloor ? ' · ' + window.state.currentFloor : ''), 'info', 2600);
+            }
+            return true;
+        } catch (e) {
+            console.warn('마지막 작업 위치 복원 실패(홈으로):', e);
+            return false;
+        }
+    }
+    window.BSA = window.BSA || {};
+    window.BSA.lastLocUi = {
+        record: recordLastLocation,
+        clear: clearLastLocation,
+        tryRestore: tryRestoreLastLocation,
+        enableTracking: function () { _lastLocTracking = true; },
+        disableTracking: function () { _lastLocTracking = false; }
+    };
+
     window.switchTab = function(targetTabId = 'tab-home') {
         // 탭 전환 시 결함/NDT 드로어·관련 모달이 다른 도면 위에 남지 않도록 닫기
         try {
@@ -5621,6 +5684,11 @@ document.addEventListener('DOMContentLoaded', () => {
             subscribeCurrentFloorSync();
         }
         if (typeof syncMobileBackHistoryGuard === 'function') syncMobileBackHistoryGuard();
+        // 홈으로 직접 나가면 위치 기록을 지운다(새로고침해도 홈 유지). 작업 탭이면 현재 위치를 기록
+        if (_lastLocTracking) {
+            if (targetTabId === 'tab-home') clearLastLocation();
+            else recordLastLocation();
+        }
     };
 
     /** 모바일·Android 앱 뒤로가기 인터셉트 대상 */
@@ -6165,6 +6233,15 @@ document.addEventListener('DOMContentLoaded', () => {
         };
 
         // ── 3단: 현장 → 회차 → (여러 동만) 동 ──
+        // 요약·탭은 현장 목록 첫 화면에서만 (현장 안으로 들어가면 숨김)
+        {
+            const sumEl = document.getElementById('dashboardSummary');
+            const tabEl = document.getElementById('dashboardTabs');
+            if (selectedSiteKey) {
+                if (sumEl) sumEl.hidden = true;
+                if (tabEl) tabEl.hidden = true;
+            }
+        }
         if (selectedSiteKey && window.state.dashboardRoundKey) {
             const roundKey = window.state.dashboardRoundKey;
             const dongs = filtered.filter((b) =>
@@ -6343,10 +6420,81 @@ document.addEventListener('DOMContentLoaded', () => {
         if (heroTitle) heroTitle.textContent = '🏢 점검 대상 건축물 목록';
 
         const siteMap = groupBuildingsBySite(filtered);
-        const siteKeys = [...siteMap.keys()].sort((a, b) => a.localeCompare(b, 'ko'));
+
+        // ── 요약·정렬·진행/완료 탭 (js/core/home-sites.js) — 이미 불러온 건물만 쓴다 ──
+        const HS = window.BSA && window.BSA.homeSites;
+        const RD = window.BSA && window.BSA.roundDone;
+        const todayStr = HS ? HS.todayLocal() : '';
+        const statusDeps = {
+            roundKeyOf: getBuildingSurveyRoundKey,
+            roundRank: getSurveyRoundOrderRank,
+            inspectionDate: (b, rk) => getBuildingInspectionDate(b, rk),
+            isReportDone: (b) => !!(RD && RD.isDone(b, 'report')),
+            isMapDone: (b) => !!(RD && RD.isDone(b, 'defectMap'))
+        };
+        const statusBySite = new Map();
+        groupBuildingsBySite(allBldgs).forEach((members, key) => {
+            statusBySite.set(key, HS ? HS.siteStatus(members, statusDeps, todayStr) : null);
+        });
+        const summary = HS ? HS.summarize([...statusBySite.values()]) : null;
+        const isSiteDone = (key) => !!(statusBySite.get(key) && statusBySite.get(key).done);
+        const termKeys = [...siteMap.keys()];
+        const termDoneCount = termKeys.filter(isSiteDone).length;
+        const termActiveCount = termKeys.length - termDoneCount;
+        const dashTab = window.state.dashboardTab === 'done' ? 'done' : 'active';
+        {
+            const sumEl = document.getElementById('dashboardSummary');
+            const tabEl = document.getElementById('dashboardTabs');
+            if (sumEl && summary) {
+                sumEl.hidden = false;
+                sumEl.innerHTML = `
+                    <div class="dashboard-summary-stats">
+                        <span class="ds-chip ds-chip-total" title="삭제·휴지통 제외 전체 현장">전체 현장 <b>${summary.total}</b></span>
+                        <span class="ds-chip ds-chip-done" title="최종 회차 보고서가 작성완료로 체크된 현장">보고서 작성완료 <b>${summary.done}</b></span>
+                        <span class="ds-chip ds-chip-unwritten ds-chip-map" title="다녀왔는데(점검일이 오늘 이전) 최종 회차 결함위치도가 아직 작성완료로 체크되지 않은 현장">결함위치도 남은 수 <b>${summary.mapRemaining}</b></span>
+                    </div>
+                    <div class="dashboard-summary-remain" title="다녀왔는데(점검일이 오늘 이전) 최종 회차 보고서가 아직 작성완료로 체크되지 않은 현장 수">남은 보고서 <b>${summary.remaining}</b></div>`;
+            }
+            if (tabEl) {
+                tabEl.hidden = false;
+                tabEl.innerHTML = `
+                    <button type="button" role="tab" class="dashboard-tab${dashTab === 'active' ? ' active' : ''}" data-dash-tab="active" aria-selected="${dashTab === 'active'}">진행 중 <span class="dashboard-tab-count">${termActiveCount}</span></button>
+                    <button type="button" role="tab" class="dashboard-tab${dashTab === 'done' ? ' active' : ''}" data-dash-tab="done" aria-selected="${dashTab === 'done'}">작성 완료 <span class="dashboard-tab-count">${termDoneCount}</span></button>`;
+                if (!tabEl._bsaBound) {
+                    tabEl._bsaBound = true;
+                    tabEl.addEventListener('click', (e) => {
+                        const btn = e.target.closest('[data-dash-tab]');
+                        if (!btn) return;
+                        window.state.dashboardTab = btn.getAttribute('data-dash-tab') === 'done' ? 'done' : 'active';
+                        window.renderDashboard();
+                    });
+                }
+            }
+        }
+        const siteKeys = termKeys
+            .filter((k) => (dashTab === 'done') === isSiteDone(k))
+            .sort((a, b) => {
+                const sa = statusBySite.get(a);
+                const sb = statusBySite.get(b);
+                const cmp = HS
+                    ? HS.compareSites({ name: a, date: sa && sa.date }, { name: b, date: sb && sb.date })
+                    : a.localeCompare(b, 'ko');
+                return cmp;
+            });
 
         if (siteKeys.length === 0) {
-            grid.innerHTML = `<div class="building-list-empty">${term ? '🔍 검색 결과가 없습니다.' : '등록된 건축물이 없습니다. 하단 + 버튼으로 현장을 추가하세요.'}</div>`;
+            let emptyMsg;
+            if (term) {
+                const other = dashTab === 'done' ? termActiveCount : termDoneCount;
+                emptyMsg = '🔍 검색 결과가 없습니다.' + (other ? ` (${dashTab === 'done' ? '진행 중' : '작성 완료'} 탭에 ${other}곳 있음)` : '');
+            } else if (allBldgs.length === 0) {
+                emptyMsg = '등록된 건축물이 없습니다. 하단 + 버튼으로 현장을 추가하세요.';
+            } else if (dashTab === 'done') {
+                emptyMsg = '최종 회차 보고서가 작성 완료된 현장이 아직 없습니다.';
+            } else {
+                emptyMsg = '진행 중인 현장이 없습니다. 모든 현장의 최종 회차 보고서가 작성 완료 상태입니다.';
+            }
+            grid.innerHTML = `<div class="building-list-empty">${emptyMsg}</div>`;
             return;
         }
 
@@ -6381,6 +6529,17 @@ document.addEventListener('DOMContentLoaded', () => {
                 : '현장 담당자·연락처 미등록';
             const addrLine = addr || '주소 미등록';
             const safeSite = escapeHtml(siteKey);
+            // 점검(다녀온) 날짜 — 현장명을 고르는 이 줄에 보여 준다(모바일은 회차 줄의 별도 날짜 입력을 숨김)
+            const st = statusBySite.get(siteKey);
+            let visitLine = '';
+            if (st) {
+                const bits = [];
+                if (st.date) bits.push(`📅 점검 ${st.date}`);
+                else bits.push('📅 점검일 미정');
+                if (st.latestRound) bits.push(formatSurveyRoundLabel(st.latestRound));
+                if (!st.done && st.visited) bits.push('보고서 작성 필요');
+                visitLine = `<span class="building-row-meta building-row-site-visit${(!st.done && st.visited) ? ' need-report' : ''}">${escapeHtml(bits.join(' · '))}</span>`;
+            }
             // 최신 회차 건물(목록 정렬 기준) — 현장 목록에서 바로 수정 가능
             const editTarget = members.slice().sort((a, b) => {
                 const ra = getSurveyRoundOrderRank(getBuildingSurveyRoundKey(a));
@@ -6400,6 +6559,7 @@ document.addEventListener('DOMContentLoaded', () => {
                 <div class="building-row building-row-site" data-site-key="${safeSite}">
                     <div class="building-row-info" data-action="open-site" data-site-key="${safeSite}">
                         <span class="building-row-name"><i class="fa-solid fa-building flag-icon-muted"></i> ${safeSite}<span class="round-done-badges">${buildRoundDoneBadgesHtml(members)}</span></span>
+                        ${visitLine}
                         <span class="building-row-meta building-row-rounds">${escapeHtml(roundHint)}${escapeHtml(layoutHint)}</span>
                         <span class="building-row-meta building-row-site-addr">${escapeHtml(addrLine)}</span>
                         <span class="building-row-meta building-row-site-contact">${escapeHtml(contactLine)}</span>
@@ -10677,6 +10837,7 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
         const prevBuildingId = state.currentBuildingId;
         const prevFloor = state.currentFloor;
         state.currentFloor = floorCode;
+        recordLastLocation();
         if ((prevBuildingId !== state.currentBuildingId || prevFloor !== floorCode)
             && typeof subscribeCurrentFloorSync === 'function') {
             if (prevFloor && prevBuildingId) {
@@ -11866,7 +12027,9 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
         if (!strVal) return '';
         const digits = strVal.replace(/[^0-9.]/g, '');
         if (digits) {
-            const num = parseFloat(digits);
+            let num = parseFloat(digits);
+            // "42.5m"처럼 단위를 m로 적었으면 mm로 환산한다(mm는 그대로). 단위 없는 숫자는 mm로 본다.
+            if (!isNaN(num) && /\d\s*m(?![a-z])/i.test(strVal)) num = Math.round(num * 1000 * 1000) / 1000;
             if (!isNaN(num)) {
                 const prefix = /L\s*=/i.test(strVal) ? 'L' : 'H';
                 return `${prefix} = ${num.toLocaleString()}mm`;
@@ -13788,6 +13951,11 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
         return window.BSA.ndtGrade.calcGroupDisplacement(group);
     }
 
+    /** 구역 레벨값 단위: 'mm'(새 구역) 또는 'cm'(levelUnit 없는 옛 구역) */
+    function ndtDispLevelUnit(group) {
+        return window.BSA.ndtGrade.levelUnitOf(group);
+    }
+
     // ---- 측기 이동 보정(2026-10-12 재설계, js/core/ndt-disp-transfer.js) ----
     // 적은 레벨은 그대로 두고, 계산·그래프·보고서 값만 보정한다.
     function ndtDispTransferApi() { return window.BSA && window.BSA.ndtDispTransfer; }
@@ -13797,7 +13965,7 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
     }
     /** 표시: 적은 값이 먼저, 보정으로 달라졌으면 「→ 보정값」 */
     function formatNdtDispLevelText(group, idx, unit) {
-        const u = unit == null ? 'cm' : unit;
+        const u = unit == null ? ndtDispLevelUnit(group) : unit;
         const p = (group.points || [])[idx];
         const c = ndtDispCalcLevels(group)[idx];
         const raw = p && isNdtDispLevelFilled(p.level) ? Number(p.level) : null;
@@ -13831,9 +13999,12 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
         if (!calc || calc.incomplete) {
             return { delta: '-', deltaCm: '-', tiltRatio: '-', grade: '미입력' };
         }
+        // delta: mm 값(표 머리글 "(mm)"과 일치). deltaCm: 이름은 옛 그대로지만 구역 단위(mm/cm)를 붙인 값.
+        const unit = calc.unit || 'cm';
+        const deltaMm = (calc.deltaMm != null) ? calc.deltaMm : calc.delta * 10;
         return {
-            delta: calc.delta.toFixed(1),
-            deltaCm: `${calc.delta.toFixed(1)}cm`,
+            delta: deltaMm.toFixed(1),
+            deltaCm: `${calc.delta.toFixed(1)}${unit}`,
             tiltRatio: calc.tiltRatio || '-',
             grade: calc.grade || '-'
         };
@@ -13885,6 +14056,7 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
             groupNo: nextDisplacementGroupNo(cat),
             locationType: '보',
             measureLength: null,
+            levelUnit: 'mm',
             hasMinorDamage: false,
             color,
             boxX: imgX - 40,
@@ -15255,11 +15427,11 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
                 cols.push({ label: firstLabel, value: first ? formatNdtDispLevelText(group, 0) : '-' });
                 cols.push({ label: midLabel, value: mid ? formatNdtDispLevelText(group, midIdx) : '-' });
                 cols.push({ label: lastLabel, value: last ? formatNdtDispLevelText(group, points.length - 1) : '-' });
-                cols.push({ label: `처짐량총합\n((${firstLabel}+${lastLabel})/2-${midLabel})`, value: `${arrow}${deltaAbs.toFixed(1)}cm` });
+                cols.push({ label: `처짐량총합\n((${firstLabel}+${lastLabel})/2-${midLabel})`, value: `${arrow}${deltaAbs.toFixed(1)}${calc.unit || 'cm'}` });
             } else {
                 cols.push({ label: firstLabel, value: first ? formatNdtDispLevelText(group, 0) : '-' });
                 cols.push({ label: lastLabel, value: last ? formatNdtDispLevelText(group, points.length - 1) : '-' });
-                cols.push({ label: '변위량총합', value: `${arrow}${deltaAbs.toFixed(1)}cm` });
+                cols.push({ label: '변위량총합', value: `${arrow}${deltaAbs.toFixed(1)}${calc.unit || 'cm'}` });
             }
             cols.push({ label: `변위평가\n(L=${lengthMmText})`, value: calc.tiltRatio || '-' });
 
@@ -16766,7 +16938,7 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
         tbody.innerHTML = groups.map(group => {
             const calc = calcGroupDisplacement(group);
             const lenText = (Number(group.measureLength) > 0) ? group.measureLength : '—';
-            const deltaText = calc.incomplete ? '미입력' : calc.delta.toFixed(1);
+            const deltaText = calc.incomplete ? '미입력' : calc.deltaMm.toFixed(1);
             const ratioText = calc.incomplete ? '—' : calc.tiltRatio;
             const gradeHtml = calc.incomplete
                 ? '<span style="color:#a3a3a3; font-weight:700;">미입력</span>'
@@ -20033,6 +20205,11 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
             ensureNdtDispPointModalTransferUi(null, null);
         }
 
+        // 레벨 입력 단위 라벨: 기존 구역에 넣으면 그 구역 단위, 새 구역은 mm
+        const lvlGroup = existingGroup || continueGroup
+            || (tmpl ? getCurrentFloorDisplacementGroups(cat).find(g => g.id === tmpl.groupId) : null);
+        const lblLevel = document.getElementById('lblNdtDispLevel');
+        if (lblLevel) lblLevel.textContent = `📊 레벨값 (${lvlGroup ? ndtDispLevelUnit(lvlGroup) : 'mm'})`;
         refreshNdtDispLocationChips('ndtDispLocationType', 'ndtDispLocationChips');
         document.body.classList.add('ndt-modal-open');
         modal.style.display = 'flex';
@@ -20136,6 +20313,7 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
             groupNo: nextDisplacementGroupNo(cat),
             locationType,
             measureLength: resolvedLength,
+            levelUnit: 'mm',
             hasMinorDamage,
             color,
             boxX: coords.x - 40,
@@ -20433,6 +20611,24 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
         }
     }
 
+    /** 레벨 단위 선택 안내문·입력칸 placeholder를 선택한 단위에 맞춘다(저장된 숫자는 건드리지 않음) */
+    function refreshNdtDispEditLevelUnitUi(group) {
+        const sel = document.getElementById('ndtDispEditLevelUnit');
+        const unit = (sel && sel.value === 'mm') ? 'mm' : 'cm';
+        const hint = document.getElementById('ndtDispEditLevelUnitHint');
+        if (hint) {
+            const legacy = group && group.levelUnit !== 'mm' && group.levelUnit !== 'cm';
+            hint.textContent = (unit === 'mm'
+                ? '레벨을 mm로 읽습니다. 예) 35 → 35mm.'
+                : '레벨을 cm로 읽습니다. 예) 3.5 → 35mm.')
+                + ' 단위를 바꿔도 적은 숫자는 그대로이고 읽는 단위만 바뀝니다.'
+                + (legacy ? ' (예전에 만든 구역이라 cm로 계산 중입니다. 현장에서 mm로 적었다면 mm로 바꾸세요.)' : '');
+        }
+        document.querySelectorAll('#ndtDispEditPointList .ndt-disp-edit-level-input').forEach((inp) => {
+            inp.placeholder = `레벨(${unit})`;
+        });
+    }
+
     function openNdtDisplacementGroupEditModal(group) {
         if (ndtDispTransferApi() && ndtDispTransferApi().migrateLegacyGroup(group)) {
             touchNdtDispGroup(group);
@@ -20451,6 +20647,9 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
         const isMemberDisp = group.category === '부재변위';
         if (damageRow) damageRow.style.display = isMemberDisp ? '' : 'none';
         if (damageEl) damageEl.checked = !!group.hasMinorDamage;
+        const unitSel = document.getElementById('ndtDispEditLevelUnit');
+        if (unitSel) unitSel.value = ndtDispLevelUnit(group);
+        refreshNdtDispEditLevelUnitUi(group);
         const hintEl = document.getElementById('ndtDispEditPointListHint');
         if (hintEl) {
             hintEl.textContent = '마킹한 지점 레벨을 입력·수정하세요. 측기 이동 시 해당 지점의 「이동 보정」에서 이전값·이후값만 넣으면 됩니다.';
@@ -20516,7 +20715,7 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
             <div class="option-manager-item ndt-disp-edit-point-row" data-point-id="${p.id}">
                 <span class="ndt-disp-edit-point-label">${formatNdtDisplacementPointLabel(idx + 1)}${role}</span>
                 <input type="number" class="form-control ndt-disp-edit-level-input" data-point-id="${p.id}"
-                    step="0.1" placeholder="레벨" value="${val}" inputmode="decimal" aria-label="${formatNdtDisplacementPointLabel(idx + 1)} 레벨">
+                    step="0.1" placeholder="레벨(${ndtDispLevelUnit(group)})" value="${val}" inputmode="decimal" aria-label="${formatNdtDisplacementPointLabel(idx + 1)} 레벨(${ndtDispLevelUnit(group)})">
                 ${calcHint}
                 <button type="button" class="btn ${hasX ? 'btn-primary' : 'btn-outline'} ndt-disp-mark-station-btn" title="이 지점에서 측기 이동 보정(이전값·이후값)"
                     data-group-id="${group.id}" data-point-id="${p.id}" style="font-size:0.7rem;padding:0.2rem 0.35rem;">이동 보정</button>
@@ -20633,6 +20832,15 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
         const btnClose = document.getElementById('btnCloseNdtDisplacementModal');
         if (btnClose) btnClose.addEventListener('click', closeNdtDisplacementModal);
 
+        const unitSelEdit = document.getElementById('ndtDispEditLevelUnit');
+        if (unitSelEdit) {
+            unitSelEdit.addEventListener('change', () => {
+                const gid = document.getElementById('ndtDispEditGroupId').value;
+                const g = (state.ndtDisplacementGroups[`${state.currentBuildingId}_${state.currentFloor}`] || []).find(x => x.id === gid);
+                refreshNdtDispEditLevelUnitUi(g);
+            });
+        }
+
         const btnSaveGroupEdit = document.getElementById('btnSaveNdtDispGroupEdit');
         if (btnSaveGroupEdit) {
             btnSaveGroupEdit.addEventListener('click', () => {
@@ -20668,6 +20876,8 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
                 }
                 group.locationType = document.getElementById('ndtDispEditLocationType').value || '보';
                 group.measureLength = len;
+                const unitSelSave = document.getElementById('ndtDispEditLevelUnit');
+                if (unitSelSave) group.levelUnit = unitSelSave.value === 'mm' ? 'mm' : 'cm';
                 const colorVal = document.getElementById('ndtDispEditColor')?.value;
                 if (colorVal) group.color = colorVal;
                 if (group.category === '부재변위') {
@@ -43138,6 +43348,54 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
         return Number.isFinite(x) && Number.isFinite(y) ? [{ x, y }] : [];
     }
 
+    // 2026-10-28 「화살표 추가」(같은 groupId로 한 결함에 위치가 여러 개)면 행·열은 위치마다 하나씩 나열하지 않고
+    // 모든 화살표 끝(영역은 네 모서리)을 한 번에 감싸는 큰 범위 하나로 넣는다 — 예: X1~X3/Y1~Y2 (기존 범위 표기 그대로).
+    // 같은 층 같은 그룹의 멤버 모두에게 같은 값이 들어가므로 표·보고서의 묶음 행은 값 하나만 보인다.
+    // 위치가 하나뿐이거나 그룹이 아니면 예전과 똑같다.
+    function getGridGroupMembers(d) {
+        if (!d) return [];
+        if (!d.groupId || d.surveyExtra) return [d];
+        let list = [];
+        try {
+            list = filterMapPlacedDefects(getCurrentFloorDefects()) || [];
+        } catch (_e) {
+            list = [];
+        }
+        let members = list.filter((m) => m && m.groupId === d.groupId && !m.surveyExtra);
+        if (typeof markingMembersForGroupRow === 'function' && members.length) members = markingMembersForGroupRow(list, members);
+        const out = members.map((m) => (m.id === d.id ? d : m));
+        return out.indexOf(d) === -1 ? [d] : out;
+    }
+
+    /** 행·열 계산에 쓸 점: 그룹이면 멤버 전체의 점, 아니면 자기 점 */
+    function getDefectGridPointsForLoc(d) {
+        const ms = getGridGroupMembers(d);
+        if (ms.length <= 1) return getDefectGridPoints(d);
+        const pts = [];
+        ms.forEach((m) => getDefectGridPoints(m).forEach((p) => pts.push(p)));
+        return pts.length ? pts : getDefectGridPoints(d);
+    }
+
+    /** 부재 규칙: 그룹이면 대표 마킹 기준(멤버 모두 같은 값이 나오게) */
+    function getDefectGridMemberForLoc(d) {
+        const ms = getGridGroupMembers(d);
+        if (ms.length > 1 && typeof pickDefectGroupRepresentative === 'function') {
+            const rep = pickDefectGroupRepresentative(ms);
+            if (rep && rep.component) return rep.component;
+        }
+        return d && d.component;
+    }
+
+    /** 결함과 같은 그룹 형제들까지 행·열 위치를 맞춤. 하나라도 바뀌면 true */
+    function applyGridAutoLocationToGroup(d, floorCode, opts) {
+        let changed = !!applyGridAutoLocationToDefect(d, floorCode, opts);
+        getGridGroupMembers(d).forEach((m) => {
+            if (m === d || !m) return;
+            if (applyGridAutoLocationToDefect(m, floorCode, opts)) changed = true;
+        });
+        return changed;
+    }
+
     /** 묶음 마킹(한 행으로 합침): 멤버 행·열 위치를 모아 ', '로(한 쌍 안의 열/행은 '/') */
     function mergeGroupGridLocProp(members) {
         const uniq = [];
@@ -43207,7 +43465,7 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
 
     function gridLocStampOf(d, sig) {
         const G = gridLib();
-        return G.gridLocStamp(sig, getDefectGridPoints(d), gridMemberName(d && d.component));
+        return G.gridLocStamp(sig, getDefectGridPointsForLoc(d), gridMemberName(getDefectGridMemberForLoc(d)));
     }
 
     function scheduleGridLocFreshness() {
@@ -43268,7 +43526,7 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
         const fc = floorCode || state.currentFloor;
         const locBefore = d.location;
         let changed = migrateLegacyGridLocation(d, fc);
-        const next = computeGridAutoLocationForPoints(getDefectGridPoints(d), d.component);
+        const next = computeGridAutoLocationForPoints(getDefectGridPointsForLoc(d), getDefectGridMemberForLoc(d));
         if (next == null) {
             // 선을 모두 지웠으면 칸 이름도 지움(자동 입력만 꺼 둔 경우는 그대로)
             if (!currentGridHasLines() && d.gridLoc) {
@@ -43300,7 +43558,8 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
         let n = 0;
         (defects || []).forEach((d) => {
             try {
-                if (applyGridAutoLocationToDefect(d)) n += 1;
+                // 화살표 추가 묶음이면 같은 그룹 형제도 같은 큰 범위로(2026-10-28)
+                if (applyGridAutoLocationToGroup(d)) n += 1;
             } catch (e) {
                 console.warn('[grid-lines] auto location', e);
             }
@@ -43413,7 +43672,7 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
         if (!locEl) return;
         const G = gridLib();
         if (existingPin) {
-            window._gridModalPts = getDefectGridPoints(existingPin);
+            window._gridModalPts = getDefectGridPointsForLoc(existingPin);
             let grid = existingPin.gridLoc || '';
             if (G && existingPin.gridLocAuto) {
                 // 예전 실험 데이터: 입력칸에는 실 이름만, 칸 이름은 아래 표시(저장하면 옮겨짐)
@@ -43423,7 +43682,7 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
                     grid = grid || sp.grid;
                 }
             }
-            const live = computeGridAutoLocationForPoints(window._gridModalPts, gridModalMember() || existingPin.component);
+            const live = computeGridAutoLocationForPoints(window._gridModalPts, gridModalMember() || getDefectGridMemberForLoc(existingPin));
             refreshGridLocHintInModal(live != null ? live : grid);
             return;
         }
@@ -43462,7 +43721,7 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
     function syncGridAutoFlagOnCommit(defect) {
         if (!defect) return;
         try {
-            applyGridAutoLocationToDefect(defect);
+            applyGridAutoLocationToGroup(defect);
         } catch (e) {
             console.warn('[grid-lines] commit', e);
         }
@@ -45958,8 +46217,49 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
         return getSurveyRowsForReport(combined);
     }
 
-    function collectExteriorFloorCodes(availableFloors) {
-        return (availableFloors || []).filter((fc) => isExteriorFloorCode(fc));
+    /**
+     * 외부 도면 층 코드 목록. bldg(그 건물의 floorsList)를 주면 그 건물의 표시 이름으로 판정한다 —
+     * 이름만 바꾼 외부 도면(2F → 「외부-정면」)이 지금 열어 둔 건물이 아닌 다른 동에서도 외부로 잡히게(2026-10-28).
+     * bldg가 없으면 예전과 같다(코드 규칙 + 지금 건물의 이름).
+     */
+    function collectExteriorFloorCodes(availableFloors, bldg) {
+        const labels = {};
+        const fl = (bldg && Array.isArray(bldg.floorsList)) ? bldg.floorsList : [];
+        fl.forEach((f) => { if (f && f.floorCode != null && f.floorLabel) labels[String(f.floorCode)] = String(f.floorLabel); });
+        return (availableFloors || []).filter((fc) => {
+            const lab = labels[String(fc)];
+            if (lab !== undefined && typeof window.isExteriorFloorCode === 'function') return !!window.isExteriorFloorCode(fc, lab);
+            return isExteriorFloorCode(fc);
+        });
+    }
+
+    /**
+     * 외부 도면 전체의 결함 사진 한 묶음(2026-10-28) — 상태조사표처럼 외부 도면(EXT·EXT_n·이름만 바꾼 외부)을 합친다.
+     * 순서: 결함 번호(본번호·가지번호) 순, 같으면 도면 순서·도면 안 순서 그대로. 사진 번호(사진01…)는 이 순서로 하나씩 이어 붙인다.
+     * 사진 데이터는 읽기만 한다. getFloorDefects(fc)는 그 도면의 결함 목록을 돌려준다.
+     */
+    function buildCombinedExteriorPhotoEntries(bldgId, exteriorFloorCodes, getFloorDefects) {
+        const defs = [];
+        (exteriorFloorCodes || []).forEach((fc, fIdx) => {
+            const raw = (typeof getFloorDefects === 'function'
+                ? getFloorDefects(fc)
+                : (state.defects && state.defects[bldgId + '_' + fc])) || [];
+            raw.forEach((d, dIdx) => {
+                if (!d) return;
+                const no = parseSurveyDefectNo(d);
+                defs.push({ d, floorCode: fc, fIdx, dIdx, main: no.main, suffix: no.suffix });
+            });
+        });
+        defs.sort((a, b) => (a.main - b.main) || (a.suffix - b.suffix) || (a.fIdx - b.fIdx) || (a.dIdx - b.dIdx));
+        const out = [];
+        defs.forEach((e) => {
+            const defectKey = e.d.id || ('idx_' + e.floorCode + '_' + e.dIdx);
+            getDefectOutputPhotos(e.d).forEach((src) => {
+                out.push({ d: e.d, floorCode: e.floorCode, src, defectKey });
+            });
+        });
+        out.forEach((e, i) => { const n = i + 1; e.label = '사진' + (n < 10 ? '0' + n : n); });
+        return out;
     }
 
     function buildingFloorRecords(bldgId) {
@@ -50173,9 +50473,15 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
             const reportArea = document.getElementById('printableReportArea');
             let reportPagesHtml = '';
 
-            const exteriorFloorCodesForReport = collectExteriorFloorCodes(availableFloors);
+            const exteriorFloorCodesForReport = collectExteriorFloorCodes(availableFloors, bldg);
             const exteriorFloorSetForReport = new Set(exteriorFloorCodesForReport);
             let exteriorSurveyEmitted = false;
+            // 2026-10-28 외부 도면 사진도 상태조사표처럼 한 묶음 — 첫 외부 도면 자리에 한 번만, 나머지 외부 도면은 사진첩 없이 위치도만
+            let exteriorAlbumEmitted = false;
+            const exteriorPhotoEntries = exteriorFloorCodesForReport.length
+                ? buildCombinedExteriorPhotoEntries(currentBldgId, exteriorFloorCodesForReport,
+                    (efc) => state.defects[`${currentBldgId}_${efc}`] || (state.currentFloor === efc ? getCurrentFloorDefects() : []))
+                : [];
 
             // 비파괴조사 결과표(데이터 목록)는 층별로 따로 만들지 않고 건물 전체를 미리 한 번에
             // 모아둔다 — 표는 해당 카테고리 항목이 있는 첫 층에서 한 번만(ndtTableEmitted.*) 내고,
@@ -50251,21 +50557,14 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
                         surveyFloorLabel = '건축물 외부';
                         surveyFloorCode = 'EXT';
                         // 합쳐진 표의 비고(사진번호)도 전체 외부 층 기준으로 다시 매긴다
+                        // (사진첩과 같은 묶음·같은 순서 — 결함 번호 순)
                         surveyPhotoLabels = {};
-                        let extPCounter = 0;
                         exteriorFloorCodesForReport.forEach((efc) => {
-                            const eKey = `${currentBldgId}_${efc}`;
-                            const eDefs = state.defects[eKey] || [];
-                            eDefs.forEach((d, dIdx) => {
-                                const defectKey = d.id || (`idx_${efc}_${dIdx}`);
-                                surveyPhotoLabels[defectKey] = [];
-                                getDefectOutputPhotos(d).forEach(() => {
-                                    extPCounter++;
-                                    const pNumStr = extPCounter < 10 ? `0${extPCounter}` : `${extPCounter}`;
-                                    surveyPhotoLabels[defectKey].push(`사진${pNumStr}`);
-                                });
+                            ((state.defects[`${currentBldgId}_${efc}`]) || (state.currentFloor === efc ? getCurrentFloorDefects() : [])).forEach((d, dIdx) => {
+                                if (d) surveyPhotoLabels[d.id || (`idx_${efc}_${dIdx}`)] = [];
                             });
                         });
+                        exteriorPhotoEntries.forEach((e) => { (surveyPhotoLabels[e.defectKey] = surveyPhotoLabels[e.defectKey] || []).push(e.label); });
                     }
                 } else {
                     surveyDefects = getSurveyRowsForReport(defects);
@@ -50295,10 +50594,37 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
                 }
 
                 // --- 2. 현장 사진첩 (A4 1페이지당 정확히 6개 배치 및 4:3 비율 규격) ---
+                // 외부 도면은 사진첩도 한 묶음(건축물 외부): 첫 외부 도면 자리에 합친 사진을 한 번만 내고 나머지 외부 도면은 건너뛴다
+                let albumItems = photoItems;
+                let albumFloorLabel = floorDisplayLabel;
+                let skipAlbum = false;
+                if (isExtFloor) {
+                    if (exteriorAlbumEmitted) {
+                        skipAlbum = true;
+                    } else {
+                        exteriorAlbumEmitted = true;
+                        albumFloorLabel = '건축물 외부';
+                        albumItems = exteriorPhotoEntries.map((e) => {
+                            const d = e.d;
+                            const good = isGoodDefectType(d.defectType);
+                            return {
+                                label: e.label,
+                                title: `${d.no ? d.no + ' ' : ''}${memberNameOut(d.component) || '부재'} ${d.defectType || '결함'}`,
+                                defectNo: d.no,
+                                location: enrichExteriorLocationForReport(d.location, e.floorCode),
+                                cause: good ? '-' : (d.cause || '건조수축'),
+                                size: good ? '-' : ((d.size && String(d.size).trim()) || '-'),
+                                src: e.src
+                            };
+                        });
+                    }
+                }
                 const photoPages = [];
-                if (photoItems.length > 0) {
-                    for (let i = 0; i < photoItems.length; i += 6) {
-                        photoPages.push(photoItems.slice(i, i + 6));
+                if (skipAlbum) {
+                    // 이 외부 도면의 사진은 위(첫 외부 도면)의 합친 사진첩에 있다
+                } else if (albumItems.length > 0) {
+                    for (let i = 0; i < albumItems.length; i += 6) {
+                        photoPages.push(albumItems.slice(i, i + 6));
                     }
                 } else {
                     photoPages.push([]);
@@ -50313,7 +50639,7 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
 
                             <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:0.6rem;">
                                 <h2 style="font-size:1.02rem; font-weight:800; color:#0f172a; border-left: 4px solid #2a2a2a; padding-left: 0.5rem; margin:0;">
-                                    2. ${floorDisplayLabel} 현장 결함 사진첩 (총 ${photoItems.length}개 사진)
+                                    2. ${albumFloorLabel} 현장 결함 사진첩 (총 ${albumItems.length}개 사진)
                                 </h2>
                                 <span style="font-size:0.78rem; background:#e0f2fe; color:#1f1f1f; font-weight:700; padding:0.15rem 0.5rem; border-radius:12px;">
                                     사진첩 페이지 ${pPageIdx + 1} / ${photoPages.length} (규격 6개 배치)
@@ -50338,7 +50664,7 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
                             ` : `
                                 <div style="width: 100%; border: 2px dashed #cbd5e1; border-radius: 8px; padding: 4rem 2rem; background: #f8fafc; text-align: center; color: #64748b; font-weight: 700; font-size: 1.05rem; margin-top: 2rem;">
                                     <i class="fa-solid fa-camera" style="font-size: 2.8rem; color: #a3a3a3; margin-bottom: 0.8rem; display: block;"></i>
-                                    📷 ${floorDisplayLabel}에 첨부된 현장 결함 사진이 없습니다.
+                                    📷 ${albumFloorLabel}에 첨부된 현장 결함 사진이 없습니다.
                                 </div>
                             `}
 
@@ -51644,26 +51970,44 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
     }
 
     /** 글자 줄이기: 기준 글자 모양(charPr)을 복제해 크기만 바꾼 새 id (같은 크기는 재사용) */
-    function ensureHwpxScaledCharPr(hwpxHeaderState, baseId, scale) {
-        if (!hwpxHeaderState || !hwpxHeaderState.text || !baseId || !(scale < 1)) return null;
-        hwpxHeaderState.scaledCharPr = hwpxHeaderState.scaledCharPr || {};
-        const cacheKey = `${baseId}@${scale}`;
-        if (hwpxHeaderState.scaledCharPr[cacheKey]) return hwpxHeaderState.scaledCharPr[cacheKey];
+    // 2026-10-28 균열게이지 글자 크기: 측정표 7.5pt, 비교사진 표 9pt (한글 charPr height = pt × 100)
+    const HWPX_CRACK_MEASURE_HEIGHT = 750;
+    const HWPX_CRACK_SUMMARY_HEIGHT = 900;
+
+    function hwpxCharPrHeight(headerText, id) {
+        const m = String(headerText || '').match(new RegExp(`<hh:charPr id="${id}"[^>]*\\bheight="(\\d+)"`));
+        return m ? parseInt(m[1], 10) : 0;
+    }
+
+    /** baseId 글자 모양을 복제해 크기만 height로 바꾼 글자 모양 id(같은 크기는 한 번만 만든다) */
+    function ensureHwpxSizedCharPr(hwpxHeaderState, baseId, height) {
+        if (!hwpxHeaderState || !hwpxHeaderState.text || !baseId || !(height > 0)) return null;
+        hwpxHeaderState.sizedCharPr = hwpxHeaderState.sizedCharPr || {};
+        const cacheKey = `${baseId}@${height}`;
+        if (hwpxHeaderState.sizedCharPr[cacheKey]) return hwpxHeaderState.sizedCharPr[cacheKey];
         let hdr = hwpxHeaderState.text;
         const m = hdr.match(new RegExp(`<hh:charPr id="${baseId}"[^>]*>[\\s\\S]*?</hh:charPr>`));
         if (!m) return null;
         const ids = [...hdr.matchAll(/<hh:charPr id="(\d+)"/g)].map((x) => parseInt(x[1], 10));
         const newId = String((ids.length ? Math.max(...ids) : 0) + 1);
         const block = m[0].replace(/^<hh:charPr id="\d+"/, `<hh:charPr id="${newId}"`)
-            .replace(/(<hh:charPr[^>]*\bheight=")(\d+)(")/, (all, a, h, b) => `${a}${Math.max(400, Math.round(parseInt(h, 10) * scale / 10) * 10)}${b}`);
+            .replace(/(<hh:charPr[^>]*\bheight=")(\d+)(")/, (all, a, h, b) => `${a}${height}${b}`);
         if (!hdr.includes('</hh:charProperties>')) return null;
         hdr = hdr.replace('</hh:charProperties>', block + '</hh:charProperties>');
         const cnt = (hdr.match(/<hh:charPr id="/g) || []).length;
         hdr = hdr.replace(/(<hh:charProperties[^>]*itemCnt=")(\d+)(")/, `$1${cnt}$3`);
         hwpxHeaderState.text = hdr;
         hwpxHeaderState.dirty = true;
-        hwpxHeaderState.scaledCharPr[cacheKey] = newId;
+        hwpxHeaderState.sizedCharPr[cacheKey] = newId;
         return newId;
+    }
+
+    /** 표 안 글자를 height 크기로(줄 정보 lineseg는 원래 글자 크기와의 비율만큼) */
+    function setHwpxCrackTableTextHeight(tbl, hwpxHeaderState, baseId, height) {
+        const sizedId = ensureHwpxSizedCharPr(hwpxHeaderState, baseId, height);
+        if (!sizedId) return;
+        const baseH = hwpxCharPrHeight(hwpxHeaderState.text, baseId) || height;
+        scaleHwpxTableText(tbl, sizedId, height / baseH);
     }
 
     function scaleHwpxTableText(tbl, charPrId, scale) {
@@ -52164,10 +52508,9 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
                     }
                     applyHwpxCellMap(tbl, layout.cells, setTcText);
                     polishHwpxCrackMonitorNode(tbl, crackStyleIds, purpleBfIds);
-                    if (layout.scale < 1) {
-                        const scaledId = ensureHwpxScaledCharPr(hwpxHeaderState, crackStyleIds.gulimCharPrId, layout.scale);
-                        scaleHwpxTableText(tbl, scaledId, layout.scale);
-                    }
+                    // 글자 7.5pt — 측정 줄이 양식보다 많으면 줄 높이와 같이 줄인다(최소 4pt)
+                    const measureH = Math.max(400, Math.round(HWPX_CRACK_MEASURE_HEIGHT * (layout.scale || 1) / 10) * 10);
+                    setHwpxCrackTableTextHeight(tbl, hwpxHeaderState, crackStyleIds.gulimCharPrId, measureH);
                     ensureTblTreatAsChar(tbl);
                     sec.appendChild(para);
                 });
@@ -52212,6 +52555,8 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
                 if (sumTbl) {
                     await fillSummaryPhotoTable(sumTbl, slots[si], si + 1);
                     polishHwpxCrackMonitorNode(sumTbl, crackStyleIds, purpleBfIds);
+                    // 비교사진 표 글자는 모두 9pt (2026-10-28)
+                    setHwpxCrackTableTextHeight(sumTbl, hwpxHeaderState, crackStyleIds.gulimCharPrId, HWPX_CRACK_SUMMARY_HEIGHT);
                     ensureTblTreatAsChar(sumTbl);
                 }
                 sec.appendChild(sumPara);
@@ -70296,13 +70641,29 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
             clearBuildingSearchAutofill();
             scheduleBuildingSearchAutofillCleanup();
             if (typeof renderDashboard === 'function') renderDashboard();
+            // 새로고침·새 버전 로드·재실행 뒤 로그인이 유지되면 마지막 작업 위치(현장·동·회차·층·탭)로 바로 들어간다.
+            // 못 들어가면(건물 삭제·휴지통·오류) 홈. 복원은 페이지 로드당 한 번만 하고, 끝난 뒤부터 위치를 기록한다.
             window.switchTab('tab-home');
+            (async () => {
+                try {
+                    if (window.BSA && window.BSA.lastLocUi) await window.BSA.lastLocUi.tryRestore(profile);
+                } catch (_e) { /* 홈 유지 */ }
+                if (window.BSA && window.BSA.lastLocUi) {
+                    window.BSA.lastLocUi.enableTracking();
+                    if (window.state.currentTab && window.state.currentTab !== 'tab-home') window.BSA.lastLocUi.record();
+                }
+            })();
         }, 50);
     }
 
     async function handleAuthStateChange(user) {
         if (!user) {
             if (window._deletingAccount) return;
+            // 로그아웃: 이 계정의 마지막 위치를 지우고 기록을 멈춘다(다른 계정이 이어받지 않게)
+            if (window.BSA && window.BSA.lastLocUi) {
+                if (window.state.uid && window.state.companyId) window.BSA.lastLocUi.clear(window.state.uid, window.state.companyId);
+                window.BSA.lastLocUi.disableTracking();
+            }
             window._explicitAuth = false;
             if (typeof stopRealtimeListeners === 'function') stopRealtimeListeners({ clearCache: true });
             window.state.uid = null;

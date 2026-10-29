@@ -441,7 +441,7 @@ if (fs.existsSync(appPath)) {
     };
     vm.createContext(flow);
     const fnNames = ['gridLib', 'getMemberNameApi', 'memberNameOut', 'getGridFloorKey', 'getGridCtx', 'getCurrentFloorGrid', 'gridHasLines',
-        'currentGridHasLines', 'gridMemberName', 'computeGridAutoLocationForPoints', 'gridNum', 'getDefectGridPoints',
+        'currentGridHasLines', 'gridMemberName', 'computeGridAutoLocationForPoints', 'gridNum', 'getDefectGridPoints', 'getGridGroupMembers', 'getDefectGridPointsForLoc', 'getDefectGridMemberForLoc',
         'migrateLegacyGridLocation', 'refreshGridLocHintInModal', 'applyGridAutoLocationToDefect', 'gridLocStampOf',
         'scheduleGridLocFreshness', 'refreshStaleGridLocForCurrentFloor', 'gridModalMember', 'refreshGridAutoLocationInModal'];
     vm.runInContext(`const gridLocStampMap = new WeakMap();\n${fnNames.map(takeFn).join('\n')}\n`
