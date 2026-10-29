@@ -18,7 +18,7 @@
     var KEYS = [
         'inspectionType', 'inspectionYear', 'inspectionPeriod', 'latestSurveyRoundKey',
         'floorsOrderManual',
-        'siteName', 'dong', 'multiDong', 'name', 'address', 'inspector', 'contactPhone',
+        'siteName', 'dong', 'multiDong', 'dongOrder', 'name', 'address', 'inspector', 'contactPhone',
         'floors', 'date', 'structureType', 'facilityGrade', 'completionDate', 'notes',
         // 반발경도 평균에 넣을 추정식 — 빠져 있어 동기화 때마다 서버 옛 값으로 초기화됐다(2026-09-22)
         'enabledStrengthFormulas',

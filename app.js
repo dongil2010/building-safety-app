@@ -3486,7 +3486,7 @@ document.addEventListener('DOMContentLoaded', () => {
     const BUILDING_LOCAL_META_KEYS = (_buildingMetaMerge && _buildingMetaMerge.KEYS) || [
         'inspectionType', 'inspectionYear', 'inspectionPeriod', 'latestSurveyRoundKey',
         'floorsOrderManual',
-        'siteName', 'dong', 'multiDong', 'name', 'address', 'inspector', 'contactPhone',
+        'siteName', 'dong', 'multiDong', 'dongOrder', 'name', 'address', 'inspector', 'contactPhone',
         'floors', 'date', 'structureType', 'facilityGrade', 'completionDate', 'notes',
         'enabledStrengthFormulas', 'strengthAnvilAvg', 'strengthAgeOverride', 'floorPdfRemovedAt', 'floorPdfUpdatedAt', 'evalUnitPlan', 'evalInputs', 'evalSafetyman', 'roundDone'
     ];
@@ -6111,6 +6111,14 @@ document.addEventListener('DOMContentLoaded', () => {
                     }
                 });
             });
+            grid.querySelectorAll('[data-action="dong-move"]').forEach((el) => {
+                el.addEventListener('click', (e) => {
+                    if (blockGhostClick()) { e.preventDefault(); e.stopPropagation(); return; }
+                    e.stopPropagation();
+                    if (el.disabled) return;
+                    window.moveSiteDong(el.getAttribute('data-site-key'), el.getAttribute('data-dong-label'), el.getAttribute('data-other-label'));
+                });
+            });
             grid.querySelectorAll('[data-action="dong-rename"]').forEach((el) => {
                 el.addEventListener('click', (e) => {
                     if (blockGhostClick()) { e.preventDefault(); e.stopPropagation(); return; }
@@ -6162,7 +6170,7 @@ document.addEventListener('DOMContentLoaded', () => {
             const dongs = filtered.filter((b) =>
                 getBuildingSiteName(b) === selectedSiteKey
                 && getBuildingSurveyRoundKey(b) === roundKey
-            ).sort((a, b) => formatDongRowLabel(a).localeCompare(formatDongRowLabel(b), 'ko'));
+            ).sort(makeDongComparator(selectedSiteKey));
 
             if (siteNav) siteNav.hidden = false;
             if (siteNavTitle) {
@@ -6177,12 +6185,23 @@ document.addEventListener('DOMContentLoaded', () => {
             }
 
             // 여러 동: 동별 점검·도면·전경 (동마다 도면이 다름)
-            grid.innerHTML = dongs.map((bldg) => {
+            grid.innerHTML = dongs.map((bldg, i) => {
                 const floorCount = (bldg.floorsList && bldg.floorsList.length > 0)
                     ? `도면 ${bldg.floorsList.length}개 층`
                     : '도면 미등록';
                 const sid = escapeHtml(bldg.id);
+                const myLabel = escapeHtml(formatDongRowLabel(bldg));
+                const upLabel = i > 0 ? escapeHtml(formatDongRowLabel(dongs[i - 1])) : '';
+                const downLabel = i < dongs.length - 1 ? escapeHtml(formatDongRowLabel(dongs[i + 1])) : '';
                 const dongBtns = `
+                        <button type="button" class="icon-btn" title="한글 출력·목록에서 이 동을 위로" data-action="dong-move" data-site-key="${escapeHtml(selectedSiteKey)}" data-dong-label="${myLabel}" data-other-label="${upLabel}" aria-label="동 위로" ${i === 0 ? 'disabled' : ''}>
+                            <i class="fa-solid fa-arrow-up"></i>
+                            <span class="icon-btn-label">위로</span>
+                        </button>
+                        <button type="button" class="icon-btn" title="한글 출력·목록에서 이 동을 아래로" data-action="dong-move" data-site-key="${escapeHtml(selectedSiteKey)}" data-dong-label="${myLabel}" data-other-label="${downLabel}" aria-label="동 아래로" ${i === dongs.length - 1 ? 'disabled' : ''}>
+                            <i class="fa-solid fa-arrow-down"></i>
+                            <span class="icon-btn-label">아래로</span>
+                        </button>
                         <button type="button" class="icon-btn icon-btn-edit" title="동 이름 지정/변경" data-action="dong-rename" data-bldg-id="${sid}" aria-label="동 이름 변경">
                             <i class="fa-solid fa-pen"></i>
                             <span class="icon-btn-label">이름</span>
@@ -17756,7 +17775,7 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
                         <label class="form-label">📍 측정 위치 ${ndtStrengthSlots.length > 1 ? `(${idx + 1})` : ''}${idx === 0 ? ' *' : ''}</label>
                         <input type="text" class="form-control ndt-strength-slot-location" data-slot="${idx}" value="${slot.location || ''}" placeholder="예: 101동 1F 기둥 C1 하부(플렌지)">
                     </div>
-                    ${ndtStrengthSlots.length > 1 ? `<button type="button" class="btn btn-sm btn-outline ndt-strength-slot-remove" data-slot="${idx}" style="border-color:#ef4444; color:#ef4444;" title="이 위치 삭제"><i class="fa-solid fa-trash"></i></button>` : ''}
+                    ${ndtStrengthSlots.length > 1 ? `<button type="button" class="btn btn-sm btn-outline ndt-strength-slot-remove" data-slot="${idx}" style="border-color:#ef4444; color:#ef4444; flex-shrink:0;" title="이 위치 삭제"><i class="fa-solid fa-trash"></i></button>` : ''}
                 </div>
                 <div class="form-group" style="margin:0;">
                     <label class="form-label">📷 R값 측정지 사진 스캔 (사진에서 숫자 자동 인식)</label>
@@ -21662,13 +21681,14 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
     function getSiteBuildingsSorted(siteKey) {
         const all = filterActiveBuildings(window.state.buildings || [], window.state.deletedBuildingIds);
         const list = all.filter((b) => getBuildingSiteName(b) === siteKey);
+        const dongCmp = makeDongComparator(siteKey);
         list.sort((a, b) => {
             const ra = getSurveyRoundOrderRank(getBuildingSurveyRoundKey(a));
             const rb = getSurveyRoundOrderRank(getBuildingSurveyRoundKey(b));
             if (ra != null && rb != null && ra !== rb) return rb - ra;
             if (ra != null && rb == null) return -1;
             if (ra == null && rb != null) return 1;
-            return formatDongRowLabel(a).localeCompare(formatDongRowLabel(b), 'ko');
+            return dongCmp(a, b);
         });
         return list;
     }
@@ -52535,7 +52555,7 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
         const dongs = getSiteBuildingsSorted(siteKey).filter((b) => getBuildingSurveyRoundKey(b) === roundKey);
         if (dongs.length < 2) return [bldg];
         const picked = await window.appChooseMany(
-            '한글 한 파일에 넣을 동을 고르세요.\n층 머리글 번호·도면 번호는 아래 순서대로 이어집니다.',
+            '한글 한 파일에 넣을 동을 고르세요.\n층 머리글 번호·도면 번호는 아래 순서대로 이어집니다.\n(순서 바꾸기: 홈 → 현장 → 회차 → 동 목록의 「위로/아래로」)',
             dongs.map((b) => ({ label: formatDongRowLabel(b), detail: b.id === bldg.id ? '지금 연 동' : '' })),
             { title: '한글로 저장 — 동 선택', okText: '한글로 저장' }
         );
@@ -62840,6 +62860,60 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
         }
         return false;
     }
+
+    /**
+     * 현장의 동 순서(위에서부터) — 동 이름별로 건물의 dongOrder 중 가장 작은 값, 없으면 가나다 순으로 뒤에.
+     * 홈 동 목록과 한글 「동 선택」→ 출력 순서(층 번호·도면 번호가 이어지는 순서)가 이 순서를 따른다.
+     */
+    function getSiteDongLabelsOrdered(siteKey) {
+        const rank = new Map();
+        filterActiveBuildings(window.state.buildings || [], window.state.deletedBuildingIds)
+            .filter((b) => getBuildingSiteName(b) === siteKey)
+            .forEach((b) => {
+                const k = formatDongRowLabel(b);
+                const n = b.dongOrder == null ? NaN : Number(b.dongOrder);
+                const v = Number.isFinite(n) ? n : Infinity;
+                if (!rank.has(k) || v < rank.get(k)) rank.set(k, v);
+            });
+        return [...rank.keys()].sort((a, b) => {
+            const ra = rank.get(a);
+            const rb = rank.get(b);
+            if (ra !== rb) return ra < rb ? -1 : 1;
+            return a.localeCompare(b, 'ko');
+        });
+    }
+
+    function makeDongComparator(siteKey) {
+        const idx = new Map(getSiteDongLabelsOrdered(siteKey).map((l, i) => [l, i]));
+        return (a, b) => {
+            const ia = idx.has(formatDongRowLabel(a)) ? idx.get(formatDongRowLabel(a)) : 1e9;
+            const ib = idx.has(formatDongRowLabel(b)) ? idx.get(formatDongRowLabel(b)) : 1e9;
+            return ia - ib;
+        };
+    }
+
+    /** 동 두 개의 순서를 맞바꾼다(모든 회차의 같은 이름 동에 적용) */
+    window.moveSiteDong = function(siteKey, dongLabel, otherLabel) {
+        const labels = getSiteDongLabelsOrdered(siteKey);
+        const i = labels.indexOf(dongLabel);
+        const j = labels.indexOf(otherLabel);
+        if (i < 0 || j < 0 || i === j) return false;
+        [labels[i], labels[j]] = [labels[j], labels[i]];
+        filterActiveBuildings(window.state.buildings || [], window.state.deletedBuildingIds)
+            .filter((b) => getBuildingSiteName(b) === siteKey)
+            .forEach((b) => {
+                const n = labels.indexOf(formatDongRowLabel(b));
+                if (n < 0 || b.dongOrder === n) return;
+                b.dongOrder = n;
+                b._pendingCloudSync = true;
+                if (typeof markBuildingMetaDirty === 'function') markBuildingMetaDirty(b);
+                if (window.state.currentBuildingId === b.id && window.state.currentBuilding) window.state.currentBuilding.dongOrder = n;
+            });
+        saveStateToLocalStorage();
+        if (typeof syncStateToFirebase === 'function') syncStateToFirebase();
+        if (typeof renderDashboard === 'function') renderDashboard();
+        return true;
+    };
 
     function setSiteMultiDongFlag(siteKey, multiDong) {
         const key = String(siteKey || '').trim();
