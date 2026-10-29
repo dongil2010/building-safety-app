@@ -150,8 +150,11 @@ document.addEventListener('DOMContentLoaded', () => {
         }).join('');
         const selectedBtn = list.querySelector('.bsa-select-sheet-item.is-selected');
         if (selectedBtn) {
+            // 현재 선택 항목을 목록 가운데로 — 끝에 걸쳐 보이지 않게(드래그로 위아래 바로 찾기)
             requestAnimationFrame(() => {
-                selectedBtn.scrollIntoView({ block: 'nearest' });
+                const li = selectedBtn.closest('li') || selectedBtn;
+                const top = li.offsetTop - Math.max(0, (list.clientHeight - li.offsetHeight) / 2);
+                list.scrollTop = Math.max(0, top);
             });
         }
     }
@@ -169,7 +172,9 @@ document.addEventListener('DOMContentLoaded', () => {
         window._bsaSelectIgnoreUntil = Date.now() + 320;
         if (titleEl) titleEl.textContent = getBsaSelectSheetTitle(selectEl);
         const optCount = selectEl.options ? selectEl.options.length : 0;
-        if (searchWrap) searchWrap.hidden = optCount < 10;
+        // 도면 층 선택은 검색 칸 없이 드래그(스크롤)로만 찾음 — 키보드가 올라와 목록을 가리지 않게
+        const noSearch = selectEl.id === 'floorSelect';
+        if (searchWrap) searchWrap.hidden = noSearch || optCount < 10;
         if (search) search.value = '';
         renderBsaSelectSheetList('');
         sheet.classList.add('open');
