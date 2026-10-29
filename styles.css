@@ -18086,3 +18086,25 @@ html.layout-tablet #tab-map #mobileMapFabBar .mobile-fab-btn {
     font-weight: 700;
     white-space: nowrap;
 }
+
+/* 2026-10-30 PC 회차 화면(.round-row-pc = prefersMobileLayout 아님): 아이콘 옆에 글자(점검·도면 수정·오프라인 저장·삭제) */
+#tab-home .building-row.round-row-pc .building-row-actions-compact {
+    flex-wrap: wrap !important;
+    gap: 0.35rem !important;
+}
+#tab-home .building-row.round-row-pc .building-row-actions-compact .icon-btn {
+    width: auto !important;
+    min-width: 2.35rem !important;
+    max-width: none !important;
+    padding: 0 0.6rem !important;
+    gap: 0.3rem !important;
+    display: inline-flex !important;
+    align-items: center;
+    justify-content: center;
+    white-space: nowrap;
+}
+#tab-home .building-row.round-row-pc .building-row-actions-compact .icon-btn-label {
+    display: inline !important;
+    font-size: 0.82rem !important;
+    font-weight: 700;
+}

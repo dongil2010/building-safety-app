@@ -6336,7 +6336,7 @@ document.addEventListener('DOMContentLoaded', () => {
             // 2026-10-29 폰·태블릿 회차 화면: 점검 종류 고르기·회차 삭제는 숨기고(PC에서만),
             // 남는 자리에 점검/도면 수정/오프라인 버튼을 글자와 함께 크게. 저장된 점검 종류는 그대로.
             const roundMobile = !!(window.BSA && typeof window.BSA.prefersMobileLayout === 'function' && window.BSA.prefersMobileLayout());
-            const roundRowMobileCls = roundMobile ? ' round-row-mobile' : '';
+            const roundRowMobileCls = roundMobile ? ' round-row-mobile' : ' round-row-pc';
             grid.innerHTML = roundKeys.map((rk) => {
                 const members = byRound.get(rk) || [];
                 const roundLabel = rk === '_none' ? '회차 미지정' : formatSurveyRoundLabel(rk);
@@ -6384,6 +6384,7 @@ document.addEventListener('DOMContentLoaded', () => {
                                 ${typeSelect}
 ${roundMobile ? '' : `<button type="button" class="icon-btn icon-btn-trash" title="이 회차 삭제(휴지통)" data-action="delete-round" data-site-key="${safeSite}" data-round-key="${safeRound}" aria-label="회차 삭제">
                                     <i class="fa-solid fa-trash"></i>
+                                    <span class="icon-btn-label">삭제</span>
                                 </button>`}
                             </div>
                         </div>
@@ -6407,14 +6408,15 @@ ${roundMobile ? '' : `<button type="button" class="icon-btn icon-btn-trash" titl
                             </button>
                             <button type="button" class="icon-btn icon-btn-drawing" title="도면 추가/교체" data-action="drawing" data-bldg-id="${safeId}" aria-label="도면">
                                 <i class="fa-solid fa-images"></i>
-                                <span class="icon-btn-label">${roundMobile ? '도면 수정' : '도면'}</span>
+                                <span class="icon-btn-label">도면 수정</span>
                             </button>
                             <button type="button" class="icon-btn icon-btn-offline" title="오프라인 준비 — 모든 층·도면·사진을 이 기기에 받기" data-action="offline-prep" data-bldg-id="${safeId}" aria-label="오프라인 준비">
                                 <i class="fa-solid fa-cloud-arrow-down"></i>
-                                <span class="icon-btn-label">오프라인</span>
+                                <span class="icon-btn-label">${roundMobile ? '오프라인' : '오프라인 저장'}</span>
                             </button>
                             ${roundMobile ? '' : `<button type="button" class="icon-btn icon-btn-trash" title="이 회차 삭제(휴지통)" data-action="delete-round" data-site-key="${safeSite}" data-round-key="${safeRound}" aria-label="회차 삭제">
                                 <i class="fa-solid fa-trash"></i>
+                                <span class="icon-btn-label">삭제</span>
                             </button>`}
                         </div>
                     </div>
