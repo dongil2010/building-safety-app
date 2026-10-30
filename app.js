@@ -46986,7 +46986,9 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
 
     function getSurveyStructMarks(d, isGrade3) {
         const on = isGrade3 ? 'O' : '○';
-        const isStruct = d.category === '구조체';
+        // 2026-10-30 개구부 균열은 한글·PDF 상태조사표에서 비구조체로 표시(사용자 요청). 슬래브 개구부는 구조체 그대로
+        const isOpeningNonStruct = !!d.isOpeningCrack && !/슬래브/.test(String(d.component || ''));
+        const isStruct = d.category === '구조체' && !isOpeningNonStruct;
         return { struct: isStruct ? on : '-', nonstruct: isStruct ? '-' : on };
     }
 
