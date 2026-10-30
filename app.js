@@ -13215,6 +13215,62 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
         return getPinLeaderBoxAnchorFromPoint(boxX, boxY, targetX, targetY, boxW, boxH, rotationDeg, shapeOpts);
     }
 
+    /** 마킹 점 목록(targets) → 좌표만 */
+    function collectLeaderTipPoints(targets) {
+        return (targets || [])
+            .filter((t) => t && Number.isFinite(Number(t.targetX)) && Number.isFinite(Number(t.targetY)))
+            .map((t) => ({ x: Number(t.targetX), y: Number(t.targetY) }));
+    }
+
+    /**
+     * 2026-10-30 지시선 2~3개(화살표 추가): 마킹 점들의 중심에 가장 가까운 박스 모서리 한 곳에서 모두 나감.
+     * 예외: 그 모서리→점 선이 박스를 가로지르거나 다른 마킹 점을 지나가면 그 점만 자기와 가까운 모서리로.
+     * 점이 1개이거나 사각형이 아닌 핀(동그라미·둥근 박스)은 예전 그대로. 화면·PDF·한글·벡터 PDF 공용.
+     */
+    function getGroupLeaderBoxAnchor(boxX, boxY, targetX, targetY, tips, boxW, boxH, rotationDeg, shapeOpts) {
+        const own = getPinLeaderBoxAnchorFromPoint(boxX, boxY, targetX, targetY, boxW, boxH, rotationDeg, shapeOpts);
+        const shape = (shapeOpts && shapeOpts.shape) || 'rect';
+        if (shape !== 'rect' || !Array.isArray(tips) || tips.length < 2) return own;
+        const cx = tips.reduce((s, p) => s + p.x, 0) / tips.length;
+        const cy = tips.reduce((s, p) => s + p.y, 0) / tips.length;
+        const shared = getPinLeaderBoxAnchorFromPoint(boxX, boxY, cx, cy, boxW, boxH, rotationDeg, shapeOpts);
+        if (Math.hypot(shared.x - own.x, shared.y - own.y) < 1e-6) return own;
+        const rad = ((rotationDeg || 0) * Math.PI) / 180;
+        const cos = Math.cos(rad);
+        const sin = Math.sin(rad);
+        const toLocal = (x, y) => ({ x: (x - boxX) * cos - (y - boxY) * sin, y: (x - boxX) * sin + (y - boxY) * cos });
+        const hw = boxW / 2;
+        const hh = boxH / 2;
+        const eps = Math.max(0.5, Math.min(hw, hh) * 0.05);
+        // 1) 모서리→점 선이 박스 안을 지나가거나 박스 변에 바짝 붙어 지나가면(박스를 가로지름) 제외
+        const pad = Math.min(hw, hh) * 0.6;
+        const cl = toLocal(shared.x, shared.y);
+        // 모서리→점 방향이 모서리→중심 방향과 90° 넘게 다르면(박스 반대편으로 돌아 감) 제외
+        if ((targetX - shared.x) * (cx - shared.x) + (targetY - shared.y) * (cy - shared.y) < 0) return own;
+        for (let i = 1; i < 40; i++) {
+            const k = i / 40;
+            const p = toLocal(shared.x + (targetX - shared.x) * k, shared.y + (targetY - shared.y) * k);
+            if (Math.abs(p.x) < hw - eps && Math.abs(p.y) < hh - eps) return own;
+            if (Math.hypot(p.x - cl.x, p.y - cl.y) > pad * 1.5
+                && Math.abs(p.x) < hw + pad && Math.abs(p.y) < hh + pad) return own;
+        }
+        // 2) 다른 마킹 점 바로 위를 지나가면 제외
+        const near = Math.max(6, Math.min(boxW, boxH) * 0.35);
+        const sx = targetX - shared.x;
+        const sy = targetY - shared.y;
+        const len2 = sx * sx + sy * sy;
+        if (len2 > 1e-9) {
+            for (const q of tips) {
+                if (Math.hypot(q.x - targetX, q.y - targetY) < 1e-6) continue;
+                const t = ((q.x - shared.x) * sx + (q.y - shared.y) * sy) / len2;
+                if (t <= 0.02 || t >= 0.98) continue;
+                const d = Math.hypot(q.x - (shared.x + sx * t), q.y - (shared.y + sy * t));
+                if (d < near) return own;
+            }
+        }
+        return shared;
+    }
+
     function rotateVec2Deg(x, y, deg) {
         const rad = ((deg || 0) * Math.PI) / 180;
         const cos = Math.cos(rad);
@@ -26778,6 +26834,7 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
         // Leader Line & Arrow Tip Rendering — 실선, 마킹과 가장 가까운 박스 모서리에서 시작
         // 영역 마킹: 테두리에만 선이 꼽히고 내부/화살표 관통은 없음
         const isAreaDefect = defect.shapeType === 'area' && defect.areaX1 !== undefined;
+        const leaderTips = collectLeaderTipPoints(targets);
         targets.forEach(t => {
             if (t.targetX === undefined || t.targetY === undefined) return;
             let targetX = t.targetX;
@@ -26794,7 +26851,7 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
             }
             const lineColor = activeColor;
             const leaderAnchorOpts = { shape: shapeCfg.shape, scale };
-            const anchor = getPinLeaderBoxAnchor(boxX, boxY, targetX, targetY, w, h, state.rotationAngle || 0, leaderAnchorOpts);
+            const anchor = getGroupLeaderBoxAnchor(boxX, boxY, targetX, targetY, leaderTips, w, h, state.rotationAngle || 0, leaderAnchorOpts);
             const headLen = 10 * arrowScale;
             const forcedDir = tipIsArea ? { enabled: false } : resolveForcedArrowDirection(t, defect, state.rotationAngle || 0);
             const tipCircle = useCircleTip && leaderTipIsCircle(forcedDir);
@@ -48445,6 +48502,7 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
 
             // Draw Leader Line & Arrowhead/Tip — 실선, 마킹과 가장 가까운 박스 모서리에서 시작
             const isAreaDefectSafe = defect.shapeType === 'area' && defect.areaX1 !== undefined;
+            const leaderTipsSafe = collectLeaderTipPoints(targets);
             targets.forEach(t => {
                 if (t.targetX === undefined || t.targetY === undefined) return;
                 let tipX = t.targetX;
@@ -48459,7 +48517,7 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
                     tipY = attach.y;
                 }
                 const leaderAnchorOpts = { shape: safeShapeCfg.shape, scale: safeScale };
-                const anchor = getPinLeaderBoxAnchor(boxX, boxY, tipX, tipY, safeBoxW, safeBoxH, 0, leaderAnchorOpts);
+                const anchor = getGroupLeaderBoxAnchor(boxX, boxY, tipX, tipY, leaderTipsSafe, safeBoxW, safeBoxH, 0, leaderAnchorOpts);
                 const safeHeadLen = 11 * safeArrowScale;
                 const forcedDir = tipIsArea ? { enabled: false } : resolveForcedArrowDirection(t, defect, floorRotSafe);
                 const tipCircleSafe = useCircleTipSafe && leaderTipIsCircle(forcedDir);
@@ -48597,6 +48655,7 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
                 borderStyle: getAreaBorderStyle(src)
             });
         };
+        const leaderTipsVec = collectLeaderTipPoints(targets);
         targets.forEach(t => {
             if (t.targetX === undefined || t.targetY === undefined) return;
             let tipX = t.targetX;
@@ -48612,7 +48671,7 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
                 tipY = attach.y;
             }
             const leaderAnchorOpts = { shape: shapeCfg.shape, scale: pinScale };
-            const anchor = getPinLeaderBoxAnchor(boxX, boxY, tipX, tipY, boxDim.w, boxDim.h, floorRot, leaderAnchorOpts);
+            const anchor = getGroupLeaderBoxAnchor(boxX, boxY, tipX, tipY, leaderTipsVec, boxDim.w, boxDim.h, floorRot, leaderAnchorOpts);
             const headLen = 11 * arrowScale;
             const forcedDir = tipIsArea ? { enabled: false } : resolveForcedArrowDirection(t, defect, floorRot);
             const tipCircle = useCircleTip && leaderTipIsCircle(forcedDir);
@@ -51505,6 +51564,8 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
     // (채워 넣는 순서 ≠ 최종 문서 순서라서 — 3종은 결함위치도를 맨 뒤로 몰아넣는다 — 번호를
     //  그때그때 매기면 뒤엉킨다. 반드시 마지막에 한 번에 매겨야 한다.)
     const HWPX_FIG_MARK = '␟';
+    // 2026-10-30 3종 여러 동: 동이 바뀌는 첫 위치도 캡션에 붙여 도면 번호를 1부터 다시 매긴다(MARK 바로 뒤)
+    const HWPX_FIG_RESET = '␞';
 
     /**
      * 도면 번호의 앞자리(보고서 장 번호) — 1·2종: 정기안전점검은 6, 정밀안전점검(그 밖의 점검 포함)은 7.
@@ -51523,8 +51584,14 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
         Array.from(xmlDoc.getElementsByTagNameNS(HWPX_HP_NS, 't')).forEach((t) => {
             const txt = t.textContent || '';
             if (txt.indexOf(HWPX_FIG_MARK) !== 0) return;
+            let rest = txt.slice(HWPX_FIG_MARK.length);
+            const figReset = '\u241E'; // = HWPX_FIG_RESET (함수만 떼어 쓰는 테스트에서도 동작하게 글자로)
+            if (rest.indexOf(figReset) === 0) {
+                figNo = 0;
+                rest = rest.slice(figReset.length);
+            }
             figNo++;
-            t.textContent = `[도면 ${chapterNo}-${figNo}] ${txt.slice(HWPX_FIG_MARK.length)}`;
+            t.textContent = `[도면 ${chapterNo}-${figNo}] ${rest}`;
         });
         return figNo;
     }
@@ -54364,8 +54431,16 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
                 }
             }
 
+            // 2026-10-30 여러 동: 사진 번호를 동마다 사진1부터 다시(비고도 같은 번호). 한 동은 예전처럼 이어서.
+            const photoNoByDong = !!(dongParts && dongParts.length > 1);
+            let photoNoDong;
+            let photoNoBase = 0;
             for (let preIdx = 0; preIdx < floorsData.length; preIdx++) {
                 const { floorCode: preFloorCode, pageDefects: preDefects, dongPart: preDongPart } = floorsData[preIdx];
+                if (photoNoByDong && (preDongPart || null) !== photoNoDong) {
+                    photoNoDong = preDongPart || null;
+                    photoNoBase = globalPhotoEntries.length;
+                }
                 await Promise.all(preDefects.map(async (d) => {
                     await ensureDefectPhotosLoaded(d);
                 }));
@@ -54374,11 +54449,11 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
                 preDefects.forEach((d, dIdx) => {
                     const photoList = prePhotoLists[dIdx];
                     if (!photoList.length) return;
-                    const firstNo = globalPhotoEntries.length + 1;
+                    const firstNo = globalPhotoEntries.length - photoNoBase + 1;
                     photoList.forEach((p) => {
                         globalPhotoEntries.push({
                             d, floorCode: preFloorCode, src: p.src, pid: p.pid, dongPart: preDongPart || null,
-                            label: `사진${globalPhotoEntries.length + 1}`
+                            label: `사진${globalPhotoEntries.length - photoNoBase + 1}`
                         });
                     });
                     globalPhotoLabelByDefect.set(d, formatHwpxPhotoRemark(firstNo, photoList.length));
@@ -56139,6 +56214,10 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
                         let compareDefectsOnPage = 0;
                         let comparePairIndex = 0;
                         const compareLegendItems = []; // 범례: 실제로 찍힌 표의 층 접두사
+                        // 2026-10-30 여러 동: 중점관리도 동마다 「A동 중점관리 항목」 소제목(새 쪽)으로 나눈다
+                        const splitPriorityByDong = !!(dongParts && dongParts.length > 1);
+                        let priorityDong;
+                        let priorityDongCount = 0;
                         for (let ci = 0; ci < allPriorityCompareEntries.length; ci++) {
                             const { d, floorCode: cmpFloorCode } = allPriorityCompareEntries[ci];
                             useDongOf(allPriorityCompareEntries[ci].entry);
@@ -56147,6 +56226,22 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
                             const repairSrc = getDefectRepairPhotoSrc(d);
                             const currSrc = repairSrc || getDefectOutputPhotos(d)[0];
                             if (!prevSrc && !currSrc) continue;
+                            let priorityDongHead = false;
+                            const entryDong = allPriorityCompareEntries[ci].entry && allPriorityCompareEntries[ci].entry.dongPart;
+                            if (splitPriorityByDong && entryDong !== priorityDong) {
+                                priorityDong = entryDong;
+                                const dl = priorityDong && priorityDong.dongLabel;
+                                if (dl && ndtAlbumSubHeadingStamp) {
+                                    // 첫 동은 「1.2. 중점관리 항목」 제목 바로 아래, 다음 동부터 새 쪽
+                                    const head = makeHwpxTextParaFromStamp(ndtAlbumSubHeadingStamp, `${dl} 중점관리 항목`, HP_NS, priorityDongCount > 0);
+                                    if (head) {
+                                        appendComparePara(head);
+                                        priorityDongHead = true;
+                                    }
+                                }
+                                priorityDongCount++;
+                                compareDefectsOnPage = 0;
+                            }
 
                             if (compareDefectsOnPage > 0 && compareDefectsOnPage >= COMPARE_DEFECTS_PER_PAGE) {
                                 compareDefectsOnPage = 0;
@@ -56162,9 +56257,10 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
 
                             const tblPara = cloneCompareStampPara(grade3CompareTableStamp.compareTblPara);
                             if (!tblPara) continue;
-                            if (compareDefectsOnPage === 0 && comparePairIndex > 0) {
+                            if (compareDefectsOnPage === 0 && comparePairIndex > 0 && !priorityDongHead) {
                                 tblPara.setAttribute('pageBreak', '1');
                             }
+                            if (priorityDongHead) tblPara.setAttribute('pageBreak', '0');
                             const tbl = tblPara.getElementsByTagNameNS(HP_NS, 'tbl')[0];
                             ensureTblTreatAsChar(tbl);
                             const pics = Array.from(tbl.getElementsByTagNameNS(HP_NS, 'pic'));
@@ -56223,7 +56319,9 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
                     const mapCodes = locationMapCodesForPage(floorsData[i], floorCode);
                     let mapSeq = 0;
                     let dongHead = null;
+                    let resetFigNo = false;
                     if (splitMapsByDong && floorsData[i].dongPart !== mapDong && mapCodes.length) {
+                        resetFigNo = true;
                         mapDong = floorsData[i].dongPart;
                         const dl = mapDong && mapDong.dongLabel;
                         if (dl && ndtAlbumSubHeadingStamp) {
@@ -56245,6 +56343,13 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
                         );
                         // 도면이 없는 면은 빈 틀을 남기지 않는다
                         if (!ok && clonedPara.parentNode) clonedPara.parentNode.removeChild(clonedPara);
+                        // 2026-10-30 여러 동: 동마다 도면 번호를 [도면 5-1]부터 다시
+                        if (ok && resetFigNo) {
+                            const capT = Array.from(locationMapTbl.getElementsByTagNameNS(HP_NS, 't'))
+                                .find((t) => (t.textContent || '').indexOf(HWPX_FIG_MARK) === 0);
+                            if (capT) capT.textContent = HWPX_FIG_MARK + HWPX_FIG_RESET + capT.textContent.slice(HWPX_FIG_MARK.length);
+                            resetFigNo = false;
+                        }
                     }
                 }
             }

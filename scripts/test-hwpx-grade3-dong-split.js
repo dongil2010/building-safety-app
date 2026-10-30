@@ -38,4 +38,36 @@ const ph = [1, 2, 3].map((n) => ({ n, dongPart: A })).concat([4, 5].map((n) => (
 assert.deepStrictEqual(pairs(ph, true), [[1, 2], [3, null], [4, 5]]);
 assert.deepStrictEqual(pairs(ph, false), [[1, 2], [3, 4], [5, null]]); // 한 동이면 예전 그대로
 assert.ok(g3.includes('i += (decoded[i + 1] && (!splitAlbumByDong || decoded[i + 1].dongPart === decoded[i].dongPart)) ? 2 : 1'), 'loop rule same as test');
+// 2026-10-30 사진 번호는 동마다 사진1부터(비고 photoRemark도 같은 firstNo), 한 동이면 예전처럼 이어서
+assert.ok(/const photoNoByDong = !!\(dongParts && dongParts\.length > 1\)/.test(g3));
+assert.ok(g3.includes('const firstNo = globalPhotoEntries.length - photoNoBase + 1;'));
+assert.ok(g3.includes('label: `사진${globalPhotoEntries.length - photoNoBase + 1}`'));
+assert.ok(g3.includes('globalPhotoLabelByDefect.set(d, formatHwpxPhotoRemark(firstNo, photoList.length))'));
+function numbering(defs, split) {
+    const out = []; let base = 0; let cur; let total = 0;
+    defs.forEach(([dong, n]) => {
+        if (split && dong !== cur) { cur = dong; base = total; }
+        const first = total - base + 1; total += n; out.push(first);
+    });
+    return out;
+}
+assert.deepStrictEqual(numbering([['A', 2], ['A', 1], ['B', 1], ['B', 2]], true), [1, 3, 1, 2]);
+assert.deepStrictEqual(numbering([['A', 2], ['A', 1], ['B', 1], ['B', 2]], false), [1, 3, 4, 5]);
+// 중점관리도 동별 소제목
+assert.ok(/const splitPriorityByDong = !!\(dongParts && dongParts\.length > 1\)/.test(g3));
+assert.ok(g3.includes('`${dl} 중점관리 항목`'), 'priority dong heading');
+assert.ok(!g12.includes('photoNoByDong') && !g12.includes('splitPriorityByDong'), '1·2종 unchanged');
+// 2026-10-30 위치도 도면 번호도 동마다 1부터
+assert.ok(g3.includes('HWPX_FIG_MARK + HWPX_FIG_RESET + capT.textContent'), 'fig reset per dong');
+assert.ok(!g12.includes('HWPX_FIG_RESET'), '1·2종 unchanged');
+{
+    const ns = 'http://www.hancom.co.kr/hwpml/2011/paragraph';
+    const fs0 = app.indexOf('function numberHwpxFigureCaptions(');
+    const fe = app.indexOf('\n    }\n', fs0);
+    const fn = new Function('HWPX_HP_NS', 'HWPX_FIG_MARK', 'HWPX_FIG_RESET', 'hwpxFigureChapterNo',
+        app.slice(fs0, fe + 6) + '\nreturn numberHwpxFigureCaptions;')(ns, '␟', '␞', () => 5);
+    const ts = ['␟␞A동 1층 상태조사위치도', '␟A동 2층 상태조사위치도', '␟␞B동 1층 상태조사위치도'].map((x) => ({ textContent: x }));
+    fn({ getElementsByTagNameNS: () => ts }, '', { grade3: true });
+    assert.deepStrictEqual(ts.map((x) => x.textContent), ['[도면 5-1] A동 1층 상태조사위치도', '[도면 5-2] A동 2층 상태조사위치도', '[도면 5-1] B동 1층 상태조사위치도']);
+}
 console.log('test-hwpx-grade3-dong-split: ok');
