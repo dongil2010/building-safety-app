@@ -26931,8 +26931,15 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
             '기타'
         ],
         // 2026-09-28: '중량물'(물탱크·실외기·창고·태양광 설비 등 적치·설치) — 회사 보고서는 구분 비구조체로 적음
-        '비구조체': ['조적벽체', '칸막이벽', 'ALC벽', '벽체 접합부', '창호', '문', '셔터', '난간', '지붕 패널', '패널', '중량물', '기타'],
-        '마감재': ['외장타일', '외장석재', '도장', '금속패널', '내장타일', '수장', '내장도장', '천장 마감재', '바닥타일', '바닥마감', '기타']
+        // 2026-10-30 회사 결함표(엑셀 173개) 기준: 부재명칭에 쓰는 바탕 부재(벽체·기둥·보·슬래브·바닥)와 자주 나오는 항목 추가.
+        // 「벽체」는 조적벽체와 따로 둔다. 그냥 「보」는 G/B를 몰라 여기서도 빼고 보(G)·보(B)만(예전처럼 「보」는 지정 필요).
+        '비구조체': ['벽체', '조적벽체', 'RC벽체', '내림벽체', '치장벽돌', '칸막이벽', 'ALC벽', '벽체 접합부',
+            '기둥', '보(G)', '보(B)', '슬래브', '바닥', '바닥 포장', '계단', '파라펫', '옹벽',
+            '창호', '환기창', '문', '셔터', '난간', '점검로', '배수로', '지붕 패널', '패널', '부대시설', '중량물', '기타'],
+        // 마감재: 부재 칸에 「바탕 부재 + 마감」(벽체 타일·보 뿜칠)을 쓴다. 결함 칸에는 결함만(파손·들뜸·균열·오염·박락…)
+        '마감재': ['벽체 타일', '기둥 타일', '바닥 타일', '외장타일', '외장석재', '도장', '벽체 도장', '금속패널', '내장타일', '수장', '내장도장',
+            '천장 마감재', '외벽 마감재', '지붕 마감재', '뿜칠', '보 뿜칠', '슬래브 뿜칠', '데크슬래브 뿜칠', '접합부 뿜칠', '내화피복',
+            '벽체 미장', '기둥 미장', '바닥타일', '바닥마감', '벽체', '기둥', '보(G)', '보(B)', '슬래브', '바닥', '기타']
     };
 
     // 예전 버전(카테고리 구분 없는 배열)으로 저장된 부재 명칭 커스텀/숨김 목록을 카테고리별 객체로 변환
@@ -31031,6 +31038,12 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
         '상태양호', '균열', '마모/손상', '들뜸', '오염', '기타'
     ];
 
+    // 2026-10-30 회사 결함표 기준 — 마감·비구조 항목 결함(결함 칸에는 결함만)
+    const COMPANY_TILE_DEFECTS = ['상태양호', '균열', '들뜸', '파손', '탈락', '박락', '줄눈 손상', '백태', '오염', '기타'];
+    const SPRAY_FINISH_DEFECTS = ['상태양호', '박락', '들뜸', '탈락', '파손', '오염', '기타'];
+    const COMPANY_FINISH_DEFECTS = ['상태양호', '균열', '들뜸', '파손', '박락', '탈락', '오염', '처짐', '누수흔적', '도장열화', '기타'];
+    const NONSTRUCT_SITE_DEFECTS = ['상태양호', '균열', '파손', '침하', '물고임', '부식', '변형', '기타'];
+
     const componentDefectPreset = {
         '철골기둥': STEEL_MEMBER_DEFECTS,
         '철골거더': STEEL_MEMBER_DEFECTS,
@@ -31076,7 +31089,18 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
         '지붕 패널': ROOF_PANEL_DEFECTS,
         '패널': PANEL_DEFECTS,
         '중량물': HEAVY_LOAD_DEFECTS,
+        '내림벽체': MASONRY_WALL_DEFECTS,
+        '치장벽돌': MASONRY_WALL_DEFECTS,
+        '환기창': WINDOW_DEFECTS,
+        '점검로': NONSTRUCT_SITE_DEFECTS,
+        '배수로': NONSTRUCT_SITE_DEFECTS,
+        '바닥포장': NONSTRUCT_SITE_DEFECTS,
+        '부대시설': NONSTRUCT_SITE_DEFECTS,
         // ── 마감재 ──
+        '뿜칠': SPRAY_FINISH_DEFECTS,
+        '내화피복': SPRAY_FINISH_DEFECTS,
+        '외벽마감재': COMPANY_FINISH_DEFECTS,
+        '지붕마감재': COMPANY_FINISH_DEFECTS,
         '외장타일': EXT_TILE_DEFECTS,
         '외장석재': EXT_STONE_DEFECTS,
         '도장': EXT_PAINT_DEFECTS,
@@ -31268,6 +31292,17 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
     }
     function getDefectTypePresetFor(category, component) {
         const key = normalizeComponentKey(component);
+        // 2026-10-30 회사 결함표: 같은 바탕 부재 이름(벽체·기둥·보·슬래브·바닥)도 분류에 따라 결함 목록이 다르다
+        if (key && category === '마감재') {
+            if (key.includes('뿜칠') || key.includes('내화피복')) return SPRAY_FINISH_DEFECTS;
+            if (/^(벽체|기둥|보|보\(G\)|보\(B\)|슬래브|바닥)$/.test(key)) return COMPANY_FINISH_DEFECTS;
+            if (key.includes('타일') && !componentDefectPreset[key]) return COMPANY_TILE_DEFECTS;
+            if (key.includes('마감재') && !key.includes('천장')) return COMPANY_FINISH_DEFECTS;
+        }
+        if (key && category === '비구조체') {
+            if (key === '벽체') return MASONRY_WALL_DEFECTS;
+            if (key === '바닥' || key.includes('포장') || key.includes('점검로') || key.includes('배수로') || key.includes('부대시설')) return NONSTRUCT_SITE_DEFECTS;
+        }
         if (key && componentDefectPreset[key]) return componentDefectPreset[key];
         // 키워드 매칭 (직접 입력 부재명)
         if (key) {
@@ -31339,11 +31374,20 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
             '파손',
             '중량물 적치',
             '중량물 설치',
+            '이격',
+            '물고임',
             '기타'
         ],
         '마감재': [
             '상태양호',
             '균열',
+            '들뜸',
+            '박락',
+            '탈락',
+            '파손',
+            '오염',
+            '처짐',
+            '누수흔적',
             '들뜸/탈락',
             '박리/탈락',
             '변색/오염',
@@ -33435,14 +33479,18 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
     const C_CODE = '현행기준 미달';
     const C_MASONRY = '조적 쌓기 불량';
     const C_EARTH = '토압 작용';
+    // 2026-10-30 회사 결함표에 자주 나오는 원인(엑셀 173개 기준)
+    const C_MISM_JOINT = '이질재료 접합부 거동차이';
+    const C_MANAGE = '관리미흡';
+    const C_AGING = '경과년수 증대에 따른 노후화';
 
     // 균열 원인(부재·방향과 모를 때 쓰는 기본) — 회사 결함표 균열 2,470행 중 88%가 「건조수축 및 재료적 특성」
     const CORE_CRACK_CAUSE_PRESET = [C_DS, C_OPEN, C_RESTR, '과하중', '부등침하', '철근 부식 팽창'];
     const CRACK_MESH_CAUSES = [C_DS, C_PLASTER, '동결융해 반복', C_WORK];
-    const CRACK_MASONRY_CAUSES = [C_DS, C_OPEN, C_RESTR, C_MISM, C_MASONRY];
+    const CRACK_MASONRY_CAUSES = [C_DS, C_OPEN, C_RESTR, C_MISM, C_MASONRY, C_MISM_JOINT];
     const CRACK_SLAB_CAUSES = [C_DS, C_RESTR, '과하중', C_SHORE, '철근 부식 팽창'];
-    const CRACK_NONSTRUCT_CAUSES = [C_MISM, C_DS, C_WORK, '외부 충격'];
-    const CRACK_FINISH_CAUSES = ['바탕 균열 전달', C_WORK, C_DS];
+    const CRACK_NONSTRUCT_CAUSES = [C_MISM, C_DS, C_WORK, '외부 충격', C_MISM_JOINT];
+    const CRACK_FINISH_CAUSES = ['바탕 균열 전달', C_WORK, C_DS, C_AGING];
 
     /** 균열: 부재군 → { 균열 방향 → 원인 } ('*' = 방향 모름·기타 방향) */
     const CRACK_CAUSE_BY_MEMBER = {
@@ -33483,7 +33531,7 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
             '망상균열': [C_DS, C_PLASTER, C_WORK],
             '*': CRACK_MASONRY_CAUSES
         },
-        '벽체접합부': { '*': [C_MISM, C_DS, C_MISM_WORK, C_WORK] },
+        '벽체접합부': { '*': [C_MISM, C_DS, C_MISM_WORK, C_WORK, C_MISM_JOINT] },
         'ALC벽': { '*': CRACK_NONSTRUCT_CAUSES },
         '칸막이벽': { '*': CRACK_NONSTRUCT_CAUSES },
         '비구조기타': { '*': [C_DS, C_MISM, C_WORK, '외부 충격'] },
@@ -33544,7 +33592,15 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
         '콘크리트 박락': ['철근 부식 팽창', C_WORK, '노후화', '염해', C_POST, '기타'],
         '신축이음/재료분리 손상': ['시공 다짐 불량', C_POUR, '피복두께 부족', '신축이음 노후화', '온도변화 수축팽창', '기타'],
         // ── 비구조체 ──
-        '이격': [C_MISM, C_DS, C_WORK, C_MISM_WORK, '부등침하', '기타'],
+        '이격': [C_MISM, C_DS, C_WORK, C_MISM_WORK, '부등침하', C_MISM_JOINT, '기타'],
+        // 2026-10-30 회사 결함표: 마감재 결함(들뜸·박락·탈락·오염 …)과 흔한 원인
+        '들뜸': [C_WORK, C_AGING, '바탕 균열 전달', C_WET, '기타'],
+        '박락': [C_WORK, C_AGING, '철근 부식 팽창', C_POST, '기타'],
+        '탈락': [C_WORK, C_AGING, C_MBAR, '사용자 부주의', '기타'],
+        '오염': [C_PIPE, '상부 방수층 파손', C_WET, C_MANAGE, C_AGING, '기타'],
+        '누수흔적': [C_PIPE, '상부 방수층 파손', C_WET, C_AGING, '기타'],
+        '물고임': ['배수 불량', C_WORK, C_MANAGE, '기타'],
+        '도장열화': [C_AGING, C_WET, C_WORK, '기타'],
         '줄눈 손상/탈락': [
             '몰탈 노후화', '온도·수축', '시공 불량', '진동·충격', '누수·동결', '기타'
         ],
@@ -33739,6 +33795,93 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
         return '구조기타';
     }
 
+    // 2026-10-30 회사 결함표(엑셀 173개, 판본 묶은 보고서 수 기준) 원인 빈도 순위 — 앱 기본 목록의 순서만 바꾼다(지우지 않음)
+    const COMPANY_CAUSE_RANK = {
+        '균열': ['건조수축 및 재료적 특성', '개구부 주위 응력집중', '시공미흡', '결함부위 수분유입', '주변부재의 구속', '이질재료 접합부 거동차이', '이질재료 거동차이', '코너부위 응력집중', '상부 방수층 파손', '경과년수 증대에 따른 노후화', '건조수축', '방수층 파손', '이어치기 시공미흡', '피복두께 부족'],
+        '*': ['건조수축 및 재료적 특성', '시공미흡', '개구부 주위 응력집중', '경과년수 증대에 따른 노후화', '이질재료 접합부 거동차이', '결함부위 수분유입', '상부 방수층 파손', '주변부재의 구속', '이질재료 거동차이', '피복두께 부족', '코너부위 응력집중', '관리미흡', '방수층 파손', '사용자 부주의'],
+        '이격': ['이질재료 접합부 거동차이', '건조수축 및 재료적 특성', '시공미흡', '이질재료 거동차이', '경과년수 증대에 따른 노후화', '코너부위 응력집중', '개구부 주위 응력집중'],
+        '누수': ['상부 방수층 파손', '결함부위 수분유입', '방수층 파손', '경과년수 증대에 따른 노후화', '시공미흡', '건조수축 및 재료적 특성', '상부 배관 누수', '이질재료 접합부 거동차이'],
+        '백태': ['결함부위 수분유입', '상부 방수층 파손', '건조수축 및 재료적 특성', '방수층 파손', '경과년수 증대에 따른 노후화', '시공미흡', '이질재료 거동차이'],
+        '철근노출': ['피복두께 부족', '시공미흡', '상부 방수층 파손', '경과년수 증대에 따른 노후화', '결함부위 수분유입', '건조수축 및 재료적 특성', '시공 불량'],
+        '박리/박락': ['시공미흡', '경과년수 증대에 따른 노후화', '건조수축 및 재료적 특성', '개구부 주위 응력집중', '상부 방수층 파손', '이질재료 접합부 거동차이', '이질재료 거동차이', '결함부위 수분유입'],
+        '들뜸': ['시공미흡', '경과년수 증대에 따른 노후화', '건조수축 및 재료적 특성', '이질재료 접합부 거동차이', '코너부위 응력집중', '이질재료 거동차이', '피복두께 부족', '주변부재의 구속', '사용자 부주의', '미장 시공미흡', '결함부위 수분유입', '상부 방수층 파손', '외부 충격', '시공 불량'],
+        '탈락': ['시공미흡', '경과년수 증대에 따른 노후화', '이질재료 거동차이', '관리미흡', '건조수축 및 재료적 특성', '상부 방수층 파손', '과하중'],
+        '파손': ['시공미흡', '사용자 부주의', '경과년수 증대에 따른 노후화', '외부 충격', '이질재료 거동차이', '건조수축 및 재료적 특성', '코너부위 응력집중', '이질재료 접합부 거동차이', '상부 배관 누수', '개구부 주위 응력집중', '관리미흡', '상부 방수층 파손'],
+        '오염': ['상부 방수층 파손', '상부 배관 누수', '결함부위 수분유입', '경과년수 증대에 따른 노후화', '방수층 파손', '시공미흡', '건조수축 및 재료적 특성', '이질재료 접합부 거동차이', '습기 침투', '상부 누수'],
+        '처짐': ['시공미흡', '경과년수 증대에 따른 노후화', '과하중'],
+    };
+    // 균열류 맨 위 3개(사용자 지정 2026-10-30): 건조수축 및 재료적 특성 → 이질재료 거동차이 → 내력부족
+    const CRACK_TOP_CAUSES = [C_DS, C_MISM, '내력부족'];
+    // 회사 순위를 적용할 결함 키만 명시(낙하·탈락 위험, 용접부 균열/불량, 부식 등 전문 목록은 그대로 둠)
+    const COMPANY_CAUSE_RANK_KEY = {
+        '균열': '균열', '수직균열': '균열', '수평균열': '균열', '경사균열': '균열', '망상균열': '균열', '미장균열': '균열', 'U자형균열': '균열', '균열/파손': '균열',
+        '이격': '이격', '처짐': '처짐', '철근노출': '철근노출', '탈락': '탈락',
+        '누수': '누수', '누수흔적': '누수', '누수 흔적': '누수',
+        '백태': '백태', '백태/유출': '백태',
+        '박리/박락': '박리/박락', '콘크리트 박리': '박리/박락', '콘크리트 박락': '박리/박락', '박리/탈락': '박리/박락',
+        '들뜸': '들뜸', '들뜸/탈락': '들뜸',
+        '파손': '파손', '파손/결손': '파손',
+        '오염': '오염', '변색/오염': '오염', '오염/변색': '오염'
+    };
+    function companyCauseRankKey(key) {
+        return COMPANY_CAUSE_RANK_KEY[String(key || '').trim()] || '';
+    }
+    /** 앱 기본 원인 목록을 회사가 자주 쓰는 순으로(없는 원인은 더하지 않음 — 균열 맨 위 3개만 예외). 「기타」는 늘 맨 끝 */
+    // 2026-10-30 마감재 결함 공통 맨 위 4개(사용자 지정). 미장균열만 균열류 맨 위 3개를 먼저 둔다
+    const FINISH_TOP_CAUSES = ['시공미흡', '경과년수 증대에 따른 노후화', '상부 배관 누수', '상부 누수'];
+    /** 마감재: 맨 위 4개 고정 → 나머지는 회사 순위(없으면 전체 순위) */
+    function finishCauseOrder(key, category, list) {
+        if (String(category || '') !== '마감재') return list;
+        if (isEffloCauseKey(key)) return list;
+        const k = String(key || '').trim();
+        if (k === '미장균열') return list;
+        const raw = uniqCauseList(list);
+        const rk = companyCauseRankKey(k) === '균열' ? '' : companyCauseRankKey(k);
+        const own = COMPANY_CAUSE_RANK[rk] || [];
+        const glob = COMPANY_CAUSE_RANK['*'] || [];
+        const rest = raw.filter((c) => FINISH_TOP_CAUSES.indexOf(c) < 0 && !(companyCauseRankKey(k) === '균열' && CRACK_TOP_CAUSES.indexOf(c) >= 0 && c !== C_DS));
+        const score = (c, i) => {
+            if (c === '기타') return 1e6;
+            const o = own.indexOf(c); if (o >= 0) return o;
+            const g = glob.indexOf(c); if (g >= 0) return 1000 + g;
+            return 5000 + i;
+        };
+        const sorted = rest.map((c, i) => ({ c, s: score(c, i) })).sort((x, y) => x.s - y.s).map((x) => x.c);
+        return FINISH_TOP_CAUSES.concat(sorted);
+    }
+    // 2026-10-30 누수류(모든 분류) 맨 위 3개(사용자 지정) — 마감재 맨 위 4개보다 우선
+    const LEAK_TOP_CAUSES = ['상부 방수층 파손', '결함부위 수분유입', '창호 실링 열화', '상부 배관 누수'];
+    function isLeakCauseKey(key) {
+        const k = String(key || '').trim();
+        return k === '누수' || k === '누수흔적' || k === '누수 흔적';
+    }
+    // 2026-10-30 백태류(모든 분류): 결함부위 수분유입 맨 위 — 마감재 맨 위 4개보다 우선
+    function isEffloCauseKey(key) {
+        const k = String(key || '').trim();
+        return k === '백태' || k === '백태/유출' || k === '백화';
+    }
+    function leakCauseOrder(key, list) {
+        if (isEffloCauseKey(key)) return uniqCauseList(['결함부위 수분유입', '상부 방수층 파손'].concat(list));
+        if (!isLeakCauseKey(key)) return list;
+        return uniqCauseList(LEAK_TOP_CAUSES.concat(list));
+    }
+    function rankCausesByCompany(key, list) {
+        const rk = companyCauseRankKey(key);
+        let base = uniqCauseList(list);
+        if (!rk) return base;
+        if (rk === '균열') base = uniqCauseList(CRACK_TOP_CAUSES.concat(base));
+        const own = COMPANY_CAUSE_RANK[rk] || [];
+        const glob = COMPANY_CAUSE_RANK['*'] || [];
+        const score = (c, i) => {
+            if (c === '기타') return 1e6;
+            if (rk === '균열') { const t = CRACK_TOP_CAUSES.indexOf(c); if (t >= 0) return -100 + t; }
+            const o = own.indexOf(c); if (o >= 0) return o;
+            const g = glob.indexOf(c); if (g >= 0) return 1000 + g;
+            return 5000 + i;
+        };
+        return base.map((c, i) => ({ c, s: score(c, i) })).sort((x, y) => x.s - y.s).map((x) => x.c);
+    }
+
     function uniqCauseList(list) {
         const out = [];
         (list || []).forEach((c) => {
@@ -33760,22 +33903,26 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
         const group = getCauseMemberGroup(category, component);
         if (k === '균열') {
             const byMember = CRACK_CAUSE_BY_MEMBER[group] || null;
-            if (!byMember) return CORE_CRACK_CAUSE_PRESET.slice();
+            if (!byMember) return leakCauseOrder(k, finishCauseOrder(k, category, rankCausesByCompany(k, CORE_CRACK_CAUSE_PRESET)));
             const kinds = (Array.isArray(types) && types.length ? types : ['균열'])
                 .map((t) => String(t || '').trim()).filter(Boolean);
             const merged = [];
             kinds.forEach((t) => { merged.push(...(byMember[t] || byMember['*'] || CORE_CRACK_CAUSE_PRESET)); });
-            return uniqCauseList(merged);
+            return leakCauseOrder(k, finishCauseOrder(k, category, rankCausesByCompany(k, merged)));
         }
         const byMember = DEFECT_CAUSE_BY_MEMBER[k];
-        if (byMember && byMember[group]) return byMember[group].slice();
-        return (defectCausePreset[k] || defectCausePreset['기타']).slice();
+        if (byMember && byMember[group]) return leakCauseOrder(k, finishCauseOrder(k, category, rankCausesByCompany(k, byMember[group])));
+        return leakCauseOrder(k, finishCauseOrder(k, category, rankCausesByCompany(k, defectCausePreset[k] || defectCausePreset['기타'])));
     }
 
     /** 이 키에서 앱 기본으로 나올 수 있는 모든 원인(부재·방향 전부) — 계정 순서가 의미 있는지 판단용 */
     function getAllDefaultCausesForKey(key) {
         const k = String(key || '').trim() || '기타';
         const all = [...(defectCausePreset[k] || [])];
+        if (k === '균열' || companyCauseRankKey(k) === '균열') all.push(...CRACK_TOP_CAUSES);
+        all.push(...FINISH_TOP_CAUSES);
+        if (isLeakCauseKey(k)) all.push(...LEAK_TOP_CAUSES);
+        if (isEffloCauseKey(k)) all.push('결함부위 수분유입', '상부 방수층 파손');
         if (k === '균열') {
             Object.values(CRACK_CAUSE_BY_MEMBER).forEach((m) => Object.values(m).forEach((l) => all.push(...l)));
         }
@@ -60126,23 +60273,35 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
             let matchedThisFloor = 0;
             sheetInfo.rows.forEach((row, i) => {
                 const noRaw = getCell(row, 'no');
-                const defectTypeRaw = getCell(row, 'defectType');
+                let defectTypeRaw = getCell(row, 'defectType');
                 // 2026-10-27 부재명칭 칸의 개구부 말(문 상부·창 하부·개구부 주위 …)은 지우고 「개구부 결함」 체크 + 개구부 종류로 옮긴다.
                 // 다 지워져 비면 개구부는 벽에 나는 것이라 「벽체」(그 밖의 빈 칸은 예전처럼 「기타」)
                 const componentCellRaw = getCell(row, 'component');
                 const openingFromMember = extractOpeningFromMemberName(componentCellRaw);
-                const componentCellClean = openingFromMember.found ? (openingFromMember.component || '벽체') : componentCellRaw;
-                const componentRaw = componentCellClean || '기타';
+                let componentCellClean = openingFromMember.found ? (openingFromMember.component || '벽체') : componentCellRaw;
+                let componentRaw = componentCellClean || '기타';
                 const categoryRaw = getCell(row, 'category');
                 const locationRaw = getCell(row, 'location');
                 const sizeRaw = getCell(row, 'size');
-                const causeRaw = getCell(row, 'cause');
+                let causeRaw = getCell(row, 'cause');
                 let crackWidthRaw = getCell(row, 'crackWidth');
                 let crackLengthRaw = getCell(row, 'crackLength');
                 const progressRaw = getCell(row, 'progress');
                 const leakRaw = getCell(row, 'leak');
 
                 const category = resolveImportCategoryWithContent(categoryRaw, defectTypeRaw, componentRaw);
+                // 2026-10-30 회사 결함표 형식: 비구조체·마감재는 「부재 벽체 + 조사내용 타일 파손」→ 부재 「벽체 타일」 + 결함 「파손」.
+                // 원인은 띄어쓰기·표기 변형을 표준 표기로(js/core/company-vocab.js). 구조체는 원인 표기만.
+                const companyVocab = window.BSA && window.BSA.companyVocab;
+                if (companyVocab) {
+                    const cv = companyVocab.convertImportRow({ component: componentCellClean, defectType: defectTypeRaw, cause: causeRaw, category });
+                    if (cv.split) {
+                        componentCellClean = memberNameOut(cv.component) || cv.component;
+                        componentRaw = componentCellClean || '기타';
+                    }
+                    defectTypeRaw = cv.defectType;
+                    causeRaw = cv.cause;
+                }
                 const defectType = defectTypeRaw || '기타';
                 const isGood = isGoodDefectType(defectType);
 

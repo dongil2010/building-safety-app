@@ -66,7 +66,8 @@ const PRESET_CONSTS = ['DEFECT_JOINT_LEFT', 'DEFECT_JOINT_RIGHT', 'DEFECT_JOINT_
     'MASONRY_WALL_DEFECTS', 'PARTITION_WALL_DEFECTS', 'ALC_WALL_DEFECTS', 'WINDOW_DEFECTS', 'DOOR_DEFECTS', 'SHUTTER_DEFECTS',
     'ROOF_PANEL_DEFECTS', 'PANEL_DEFECTS', 'RAILING_DEFECTS', 'NONSTRUCT_WALL_JOINT_DEFECTS', 'HEAVY_LOAD_DEFECTS', 'EXT_TILE_DEFECTS',
     'EXT_STONE_DEFECTS', 'EXT_PAINT_DEFECTS', 'METAL_PANEL_FINISH_DEFECTS', 'INT_TILE_DEFECTS', 'INTERIOR_FINISH_DEFECTS',
-    'INT_PAINT_DEFECTS', 'CEILING_FINISH_DEFECTS', 'FLOOR_TILE_DEFECTS', 'FLOOR_FINISH_DEFECTS', 'componentDefectPreset',
+    'INT_PAINT_DEFECTS', 'CEILING_FINISH_DEFECTS', 'FLOOR_TILE_DEFECTS', 'FLOOR_FINISH_DEFECTS',
+    'COMPANY_TILE_DEFECTS', 'SPRAY_FINISH_DEFECTS', 'COMPANY_FINISH_DEFECTS', 'NONSTRUCT_SITE_DEFECTS', 'componentDefectPreset',
     'categoryDefectPreset'];
 
 function buildEnv() {
@@ -179,18 +180,58 @@ function testAutoCheckedCause() {
         ['구조체', '보', '수평균열', '건조수축 및 재료적 특성'],
         ['구조체', '슬래브', '균열', '건조수축 및 재료적 특성'],
         ['구조체', '벽체', '수직균열', '건조수축 및 재료적 특성'],
-        ['구조체', 'SRC기둥', '수직균열', 'SRC기둥 이질재료 간 인장변형률 상이'],
-        ['구조체', '슬래브', '누수', '방수층 파손'],
+        ['구조체', 'SRC기둥', '수직균열', '건조수축 및 재료적 특성'],
+        ['구조체', '슬래브', '누수', '상부 방수층 파손'],
         ['구조체', '기둥', '백태/유출', '결함부위 수분유입'],
         ['구조체', '기둥', '철근노출', '피복두께 부족'],
-        ['구조체', '기둥', '콘크리트 박락', '철근 부식 팽창'],
-        ['비구조체', '벽체 접합부', '이격', '이질재료 거동차이'],
-        ['비구조체', '창호', '누수', '창호 주변 밀봉 불량'],
-        ['마감재', '천장 마감재', '오염/변색', '상부 배관 누수'],
+        ['구조체', '기둥', '콘크리트 박락', '시공미흡'],
+        ['비구조체', '벽체 접합부', '이격', '이질재료 접합부 거동차이'],
+        ['비구조체', '창호', '누수', '상부 방수층 파손'],
+        ['마감재', '천장 마감재', '오염/변색', '시공미흡'],
         ['마감재', '천장 마감재', '처짐', '시공미흡'],
-        ['마감재', '천장 마감재', '누수 흔적', '상부 배관 누수'],
+        ['마감재', '천장 마감재', '누수 흔적', '상부 방수층 파손'],
         ['비구조체', '', '변형', '시공미흡']
     ];
+    // 2026-10-30 회사 빈도순: 균열류 맨 위 3개 고정
+    ['기둥', '보', '슬래브', '벽체', 'SRC기둥'].forEach((comp) => {
+        api.getCauseDisplayGroups('수직균열').forEach((g) => {
+            assert.deepStrictEqual(api.getDefaultCausePresetList(g.key, g.types, '구조체', comp).slice(0, 3), ['건조수축 및 재료적 특성', '이질재료 거동차이', '내력부족'], 'crack top3 ' + comp);
+        });
+    });
+    // 2026-10-30 마감재: 맨 위 4개 고정(미장균열만 균열 3개 우선)
+    const FIN4 = ['시공미흡', '경과년수 증대에 따른 노후화', '상부 배관 누수', '상부 누수'];
+    ['벽체 타일', '바닥 타일', '도장', '천장 마감재', '외벽 마감재'].forEach((comp) => {
+        (api.getDefectTypePresetFor('마감재', comp) || []).forEach((t) => {
+            if (t === '상태양호' || t === '미장균열') return;
+            api.getCauseDisplayGroups(t).forEach((g) => {
+                if (g.key === '미장균열' || /^누수( ?흔적)?$/.test(g.key) || /^(백태|백태\/유출|백화)$/.test(g.key)) return;
+                assert.deepStrictEqual(api.getDefaultCausePresetList(g.key, g.types, '마감재', comp).slice(0, 4), FIN4, 'finish top4 ' + comp + '/' + t);
+            });
+        });
+    });
+    api.getCauseDisplayGroups('미장균열').forEach((g) => {
+        assert.deepStrictEqual(api.getDefaultCausePresetList(g.key, g.types, '마감재', '벽체 미장').slice(0, 3), ['건조수축 및 재료적 특성', '이질재료 거동차이', '내력부족'], 'finish 미장균열');
+    });
+    // 2026-10-30 누수류: 모든 분류에서 맨 위 3개 고정, 결함부위 수분유입은 그 아래
+    // 사용자는 두 원인을 함께 고름: 누수 = 방수층 파손 → 결함부위 수분유입 → 창호 실링 → 배관
+    const LEAK3 = ['상부 방수층 파손', '결함부위 수분유입', '창호 실링 열화', '상부 배관 누수'];
+    [['구조체', '슬래브'], ['구조체', '기둥'], ['구조체', '옹벽'], ['비구조체', '창호'], ['마감재', '천장 마감재'], ['마감재', '외벽 마감재'], ['마감재', '벽체 미장']].forEach(([cat, comp]) => {
+        (api.getDefectTypePresetFor(cat, comp) || []).filter((t) => /^누수( ?흔적)?$/.test(t)).forEach((t) => {
+            api.getCauseDisplayGroups(t).forEach((g) => {
+                const list = api.getDefaultCausePresetList(g.key, g.types, cat, comp);
+                assert.deepStrictEqual(list.slice(0, 4), LEAK3, 'leak top3 ' + cat + '/' + comp + '/' + t);
+            });
+        });
+    });
+    // 2026-10-30 백태류: 모든 분류에서 결함부위 수분유입 맨 위
+    [['구조체', '기둥'], ['구조체', '슬래브'], ['마감재', '벽체 타일']].forEach(([cat, comp]) => {
+        (api.getDefectTypePresetFor(cat, comp) || []).filter((t) => /^(백태|백태\/유출|백화)$/.test(t)).forEach((t) => {
+            assert.strictEqual(firstFor(cat, comp, t), '결함부위 수분유입', 'efflo ' + cat + '/' + comp + '/' + t);
+            api.getCauseDisplayGroups(t).forEach((g) => {
+                assert.deepStrictEqual(api.getDefaultCausePresetList(g.key, g.types, cat, comp).slice(0, 2), ['결함부위 수분유입', '상부 방수층 파손'], 'efflo top2 ' + comp + '/' + t);
+            });
+        });
+    });
     cases.forEach(([cat, comp, type, want]) => {
         const types = api.getDefectTypePresetFor(cat, comp) || [];
         if (comp) assert.ok(types.includes(type), `type ${type} not in preset of ${cat}/${comp}`);
@@ -283,7 +324,8 @@ function testComponentChangeKeepsManualCauses() {
     env.selected = ['건조수축 및 재료적 특성'];
     env.window._defectAutoCauses = ['건조수축 및 재료적 특성'];
     api.refreshDefectTypeAfterComponentChange('구조체');
-    assert.strictEqual(env.lastCause.joined, 'SRC기둥 이질재료 간 인장변형률 상이');
+    // 2026-10-30 균열류 자동 원인은 부재와 관계없이 '건조수축 및 재료적 특성'
+    assert.strictEqual(env.lastCause.joined, '건조수축 및 재료적 특성');
     // 자동 + 직접: 직접 고른 것만 남김
     setContext('구조체', '보', '수직균열');
     env.selected = ['SRC기둥 이질재료 간 인장변형률 상이', '과하중'];
