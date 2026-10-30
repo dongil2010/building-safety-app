@@ -684,10 +684,11 @@
     }
 
     /** 위치 칸 두 줄: 행·열 → 다음 줄 실 이름. 하나만 있으면 한 줄 */
-    function formatLocationCell(grid, room) {
+    // roomFirst: 실 이름 → 다음 줄 행·열 (2026-10-30 1·2종 한글 출력 요청)
+    function formatLocationCell(grid, room, roomFirst) {
         const g = String(grid == null ? '' : grid).trim();
         const r = String(room == null ? '' : room).trim();
-        if (g && r) return `${g}\n${r}`;
+        if (g && r) return roomFirst ? `${r}\n${g}` : `${g}\n${r}`;
         return g || r;
     }
 
@@ -708,7 +709,7 @@
         }
         if (!grid) return '';
         if (Number(x.maxUnits) > 0) grid = splitGridLocLines(grid, x.maxUnits, x.measure).join('\n');
-        return formatLocationCell(grid, room);
+        return formatLocationCell(grid, room, !!x.roomFirst);
     }
 
     // ---- 한글/PDF 위치 칸 줄나눔: 행·열이 칸 폭을 넘을 때만 '/' 뒤(여러 쌍이면 ', ' 뒤 먼저)에서 줄바꿈 ----

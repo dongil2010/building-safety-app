@@ -1,0 +1,21 @@
+'use strict';
+// 2026-10-30: 1·2종 한글 위치 칸 — 실 이름 먼저, 다음 줄 행·열. PDF/화면은 예전(행·열 먼저) 그대로
+const assert = require('assert');
+const fs = require('fs');
+const path = require('path');
+const G = require('../js/shared/grid-lines.js');
+assert.strictEqual(G.formatLocationCell('X1~X2/Y2', '거실', true), '거실\nX1~X2/Y2');
+assert.strictEqual(G.formatLocationCell('X1~X2/Y2', '거실'), 'X1~X2/Y2\n거실');
+assert.strictEqual(G.formatLocationCell('X1~X2/Y2', '', true), 'X1~X2/Y2');
+assert.strictEqual(G.reportLocationCell({ gridLoc: 'X1/Y2', detail: '침실1', roomFirst: true }), '침실1\nX1/Y2');
+assert.strictEqual(G.reportLocationCell({ gridLoc: 'X1/Y2', detail: '침실1' }), 'X1/Y2\n침실1');
+assert.strictEqual(G.reportLocationCell({ gridLoc: '', detail: '침실1', roomFirst: true }), '');
+const app = fs.readFileSync(path.join(__dirname, '..', 'app.js'), 'utf8');
+const s = app.indexOf('async function exportHwpxSurveyTable12(');
+assert.ok(s > 0);
+const e = app.indexOf('\n    async function ', s + 10);
+const body = app.slice(s, e > 0 ? e : undefined);
+const outside = app.slice(0, s) + (e > 0 ? app.slice(e) : '');
+assert.ok((body.match(/roomFirst: true/g) || []).length >= 4, '1·2종 한글 위치 칸이 실 이름 먼저');
+assert.ok(!/roomFirst: true/.test(outside), '1·2종 한글 밖(3종·PDF·화면)은 그대로');
+console.log('test-hwpx12-location-room-first: ok');

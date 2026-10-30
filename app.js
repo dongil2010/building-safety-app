@@ -6286,7 +6286,7 @@ document.addEventListener('DOMContentLoaded', () => {
                         </button>
                         <button type="button" class="icon-btn icon-btn-edit" title="동 이름 지정/변경" data-action="dong-rename" data-bldg-id="${sid}" aria-label="동 이름 변경">
                             <i class="fa-solid fa-pen"></i>
-                            <span class="icon-btn-label">이름</span>
+                            <span class="icon-btn-label">이름 수정</span>
                         </button>
                         <button type="button" class="icon-btn icon-btn-danger" title="이 동 삭제(휴지통)" data-action="dong-delete" data-bldg-id="${sid}" aria-label="동 삭제">
                             <i class="fa-solid fa-trash-can"></i>
@@ -43595,7 +43595,7 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
      * 한글/PDF 상태조사표 위치 칸: 행·열이 있으면 「행·열\n실 이름(상세 위치)」, 행·열이 없으면 ''(→ 예전 출력 그대로)
      * 예전 실험 데이터(상세 위치 앞에 칸 이름)도 나눠서 출력
      */
-    function getDefectGridRoomForReport(d, floorCode, maxUnits) {
+    function getDefectGridRoomForReport(d, floorCode, maxUnits, opts) {
         const G = gridLib();
         if (!G || !d) return '';
         return G.reportLocationCell({
@@ -43603,7 +43603,9 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
             legacyAuto: d.gridLocAuto,
             detail: extractDefectLocationDetail(d.location || '', floorCode),
             // 한글 칸 폭(em) — 주면 행·열이 넘칠 때만 '/' 뒤에서 줄바꿈
-            maxUnits
+            maxUnits,
+            // 1·2종 한글(HWPX) 출력만: 실 이름 먼저, 다음 줄 행·열
+            roomFirst: !!(opts && opts.roomFirst)
         });
     }
 
@@ -56691,7 +56693,7 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
             /** 사진표 위치 칸: 행·열이 있으면 상태조사표 위치 칸과 같은 규칙(행·열 → 다음 줄 실 이름), 없으면 예전 그대로 */
             const setHwpxPhotoLocText = (tc, d, fc) => {
                 if (!tc) return;
-                const raw = getDefectGridRoomForReport(d, fc);
+                const raw = getDefectGridRoomForReport(d, fc, undefined, { roomFirst: true });
                 if (!raw) {
                     setTcText(tc, getSurveyCellText('location', d, { floorCode: fc }));
                     return;
@@ -56699,7 +56701,7 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
                 const subList = tc.getElementsByTagNameNS(HP_NS, 'subList')[0];
                 const paras = subList ? Array.from(subList.getElementsByTagNameNS(HP_NS, 'p')).filter(p => p.parentNode === subList) : [];
                 const units = hwpxCellTextUnits(tc, paras);
-                setTcText(tc, units > 0 ? (getDefectGridRoomForReport(d, fc, units) || raw) : raw, units);
+                setTcText(tc, units > 0 ? (getDefectGridRoomForReport(d, fc, units, { roomFirst: true }) || raw) : raw, units);
             };
             const ensureTblTreatAsChar = (tbl) => {
                 if (!tbl) return;
@@ -57285,9 +57287,11 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
                                 let cellMinChars = 0;
                                 // 1·2종 위치 칸(행·열): 칸 폭에 들어가면 한 줄, 넘치면 '/' 뒤에서 줄바꿈 → 다음 줄 실 이름
                                 if (colIdx === 1 && gridLocCellRaw && cellVal === gridLocCellRaw) {
+                                    // 2026-10-30 1·2종 한글: 실 이름 먼저, 다음 줄 행·열
+                                    cellVal = getDefectGridRoomForReport(d, floorCode, undefined, { roomFirst: true }) || cellVal;
                                     const locUnits = hwpxCellTextUnits(tc, paras);
                                     if (locUnits > 0) {
-                                        cellVal = getDefectGridRoomForReport(d, floorCode, locUnits) || cellVal;
+                                        cellVal = getDefectGridRoomForReport(d, floorCode, locUnits, { roomFirst: true }) || cellVal;
                                         cellMinChars = locUnits;
                                     }
                                 }

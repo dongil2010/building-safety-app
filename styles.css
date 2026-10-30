@@ -18108,3 +18108,45 @@ html.layout-tablet #tab-map #mobileMapFabBar .mobile-fab-btn {
     font-size: 0.82rem !important;
     font-weight: 700;
 }
+
+/* 2026-10-30 동 선택 화면(.building-row-dong): 아이콘 옆에 글자(점검·도면·오프라인·위로·아래로·이름 수정·삭제) — PC·폰 공통 */
+#tab-home .building-row.building-row-dong { flex-wrap: wrap !important; }
+#tab-home .building-row.building-row-dong .building-row-actions-compact {
+    flex-wrap: wrap !important;
+    gap: 0.3rem !important;
+    justify-content: flex-end;
+}
+#tab-home .building-row.building-row-dong .building-row-actions-compact .icon-btn {
+    width: auto !important;
+    min-width: 2.35rem !important;
+    max-width: none !important;
+    padding: 0 0.5rem !important;
+    gap: 0.28rem !important;
+    display: inline-flex !important;
+    align-items: center;
+    justify-content: center;
+    white-space: nowrap;
+}
+#tab-home .building-row.building-row-dong .building-row-actions-compact .icon-btn-label {
+    display: inline !important;
+    font-size: 0.8rem !important;
+    font-weight: 700;
+    white-space: nowrap;
+}
+@media (max-width: 820px) {
+    #tab-home .building-row.building-row-dong .building-row-actions-compact {
+        flex: 1 1 100% !important;
+        width: 100% !important;
+        display: grid !important;
+        grid-template-columns: repeat(4, minmax(0, 1fr));
+        margin-top: 0.35rem;
+        box-sizing: border-box;
+    }
+    #tab-home .building-row.building-row-dong .building-row-actions-compact .icon-btn {
+        width: 100% !important;
+        min-width: 0 !important;
+        height: 2.3rem !important;
+        padding: 0 0.3rem !important;
+    }
+    #tab-home .building-row.building-row-dong .building-row-actions-compact .icon-btn-label { font-size: 0.76rem !important; }
+}
