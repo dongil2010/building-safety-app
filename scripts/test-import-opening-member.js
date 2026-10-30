@@ -28,7 +28,7 @@ function extractFunction(src, header) {
 // ---- 가져오기 연결 ----
 const imp = app.slice(app.indexOf('window.confirmImportDefectExcel = async'));
 assert.ok(/const openingFromMember = extractOpeningFromMemberName\(componentCellRaw\);/.test(imp), '부재명칭에서 개구부 말 찾기');
-assert.ok(/const componentRaw = componentCellClean \|\| '기타';/.test(imp), '지운 부재명 사용');
+assert.ok(/(?:const|let) componentRaw = componentCellClean \|\| '기타';/.test(imp), '지운 부재명 사용');
 assert.ok(/pick\(componentCellClean, existing\.component, '기타'\)/.test(imp), '기존 결함 합치기도 지운 부재명');
 assert.strictEqual((imp.match(/openingFromMember: openingFromMember\.found/g) || []).length, 2, '새 결함·기존 결함 모두 개구부 체크 판정에 반영');
 assert.ok(/openingFromMember\.pos \|\| findOpeningPosInText\(defectType\)/.test(imp), '새 결함 개구부 종류: 부재명칭 우선');
