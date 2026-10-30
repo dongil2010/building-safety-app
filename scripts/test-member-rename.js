@@ -87,7 +87,7 @@ assert.ok(app.includes("'철골보(G)': STEEL_MEMBER_DEFECTS") && app.includes("
 
 // 표시·출력 경로는 memberNameOut
 assert.ok(/function memberNameOut\(v\)/.test(app));
-assert.ok(app.includes("case 'component': return memberNameOut(d.component) || '기둥';"));
+assert.ok(app.includes("case 'component': return memberNameOut(d.component) || '';"));
 assert.ok(app.includes("setTcText(getHwpxTblCellByAddr(tbl, 1, 1), memberNameOut(d.component) || '')"));
 assert.ok(app.includes("return field === 'component' ? (memberNameOut(cellVal) || '') : cellVal;"), 'excel import normalizes');
 assert.ok(app.includes("component: memberNameOut(cadItem.component) || '',"), 'cad import normalizes');

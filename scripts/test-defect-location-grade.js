@@ -54,7 +54,9 @@ assert.strictEqual(sb.extract('거실'), '거실');
 const cellFn = takeFn('getSurveyCellText');
 const locCase = cellFn.slice(cellFn.indexOf("case 'location':"), cellFn.indexOf("case 'component':"));
 assert.ok(locCase.includes('if (d.location) return d.location;'), '적은 위치는 그대로');
-assert.ok(/defectLocationUsesFloor\(\) \? \(\(ctx\.floorCode \|\| state\.currentFloor\) \+ ' ' \+ \(memberNameOut\(d\.component\) \|\| '기둥'\)\) : ''/.test(locCase), '비었을 때 층+부재는 3종만');
+// 2026-10-30 3종 위치 대체값은 그대로(층+부재), 부재가 비어도 「기둥」은 안 채운다
+assert.ok(locCase.includes("return defectLocationUsesFloor() ? `${ctx.floorCode || state.currentFloor} ${memberNameOut(d.component) || ''}`.trim() : '';"), '비었을 때 층+부재는 3종만');
+assert.ok(!/'기둥'/.test(locCase), '부재 「기둥」을 위치에 채우지 않는다');
 assert.ok(app.includes("location: d.location || (defectLocationUsesFloor() ? `${floorDisplayLabel} ${memberNameOut(d.component) || ''}` : ''),"), '사진대지 위치도 3종만 층');
 assert.ok(app.includes("location: defectLocationUsesFloor() ? state.currentFloor : '',"), 'CAD 번호 가져오기도 3종만 층');
 assert.ok(!/location:\s*state\.currentFloor,/.test(app), '층 코드를 위치에 바로 넣는 곳 없음');

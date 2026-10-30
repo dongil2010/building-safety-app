@@ -45222,7 +45222,7 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
                 component: memberNameOut(cadItem.component) || '',
                 location: defectLocationUsesFloor() ? state.currentFloor : '',
                 defectType: cadItem.defectType || '균열',
-                cause: cadItem.cause || '건조수축',
+                cause: cadItem.cause || '', // 2026-10-30 안 적으면 빈칸(예전 「건조수축」)
                 size: cadItem.size || '',
                 crackWidth: cadItem.crackWidth || '',
                 crackLength: cadItem.crackLength || '',
@@ -46604,9 +46604,10 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
             }
             case 'location':
                 if (d.location) return d.location;
-                // 1·2종: 비어 있으면 공란(층을 끼워 넣지 않음)
-                return defectLocationUsesFloor() ? ((ctx.floorCode || state.currentFloor) + ' ' + (memberNameOut(d.component) || '기둥')) : '';
-            case 'component': return memberNameOut(d.component) || '기둥';
+                // 1·2종: 비어 있으면 공란(층을 끼워 넣지 않음). 3종은 층+부재(2026-10-30 부재가 비면 「기둥」 대신 층만)
+                return defectLocationUsesFloor() ? `${ctx.floorCode || state.currentFloor} ${memberNameOut(d.component) || ''}`.trim() : '';
+            // 2026-10-30 안 적은 칸은 빈칸 그대로(예전: 부재 「기둥」, 원인 「건조수축」을 채워 넣음)
+            case 'component': return memberNameOut(d.component) || '';
             case 'defectType': return formatOpeningAwareDefectType(d) || '';
             case 'category': return d.category === '구조체' ? '○' : '-';
             case 'openingCrack': return d.isOpeningCrack ? '○' : '-';
@@ -46654,7 +46655,7 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
             }
             case 'progress': return d.isProgress ? getSurveyProgressLabel(isGrade3Building()) : '-';
             case 'leak': return d.isLeak ? getSurveyLeakLabel(isGrade3Building()) : '-';
-            case 'cause': return isGood ? '-' : (d.cause || '건조수축');
+            case 'cause': return isGood ? '-' : (d.cause || '');
             case 'priorityManage': return d.isPriorityManage ? '중점관리' : '-';
             case 'remark': return ctx.photoRemark || '-';
             default: return '';
@@ -50542,7 +50543,7 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
                             title: componentDefectTitle,
                             defectNo: d.no,
                             location: d.location || (defectLocationUsesFloor() ? `${floorDisplayLabel} ${memberNameOut(d.component) || ''}` : ''),
-                            cause: isGoodDefectType(d.defectType) ? '-' : (d.cause || '건조수축'),
+                            cause: isGoodDefectType(d.defectType) ? '-' : (d.cause || ''),
                             size: isGoodDefectType(d.defectType) ? '-' : ((d.size && String(d.size).trim()) || '-'),
                             src: src
                         });
@@ -50623,7 +50624,7 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
                                 title: `${d.no ? d.no + ' ' : ''}${memberNameOut(d.component) || '부재'} ${d.defectType || '결함'}`,
                                 defectNo: d.no,
                                 location: enrichExteriorLocationForReport(d.location, e.floorCode),
-                                cause: good ? '-' : (d.cause || '건조수축'),
+                                cause: good ? '-' : (d.cause || ''),
                                 size: good ? '-' : ((d.size && String(d.size).trim()) || '-'),
                                 src: e.src
                             };
@@ -50757,7 +50758,7 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
                                         <tr>
                                             <td style="padding:0.4rem 0.3rem; border:1px solid #e2e8f0; font-weight:800; color:#2a2a2a;">${item.no || 'NO.01'}</td>
                                             <td style="padding:0.4rem 0.3rem; border:1px solid #e2e8f0;">${item.location || '위치미지정'}</td>
-                                            <td style="padding:0.4rem 0.3rem; border:1px solid #e2e8f0;">${memberNameOut(item.component) || '기둥'}</td>
+                                            <td style="padding:0.4rem 0.3rem; border:1px solid #e2e8f0;">${memberNameOut(item.component) || ''}</td>
                                             <td style="padding:0.4rem 0.3rem; border:1px solid #e2e8f0; font-family:monospace;">${designText}</td>
                                             <td style="padding:0.4rem 0.3rem; border:1px solid #e2e8f0; font-family:monospace;">${measuredText}</td>
                                             <td style="padding:0.4rem 0.3rem; border:1px solid #e2e8f0;">${item.finishState || '-'}</td>
@@ -50848,7 +50849,7 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
                                         <tr>
                                             <td style="padding:0.4rem 0.3rem; border:1px solid #e2e8f0; font-weight:800; color:#2a2a2a;">${item.no || 'NO.01'}</td>
                                             <td style="padding:0.4rem 0.3rem; border:1px solid #e2e8f0;">${item.location || '위치미지정'}</td>
-                                            <td style="padding:0.4rem 0.3rem; border:1px solid #e2e8f0;">${memberNameOut(item.component) || '기둥'}</td>
+                                            <td style="padding:0.4rem 0.3rem; border:1px solid #e2e8f0;">${memberNameOut(item.component) || ''}</td>
                                             <td style="padding:0.4rem 0.3rem; border:1px solid #e2e8f0; font-family:monospace;">${item.valuesText || '-'}</td>
                                             <td style="padding:0.4rem 0.3rem; border:1px solid #e2e8f0; font-weight:800; color:#16a34a;">${item.avgValue || '-'}</td>
                                             <td style="padding:0.4rem 0.3rem; border:1px solid #e2e8f0; font-weight:700;">${item.status || '양호'}</td>
@@ -60202,7 +60203,7 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
                     existing.defectType = pick(defectTypeRaw, existing.defectType, '기타');
                     // 합친 결과로 다시 판정한다 — 빈 가져오기 값으로 '기타'가 되어 있으면 안 된다
                     const isGoodMerged = isGoodDefectType(existing.defectType);
-                    existing.cause = isGoodMerged ? '-' : pick(causeRaw, existing.cause, '건조수축');
+                    existing.cause = isGoodMerged ? '-' : pick(causeRaw, existing.cause, '');
                     existing.size = isGoodMerged ? '' : pick(sizeRaw, existing.size, '');
                     existing.crackWidth = isGoodMerged ? '' : pick(crackWidthRaw, existing.crackWidth, '');
                     existing.crackLength = isGoodMerged ? '' : pick(crackLengthRaw, existing.crackLength, '');
@@ -60271,7 +60272,7 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
                     // 2026-10-27 위치칸이 공란이면 상세위치도 공란(1·2종 '' · 3종 층 이름만 = 상세위치 공란). 예전엔 '2F 기둥'처럼 부재명이 상세위치로 들어갔다
                     location: locationRaw || composeDefectLocation('', floorCode),
                     defectType,
-                    cause: isGood ? '-' : (causeRaw || '건조수축'),
+                    cause: isGood ? '-' : (causeRaw || ''), // 2026-10-30 원인을 안 적으면 빈칸(예전 「건조수축」)
                     size: isGood ? '' : sizeRaw,
                     crackWidth: isGood ? '' : crackWidthRaw,
                     crackLength: isGood ? '' : crackLengthRaw,

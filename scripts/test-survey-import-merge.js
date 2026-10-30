@@ -79,7 +79,7 @@ function testAppImportUsesRule() {
     const block = app.slice(start, start + 2600);
     assert.ok(block.indexOf("pick(componentCellClean, existing.component, '기타')") >= 0,
         '부재는 pick()으로 기존 내용을 지켜야 한다');
-    assert.ok(block.indexOf("pick(causeRaw, existing.cause, '건조수축')") >= 0,
+    assert.ok(block.indexOf("pick(causeRaw, existing.cause, '')") >= 0,
         '원인은 pick()으로 기존 내용을 지켜야 한다');
     assert.ok(!/existing\.component = componentRaw;/.test(app),
         "빈 값이면 '기타'가 되는 componentRaw를 그대로 쓰면 안 된다");

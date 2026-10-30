@@ -17,11 +17,11 @@ const rules = (rows) => R.reviewRows(rows).map((x) => x.rule);
 // 멀쩡한 행은 아무것도 안 나온다
 assert.deepStrictEqual(R.reviewRows([row({})]), [], '정상 행');
 
-// 원인 빠짐 — 한글엔 건조수축으로 나간다고 알림
+// 원인 빠짐 — 2026-10-30부터 한글에도 빈칸으로 나간다
 let out = R.reviewRows([row({ cause: '' })]);
 assert.strictEqual(out[0].rule, 'empty-cause');
 assert.strictEqual(out[0].level, 'error');
-assert.ok(/건조수축/.test(out[0].msg));
+assert.ok(!/건조수축/.test(out[0].msg), '건조수축으로 채운다는 말 없음');
 // 상태양호·보수완료는 원인·균열폭 검사에서 뺀다
 assert.deepStrictEqual(rules([row({ defectType: '상태양호', cause: '', widths: [], good: true })]), [], '상태양호 원인 없음 = 정상');
 assert.deepStrictEqual(rules([row({ defectType: '보수완료', cause: '', widths: [], good: true })]), [], '보수완료 원인 없음 = 정상');

@@ -139,7 +139,7 @@
             category,
             defectType: parsed.defectType,
             size: good ? '' : parsed.size,
-            cause: cause || (good ? '-' : '건조수축'),
+            cause: cause || (good ? '-' : ''),
             remark,
             // 2026-09-28: 예전에는 점검내용에 '누수' 글자만 있어도 누수여부를 켰다(누수 흔적·백태도) — 표기가 있을 때만
             isProgress: good ? false : markers.progress,
@@ -197,7 +197,7 @@
             category,
             defectType,
             size: good ? '' : size,
-            cause: cause || (good ? '-' : '건조수축'),
+            cause: cause || (good ? '-' : ''),
             remark: c9,
             isProgress: good ? false : progress,
             isLeak: good ? false : leak,

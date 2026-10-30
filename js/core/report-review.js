@@ -82,12 +82,12 @@
             // 위치·부재가 다 비면 마킹만 하고 내용을 안 채운 것 — 칸마다 따로 띄우지 않고 한 줄로(2026-10-20 성광교회 외부 19곳)
             var emptyPin = noLoc && noComp;
             if (!dt) push(out, r, 'error', 'empty-type', '결함 종류가 비어 있습니다.');
-            if (emptyPin) push(out, r, 'warn', 'empty-pin', '위치·부재가 비어 있습니다 — 마킹만 하고 내용을 안 채운 것 같습니다(한글엔 부재 「기둥」으로 나감).');
+            if (emptyPin) push(out, r, 'warn', 'empty-pin', '위치·부재가 비어 있습니다 — 마킹만 하고 내용을 안 채운 것 같습니다.');
             else {
                 if (noLoc) push(out, r, 'warn', 'empty-location', '위치가 비어 있습니다.');
-                if (noComp) push(out, r, 'warn', 'empty-component', '부재가 비어 있습니다 — 한글에는 「기둥」으로 나갑니다.');
+                if (noComp) push(out, r, 'warn', 'empty-component', '부재가 비어 있습니다.');
             }
-            if (!r.good && dt && !trim(r.cause)) push(out, r, 'error', 'empty-cause', '원인이 비어 있습니다 — 한글에는 「건조수축」으로 나갑니다.');
+            if (!r.good && dt && !trim(r.cause)) push(out, r, 'error', 'empty-cause', '원인이 비어 있습니다.');
             // 결함인데 원인이 「-」(물탱크 설치처럼 결함이 아닌 글이거나 원인을 안 적은 것)
             else if (!r.good && dt && /^[-–—]+$/.test(trim(r.cause))) push(out, r, 'error', 'dash-cause', '원인이 「-」입니다 — 결함이면 원인을, 결함이 아니면 결함 종류를 「상태양호」로.');
 
