@@ -935,6 +935,16 @@
     if (floors.length <= 1) {
       return window.exportCurrentFloorVectorPdf();
     }
+    // 2026-10-30 기본 prompt 창은 앱 창(WebView2·안드로이드·대화상자 막힘)에서 안 뜨고 null만 돌려줘서
+    // 「버튼 눌러도 아무 일 없음」이 됐다 → 앱 공용 선택 창(appChoose) 사용, 없을 때만 기본 prompt
+    if (typeof window.appChoose === 'function') {
+      const k = await window.appChoose('벡터 PDF 범위를 고르세요.', [
+        { label: '현재 층만', detail: String(state.currentFloor || '-') },
+        { label: '각 층 전부 한 PDF로', detail: floors.length + '층' }
+      ], { title: '벡터 PDF', okText: '내보내기', defaultIndex: 1 });
+      if (k === null || k === undefined) return;
+      return k === 1 ? window.exportAllFloorsVectorPdf() : window.exportCurrentFloorVectorPdf();
+    }
     const choice = window.prompt(
       '벡터 PDF 범위 선택\n\n1 = 현재 층만 (' + (state.currentFloor || '-') + ')\n2 = 각 층 전부 한 PDF로 (' + floors.length + '층)\n\n숫자 입력 후 확인',
       '2'

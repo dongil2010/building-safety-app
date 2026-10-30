@@ -25364,10 +25364,11 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
     }
 
     /** 규모(상태조사표 size) — crackMeasures는 ", "로 연결 (한글 출력 동일) */
-    function formatDefectSizeMeasuresJoined(d) {
+    function formatDefectSizeMeasuresJoined(d, pairFn) {
         if (!d) return '';
+        const fmt = typeof pairFn === 'function' ? pairFn : formatCrackMeasurePair;
         if (Array.isArray(d.crackMeasures) && d.crackMeasures.length) {
-            const bits = d.crackMeasures.map(m => formatCrackMeasurePair({
+            const bits = d.crackMeasures.map(m => fmt({
                 width: m.width,
                 length: m.length,
                 count: m.count,
@@ -31980,6 +31981,26 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
         if (w && !l) return normalizeEaSpacingInText(`Cw:${w}${eaSuffix}`);
         if (w && l) return normalizeEaSpacingInText(`${w}/${l}${eaSuffix}`);
         if (l) return normalizeEaSpacingInText(n ? `${l}m -${n}EA` : `${l}m`);
+        if (n) return `${n}EA`;
+        return '';
+    }
+
+    /**
+     * 2026-10-30 한글(HWPX) 상태조사표 전용: 단위를 붙인 규모 글자.
+     * 폭만 → Cw:0.3mm / 길이만 → L: 5m / 개수만 → 3EA / 폭+길이 → 0.3mm/5m (-nEA는 그대로 뒤에).
+     * 「x」(가로x세로) 표기는 단위가 정해져 있지 않아 예전 그대로 둔다. 화면·PDF·엑셀은 바꾸지 않는다.
+     */
+    function formatCrackMeasurePairHwpx(m) {
+        const join = normalizeMeasureJoin(m && m.join);
+        if (join === 'x') return formatCrackMeasurePair(m);
+        const strip = (v, re) => String(v == null ? '' : v).replace(re, '').trim();
+        const w = normalizeCrackDecimalText(strip(String((m && m.width) || '').replace(/^\s*Cw\s*[:=]\s*/i, ''), /\s*(mm|㎜)\s*$/i));
+        const l = normalizeCrackDecimalText(strip(String((m && m.length) || '').replace(/^\s*L\s*[:=]\s*/i, ''), /\s*m\s*$/i));
+        const n = strip((m && m.count) || '', /\s*EA\s*$/i);
+        const eaSuffix = n ? ` -${n}EA` : '';
+        if (w && !l) return normalizeEaSpacingInText(`Cw:${w}mm${eaSuffix}`);
+        if (w && l) return normalizeEaSpacingInText(`${w}mm/${l}m${eaSuffix}`);
+        if (l) return normalizeEaSpacingInText(`L: ${l}m${eaSuffix}`);
         if (n) return `${n}EA`;
         return '';
     }
@@ -46760,7 +46781,9 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
             case 'openingCrack': return d.isOpeningCrack ? '○' : '-';
             case 'size': {
                 if (isGood) return '-';
-                const joinedMeasures = formatDefectSizeMeasuresJoined(d);
+                // 한글(HWPX) 출력만 단위 붙임(ctx.hwpxUnits) — 화면·PDF·엑셀은 예전 표기
+                const pairFmt = ctx.hwpxUnits ? formatCrackMeasurePairHwpx : formatCrackMeasurePair;
+                const joinedMeasures = formatDefectSizeMeasuresJoined(d, pairFmt);
                 if (joinedMeasures) return joinedMeasures;
                 const w = (d.crackWidth !== undefined && d.crackWidth !== null && String(d.crackWidth).trim() !== '') ? String(d.crackWidth).trim() : '';
                 const l = (d.crackLength !== undefined && d.crackLength !== null && String(d.crackLength).trim() !== '') ? String(d.crackLength).trim() : '';
@@ -46774,7 +46797,7 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
                     if (maxN > 1) {
                         const bits = [];
                         for (let i = 0; i < maxN; i++) {
-                            const bit = formatCrackMeasurePair({
+                            const bit = pairFmt({
                                 width: wParts[i] || '',
                                 length: lParts[i] || '',
                                 count: nParts[i] || '',
@@ -46784,7 +46807,7 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
                         }
                         if (bits.length) return bits.join(', ');
                     }
-                    return formatCrackMeasurePair({ width: w, length: l, count: n, join: inferMeasureJoin(d, null) }) || '-';
+                    return pairFmt({ width: w, length: l, count: n, join: inferMeasureJoin(d, null) }) || '-';
                 }
                 const sizeVal = (d.size != null) ? String(d.size).trim() : '';
                 return normalizeEaSpacingInText(sizeVal) || '-';
@@ -47007,7 +47030,7 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
             no,
             loc,
             content,
-            getSurveyCellText('size', d),
+            getSurveyCellText('size', d, ctx.hwpxUnits ? { hwpxUnits: true } : undefined),
             marks.struct,
             marks.nonstruct,
             progress,
@@ -54592,7 +54615,7 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
                             floorDisplayLabel: rowFloorLabel(floorCode)
                         };
                         const colCount = Array.from(normalRowTpl.getElementsByTagNameNS(HP_NS, 'tc')).length;
-                        const values = getReportSurveyRowValues(d, rowCtx, isGrade3, colCount);
+                        const values = getReportSurveyRowValues(d, Object.assign({ hwpxUnits: true }, rowCtx), isGrade3, colCount);
                         // 첫 데이터 행: 헤더 직하 DOUBLE_SLIM 상단선(first). 마지막 행: 페이지 하단 테두리(last).
                         const rowTpl = localIdx === 0 ? firstRowTpl : (isLastOnPage ? lastRowTpl : normalRowTpl);
                         const styleMap = localIdx === 0 ? styleMaps.first : (isLastOnPage ? styleMaps.last : styleMaps.normal);
@@ -56112,7 +56135,7 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
                                 floorCode: cmpFloorCode,
                                 floorDisplayLabel: rowFloorLabel(cmpFloorCode)
                             };
-                            const values = getReportSurveyRowValues(d, rowCtx, isGrade3, refColCount);
+                            const values = getReportSurveyRowValues(d, Object.assign({ hwpxUnits: true }, rowCtx), isGrade3, refColCount);
                             const defectNo = values[0] || getSurveyCellText('no', d, rowCtx) || (d.no || '').replace(/^NO\.?\s*/i, '');
                             const roundLabels = getDefectHwpxCompareRoundLabelsFull(d, bldg);
 
@@ -57210,7 +57233,7 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
                             floorDisplayLabel: rowFloorLabel(floorCode)
                         };
                         const colCount = Array.from(normalStyleRow.getElementsByTagNameNS(HP_NS, 'tc')).length;
-                        const values = getReportSurveyRowValues(d, rowCtx, isGrade3, colCount);
+                        const values = getReportSurveyRowValues(d, Object.assign({ hwpxUnits: true }, rowCtx), isGrade3, colCount);
                         const gridLocCellRaw = getDefectGridRoomForReport(d, floorCode);
                         const styleMap = localIdx === 0 ? styleMaps.first : (isLastOnPage ? styleMaps.last : styleMaps.normal);
 
