@@ -532,6 +532,40 @@
    * 본앱 drawPinSafe와 같은 이미지-픽셀 비율로 PDF에 벡터 마킹
    * @param {object} [options] { plans } — 있으면 defects 대신 사전 계산 플랜 사용(NDT 등)
    */
+  /**
+   * 화면(pdf.js 뷰포트)에 보이는 페이지 크기와, 그 좌표(왼쪽 아래 원점, 위로 +y)를
+   * PDF 원래 좌표로 바꾸는 cm 행렬 [a b c d e f]. 회전 0·원점 (0,0)이면 matrix = null.
+   */
+  window.vectorPdfDisplayFrame = function (page) {
+    let box = null;
+    try { box = typeof page.getCropBox === 'function' ? page.getCropBox() : null; } catch (_e) { box = null; }
+    if (!box || !(box.width > 0) || !(box.height > 0)) {
+      const sz = page.getSize();
+      box = { x: 0, y: 0, width: sz.width, height: sz.height };
+    }
+    let rot = 0;
+    try { rot = Number(page.getRotation && page.getRotation().angle) || 0; } catch (_e) { rot = 0; }
+    rot = ((Math.round(rot / 90) * 90) % 360 + 360) % 360;
+    const W = box.width;
+    const H = box.height;
+    const x0 = box.x || 0;
+    const y0 = box.y || 0;
+    let m;
+    if (rot === 90) m = [0, 1, -1, 0, W, 0];
+    else if (rot === 180) m = [-1, 0, 0, -1, W, H];
+    else if (rot === 270) m = [0, -1, 1, 0, 0, H];
+    else m = [1, 0, 0, 1, 0, 0];
+    m[4] += x0;
+    m[5] += y0;
+    const identity = rot === 0 && !x0 && !y0;
+    return {
+      rotation: rot,
+      width: (rot === 90 || rot === 270) ? H : W,
+      height: (rot === 90 || rot === 270) ? W : H,
+      matrix: identity ? null : m
+    };
+  };
+
   window.exportFloorPlanVectorPdf = async function (pdfDataUrl, defects, imgW, imgH, options) {
     if (typeof PDFLib === 'undefined') {
       throw new Error('pdf-lib가 로드되지 않았습니다.');
@@ -544,7 +578,15 @@
     const { PDFDocument, rgb, StandardFonts } = PDFLib;
     const outDoc = await PDFDocument.load(bytes);
     const page = outDoc.getPages()[0];
-    const { width, height } = page.getSize();
+    // 2026-10-30 페이지 회전(/Rotate 90·180·270)·자르기 상자 원점 반영.
+    // 마킹 좌표는 pdf.js가 회전까지 적용해 그린 그림 기준인데, pdf-lib는 회전 전 좌표계에 그려서
+    // /Rotate 180 도면은 마킹이 180° 돌아 나왔다 → 화면에 보이는 좌표계로 cm 행렬을 한 번 깔고 그린다.
+    const view = window.vectorPdfDisplayFrame(page);
+    const width = view.width;
+    const height = view.height;
+    if (view.matrix && typeof page.pushOperators === 'function' && PDFLib.concatTransformationMatrix) {
+      page.pushOperators(PDFLib.pushGraphicsState(), PDFLib.concatTransformationMatrix(...view.matrix));
+    }
     const font = await outDoc.embedFont(StandardFonts.HelveticaBold);
 
     const iw = Math.max(1, imgW || width);
@@ -752,6 +794,9 @@
       }
     }
 
+    if (view.matrix && typeof page.pushOperators === 'function' && PDFLib.concatTransformationMatrix) {
+      page.pushOperators(PDFLib.popGraphicsState());
+    }
     const pdfBytes = await outDoc.save();
     return new Blob([pdfBytes], { type: 'application/pdf' });
   };
@@ -778,7 +823,11 @@
     }
     const id = buildingId || bldg.id || (window.state && window.state.currentBuildingId) || '';
     const key = `${id}_${floorCode}`;
-    const defects = (window.state && window.state.defects && window.state.defects[key]) || [];
+    // 2026-10-30 전층 출력: 결함에 층·건물 정보가 없으면 핀 방향 계산(층별 도면 회전)이 「지금 보는 층」 회전을 써서
+    // 다른 층 마킹이 돌아가 나왔다 → 그 층 코드를 붙인 사본으로 넘긴다(저장 데이터는 안 건드림)
+    const defects = ((window.state && window.state.defects && window.state.defects[key]) || []).map((d) => (
+      d && (!d.floorCode || !d.buildingId) ? Object.assign({}, d, { floorCode: d.floorCode || floorCode, buildingId: d.buildingId || id }) : d
+    ));
     let imgW;
     let imgH;
     const stRef = window.state && window.state.floorPlanRef;

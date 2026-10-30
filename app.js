@@ -54361,7 +54361,7 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
             }
 
             for (let preIdx = 0; preIdx < floorsData.length; preIdx++) {
-                const { floorCode: preFloorCode, pageDefects: preDefects } = floorsData[preIdx];
+                const { floorCode: preFloorCode, pageDefects: preDefects, dongPart: preDongPart } = floorsData[preIdx];
                 await Promise.all(preDefects.map(async (d) => {
                     await ensureDefectPhotosLoaded(d);
                 }));
@@ -54373,7 +54373,7 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
                     const firstNo = globalPhotoEntries.length + 1;
                     photoList.forEach((p) => {
                         globalPhotoEntries.push({
-                            d, floorCode: preFloorCode, src: p.src, pid: p.pid,
+                            d, floorCode: preFloorCode, src: p.src, pid: p.pid, dongPart: preDongPart || null,
                             label: `사진${globalPhotoEntries.length + 1}`
                         });
                     });
@@ -54740,7 +54740,7 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
                             const src = await resolveSrcForHwpxEmbed(src0, entry.pid);
                             const { bytes, mime, ext } = await dataUrlToBytes(src);
                             const size = await loadImageNaturalSizeFromBytes(bytes, mime);
-                            return { d, floorCode, label: entry.label, bytes, mime, ext, w: size.w, h: size.h };
+                            return { d, floorCode, dongPart: entry.dongPart || null, label: entry.label, bytes, mime, ext, w: size.w, h: size.h };
                         } catch (onePhotoErr) {
                             console.warn('사진 1장 임베드 실패(해당 컷만 생략):', d && d.id, onePhotoErr);
                             return null;
@@ -54783,11 +54783,28 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
                         photosOnPage = 0;
                     };
 
-                    for (let i = 0; i < decoded.length; i += 2) {
+                    // 2026-10-30 여러 동: 사진첩을 동마다 새 쪽 + 「A동 결함사진」 소제목으로 나눈다(사진 번호는 비고와 맞게 이어감).
+                    // 한 표(사진 2장)에 두 동 사진이 섞이지 않게 동이 바뀌면 왼쪽 칸부터 다시.
+                    const splitAlbumByDong = !!(dongParts && dongParts.length > 1);
+                    let albumDong;
+                    let albumGroupCount = 0;
+                    for (let i = 0; i < decoded.length; i += (decoded[i + 1] && (!splitAlbumByDong || decoded[i + 1].dongPart === decoded[i].dongPart)) ? 2 : 1) {
                         const slot1 = decoded[i];
-                        const slot2 = decoded[i + 1] || null;
+                        const slot2 = (decoded[i + 1] && (!splitAlbumByDong || decoded[i + 1].dongPart === slot1.dongPart)) ? decoded[i + 1] : null;
                         const pairCount = slot2 ? 2 : 1;
-                        if (photosOnPage > 0 && photosOnPage + pairCount > PHOTOS_PER_PAGE) {
+                        if (splitAlbumByDong && slot1.dongPart !== albumDong) {
+                            if (albumGroupCount > 0) startNextPhotoPage();
+                            albumDong = slot1.dongPart;
+                            albumGroupCount++;
+                            const dl = albumDong && albumDong.dongLabel;
+                            if (dl && ndtAlbumSubHeadingStamp && insertPara && insertPara.parentNode) {
+                                const head = makeHwpxTextParaFromStamp(ndtAlbumSubHeadingStamp, `${dl} 결함사진`, HP_NS, true);
+                                if (head) {
+                                    insertPara.parentNode.insertBefore(head, insertPara);
+                                    insertPara.setAttribute('pageBreak', '0');
+                                }
+                            }
+                        } else if (photosOnPage > 0 && photosOnPage + pairCount > PHOTOS_PER_PAGE) {
                             startNextPhotoPage();
                         }
 
@@ -56192,15 +56209,28 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
             // 모든 층의 상태조사표/사진첩이 다 채워지고 표본 잔여 정리까지 끝난 뒤, 떼어뒀던 위치도
             // "틀" 문단을 층 수만큼 복제해 문서 맨 뒤에 순서대로 붙이고 채운다.
             if (grade3LocMapStampPara) {
+                // 2026-10-30 여러 동: 위치도도 동마다 「A동 상태조사위치도」 소제목(새 쪽)으로 나눈다
+                const splitMapsByDong = !!(dongParts && dongParts.length > 1);
+                let mapDong;
                 for (let i = 0; i < floorsData.length; i++) {
                     const { floorCode } = floorsData[i];
                     useDongOf(floorsData[i]);
                     // 외부는 배치도 한 장일 수도, 입면도 여러 장일 수도 있다 — 도면마다 한 장씩.
                     const mapCodes = locationMapCodesForPage(floorsData[i], floorCode);
                     let mapSeq = 0;
+                    let dongHead = null;
+                    if (splitMapsByDong && floorsData[i].dongPart !== mapDong && mapCodes.length) {
+                        mapDong = floorsData[i].dongPart;
+                        const dl = mapDong && mapDong.dongLabel;
+                        if (dl && ndtAlbumSubHeadingStamp) {
+                            dongHead = makeHwpxTextParaFromStamp(ndtAlbumSubHeadingStamp, `${dl} 상태조사위치도`, HP_NS, true);
+                            if (dongHead) sec.appendChild(dongHead);
+                        }
+                    }
                     for (const mapCode of mapCodes) {
                         const clonedPara = grade3LocMapStampPara.cloneNode(true);
-                        clonedPara.setAttribute('pageBreak', '1');
+                        clonedPara.setAttribute('pageBreak', dongHead ? '0' : '1');
+                        dongHead = null;
                         reassignClonedIds([clonedPara]);
                         sec.appendChild(clonedPara);
                         const locationMapTbl = clonedPara.getElementsByTagNameNS(HP_NS, 'tbl')[0];
