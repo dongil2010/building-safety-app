@@ -315,6 +315,40 @@
         };
     }
 
+    /**
+     * HWPX 본문에서 표를 뽑는다. 표 안의 표는 따로 한 개로 나오고, 바깥 칸 글자에는 섞이지 않는다.
+     * 모양은 hwp-read.js의 tablesFromSection과 같다(전회차 보고서를 .hwp든 .hwpx든 같게 읽으려고).
+     * @returns {Array<{rows: number, cols: number, cells: Array<{row: number, col: number, lines: string[]}>}>}
+     */
+    function tablesFromSectionXml(xml, out) {
+        const tables = out || [];
+        topElements(xml, 'hp:tbl').forEach(function (el) {
+            const t = parseTable(xml.slice(el.start, el.end));
+            const cells = [];
+            let rows = 0;
+            let cols = 0;
+            const table = { rows: 0, cols: 0, cells: cells };
+            tables.push(table);
+            t.rows.forEach(function (r) {
+                r.cells.forEach(function (c) {
+                    cells.push({
+                        col: c.col, row: c.row,
+                        lines: cellLines(c.xml).map(function (l) { return l.replace(/\s+/g, ' ').trim(); }).filter(Boolean)
+                    });
+                    rows = Math.max(rows, c.row + c.rowSpan);
+                    cols = Math.max(cols, c.col + c.colSpan);
+                    if (c.xml.indexOf('<hp:tbl') >= 0) {
+                        const sub = subListRange(c.xml);
+                        if (sub) tablesFromSectionXml(c.xml.slice(sub.innerStart, sub.innerEnd), tables);
+                    }
+                });
+            });
+            table.rows = rows;
+            table.cols = cols;
+        });
+        return tables;
+    }
+
     function buildTable(t) {
         return t.open + t.head + t.rows.map(function (r) {
             return r.open + r.cells.map(function (c) { return c.xml; }).join('') + '</hp:tr>';
@@ -847,6 +881,7 @@
     const api = {
         topElements: topElements,
         parseTable: parseTable,
+        tablesFromSectionXml: tablesFromSectionXml,
         buildTable: buildTable,
         tableKind: tableKind,
         cellText: cellText,

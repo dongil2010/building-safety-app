@@ -242,4 +242,24 @@ sumFit.rows.slice(1).forEach((r) => r.cells.forEach((c) => {
     assert.ok(c.height >= H.cellNeed(c.xml, { inMargin: null }) || c.rowSpan > 1, '요약표 칸 높이가 내용보다 낮다');
 }));
 
+// 전회차 .hwpx 표 읽기: 칸 주소대로 읽고, 표 안의 표는 따로 나오며, 바깥 칸 글자에 섞이지 않는다
+const tc = (col, row, inner) => '<hp:tc><hp:subList>' + inner + '</hp:subList><hp:cellAddr colAddr="' + col + '" rowAddr="' + row + '"/>'
+    + '<hp:cellSpan colSpan="1" rowSpan="1"/></hp:tc>';
+const para = (text) => '<hp:p><hp:run><hp:t>' + text + '</hp:t></hp:run></hp:p>';
+const tbl = (rows) => '<hp:tbl>' + rows.map((r) => '<hp:tr>' + r.join('') + '</hp:tr>').join('') + '</hp:tbl>';
+const prevXml = '<hs:sec>' + para('머리말') + tbl([
+    [tc(0, 0, para('구  분')), tc(1, 0, para('주요 점검결과'))],
+    [tc(1, 1, para('1. 슬래브   균열') + para('') + para('2. 보 균열')), tc(0, 1, para('구조체 상태'))],
+    [tc(0, 2, para('안쪽 표') + '<hp:p>' + tbl([[tc(0, 0, para('속칸'))]]) + '</hp:p>'), tc(1, 2, para('-'))]
+]) + '</hs:sec>';
+const prevTables = H.tablesFromSectionXml(prevXml);
+assert.strictEqual(prevTables.length, 2, '표 안의 표도 한 개로 나온다');
+assert.strictEqual(prevTables[0].rows, 3);
+assert.strictEqual(prevTables[0].cols, 2);
+assert.deepStrictEqual(prevTables[0].cells.find((c) => c.row === 1 && c.col === 1).lines, ['1. 슬래브 균열', '2. 보 균열']);
+assert.deepStrictEqual(prevTables[0].cells.find((c) => c.row === 2 && c.col === 0).lines, ['안쪽 표']);
+assert.deepStrictEqual(prevTables[1].cells[0].lines, ['속칸']);
+const prevOut = require('../js/report/summary-core.js').extractPrev(prevTables);
+assert.deepStrictEqual(prevOut.items.structure, ['슬래브 균열', '보 균열'], '.hwpx 표로도 전회차 항목을 꺼낸다');
+
 console.log('report-summary-hwpx ok');

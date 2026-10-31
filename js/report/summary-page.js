@@ -2,7 +2,7 @@
  * 보고서 본문 요약 화면 (report-summary.html 전용)
  *
  * 앱이 내보낸 상태조사표 HWPX를 이 컴퓨터 안에서 읽어, 주요 점검결과를 고르고
- * 보고서에 붙여넣을 표를 만든다. 전회차 보고서(.hwp)를 함께 읽으면 분류마다
+ * 보고서에 붙여넣을 표를 만든다. 전회차 보고서(.hwp/.hwpx)를 함께 읽으면 분류마다
  * 전회·금회를 나란히 놓고 달라진 항목을 파란색으로 표시한다.
  * 계산은 summary-core.js, 여기는 파일 읽기와 화면. 앱 데이터(Firestore)에는 접속하지 않는다.
  */
@@ -336,7 +336,7 @@
         return { floors: withRows, photoUrl: photoUrl, photoSrc: { zip: zip, hrefById: hrefById, picXmlById: picXmlById } };
     }
 
-    /* ───────── 전회차 보고서(.hwp) 읽기 ───────── */
+    /* ───────── 전회차 보고서(.hwp/.hwpx) 읽기 ───────── */
 
     /** raw deflate 풀기. 압축 뒤에 군더더기가 붙은 스트림도 있어, 오류가 나도 그때까지 나온 것을 쓴다. */
     async function inflateRaw(bytes) {
@@ -362,9 +362,27 @@
         return out;
     }
 
+    /** 전회차 .hwpx의 표. 모양은 hwpRead.readHwpTables와 같다. */
+    async function readHwpxTables(buffer) {
+        if (typeof JSZip === 'undefined') throw new Error('JSZip 라이브러리를 불러오지 못했습니다. 인터넷 연결을 확인해 주세요.');
+        const zip = await JSZip.loadAsync(buffer);
+        const secPaths = Object.keys(zip.files)
+            .filter((p) => /^Contents\/section\d+\.xml$/.test(p))
+            .sort((a, b) => parseInt(a.match(/\d+/)[0], 10) - parseInt(b.match(/\d+/)[0], 10));
+        if (!secPaths.length) throw new Error('한글 본문(section)을 찾지 못했습니다. .hwpx 파일인지 확인해 주세요.');
+        let tables = [];
+        for (const secPath of secPaths) {
+            tables = tables.concat(hwpxOut.tablesFromSectionXml(await zip.file(secPath).async('string')));
+        }
+        return tables;
+    }
+
     async function loadPrevBuffer(buffer, fileName) {
         setPrevStatus('전회차 보고서를 읽는 중...', 'muted');
-        const tables = await hwpRead.readHwpTables(buffer, inflateRaw);
+        // 확장자가 바뀌어 있어도 읽히도록 파일 앞머리로 가린다 (PK = zip = .hwpx)
+        const head = new Uint8Array(buffer, 0, 2);
+        const isZip = head[0] === 0x50 && head[1] === 0x4b;
+        const tables = isZip ? await readHwpxTables(buffer) : await hwpRead.readHwpTables(buffer, inflateRaw);
         const prev = core.extractPrev(tables);
         const count = Object.keys(prev.items).reduce((n, k) => n + prev.items[k].length, 0);
         if (!count) throw new Error('전회차 보고서에서 「주요 점검결과」 표를 찾지 못했습니다.');
