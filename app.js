@@ -45802,7 +45802,8 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
         if (!C) return;
         const floorKey = `${state.currentBuildingId}_${state.currentFloor}`;
         const list = (state.defects && state.defects[floorKey]) || [];
-        const targets = list.filter((d) => d && C.hasContent(d));
+        const clearOpts = { emptyLocation: composeDefectLocation('', state.currentFloor) };
+        const targets = list.filter((d) => d && C.hasContent(d, clearOpts));
         if (!targets.length) { window.showToast?.('이 층에는 비울 결함 내용이 없습니다.', 'info', 3000); return; }
         const photoN = targets.reduce((s, d) => s + C.currentPhotoCount(d), 0);
         const bldg = state.currentBuilding || (state.buildings || []).find((b) => b.id === state.currentBuildingId);
@@ -45810,8 +45811,8 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
         const name = String((bldg && bldg.name) || '').replace(/^🏢\s*/, '');
         const ok = await window.appConfirm(
             `${name} · ${fl}\n마킹 ${targets.length}개의 결함 내용을 비웁니다.\n` +
-            `(종류·부재·원인·크기·개수·비고·진행 표시${photoN ? ` · 이번 회차 사진 ${photoN}장 떼기` : ''})\n\n` +
-            '핀·박스·지시선·번호는 그대로이고, 이전 회차 사진·다른 층·다른 동은 건드리지 않습니다.\n되돌리기(Ctrl+Z)로 돌아갈 수 있습니다.',
+            `(종류·부재·원인·크기·개수·비고·진행 표시·상세위치${photoN ? ` · 이번 회차 사진 ${photoN}장 떼기` : ''})\n\n` +
+            '핀·박스·지시선·번호·행·열 위치는 그대로이고, 이전 회차 사진·다른 층·다른 동은 건드리지 않습니다.\n되돌리기(Ctrl+Z)로 돌아갈 수 있습니다.',
             { title: '내용 비우기 (핀 위치 유지)', okText: `${targets.length}개 비우기`, danger: true }
         );
         if (!ok) return;
@@ -45824,7 +45825,7 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
         targets.forEach((d) => {
             const photoCount = C.currentPhotoCount(d);
             const beforeIds = photoCount ? defectPhotoIdList(d, photoCount) : [];
-            const changed = C.clearContentFields(d);
+            const changed = C.clearContentFields(d, clearOpts);
             if (changed) touchDefectUpdatedAt(d);
             if (photoCount) {
                 C.unlinkCurrentPhotos(d, beforeIds);
@@ -45848,7 +45849,7 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
     // 건물 층 목록 ∪ 기기 메모리의 이 건물 키). 서버를 따로 읽지 않는다. 확인창을 기다리는 사이 동기화가 목록을
     // 새 객체로 바꿔 끼울 수 있어 확인·백업 뒤에 목록을 다시 읽어 적용하고, 되돌리기는 한 번에 모든 층이 돌아간다.
     // 비우는 칸·보존하는 것은 「이 층만」과 같다(핀·박스·지시선·번호·이전 회차 사진·위치 칸은 그대로).
-    const DEFECT_CONTENT_CLEAR_FIELDS_TEXT = '종류·부재·원인·크기·폭·길이·개수·비고·진행 표시';
+    const DEFECT_CONTENT_CLEAR_FIELDS_TEXT = '종류·부재·원인·크기·폭·길이·개수·비고·진행 표시·상세위치';
 
     /** 읽기만 하는 계획: 층마다 { fc, key, label, total, targets, photoN } + 합계 */
     function planClearContentsForAllFloors(bldgId) {
@@ -45859,7 +45860,7 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
         const base = planClearDetailForAllFloors(id); // 층 목록만 빌려 쓴다(대상 판정은 아래에서 내용 기준으로 다시)
         base.floors.forEach((f) => {
             const list = Array.isArray(state.defects && state.defects[f.key]) ? state.defects[f.key] : [];
-            const targets = list.filter((d) => d && C.hasContent(d));
+            const targets = list.filter((d) => d && C.hasContent(d, { emptyLocation: composeDefectLocation('', f.fc) }));
             const photoN = targets.reduce((s, d) => s + C.currentPhotoCount(d), 0);
             out.floors.push({ fc: f.fc, key: f.key, label: f.label, total: list.length, targets, photoN });
             if (targets.length) { out.targetFloors += 1; out.targetCount += targets.length; out.photoCount += photoN; }
@@ -45869,10 +45870,10 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
     }
 
     /** 한 마킹의 내용 비우기(이 층만과 같은 처리) */
-    function applyDefectContentClearTo(d, C) {
+    function applyDefectContentClearTo(d, C, fc) {
         const photoCount = C.currentPhotoCount(d);
         const beforeIds = photoCount ? defectPhotoIdList(d, photoCount) : [];
-        const changed = C.clearContentFields(d);
+        const changed = C.clearContentFields(d, { emptyLocation: composeDefectLocation('', fc) });
         if (changed) touchDefectUpdatedAt(d);
         if (photoCount) {
             C.unlinkCurrentPhotos(d, beforeIds);
@@ -45900,7 +45901,7 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
             `「${describeBuildingForClear(bId)}」 건물의 모든 층(${plan0.floorCount}개 층 확인)에서\n` +
             `마킹 ${plan0.targetCount}개 · ${plan0.targetFloors}개 층의 결함 내용을 비웁니다.\n${lines}\n\n` +
             `(${DEFECT_CONTENT_CLEAR_FIELDS_TEXT}${plan0.photoCount ? ` · 이번 회차 사진 ${plan0.photoCount}장 떼기` : ''})\n\n` +
-            '핀·박스·지시선·번호·위치 칸은 그대로이고, 이전 회차 사진·다른 동은 건드리지 않습니다.\n' +
+            '핀·박스·지시선·번호·행·열 위치는 그대로이고, 이전 회차 사진·다른 동은 건드리지 않습니다.\n' +
             '이 층 화면에서 되돌리기(Ctrl+Z) 한 번으로 전체 층을 취소할 수 있습니다.',
             { title: '내용 비우기 — 전체 층', okText: `전체 ${plan0.targetCount}개 비우기`, danger: true }
         );
@@ -45920,7 +45921,7 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
         const hit = plan.floors.filter((f) => f.targets.length);
         pushDefectHistory(hit.filter((f) => f.key !== curKey).map((f) => f.key)); // 한 번에 모든 층 되돌리기
         let n = 0;
-        hit.forEach((f) => { f.targets.forEach((d) => { applyDefectContentClearTo(d, C); n++; }); });
+        hit.forEach((f) => { f.targets.forEach((d) => { applyDefectContentClearTo(d, C, f.fc); n++; }); });
         if (typeof markFloorKeyDirty === 'function') hit.forEach((f) => markFloorKeyDirty(f.key));
         saveStateToLocalStorage();
         if (typeof recordAfterBulkOp === 'function') recordAfterBulkOp(snaps);
@@ -45940,7 +45941,7 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
         if (!C) return;
         const bId = state.currentBuildingId;
         const floorKey = `${bId}_${state.currentFloor}`;
-        const here = ((state.defects && state.defects[floorKey]) || []).filter((d) => d && C.hasContent(d));
+        const here = ((state.defects && state.defects[floorKey]) || []).filter((d) => d && C.hasContent(d, { emptyLocation: composeDefectLocation('', state.currentFloor) }));
         const all = planClearContentsForAllFloors(bId);
         if (!here.length && !all.targetCount) { window.showToast?.(`비울 결함 내용이 없습니다. (${all.floorCount || 1}개 층 확인)`, 'info', 3000); return; }
         // 다른 층에는 비울 것이 없으면 물을 필요가 없다 → 이 층만 (기존 흐름)

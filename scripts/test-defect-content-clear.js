@@ -23,12 +23,13 @@ assert.deepStrictEqual(ids, ['p1', 'p2']);
 // 비움
 ['component', 'defectType', 'cause', 'size', 'crackWidth', 'crackLength', 'itemCount'].forEach((k) => assert.strictEqual(d[k], '', k));
 assert.deepStrictEqual(d.crackMeasures, []);
+assert.strictEqual(d.location, '', '2026-10-31 상세위치도 비움(1·2종 공란)');
 assert.strictEqual(d.isProgress, false);
 assert.strictEqual(d.isLeak, false);
 assert.deepStrictEqual(d.photos, []);
 assert.deepStrictEqual(d.photoIds, []);
 // 그대로
-['id', 'no', 'groupNo', 'category', 'x', 'y', 'targetX', 'targetY', 'boxManual', 'surveyRound', 'location', 'evalUnitId', 'isCarriedOver'].forEach((k) => assert.deepStrictEqual(d[k], old[k], k));
+['id', 'no', 'groupNo', 'category', 'x', 'y', 'targetX', 'targetY', 'boxManual', 'surveyRound', 'evalUnitId', 'isCarriedOver'].forEach((k) => assert.deepStrictEqual(d[k], old[k], k));
 assert.deepStrictEqual(d.prevRoundPhotos, old.prevRoundPhotos, '이전 회차 사진 유지');
 assert.deepStrictEqual(d.prevRoundPhotoIds, old.prevRoundPhotoIds);
 assert(!C.hasContent(d), '다시 누르면 비울 것 없음');
@@ -63,4 +64,12 @@ assert(/markFloorKeyDirty\(floorKey\)/.test(body));
 const idx = fs.readFileSync(path.join(__dirname, '..', 'index.html'), 'utf8');
 assert(/id="btnClearDefectContents"[\s\S]{0,600}내용 비우기 \(핀 위치 유지\)/.test(idx));
 assert(/js\/core\/defect-content-clear\.js/.test(idx));
+// 3종: 상세위치는 층 이름만 남김. 층 이름만 남은 마킹은 비울 것 없음
+const g3 = { location: '지상1층 계단실', defectType: '' };
+assert(C.hasContent(g3, { emptyLocation: '지상1층' }));
+assert(C.clearContentFields(g3, { emptyLocation: '지상1층' }));
+assert.strictEqual(g3.location, '지상1층');
+assert(!C.hasContent(g3, { emptyLocation: '지상1층' }));
+assert((body.match(/clearContentFields\(d, clearOpts\)/g) || []).length === 1, '이 층: 위치 기준 전달');
+assert(app.includes("applyDefectContentClearTo(d, C, f.fc)"), '전체 층: 층마다 위치 기준');
 console.log('test-defect-content-clear: ok');

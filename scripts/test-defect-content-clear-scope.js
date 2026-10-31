@@ -33,12 +33,13 @@ function mk(withSwap) {
     const state = {
         currentBuildingId: 'B1', currentFloor: '1F', currentBuilding: { id: 'B1', name: '🏢 A동' },
         buildings: [{ id: 'B1', name: '🏢 A동', floorsList: [{ floorCode: '1F', floorLabel: '1층' }, { floorCode: '2F', floorLabel: '2층' }, { floorCode: '3F', floorLabel: '3층' }] }],
-        defects: { B1_1F: [mkd('a'), mkd('b', { defectType: '' , component: '' , crackWidth: '' })], B1_2F: [mkd('c'), mkd('d')], B1_3F: [mkd('e', { component: '', defectType: '', crackWidth: '' })], B2_1F: [mkd('z')] }
+        defects: { B1_1F: [mkd('a'), mkd('b', { defectType: '' , component: '' , crackWidth: '', location: '' })], B1_2F: [mkd('c'), mkd('d')], B1_3F: [mkd('e', { component: '', defectType: '', crackWidth: '', location: '' })], B2_1F: [mkd('z')] }
     };
     const log = { choose: [], confirm: [], history: [], dirty: [], snaps: [], toasts: [], after: 0 };
     const sb = {
         window: { BSA: { defectContentClear: C }, showToast: (m) => log.toasts.push(m), getFloorLabelFromCode: (c) => ({ '1F': '1층', '2F': '2층', '3F': '3층' }[c] || c) },
         state, console, log,
+        composeDefectLocation: () => '', // 1·2종: 상세위치 비우면 공란
         planClearDetailForAllFloors: (id) => ({ floors: ['1F', '2F', '3F'].map((fc) => ({ fc, key: `${id}_${fc}`, label: fc.replace('F', '층') })), floorCount: 3 }),
         getBuildingDongLabel: () => '', defectPhotoIdList: (d, n) => d.photoIds.slice(0, n), touchDefectUpdatedAt: (d) => { d.updatedAt = 9; },
         recordDefectPhotoState: () => {}, stampDefectPhotosChangedIfSafe: () => {}, bsaStampAfter: (x) => x,
@@ -79,7 +80,7 @@ const filled = (d) => !!(d.component || d.defectType || d.crackWidth);
     assert(/3개 층 확인/.test(sb.log.confirm[0].msg) && /마킹 3개 · 2개 층/.test(sb.log.confirm[0].msg) && /1층: 1개/.test(sb.log.confirm[0].msg) && /2층: 2개/.test(sb.log.confirm[0].msg), '전체 확인 문구');
     ['B1_1F', 'B1_2F', 'B1_3F'].forEach((k) => sb.state.defects[k].forEach((d) => assert(!filled(d), k)));
     assert(filled(sb.state.defects.B2_1F[0]), '다른 건물 그대로');
-    sb.state.defects.B1_2F.forEach((d) => { assert.strictEqual(d.x, 10); assert.strictEqual(d.no, 'NO.1'); assert.strictEqual(d.location, '3F X1'); });
+    sb.state.defects.B1_2F.forEach((d) => { assert.strictEqual(d.x, 10); assert.strictEqual(d.no, 'NO.1'); assert.strictEqual(d.location, '', '상세위치도 비움'); });
     assert.strictEqual(sb.log.history.length, 1, '되돌리기 한 번');
     assert.deepStrictEqual(J(sb.log.history[0]), ['B1_2F'], '다른 층 키도 같은 기록에');
     assert.deepStrictEqual(J(sb.log.dirty.sort()), ['B1_1F', 'B1_2F']);
