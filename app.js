@@ -10359,6 +10359,22 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
             : 4000;
         const newLong = getImageLongSide(img);
         const curLong = getImageLongSide(state.bgImage);
+        // 2026-10-31 확대용 티어는 지금 도면을 키운 같은 그림이라 가로세로 비율이 같아야 한다.
+        // 비율이 다르면 옛 도면(같은 이름 파일의 캐시·옛 티어)이라 화면에 붙이지 않는다 — 확대·축소할 때마다
+        // 새 도면과 옛 도면이 번갈아 나오고 비율이 틀어지던 문제.
+        if (wantDim > baseTier && state.bgImage) {
+            const nw = img.naturalWidth || img.width || 0;
+            const nh = img.naturalHeight || img.height || 0;
+            const cw = state.bgImage.naturalWidth || state.bgImage.width || 0;
+            const ch = state.bgImage.naturalHeight || state.bgImage.height || 0;
+            if (nw > 0 && nh > 0 && cw > 0 && ch > 0) {
+                const ratioGap = Math.abs((nw / nh) / (cw / ch) - 1);
+                if (ratioGap > 0.04) {
+                    console.warn('도면 티어 비율이 현재 도면과 달라 적용하지 않음(옛 도면 캐시 의심):', fc, wantDim, `${nw}x${nh}`, `${cw}x${ch}`);
+                    return false;
+                }
+            }
+        }
         // 요청 티어보다 확연히 작으면(잘못된 fallback) 적용하지 않음
         if (wantDim > baseTier && newLong > 0 && newLong < wantDim * 0.72) {
             return false;
