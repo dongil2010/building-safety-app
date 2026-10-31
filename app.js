@@ -56797,6 +56797,25 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
                 }
                 return G.cellTextUnits({ cellWidth, marginLeft: ml, marginRight: mr, fontHeight });
             };
+            // 2026-10-31 1·2종 상태조사표: 행·열(X4~X5/Y1~Y2)이 위치 칸에 한 줄로 들어가게 위치 칸(1번)을 넓히고 그만큼 조사내용 칸(2번)을 줄인다.
+            // 양식 파일은 그대로 두고 출력할 때만 바꾼다(표 전체 폭 불변, 여러 번 불려도 같은 결과).
+            const HWPX_G12_LOCATION_COL_WIDTH = 6200;
+            const widenGrade12SurveyLocationCol = (tbl) => {
+                Array.from(tbl.getElementsByTagNameNS(HP_NS, 'tr')).filter(tr => tr.parentNode === tbl).forEach((tr) => {
+                    const cellAt = (col) => Array.from(tr.getElementsByTagNameNS(HP_NS, 'tc')).find((tc) => {
+                        const addr = tc.getElementsByTagNameNS(HP_NS, 'cellAddr')[0];
+                        const span = tc.getElementsByTagNameNS(HP_NS, 'cellSpan')[0];
+                        return addr && addr.getAttribute('colAddr') === String(col) && (!span || span.getAttribute('colSpan') === '1');
+                    });
+                    const locSz = cellAt(1)?.getElementsByTagNameNS(HP_NS, 'cellSz')[0];
+                    const contentSz = cellAt(2)?.getElementsByTagNameNS(HP_NS, 'cellSz')[0];
+                    if (!locSz || !contentSz) return;
+                    const diff = HWPX_G12_LOCATION_COL_WIDTH - (parseInt(locSz.getAttribute('width'), 10) || 0);
+                    if (diff <= 0) return;
+                    locSz.setAttribute('width', String(HWPX_G12_LOCATION_COL_WIDTH));
+                    contentSz.setAttribute('width', String((parseInt(contentSz.getAttribute('width'), 10) || 0) - diff));
+                });
+            };
             /** 사진표 위치 칸: 행·열이 있으면 상태조사표 위치 칸과 같은 규칙(행·열 → 다음 줄 실 이름), 없으면 예전 그대로 */
             const setHwpxPhotoLocText = (tc, d, fc) => {
                 if (!tc) return;
@@ -57259,6 +57278,7 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
                 // 문서가 원래 그 층에 여러 페이지를 갖고 있었다면 여러 개, 아니면 1개). 결함 개수에
                 // 맞는 페이지 수(15건당 1페이지)와 비교해서 모자라면 복제로 늘리고, 남으면 지운다 —
                 // 표본 페이지를 그대로 남겨두면 실제 데이터 사이에 표본 데이터가 섞여 나온다.
+                slot.statusTbls.forEach(widenGrade12SurveyLocationCol);
                 const targetTbl = slot.statusTbls[0];
                 const headerRow1Text = (() => {
                     const trs = Array.from(targetTbl.getElementsByTagNameNS(HP_NS, 'tr')).filter(tr => tr.parentNode === targetTbl);
