@@ -59337,6 +59337,41 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
         });
     }
 
+    const btnClearImageCache = document.getElementById('btnClearImageCache');
+    if (btnClearImageCache) {
+        btnClearImageCache.addEventListener('click', async () => {
+            if (!await window.appConfirm(
+                '이 기기에 받아 둔 도면 그림 캐시를 지울까요?\n\n'
+                + '· 서버에 올라간 도면은 그대로입니다. 필요할 때 서버에서 다시 받습니다.\n'
+                + '· 아직 서버에 못 올린 도면(업로드 대기)과 서버 확인이 안 된 층은 지우지 않습니다.\n'
+                + '· 결함·마킹 데이터는 건드리지 않습니다.\n'
+                + '· 인터넷에 연결된 상태에서 눌러 주세요(지운 뒤 다시 받아야 합니다).'
+            )) return;
+            if (typeof navigator !== 'undefined' && navigator.onLine === false) {
+                window.showToast('오프라인에서는 지우지 않습니다. 인터넷에 연결한 뒤 다시 눌러 주세요.', 'warning', 4000);
+                return;
+            }
+            btnClearImageCache.disabled = true;
+            try {
+                const r = await clearLocalFloorImageCache();
+                const kept = r.keptPending + r.keptUnverified;
+                window.showToast(
+                    `도면 이미지 캐시 ${r.cleared}개 층을 지웠습니다.` + (kept ? ` (서버 미확인·업로드 대기 ${kept}개 층은 남김)` : ''),
+                    r.cleared > 0 ? 'success' : 'info',
+                    4500
+                );
+                if ((window.state.currentTab === 'tab-map' || window.__bsaEvalMapOn === true) && window.state.currentFloor && typeof loadFloorDrawing === 'function') {
+                    loadFloorDrawing(window.state.currentFloor, { forceClear: true });
+                }
+            } catch (e) {
+                console.warn('도면 이미지 캐시 삭제 실패:', e);
+                window.showToast('도면 이미지 캐시 삭제 중 오류가 발생했습니다.', 'error');
+            } finally {
+                btnClearImageCache.disabled = false;
+            }
+        });
+    }
+
     // Inspection Settings Toolbar Selects Change Handlers
     syncInspectionTypeSelectOptionLabels();
     window.addEventListener('resize', () => syncInspectionTypeSelectOptionLabels());
@@ -67270,6 +67305,53 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
         return removed;
     }
     window.clearLocalFloorPdfCache = clearLocalFloorPdfCache;
+
+    /**
+     * 2026-10-31 도면 이미지 캐시 지우기 — 이 기기에 받아 둔 도면 그림(기본·확대용 티어·원본 이미지)을 비우고 서버에서 다시 받는다.
+     * 도면을 바꿨는데 이미 받아 둔 옛 그림이 계속 남아 확대·축소할 때마다 옛 도면과 새 도면이 번갈아 보이던 문제.
+     * 서버에 올라간 것이 확인된 층만 지운다 — 아직 서버에 못 올린 도면(업로드 대기 표시)·서버 확인이 안 된 층은 이 기기가 유일한 사본이라 남긴다.
+     * @returns {{cleared:number, keptPending:number, keptUnverified:number}}
+     */
+    async function clearLocalFloorImageCache() {
+        const pending = readPendingDrawingUploads();
+        const synced = ensureCloudSyncedDrawingKeys();
+        const result = { cleared: 0, keptPending: 0, keptUnverified: 0 };
+        for (const bldg of (window.state.buildings || [])) {
+            if (!bldg || !bldg.id) continue;
+            const codes = new Set();
+            (bldg.floorsList || []).forEach((f) => { if (f && f.floorCode) codes.add(f.floorCode); });
+            (bldg.drawingFloorCodes || []).forEach((c) => { if (c) codes.add(c); });
+            ['floorDrawings', 'floorDrawingTiers', 'floorDrawingSources'].forEach((m) => {
+                Object.keys(bldg[m] || {}).forEach((c) => codes.add(c));
+            });
+            for (const code of codes) {
+                const floorKey = `${bldg.id}_${code}`;
+                if (Object.prototype.hasOwnProperty.call(pending, floorKey)) { result.keptPending++; continue; }
+                if (!synced.has(floorKey)) { result.keptUnverified++; continue; }
+                await clearFloorDrawingTierCacheForFloor(bldg.id, code, true);
+                await Promise.resolve(idbDelete('floorDrawings', floorKey)).catch(() => {});
+                _idbPersistedDrawingKeys.delete(floorKey);
+                _idbPersistedSourceKeys.delete(floorKey);
+                if (bldg.floorDrawings) delete bldg.floorDrawings[code];
+                if (bldg.floorDrawingTiers) delete bldg.floorDrawingTiers[code];
+                if (bldg.floorDrawingSources) delete bldg.floorDrawingSources[code];
+                result.cleared++;
+            }
+        }
+        const cur = state.currentBuilding;
+        if (cur && cur.id) {
+            const live = (window.state.buildings || []).find((b) => b && b.id === cur.id);
+            if (live && live !== cur) {
+                ['floorDrawings', 'floorDrawingTiers', 'floorDrawingSources'].forEach((m) => { cur[m] = live[m] || {}; });
+            }
+        }
+        state.floorDrawingTierImageCache = {};
+        state.floorImageCache = {};
+        state.floorDrawingHiPatch = null;
+        floorDrawingActiveTierDim = 0;
+        return result;
+    }
+    window.clearLocalFloorImageCache = clearLocalFloorImageCache;
 
     /** 점검(건물) 마지막 진입 시각 — IndexedDB 대용량 자산 TTL (24시간) */
     const BUILDING_ACCESS_LS_KEY = 'bsa_building_access_v1';
