@@ -351,4 +351,15 @@ console.log('report-summary ok');
     assert.ok(t.indexOf('벽체 균열 (0.5mm 이상 2개소, 최대 균열폭:0.8mm)') >= 0, t.join(' / '));
     assert.ok(!t.some((x) => /슬래브 및 벽체/.test(x)));
 })();
+// 미장 들뜸은 구조 체크와 상관없이 마감재, 바탕 균열이 함께면 그 균열을 따른다
+(() => {
+    const c = (content, structural, floor) => api.classify({ content: content, structural: structural, floor: floor || '지상3층' });
+    assert.strictEqual(c('슬래브 미장들뜸', true), 'interior');
+    assert.strictEqual(c('기둥 미장 망상균열 및 들뜸', false), 'interior');
+    assert.strictEqual(c('벽체 미장 들뜸', false, '건축물 외부'), 'exterior');
+    assert.strictEqual(c('벽체 수직균열 및 미장들뜸', false), 'nonStructure');
+    assert.strictEqual(c('천장슬래브 망상균열 및 미장들뜸', true), 'structure');
+    assert.strictEqual(c('기둥 미장 경사, 수직균열', false), 'nonStructure');
+    assert.strictEqual(c('옹벽 미장들뜸', false), 'aux');
+})();
 console.log('report-summary 부재별 묶음 ok');

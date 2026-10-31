@@ -125,6 +125,11 @@
             /벽체?\s*(?:[-–~·/]|와|과)\s*(기둥|보)(?![가-힣])/.test(t);
     }
 
+    // 미장 들뜸·박락은 마감재 결함이다(2026-10-31 사용자). 「벽체 수직균열 및 미장들뜸」처럼 바탕 균열이 함께면 그 균열을 따른다.
+    function isPlasterLoose(t) {
+        return /미장[^,]*(들뜸|박락|탈락|파손)/.test(t) && !/균열/.test(t.replace(/미장\s*\S*균열/g, ''));
+    }
+
     /**
      * 조사내용 낱말로 8개 분류를 추정한다. 조사표에는 구조/비구조 표시만 있어서 나머지는
      * 낱말로 가른다. 틀릴 수 있으므로 화면에서 항목마다 고칠 수 있게 한다.
@@ -146,8 +151,8 @@
         if (/간판|앵커|비가림|캐노피|볼트\s*누락|나사산|실외기|안테나/.test(t)) return 'attachment';
         if (/점검로|난간|환기구|덮개|포장|D\.A|신축이음|추락/.test(t)) return 'public';
         if (/외벽|패널|실링|파라펫/.test(t)) return 'exterior';
-        if (outside && /마감재|석재|도장|타일/.test(t)) return 'exterior';
-        if (/타일|천장\s*마감|마감재|도배|몰딩/.test(t)) return 'interior';
+        if (outside && (/마감재|석재|도장|타일/.test(t) || isPlasterLoose(t))) return 'exterior';
+        if (/타일|천장\s*마감|마감재|도배|몰딩/.test(t) || isPlasterLoose(t)) return 'interior';
         return d.structural ? 'structure' : 'nonStructure';
     }
 
