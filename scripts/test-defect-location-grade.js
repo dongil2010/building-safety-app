@@ -47,8 +47,11 @@ assert.strictEqual(sb.compose('지상1층 거실'), '지상1층 거실', '3종: 
 // 수정창에 보여 줄 상세 위치(층 떼기)는 그대로 — 예전 1·2종 데이터 「지상1층 거실」도 창에는 「거실」
 sb.state.currentBuilding.facilityGrade = '제1종시설물';
 assert.strictEqual(sb.extract('지상1층 거실'), '거실');
-assert.strictEqual(sb.extract('지상1층'), '');
+assert.strictEqual(sb.extract('지상1층'), '지상1층', '1·2종: 층(도면) 이름과 같아도 적은 글은 보인다(건축물 외부)');
 assert.strictEqual(sb.extract('거실'), '거실');
+sb.state.currentBuilding.facilityGrade = '제3종시설물';
+assert.strictEqual(sb.extract('지상1층'), '', '3종: 층 이름만이면 비운 것');
+sb.state.currentBuilding.facilityGrade = '제1종시설물';
 
 // 층을 대신 채우던 곳: 3종만
 const cellFn = takeFn('getSurveyCellText');

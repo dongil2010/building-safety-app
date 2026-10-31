@@ -344,20 +344,21 @@ if (fs.existsSync(appPath)) {
         }
         throw new Error(name);
     };
-    // 「위치칸 비우고 행·열 다시 채우기」: 위치칸(location) 비움 + gridLoc 다시 계산, 되돌리기 한 번, 동기화 시각
-    assert.ok(app.includes('data-act="resetFill"') && app.includes('위치칸 비우고 행·열 다시 채우기</button>'), '버튼(패널에 조건 없이 늘 있음)');
+    // 「실 이름 두고 행·열만 다시 계산」: gridLoc만 다시, 위치칸(location) 그대로, 되돌리기 한 번
+    assert.ok(app.includes('data-act="recalcGrid"') && app.includes('실 이름 두고 행·열만 다시 계산</button>'), '버튼(패널에 조건 없이 늘 있음)');
+    assert.ok(!app.includes('data-act="resetFill"') && !app.includes('resetGridLocationForCurrentFloor'), '실 이름까지 지우던 버튼은 없앰');
     {
         const panelFn = takeFnTop('renderGridPanel');
-        const i = panelFn.indexOf('data-act="resetFill"');
+        const i = panelFn.indexOf('data-act="recalcGrid"');
         const before = panelFn.slice(Math.max(0, panelFn.lastIndexOf('<div class="grid-panel-sec">', i)), i);
         assert.ok(!/\$\{[^}]*\?\s*`/.test(before), '버튼이 조건부 블록(${... ? `...`})으로 숨지 않음');
     }
-    assert.ok(app.includes("if (act === 'resetFill') {\n            resetGridLocationForCurrentFloor();"), '버튼 연결');
-    const resetFn = autoSec.slice(autoSec.indexOf('function resetGridLocationForCurrentFloor('), autoSec.indexOf('function applyGridAutoLocationToModal('));
-    assert.ok(resetFn.includes('await window.appConfirm(') && resetFn.includes('위치칸을 비우고') && resetFn.includes('지워집니다'), '확인창: 위치칸을 비운다고 알림');
+    assert.ok(app.includes("if (act === 'recalcGrid') {\n            recalcGridLocationForCurrentFloor();"), '버튼 연결');
+    const resetFn = autoSec.slice(autoSec.indexOf('function recalcGridLocationForCurrentFloor('), autoSec.indexOf('function applyGridAutoLocationToModal('));
+    assert.ok(resetFn.includes('await window.appConfirm(') && resetFn.includes('실 이름은 그대로'), '확인창: 실 이름은 그대로라고 알림');
     assert.strictEqual((resetFn.match(/pushDefectHistory\(\)/g) || []).length, 1, '되돌리기 기록은 한 번만');
-    assert.ok(resetFn.indexOf('pushDefectHistory()') < resetFn.indexOf('d.location = emptyLoc;') && resetFn.indexOf('pushDefectHistory()') < resetFn.indexOf('applyGridAutoLocationToDefect(d, fc)'), '바꾸기 전에 기록');
-    assert.ok(resetFn.includes("const emptyLoc = composeDefectLocation('', fc);") && resetFn.includes('d.location = emptyLoc;'), '위치칸 비움(3종은 층 규칙대로 층만)');
+    assert.ok(resetFn.indexOf('pushDefectHistory()') < resetFn.indexOf('applyGridAutoLocationToDefect(d, fc)'), '기록 먼저');
+    assert.ok(!/d\.location\s*=/.test(resetFn), '위치칸을 건드리지 않음');
     assert.ok(applyFn.includes('touchDefectUpdatedAt(d);') && autoSec.includes('saveStateToLocalStorage();'), '수정 시각·저장');
     // 한글/PDF 상태조사표 위치 칸: 행·열 → 다음 줄 실 이름
     const rowFn = app.slice(app.indexOf('function getReportSurveyRowValues('), app.indexOf('function buildReportSurveyTableHtml('));
@@ -494,17 +495,16 @@ if (fs.existsSync(appPath)) {
     assert.strictEqual(A.refreshStaleGridLocForCurrentFloor(), 0, '자동 입력 꺼짐');
     assert.strictEqual(pin.gridLoc, 'A1/Y1~Y2');
     flow.state.floorGridLines.b1_1F.autoLocation = true;
-    // 「위치칸 비우고 행·열 다시 채우기」: 위치칸 비움 + gridLoc 다시, 되돌리기 기록 한 번
+    // 「실 이름 두고 행·열만 다시 계산」: gridLoc만 다시, 위치칸 그대로, 되돌리기 기록 한 번
     {
         const hist = { n: 0 };
         const rctx = Object.assign(flow, {
             confirm: (msg) => { rctx._msg = msg; return true; },
             pushDefectHistory: () => { hist.n += 1; },
-            afterGridBulkChange: (m) => { rctx._done = m; },
-            composeDefectLocation: (room) => (rctx._grade3 ? `지상1층${room ? ' ' + room : ''}` : String(room || '').trim())
+            afterGridBulkChange: (m) => { rctx._done = m; }
         });
         // 앱은 `await window.appConfirm(` (앱 확인 창) — 여기서는 같은 흐름을 동기 확인 스텁으로 돌림
-        vm.runInContext(`${takeFn('resetGridLocationForCurrentFloor').replace('await window.appConfirm(', 'confirm(')}\nthis.api.reset = resetGridLocationForCurrentFloor;`, rctx);
+        vm.runInContext(`${takeFn('recalcGridLocationForCurrentFloor').replace('await window.appConfirm(', 'confirm(')}\nthis.api.reset = recalcGridLocationForCurrentFloor;`, rctx);
         pin.location = '지상1층 거실';
         inBand.location = 'X2, Y3 옛글';
         stale.location = '1F';
@@ -512,15 +512,12 @@ if (fs.existsSync(appPath)) {
         pin.gridLoc = 'X9';
         A.reset();
         assert.strictEqual(hist.n, 1, '되돌리기 기록 한 번');
-        assert.ok(/위치칸을 비우고/.test(rctx._msg) && /3개가 지워집니다/.test(rctx._msg), '확인창 개수');
-        [pin, inBand, stale, member2].forEach((d) => assert.strictEqual(d.location, '', `1·2종 위치칸 비움: ${d.id}`));
+        assert.ok(/행·열 위치를 지금 선 기준으로 다시 계산/.test(rctx._msg), '확인창');
+        assert.strictEqual(pin.location, '지상1층 거실', '실 이름 그대로');
+        assert.strictEqual(inBand.location, 'X2, Y3 옛글');
+        assert.strictEqual(stale.location, '1F');
         assert.strictEqual(pin.gridLoc, '~A1/Y1~Y2', 'gridLoc 다시 계산(부재 없음, 옮긴 A1 바깥)');
-        rctx._grade3 = true;
-        pin.location = '거실';
-        A.reset();
-        assert.strictEqual(pin.location, '지상1층', '3종: 비운 뒤 층만');
-        assert.ok(/층 「지상1층」만 남깁니다/.test(rctx._msg), '3종 안내');
-        rctx._grade3 = false;
+        assert.strictEqual(flow.state.floorGridLines.b1_1F.autoLocation, true, '자동 입력 설정 복원');
     }
     // 연결: 조사표 칸·일괄 수정·수정창 칩(G/B 버튼)에서 부재를 바꾸면 다시 계산, 그릴 때 옛값 확인
     assert.ok(app.includes("if (field === 'component' && key === `${state.currentBuildingId}_${state.currentFloor}` && typeof applyGridAutoLocationToDefect === 'function') {"), '조사표 부재 칸');

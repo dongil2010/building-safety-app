@@ -683,6 +683,33 @@
         return { grid: '', room: cur };
     }
 
+    /**
+     * 상세 위치 글에서 행·열 표기만 뺀 나머지(실 이름·위치는 그대로) — 2026-10-31
+     * o.known: 그 결함의 행·열 값(그대로 일치하는 글자를 뺌), o.prefixes: 그 층 선 머리글자(기본 X·Y).
+     * 머리글자가 맞는 표기만 뺀다: X4, X4~X5, X4~X5/Y1~Y2, X1-Y2, X1,Y2. 「기둥 C1 하부」의 C1은 안 건드린다.
+     */
+    function stripGridTextFromDetail(detail, o) {
+        const x = o || {};
+        let text = String(detail == null ? '' : detail).trim();
+        if (!text) return '';
+        (x.known || []).forEach((k) => {
+            const g = String(k == null ? '' : k).trim();
+            if (!g) return;
+            [g].concat(g.split(/\s*,\s*/)).filter(Boolean).forEach((s) => { text = text.split(s).join(' '); });
+        });
+        const prefixes = ['X', 'Y'].concat(x.prefixes || [])
+            .map((p) => String(p == null ? '' : p).trim()).filter(Boolean)
+            .map((p) => p.replace(/[.*+?^${}()|[\]\\]/g, '\\$&'));
+        const unit = `(?:${Array.from(new Set(prefixes)).join('|')})\\d+`;
+        const range = `${unit}(?:\\s*~\\s*${unit})?`;
+        const re = new RegExp(`(^|[^A-Za-z0-9])${range}(?:\\s*[/,\\-]\\s*${range})*(?![A-Za-z0-9])`, 'gi');
+        text = text.replace(re, '$1 ');
+        return text.replace(/\(\s*\)/g, ' ')
+            .replace(/\s+/g, ' ')
+            .replace(/^[\s,/·-]+|[\s,/·-]+$/g, '')
+            .trim();
+    }
+
     /** 위치 칸 두 줄: 행·열 → 다음 줄 실 이름. 하나만 있으면 한 줄 */
     // roomFirst: 실 이름 → 다음 줄 행·열 (2026-10-30 1·2종 한글 출력 요청)
     function formatLocationCell(grid, room, roomFirst) {
@@ -1101,6 +1128,7 @@
         reportLocationCell,
         gridLocTextEm,
         cellTextUnits,
+        stripGridTextFromDetail,
         splitGridLocLines,
         gridLocBreakableHtml,
         makeLineThrough,

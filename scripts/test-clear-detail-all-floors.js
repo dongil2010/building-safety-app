@@ -3,7 +3,7 @@
 
 /**
  * 2026-10-27 행·열 툴바 「전체층 상세위치 지우기」 — 합성 데이터로 확인(실제 데이터 아님)
- *  - 이 건물 모든 층(외부 포함)의 상세위치만 composeDefectLocation('', 층)으로: 1·2종 '' · 3종 층 이름
+ *  - 2026-10-31 이 건물 모든 층(외부 포함) 상세위치에서 행·열 글자만 지움: 실 이름·위치 글은 그대로, 3종은 층 이름 유지
  *  - 행·열(gridLoc)·좌표·사진·번호는 그대로, 도면에 안 놓인 결함·다른 건물은 건드리지 않음
  *  - 확인창 뒤에 목록을 다시 읽음, 취소하면 아무것도 안 바뀜, 되돌리기 한 번에 모든 층 복원, 바뀐 층만 dirty
  */
@@ -30,7 +30,7 @@ function extractFunction(src, header) {
 }
 
 // ---- 화면 조각 ----
-assert.ok(/data-act="clearDetailAll" class="danger-all"[^>]*>전체층 상세위치 지우기<\/button>/.test(app), '툴바 버튼 라벨');
+assert.ok(/data-act="clearDetailAll" class="danger-all"[^>]*>전체층 상세위치 행·열 지우기<\/button>/.test(app), '툴바 버튼 라벨');
 assert.ok(/if \(act === 'clearDetailAll'\) \{\s*clearDetailLocationForAllFloors\(\);/.test(app), '클릭 연결');
 assert.ok(/button\.danger-all \{[^}]*background: #b91c1c/.test(css), '위험 스타일');
 assert.ok(/button\.danger-all \{[^}]*flex: 1 1 100%/.test(css), '좁은 화면에서도 한 줄 전체 폭');
@@ -45,11 +45,11 @@ function makeEnv(grade, opts) {
     const state = {
         currentBuildingId: 'B1', currentFloor: '2F', currentBuilding: bldg, buildings: [bldg, other],
         defects: {
-            B1_1F: [mk('a1', '지상1층 기둥 C1'), mk('a2', '회의실'), mk('a3', typeof grade === 'string' ? '지상1층' : '')],
-            B1_2F: [mk('b1', '지상2층 복도'), mk('b2', '창고', { mapUnregistered: true })],
-            B1_EXT_A: [mk('e1', '정면')],
+            B1_1F: [mk('a1', '지상1층 X1/Y2 기둥 C1'), mk('a2', 'X4~X5/Y1~Y2 회의실'), mk('a3', typeof grade === 'string' ? '지상1층' : ''), mk('a4', '화장실 앞')],
+            B1_2F: [mk('b1', '지상2층 X2/Y3 복도'), mk('b2', 'X1/Y2 창고', { mapUnregistered: true })],
+            B1_EXT_A: [mk('e1', '정면 X1/Y2')],
             B1_ROUND_SKETCH_MEMO: [mk('s1', '메모')],
-            B1_X_1F: [mk('o1', '다른건물 위치')]
+            B1_X_1F: [mk('o1', '다른건물 X1/Y2')]
         }
     };
     const log = { dirty: [], touched: [], toasts: [], confirm: [], hist: [] };
@@ -62,6 +62,8 @@ function makeEnv(grade, opts) {
         stripFloorCodeSuffix: (s) => String(s),
         isExteriorFloorCode: () => false,
         migrateLegacyGridLocation: () => false,
+        gridLib: () => require(path.join(ROOT, 'js', 'shared', 'grid-lines.js')),
+        getFloorMapStyleKey: (b, f) => `${b}_${f}`,
         touchDefectUpdatedAt: (d) => { log.touched.push(d.id); d.contentUpdatedAt = 99; },
         markFloorKeyDirty: (k) => log.dirty.push(k),
         afterGridBulkChange: (msg) => log.toasts.push(msg),
@@ -85,6 +87,8 @@ function makeEnv(grade, opts) {
         extractFunction(app, 'function composeDefectLocation('),
         extractFunction(app, 'function extractDefectLocationDetail('),
         extractFunction(app, 'function filterMapPlacedDefects('),
+        extractFunction(app, 'function locationWithoutGridText('),
+        extractFunction(app, 'function defectHasGridTextInDetail('),
         extractFunction(app, 'function clearDefectDetailLocation('),
         extractFunction(app, 'function getDefectHistoryKey('),
         extractFunction(app, 'function snapshotDefectHistoryEntry('),
@@ -105,18 +109,18 @@ const snap = (o) => JSON.stringify(o);
     const before = snap(e.state.defects);
     const plan = e.ctx.plan('B1');
     assert.strictEqual(JSON.stringify(plan.floors.map((f) => f.fc)), JSON.stringify(['1F', '2F', 'EXT_A']), '층 목록 = 건물 층 + 외부, 메모 자리·다른 건물 제외');
-    assert.strictEqual(plan.targetCount, 4, 'a1 a2 b1 e1 (a3은 이미 공란, b2는 도면에 안 놓임)');
+    assert.strictEqual(plan.targetCount, 4, 'a1 a2 b1 e1 (a3 공란·a4 행·열 없음, b2는 도면에 안 놓임)');
     assert.strictEqual(plan.skippedUnplaced, 1);
     assert.strictEqual(snap(e.state.defects), before, '계획은 읽기만');
 
     await e.ctx.run();
     const D = e.state.defects;
-    ['a1', 'a2', 'a3'].forEach((id, i) => assert.strictEqual(D.B1_1F[i].location, '', id + ' 1·2종 공란'));
-    assert.strictEqual(D.B1_2F[0].location, '');
-    assert.strictEqual(D.B1_2F[1].location, '창고', '도면에 안 놓인 결함은 그대로');
-    assert.strictEqual(D.B1_EXT_A[0].location, '', '외부 층 포함');
+    assert.strictEqual(JSON.stringify(D.B1_1F.map((d) => d.location)), JSON.stringify(['지상1층 기둥 C1', '회의실', '', '화장실 앞']), '행·열만 지우고 실 이름은 그대로');
+    assert.strictEqual(D.B1_2F[0].location, '지상2층 복도');
+    assert.strictEqual(D.B1_2F[1].location, 'X1/Y2 창고', '도면에 안 놓인 결함은 그대로');
+    assert.strictEqual(D.B1_EXT_A[0].location, '정면', '외부 층 포함');
     assert.strictEqual(D.B1_ROUND_SKETCH_MEMO[0].location, '메모');
-    assert.strictEqual(D.B1_X_1F[0].location, '다른건물 위치', '다른 건물은 그대로');
+    assert.strictEqual(D.B1_X_1F[0].location, '다른건물 X1/Y2', '다른 건물은 그대로');
     [].concat(D.B1_1F, D.B1_2F, D.B1_EXT_A).forEach((d) => {
         assert.strictEqual(d.gridLoc, 'X1/Y2', '행·열 그대로');
         assert.strictEqual(d.x, 10); assert.strictEqual(d.y, 20);
@@ -131,11 +135,11 @@ const snap = (o) => JSON.stringify(o);
     const h = e.ctx.history[e.ctx.hkey()];
     assert.strictEqual(h.undo.length, 1);
     e.ctx.apply(e.ctx.hkey(), h.undo.pop());
-    assert.strictEqual(e.state.defects.B1_1F[0].location, '지상1층 기둥 C1');
-    assert.strictEqual(e.state.defects.B1_1F[1].location, '회의실');
-    assert.strictEqual(e.state.defects.B1_2F[0].location, '지상2층 복도');
-    assert.strictEqual(e.state.defects.B1_EXT_A[0].location, '정면');
-    assert.strictEqual(e.state.defects.B1_X_1F[0].location, '다른건물 위치');
+    assert.strictEqual(e.state.defects.B1_1F[0].location, '지상1층 X1/Y2 기둥 C1');
+    assert.strictEqual(e.state.defects.B1_1F[1].location, 'X4~X5/Y1~Y2 회의실');
+    assert.strictEqual(e.state.defects.B1_2F[0].location, '지상2층 X2/Y3 복도');
+    assert.strictEqual(e.state.defects.B1_EXT_A[0].location, '정면 X1/Y2');
+    assert.strictEqual(e.state.defects.B1_X_1F[0].location, '다른건물 X1/Y2');
 
     // 취소하면 아무것도 안 바뀜
     e = makeEnv(2, { answer: false });
@@ -148,8 +152,8 @@ const snap = (o) => JSON.stringify(o);
     // 확인창 사이에 동기화가 목록을 새 객체로 바꿔 끼워도 새 목록에 적용(오래된 목록 버그 방지)
     e = makeEnv(2, { onConfirm: (st) => { Object.keys(st.defects).forEach((k) => { st.defects[k] = JSON.parse(JSON.stringify(st.defects[k])); }); } });
     await e.ctx.run();
-    assert.strictEqual(e.state.defects.B1_1F[0].location, '', '확인 뒤 새로 읽은 목록에 적용');
-    assert.strictEqual(e.state.defects.B1_EXT_A[0].location, '');
+    assert.strictEqual(e.state.defects.B1_1F[0].location, '지상1층 기둥 C1', '확인 뒤 새로 읽은 목록에 적용');
+    assert.strictEqual(e.state.defects.B1_EXT_A[0].location, '정면');
 
     // 확인창 사이에 건물이 바뀌면 중단
     e = makeEnv(2, { onConfirm: (st) => { st.currentBuildingId = 'B1_X'; } });
@@ -163,18 +167,17 @@ const snap = (o) => JSON.stringify(o);
     e.log.confirm.length = 0;
     await e.ctx.run();
     assert.strictEqual(e.log.confirm.length, 0);
-    assert.ok(e.log.toasts.some((m) => /지울 상세 위치가 없습니다/.test(m)));
+    assert.ok(e.log.toasts.some((m) => /상세 위치에 지울 행·열이 없습니다/.test(m)));
 
-    // ---- 3종: 층 이름만 ----
+    // ---- 3종: 층 이름은 앞에 유지 ----
     e = makeEnv('제3종시설물');
     await e.ctx.run();
     const D3 = e.state.defects;
-    assert.strictEqual(D3.B1_1F[0].location, '지상1층');
-    assert.strictEqual(D3.B1_1F[1].location, '지상1층');
-    assert.strictEqual(D3.B1_2F[0].location, '지상2층');
-    assert.strictEqual(D3.B1_EXT_A[0].location, '정면', '외부 입면 도면은 그 도면 이름만');
-    assert.strictEqual(D3.B1_2F[1].location, '창고');
-    assert.ok(/층 이름만/.test(e.log.confirm[0]));
+    assert.strictEqual(D3.B1_1F[0].location, '지상1층 기둥 C1');
+    assert.strictEqual(D3.B1_1F[1].location, '회의실');
+    assert.strictEqual(D3.B1_2F[0].location, '지상2층 복도');
+    assert.strictEqual(D3.B1_EXT_A[0].location, '정면', '외부 입면 도면');
+    assert.strictEqual(D3.B1_2F[1].location, 'X1/Y2 창고');
     assert.ok(!e.log.touched.includes('a3'), '이미 층 이름만인 것은 안 건드림');
 
     console.log('test-clear-detail-all-floors OK');

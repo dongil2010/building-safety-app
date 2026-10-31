@@ -43042,13 +43042,13 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
                     <label class="grid-panel-row"><input type="checkbox" data-f="auto" ${grid.autoLocation ? 'checked' : ''}> 마킹에 행·열 위치 자동 입력</label>
                     <div class="grid-panel-row">
                         <button type="button" data-act="fillExisting" title="행·열 위치가 없는 마킹만 채움(상세 위치·실 이름은 그대로)">이 층 마킹에 위치 채우기</button>
-                        <button type="button" data-act="resetFill" class="danger" title="이 층 마킹 전부의 위치칸(상세 위치·실 이름·예전 글자)을 비우고 행·열 위치를 지금 선 기준으로 다시 씀. 3종은 위치칸에 층만 남김. 되돌리기 한 번으로 취소">위치칸 비우고 행·열 다시 채우기</button>
-                        <button type="button" data-act="clearDetail" class="danger" title="이 층 마킹 전부의 상세 위치를 비움(다시 적을 수 있게). 행·열 위치는 그대로. 3종은 위치칸에 층만 남김. 되돌리기 한 번으로 취소">상세위치 전부 지우기</button>
+                        <button type="button" data-act="recalcGrid" title="이 층 마킹 전부의 행·열 위치를 지금 선 기준으로 다시 계산. 상세 위치·실 이름은 그대로. 되돌리기 한 번으로 취소">실 이름 두고 행·열만 다시 계산</button>
+                        <button type="button" data-act="clearDetail" class="danger" title="이 층 마킹의 상세 위치 글자에서 행·열 표기(X4~X5/Y1~Y2 등)만 지움. 실 이름·위치 글과 행·열 위치 칸은 그대로. 되돌리기 한 번으로 취소">상세위치 행·열 지우기</button>
                         <button type="button" data-act="clearAll" class="danger">이 층 선 모두 지우기</button>
                     </div>
                     <div class="grid-panel-row grid-panel-allfloors">
-                        <button type="button" data-act="clearDetailAll" class="danger-all" title="이 건물 모든 층 마킹의 상세 위치를 비움(외부 입면 도면 포함). 행·열 위치·마킹 위치·번호·사진은 그대로. 1·2종은 공란, 3종은 층 이름만 남김. 확인창에서 층·결함 수를 보여 주고, 이 층 화면에서 되돌리기 한 번으로 전체 취소">전체층 상세위치 지우기</button>
-                        <span class="grid-panel-muted grid-panel-allnote">이 건물 모든 층 · 행·열 위치는 그대로</span>
+                        <button type="button" data-act="clearDetailAll" class="danger-all" title="이 건물 모든 층 마킹의 상세 위치 글자에서 행·열 표기만 지움(외부 입면 도면 포함). 실 이름·위치 글, 행·열 위치 칸, 마킹 위치·번호·사진은 그대로. 확인창에서 층·결함 수를 보여 주고, 이 층 화면에서 되돌리기 한 번으로 전체 취소">전체층 상세위치 행·열 지우기</button>
+                        <span class="grid-panel-muted grid-panel-allnote">이 건물 모든 층 · 실 이름·행·열 위치 칸은 그대로</span>
                     </div>
                 </div>
             </div>`;
@@ -43172,8 +43172,8 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
         if (act === 'fillExisting') {
             fillGridLocationForCurrentFloor();
         }
-        if (act === 'resetFill') {
-            resetGridLocationForCurrentFloor();
+        if (act === 'recalcGrid') {
+            recalcGridLocationForCurrentFloor();
         }
         if (act === 'clearDetail') {
             clearDetailLocationForCurrentFloor();
@@ -43852,29 +43852,25 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
     }
 
     /**
-     * 「위치칸 비우고 행·열 다시 채우기」 — 이 층 마킹 전부의 위치칸(location: 실 이름·층 이름·예전 행·열 글자·CAD '1F' 등)을
-     * 비우고 행·열 위치(gridLoc)를 지금 선 기준으로 다시 씀. 3종은 위치칸 층 규칙대로 층만 남김(composeDefectLocation('')).
+     * 2026-10-31 「실 이름 두고 행·열만 다시 계산」 — 이 층 마킹 전부의 행·열 위치(gridLoc)를 지금 선 기준으로 다시 쓴다.
+     * 상세 위치(location: 실 이름·층 이름)는 그대로. 예전 「위치칸 비우고 행·열 다시 채우기」는 실 이름까지 지워서 이 버튼으로 바꿨다(사용자).
      * 선 밖은 보통 규칙(~X1 / X7~). 되돌리기 한 번으로 전체 취소.
-     * (2026-09-28 e59845f에서 실 이름을 지키도록 바뀌며 위치칸을 안 비우게 됐던 것을 사용자 요청으로 되돌림)
      */
-    async function resetGridLocationForCurrentFloor() {
+    async function recalcGridLocationForCurrentFloor() {
         if (!currentGridHasLines()) {
             window.showToast?.('먼저 행·열 선을 그어 주세요.', 'info', 2000);
             return;
         }
-        const grid = getCurrentFloorGrid(false);
-        const wasAuto = grid.autoLocation !== false;
-        const fc = state.currentFloor;
-        const emptyLoc = composeDefectLocation('', fc); // 1·2종 '' · 3종 층 이름
         const list = filterMapPlacedDefects(getCurrentFloorDefects());
         if (!list.length) {
             window.showToast?.('이 층에 마킹이 없습니다.', 'info', 2000);
             return;
         }
-        const withText = list.filter((d) => String(d.location || '').trim() !== emptyLoc).length;
-        const floorNote = emptyLoc ? `(3종 시설물: 위치칸에는 층 「${emptyLoc}」만 남깁니다)\n` : '';
-        if (!await window.appConfirm(`이 층 마킹 ${list.length}개의 위치칸을 비우고 행·열 위치를 지금 선 기준으로 다시 넣습니다.\n`
-            + `위치칸에 적힌 글(실 이름·층 이름·예전 위치) ${withText}개가 지워집니다.\n${floorNote}(되돌리기로 한 번에 취소할 수 있습니다)`)) return;
+        if (!await window.appConfirm(`이 층 마킹 ${list.length}개의 행·열 위치를 지금 선 기준으로 다시 계산합니다.\n`
+            + `상세 위치·실 이름은 그대로 둡니다.\n(되돌리기로 한 번에 취소할 수 있습니다)`)) return;
+        const grid = getCurrentFloorGrid(false);
+        const wasAuto = grid.autoLocation !== false;
+        const fc = state.currentFloor;
         if (typeof pushDefectHistory === 'function') pushDefectHistory();
         let done = 0;
         grid.autoLocation = true; // 직접 누른 명령 — 자동 입력 체크와 무관하게 계산
@@ -43882,26 +43878,11 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
         // 화면·저장에 안 남아 두세 번 눌러야 됐다 — 확인 뒤 목록을 다시 읽는다.
         const listNow = filterMapPlacedDefects(getCurrentFloorDefects());
         try {
-            listNow.forEach((d) => {
-                let changed = false;
-                if (String(d.location || '') !== emptyLoc) {
-                    d.location = emptyLoc;
-                    changed = true;
-                }
-                if (d.gridLocAuto) {
-                    delete d.gridLocAuto; // 예전 실험 데이터 표시도 정리(위치칸을 비웠으니 옮길 것 없음)
-                    changed = true;
-                }
-                if (applyGridAutoLocationToDefect(d, fc)) changed = true;
-                if (changed) {
-                    touchDefectUpdatedAt(d);
-                    done += 1;
-                }
-            });
+            listNow.forEach((d) => { if (applyGridAutoLocationToDefect(d, fc)) done += 1; });
         } finally {
             grid.autoLocation = wasAuto;
         }
-        afterGridBulkChange(`마킹 ${done}개: 위치칸을 비우고 행·열 위치를 다시 넣었습니다.`);
+        afterGridBulkChange(done ? `마킹 ${done}개의 행·열 위치를 다시 계산했습니다.` : '바뀐 행·열 위치가 없습니다.');
     }
 
     /** 결함 창 열 때: 행·열 위치를 입력칸 아래에 보여 줌(상세 위치 입력칸은 실 이름용 — 건드리지 않음) */
@@ -43965,20 +43946,38 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
         }
     }
     /**
-     * 2026-10-19 「상세위치 전부 지우기」 — 이 층 마킹 전부의 상세 위치(location)를 비워 다시 적게 한다.
-     * 대상은 「위치칸 비우고 행·열 다시 채우기」와 같은 목록(이 층 도면에 놓인 마킹, filterMapPlacedDefects).
-     * 행·열 위치(gridLoc)는 그대로 둔다. 3종은 위치칸 층 규칙대로 층만 남김(composeDefectLocation('')).
+     * 2026-10-19 「상세위치 전부 지우기」 → 2026-10-31 「상세위치 행·열 지우기」: 상세 위치(location) 글자 안의 행·열 표기만 지운다.
+     * 실 이름·위치 글은 그대로 둔다(규칙은 grid-lines.js stripGridTextFromDetail).
+     * 대상은 「실 이름 두고 행·열만 다시 계산」과 같은 목록(이 층 도면에 놓인 마킹, filterMapPlacedDefects).
+     * 행·열 위치(gridLoc)는 그대로 둔다. 3종은 층 이름을 앞에 유지(composeDefectLocation).
      * 예전 실험 데이터(gridLocAuto)는 먼저 gridLoc으로 옮겨 행·열 위치를 잃지 않게 한다.
      * 칸 시각은 touchDefectUpdatedAt이 location 칸에 찍는다 → 다른 기기의 옛 상세 위치보다 이 지우기가 이긴다.
      * 되돌리기 한 번으로 전체 취소.
      */
+    /** 상세 위치에서 행·열 표기를 뺀 위치 글자. 뺄 것이 없으면 지금 글자 그대로 */
+    function locationWithoutGridText(d, fc) {
+        const G = gridLib();
+        const cur = String((d && d.location) || '');
+        if (!G) return cur;
+        const raw = state.floorGridLines && state.floorGridLines[getFloorMapStyleKey(state.currentBuildingId, fc)];
+        const prefixes = ((raw && raw.groups) || []).map((g) => g && g.prefix);
+        // 층·도면 이름을 떼지 않고 글자 전체에서 행·열만 뺀다(「정면 X1/Y2」→「정면」, 적힌 층 이름도 그대로)
+        const next = G.stripGridTextFromDetail(cur, { known: [d.gridLoc, d.gridLocAuto], prefixes });
+        if (next === cur.trim()) return cur;
+        return next || composeDefectLocation('', fc);
+    }
+
+    function defectHasGridTextInDetail(d, fc) {
+        return !!d && (!!d.gridLocAuto || locationWithoutGridText(d, fc) !== String(d.location || ''));
+    }
+
     function clearDefectDetailLocation(d, fc) {
         if (!d) return false;
         let changed = false;
         if (d.gridLocAuto && migrateLegacyGridLocation(d, fc)) changed = true;
-        const emptyLoc = composeDefectLocation('', fc);
-        if (String(d.location || '') !== emptyLoc) {
-            d.location = emptyLoc;
+        const next = locationWithoutGridText(d, fc);
+        if (String(d.location || '') !== next) {
+            d.location = next;
             changed = true;
         }
         return changed;
@@ -43986,23 +43985,21 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
 
     async function clearDetailLocationForCurrentFloor() {
         const fc = state.currentFloor;
-        const emptyLoc = composeDefectLocation('', fc); // 1·2종 '' · 3종 층 이름
         const list = filterMapPlacedDefects(getCurrentFloorDefects());
         if (!list.length) {
             window.showToast?.('이 층에 마킹이 없습니다.', 'info', 2000);
             return;
         }
-        const targets = list.filter((d) => String(d.location || '') !== emptyLoc || d.gridLocAuto);
+        const targets = list.filter((d) => defectHasGridTextInDetail(d, fc));
         if (!targets.length) {
-            window.showToast?.('지울 상세 위치가 없습니다.', 'info', 2000);
+            window.showToast?.('상세 위치에 지울 행·열이 없습니다.', 'info', 2000);
             return;
         }
-        const floorNote = emptyLoc ? `(3종 시설물: 위치칸에는 층 「${emptyLoc}」만 남깁니다)\n` : '';
-        if (!await window.appConfirm(`이 층 마킹 ${list.length}개 중 상세 위치가 적힌 ${targets.length}개의 상세 위치를 모두 지웁니다.\n`
-            + `행·열 위치는 그대로 둡니다.\n${floorNote}(되돌리기로 한 번에 취소할 수 있습니다)`)) return;
+        if (!await window.appConfirm(`이 층 마킹 ${list.length}개 중 상세 위치에 행·열이 적힌 ${targets.length}개에서 행·열 글자만 지웁니다.\n`
+            + `실 이름·위치 글과 행·열 위치 칸은 그대로 둡니다.\n(되돌리기로 한 번에 취소할 수 있습니다)`)) return;
         // 2026-10-23 확인창을 기다리는 사이 동기화가 층 결함을 새 객체로 바꿔 끼우면, 확인 전에 잡아 둔 목록을 고쳐도
         // 화면·저장에 안 남아 두세 번 눌러야 됐다 — 확인 뒤 목록을 다시 읽는다.
-        const targetsNow = filterMapPlacedDefects(getCurrentFloorDefects()).filter((d) => String(d.location || '') !== emptyLoc || d.gridLocAuto);
+        const targetsNow = filterMapPlacedDefects(getCurrentFloorDefects()).filter((d) => defectHasGridTextInDetail(d, fc));
         if (typeof pushDefectHistory === 'function') pushDefectHistory();
         let done = 0;
         targetsNow.forEach((d) => {
@@ -44011,11 +44008,11 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
                 done += 1;
             }
         });
-        afterGridBulkChange(`마킹 ${done}개의 상세 위치를 지웠습니다.`);
+        afterGridBulkChange(`마킹 ${done}개의 상세 위치에서 행·열을 지웠습니다.`);
     }
 
-    // ---- 2026-10-27 「전체층 상세위치 지우기」(행·열 툴바) ----
-    // 이 건물(이 회차·이 동)의 모든 층 상세 위치를 composeDefectLocation('', 층)으로 되돌린다(1·2종 '' · 3종 층 이름).
+    // ---- 2026-10-27 「전체층 상세위치 지우기」 → 2026-10-31 「전체층 상세위치 행·열 지우기」(행·열 툴바) ----
+    // 이 건물(이 회차·이 동)의 모든 층 상세 위치에서 행·열 글자만 지운다(실 이름·위치 글은 그대로).
     // 층 목록 = 건물 층 목록 ∪ 기기 메모리(state.defects)에 있는 이 건물 키(외부 입면 층 포함). 서버를 따로 읽지 않는다(읽기 폭주 방지) —
     // 결함 데이터는 이미 기기에 있고, 바뀐 층은 markFloorKeyDirty → 보통 저장·동기화 길로 층마다 올라간다(오프라인이면 나중에).
     /** 읽기만 하는 계획: 층마다 { fc, key, label, total, skippedUnplaced, targets } */
@@ -44047,8 +44044,7 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
             const key = `${id}_${fc}`;
             const list = Array.isArray(state.defects && state.defects[key]) ? state.defects[key] : [];
             const placed = filterMapPlacedDefects(list); // 「이 층」 버튼과 같은 대상(도면에 놓인 마킹)
-            const emptyLoc = composeDefectLocation('', fc);
-            const targets = placed.filter((d) => d && (String(d.location || '') !== emptyLoc || d.gridLocAuto));
+            const targets = placed.filter((d) => defectHasGridTextInDetail(d, fc));
             out.floors.push({ fc, key, label: labelOf.get(fc) || fc, total: list.length, skippedUnplaced: list.length - placed.length, targets });
             out.skippedUnplaced += list.length - placed.length;
             if (targets.length) { out.targetFloors += 1; out.targetCount += targets.length; }
@@ -44062,7 +44058,7 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
         if (!bId) { window.showToast?.('먼저 건축물을 선택하세요.', 'info', 2000); return; }
         const plan0 = planClearDetailForAllFloors(bId);
         if (!plan0.targetCount) {
-            window.showToast?.(`지울 상세 위치가 없습니다. (${plan0.floorCount}개 층 확인${plan0.skippedUnplaced ? ` · 도면에 안 놓인 결함 ${plan0.skippedUnplaced}개는 대상 아님` : ''})`, 'info', 3500);
+            window.showToast?.(`상세 위치에 지울 행·열이 없습니다. (${plan0.floorCount}개 층 확인${plan0.skippedUnplaced ? ` · 도면에 안 놓인 결함 ${plan0.skippedUnplaced}개는 대상 아님` : ''})`, 'info', 3500);
             return;
         }
         const bldg = state.currentBuilding || (state.buildings || []).find((b) => b && b.id === bId);
@@ -44070,10 +44066,9 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
         const bName = `${(bldg && bldg.name) || '이 건물'}${dong ? ` ${dong}` : ''}`;
         const shown = plan0.floors.filter((f) => f.targets.length);
         const lines = shown.slice(0, 8).map((f) => `  · ${f.label}: ${f.targets.length}개`).join('\n') + (shown.length > 8 ? `\n  · 외 ${shown.length - 8}개 층` : '');
-        const floorNote = isGrade3Building(bldg) ? '3종 시설물: 위치칸에는 층 이름만 남깁니다.' : '1·2종: 상세 위치를 공란으로 만듭니다.';
-        if (!await window.appConfirm(`「${bName}」 건물의 모든 층(${plan0.floorCount}개 층 확인) 상세 위치를 지웁니다.\n`
+        if (!await window.appConfirm(`「${bName}」 건물의 모든 층(${plan0.floorCount}개 층 확인) 상세 위치에서 행·열 글자만 지웁니다.\n`
             + `바뀌는 결함 ${plan0.targetCount}개 · ${plan0.targetFloors}개 층\n${lines}\n\n`
-            + `${floorNote}\n행·열 위치·마킹 위치·번호·사진은 그대로입니다.\n`
+            + `실 이름·위치 글, 행·열 위치 칸, 마킹 위치·번호·사진은 그대로입니다.\n`
             + `${plan0.skippedUnplaced ? `도면에 아직 놓지 않은 결함 ${plan0.skippedUnplaced}개는 건드리지 않습니다.\n` : ''}`
             + `(이 층 화면에서 되돌리기 한 번으로 전체 층을 취소할 수 있습니다)`)) return;
         // 2026-10-23 확인창을 기다리는 사이 동기화가 층 결함을 새 객체로 바꿔 끼울 수 있다 — 확인 뒤 목록을 다시 읽는다
@@ -44083,7 +44078,7 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
         }
         const plan = planClearDetailForAllFloors(bId);
         if (!plan.targetCount) {
-            window.showToast?.('지울 상세 위치가 이미 없습니다.', 'info', 2500);
+            window.showToast?.('상세 위치에 지울 행·열이 이미 없습니다.', 'info', 2500);
             return;
         }
         const curKey = `${bId}_${state.currentFloor}`;
@@ -44103,7 +44098,7 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
             if (n) { done += n; floorsDone += 1; dirtyKeys.push(f.key); }
         });
         if (typeof markFloorKeyDirty === 'function') dirtyKeys.forEach((k) => markFloorKeyDirty(k));
-        afterGridBulkChange(`전체 ${floorsDone}개 층 마킹 ${done}개의 상세 위치를 지웠습니다.${plan.skippedUnplaced ? ` (도면에 안 놓인 ${plan.skippedUnplaced}개 제외)` : ''}`);
+        afterGridBulkChange(`전체 ${floorsDone}개 층 마킹 ${done}개의 상세 위치에서 행·열을 지웠습니다.${plan.skippedUnplaced ? ` (도면에 안 놓인 ${plan.skippedUnplaced}개 제외)` : ''}`);
     }
 
     // ---- 구역(한 도면에 여러 층, 2026-09-28) ----
@@ -46724,7 +46719,10 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
     function extractDefectLocationDetail(fullLocation, floorCode) {
         const floor = getDefectLocationFloorLabel(floorCode);
         const loc = String(fullLocation || '').trim();
-        if (!loc || loc === floor) return '';
+        if (!loc) return '';
+        // 3종은 비우면 층 이름이 저장되므로 빈칸으로 보여 준다. 1·2종은 층을 채우지 않으니 층(도면) 이름과 같아도
+        // 사람이 적은 글이다(2026-10-31 외부 도면에 「건축물 외부」라고 적으면 수정창에서 안 보였다)
+        if (loc === floor) return defectLocationUsesFloor() ? '' : loc;
         if (loc.startsWith(`${floor} `)) return loc.slice(floor.length).trim();
         return loc;
     }
