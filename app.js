@@ -32044,7 +32044,7 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
 
     /**
      * 2026-10-30 한글(HWPX) 상태조사표 전용: 단위를 붙인 규모 글자.
-     * 폭만 → Cw:0.3mm / 길이만 → L: 5m / 개수만 → 3EA / 폭+길이 → 0.3mm/5m (-nEA는 그대로 뒤에).
+     * 폭만 → Cw:0.3mm / 길이만 → L: 5m / 개수만 → 3EA / 폭+길이 → 0.3/5.0 단위 없이 (-nEA는 그대로 뒤에).
      * 「x」(가로x세로) 표기는 단위가 정해져 있지 않아 예전 그대로 둔다. 화면·PDF·엑셀은 바꾸지 않는다.
      */
     function formatCrackMeasurePairHwpx(m) {
@@ -32056,7 +32056,7 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
         const n = strip((m && m.count) || '', /\s*EA\s*$/i);
         const eaSuffix = n ? ` -${n}EA` : '';
         if (w && !l) return normalizeEaSpacingInText(`Cw:${w}mm${eaSuffix}`);
-        if (w && l) return normalizeEaSpacingInText(`${w}mm/${l}m${eaSuffix}`);
+        if (w && l) return normalizeEaSpacingInText(`${w}/${l}${eaSuffix}`); // 2026-10-31 폭+길이는 단위 없이 예전 표기(사용자)
         if (l) return normalizeEaSpacingInText(`L: ${l}m${eaSuffix}`);
         if (n) return `${n}EA`;
         return '';

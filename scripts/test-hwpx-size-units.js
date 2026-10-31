@@ -20,11 +20,11 @@ const cases = [
     [{ width: '', length: '5', count: '' }, '5.0m', 'L: 5.0m'],
     [{ width: '0.3', length: '', count: '' }, 'Cw:0.3', 'Cw:0.3mm'],
     [{ width: '', length: '', count: '3' }, '3EA', '3EA'],
-    [{ width: '0.3', length: '5', count: '' }, '0.3/5.0', '0.3mm/5.0m'],
-    [{ width: '0.3', length: '5', count: '2' }, '0.3/5.0 -2EA', '0.3mm/5.0m -2EA'],
+    [{ width: '0.3', length: '5', count: '' }, '0.3/5.0', '0.3/5.0'],
+    [{ width: '0.3', length: '5', count: '2' }, '0.3/5.0 -2EA', '0.3/5.0 -2EA'],
     [{ width: '', length: '5', count: '2' }, '5.0m -2EA', 'L: 5.0m -2EA'],
     [{ width: '0.3', length: '', count: '2' }, 'Cw:0.3 -2EA', 'Cw:0.3mm -2EA'],
-    [{ width: '0.3mm', length: '5m', count: '' }, null, '0.3mm/5.0m'],
+    [{ width: '0.3mm', length: '5m', count: '' }, null, '0.3/5.0'],
     [{ width: '1.5', length: '2.0', count: '', join: 'x' }, '1.5x2.0', '1.5x2.0']
 ];
 cases.forEach(([m, before, after]) => {
