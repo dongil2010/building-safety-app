@@ -62475,6 +62475,13 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
         scheduleChunkPartsCleanup(docRef, null);
     }
 
+    /** 「…/건물_1F.jpg」→「…/건물_1F_vmh3k2x.jpg」 — 올릴 때마다 다른 파일 이름 */
+    function withUploadVersionSuffix(path) {
+        const tag = '_v' + Date.now().toString(36);
+        const m = /^(.*)(\.[A-Za-z0-9]+)$/.exec(String(path || ''));
+        return m ? m[1] + tag + m[2] : String(path || '') + tag;
+    }
+
     async function uploadAssetToFirebaseStorageAndMeta(docRef, storagePath, sourceUrl, extraFields) {
         const extra = Object.assign({}, extraFields || {});
         let previousPath = extra.previousStoragePath || null;
@@ -62482,7 +62489,9 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
         if (!previousPath && isFirebaseStorageHttpUrl(sourceUrl)) {
             previousPath = storagePathFromDownloadURL(sourceUrl);
         }
-        const targetPath = String(storagePath || '').replace(/^\/+/, '');
+        let targetPath = String(storagePath || '').replace(/^\/+/, '');
+        const freshName = !!extra.freshName;
+        delete extra.freshName;
         // 같은 객체 = 이미 Storage에 있는 그 파일(https 주소)을 다시 적을 때만. 2026-10-14: 예전엔 경로만 같으면
         // (층 도면 교체처럼 경로가 층마다 고정) 새 data: 파일을 올리지 않고 옛 파일을 그대로 두었다
         // → 다른 층 갔다 오거나 다른 기기에서 옛 도면/깨진 주소를 받아 「도면이 다시 사라짐」.
@@ -62497,6 +62506,10 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
                 size: null
             };
         } else {
+            // 2026-10-31 층 도면은 같은 층을 다시 올려도 파일 이름이 늘 같고 파일에는 1년 캐시(max-age=31536000)가 걸려 있어,
+            // 지웠다 다시 넣거나 바꿔 넣은 뒤 확대하면 브라우저·서버 캐시에서 옛 도면이 나왔다.
+            // 새로 올릴 때마다 이름 뒤에 올린 시각을 붙인다 — 문서에 저장 경로가 같이 적히고, 옛 파일은 아래에서 지운다.
+            if (freshName) targetPath = withUploadVersionSuffix(targetPath);
             const parsed = await assetUrlToUploadBlob(sourceUrl);
             if (!parsed || !parsed.blob) throw new Error('asset parse failed');
             uploaded = await uploadBlobToFirebaseStorage(targetPath, parsed.blob, parsed.contentType);
@@ -62884,6 +62897,7 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
                     if (prevSnap.exists) previousStoragePath = storagePathFromSnapData(prevSnap.data() || {});
                 } catch (_e) { /* ignore */ }
                 await uploadAssetToFirebaseStorageAndMeta(docRef, path, dataUrl, {
+                    freshName: true,
                     buildingId,
                     floorCode,
                     site: scope.site,
@@ -63027,6 +63041,7 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
                     } catch (_e) { /* ignore */ }
                     await withTimeout(
                         uploadAssetToFirebaseStorageAndMeta(docRef, path, url, {
+                            freshName: true,
                             dim,
                             floorCode,
                             buildingId,
@@ -67524,6 +67539,7 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
                     if (prevSnap.exists) previousStoragePath = storagePathFromSnapData(prevSnap.data() || {});
                 } catch (_e) { /* ignore */ }
                 await uploadAssetToFirebaseStorageAndMeta(docRef, path, pdfDataUrl, {
+                    freshName: true,
                     buildingId,
                     floorCode,
                     site: scope.site,
