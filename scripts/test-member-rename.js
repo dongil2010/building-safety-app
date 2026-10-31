@@ -143,8 +143,8 @@ assert.strictEqual(h.withMemberGbHint('<input type="text">', '보(G)'), '<input 
 
 // 통계 분류 (예전·새 이름 같은 칸)
 const stats = fs.readFileSync(path.join(root, 'js/tabs/stats.js'), 'utf8').replace(/\r\n/g, '\n');
-const cs = stats.indexOf('function classifyComponentGroup');
-const ce = stats.indexOf('\n    }\n', cs);
+const cs = stats.indexOf('function isFinishingSlabOrWall');
+const ce = stats.indexOf('\n    }\n', stats.indexOf('function classifyComponentGroup'));
 const csb = {};
 vm.createContext(csb);
 vm.runInContext(stats.slice(cs, ce + 6) + '\n;this.f = classifyComponentGroup;', csb);

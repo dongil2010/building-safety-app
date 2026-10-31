@@ -1132,9 +1132,13 @@
         { key: 'masonryWall', label: '조적벽체', sort: 7 },
         { key: 'other', label: '기타 부재', sort: 99 }
     ];
+    /** 2026-10-31 슬래브·벽체를 마감재로 체크한 결함은 부재 균열이 아니라 마감재 균열이다 — 슬래브·벽체 칸과 균열 통계에서 뺀다 */
+    function isFinishingSlabOrWall(component, category) {
+        return category === '마감재' && /슬래브|벽체/.test(String(component || '').replace(/\s+/g, ''));
+    }
     function classifyComponentGroup(component, category) {
         var key = String(component || '').replace(/\s+/g, '');
-        if (!key) return 'other';
+        if (!key || isFinishingSlabOrWall(component, category)) return 'other';
         // 2026-10-08: ALC·블록(블럭)·벽돌 벽체도 조적벽체로 묶는다. 바닥에 까는 블록(보도·점자·경계)은 벽체가 아니다.
         var isMasonry = /조적|ALC|블록|블럭|벽돌/i.test(key) && !/보도|점자|경계|포장|바닥/.test(key);
         if (key.indexOf('접합') >= 0) {
@@ -1481,8 +1485,9 @@
                 var compGroup = classifyComponentGroup(d.component, cat);
                 componentCounts[compGroup] = (componentCounts[compGroup] || 0) + 1;
                 floorComponentCounts[compGroup] = (floorComponentCounts[compGroup] || 0) + 1;
+                var finishingSlabOrWall = isFinishingSlabOrWall(d.component, cat);
                 // 균열·이격 결함 수(최대 균열폭 보기의 건수). getCrackWidthNumbers와 같은 기준이다.
-                if (/균열|이격/.test(String(d.defectType != null ? d.defectType : ''))) {
+                if (!finishingSlabOrWall && /균열|이격/.test(String(d.defectType != null ? d.defectType : ''))) {
                     componentCrackCounts[compGroup] = (componentCrackCounts[compGroup] || 0) + 1;
                     floorComponentCrackCounts[compGroup] = (floorComponentCrackCounts[compGroup] || 0) + 1;
                     var bin = classifyCrackWidthBin(getCrackWidthNumbers(d));
@@ -1496,7 +1501,7 @@
                 DEFECT_KIND_COLUMNS.forEach(function (k) {
                     if (kinds[k.key]) kindBucket[k.key] = (kindBucket[k.key] || 0) + 1;
                 });
-                getCrackWidthNumbers(d).forEach(function (w) {
+                (finishingSlabOrWall ? [] : getCrackWidthNumbers(d)).forEach(function (w) {
                     var cur = floorComponentCrackMax[compGroup];
                     if (!cur || w > cur.value) {
                         floorComponentCrackMax[compGroup] = { value: w, id: d.id || '', no: d.no || d.groupNo || '' };

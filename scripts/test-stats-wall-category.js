@@ -32,7 +32,7 @@ function extractFunction(src, header) {
 }
 
 function loadClassify() {
-    const fnSrc = extractFunction(statsSrc, 'function classifyComponentGroup(');
+    const fnSrc = extractFunction(statsSrc, 'function isFinishingSlabOrWall(') + '\n' + extractFunction(statsSrc, 'function classifyComponentGroup(');
     const sandbox = {};
     vm.createContext(sandbox);
     vm.runInContext(fnSrc + '\nthis.classifyComponentGroup = classifyComponentGroup;', sandbox);
@@ -45,6 +45,15 @@ function testWallCategoryRules() {
     assert.strictEqual(classify('벽체', undefined), 'rcWall', '카테고리 미기재는 구조체로 간주');
     assert.strictEqual(classify('벽체', '비구조체'), 'other', '비구조체 벽체는 기타 부재');
     assert.strictEqual(classify('벽체', '마감재'), 'other', '마감재 벽체는 기타 부재');
+    // 2026-10-31 슬래브·벽체를 마감재로 체크하면 슬래브·벽체 칸과 균열 통계에서 뺀다
+    assert.strictEqual(classify('슬래브', '마감재'), 'other', '슬래브(마감재)');
+    assert.strictEqual(classify('조적벽체', '마감재'), 'other', '조적벽체(마감재)');
+    assert.strictEqual(classify('슬래브', '구조체'), 'slab', '구조체는 그대로');
+    assert.strictEqual(classify('슬래브', '비구조체'), 'slab', '비구조체는 그대로');
+    assert.strictEqual(classify('슬래브', ''), 'slab', '구분 미기재는 그대로');
+    assert.strictEqual(classify('조적벽체', '비구조체'), 'masonryWall', '조적벽체 비구조체는 그대로');
+    assert.ok(/if \(!finishingSlabOrWall && \/균열\|이격\//.test(statsSrc), '균열 건수·폭 구간에서 뺀다');
+    assert.ok(statsSrc.indexOf('(finishingSlabOrWall ? [] : getCrackWidthNumbers(d)).forEach') >= 0, '최대 균열폭에서 뺀다');
     assert.strictEqual(classify('RC벽체', '비구조체'), 'rcWall', 'RC벽체 표기는 카테고리와 무관하게 RC벽체');
     assert.strictEqual(classify('내력벽', '비구조체'), 'rcWall', '내력벽 표기는 카테고리와 무관하게 RC벽체');
     assert.strictEqual(classify('조적벽체', '비구조체'), 'masonryWall', '조적벽체는 카테고리와 무관하게 조적벽체');
