@@ -31811,6 +31811,14 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
             .replace(/\u00d7/g, 'x') // ×
             .trim();
         if (!rest || rest === '-') return [];
+        // 2026-10-31 개수만 적힌 칸(「3」·「3개소」·「개수 3」·「수량3」·「EA 3」·「N=3」) → 개수.
+        // 소수점 없는 숫자 하나만 있으면 폭이 아니라 개수로 본다(폭·길이는 0.3·2.0처럼 소수로 적음).
+        // 예전엔 숫자 하나를 폭 3.0으로 넣어 엑셀 가져오기 때 개수가 균열폭으로 들어갔다.
+        {
+            const cOnly = rest.match(/^(?:(?:개수|수량|갯수|N)\s*[:=]?\s*)?-?\s*(\d+)\s*(?:EA|개소|개)?$/i)
+                || rest.match(/^EA\s*[:=]?\s*(\d+)$/i);
+            if (cOnly) return [{ width: '', length: '', count: cOnly[1], join: '/' }];
+        }
 
         const takeNumber = (s) => {
             const m = String(s).match(/^(\d+(?:\.\d+)?)/);
