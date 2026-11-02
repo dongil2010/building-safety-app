@@ -12,7 +12,9 @@
     enabled: true,
     version: 'main-10',
     /** PDF 도면: 전체 페이지 티어 교체 대신 뷰포트 고해상도 패치 (벡터 PDF 출력은 별도) */
-    useViewportTiles: true
+    useViewportTiles: true,
+    /** 핀 번호 글자를 글꼴 없이 선으로 그릴지(기본 끔 — 예전 Helvetica 글자). 글꼴을 못 찾는 변환기에서 깨질 때만 켠다 */
+    textAsPaths: false
   };
 
   /** 핀·벡터 PDF 출력용 고정 좌표계 (4000px 미리보기 기준, 표시 타일과 분리) */
@@ -222,7 +224,7 @@
   }
 
   /** 선(획)으로 가운데 정렬해 그린다. 그렸으면 true */
-  function drawPdfStrokeText(page, text, cx, cy, size, color) {
+  function drawPdfStrokeText(page, text, cx, cy, size, color, haloW) {
     const lay = strokeTextLayout(text);
     if (!lay) return false;
     const capH = size * 0.72;
@@ -231,20 +233,24 @@
     const yTop = cy + capH / 2;
     const thickness = Math.max(0.2, size * 0.1);
     const cap = (PDFLib.LineCapStyle && PDFLib.LineCapStyle.Round !== undefined) ? PDFLib.LineCapStyle.Round : undefined;
-    lay.glyphs.forEach((g) => {
-      g.strokes.forEach((stroke) => {
-        for (let i = 1; i < stroke.length; i++) {
-          const a = stroke[i - 1];
-          const b = stroke[i];
-          const seg = {
-            start: { x: x0 + (g.x + a[0]) * k, y: yTop - a[1] * k },
-            end: { x: x0 + (g.x + b[0]) * k, y: yTop - b[1] * k },
-            thickness: thickness,
-            color: color
-          };
-          if (cap !== undefined) seg.lineCap = cap;
-          page.drawLine(seg);
-        }
+    // 흰 윤곽선(haloW > 0): 같은 획을 굵은 흰 선으로 먼저 깔고 그 위에 글자색 선
+    const passes = (haloW > 0) ? [{ w: thickness + haloW, c: PDFLib.rgb(1, 1, 1) }, { w: thickness, c: color }] : [{ w: thickness, c: color }];
+    passes.forEach((pass) => {
+      lay.glyphs.forEach((g) => {
+        g.strokes.forEach((stroke) => {
+          for (let i = 1; i < stroke.length; i++) {
+            const a = stroke[i - 1];
+            const b = stroke[i];
+            const seg = {
+              start: { x: x0 + (g.x + a[0]) * k, y: yTop - a[1] * k },
+              end: { x: x0 + (g.x + b[0]) * k, y: yTop - b[1] * k },
+              thickness: pass.w,
+              color: pass.c
+            };
+            if (cap !== undefined) seg.lineCap = cap;
+            page.drawLine(seg);
+          }
+        });
       });
     });
     return true;
@@ -263,16 +269,32 @@
    * 한글 등은 StandardFonts로 인코딩 불가 → 캔버스 래스터를 PNG로 임베드.
    * ASCII(핀 번호 등)는 선 글자(글꼴 없음)로, 선 글꼴에 없는 글자만 Helvetica 벡터 텍스트.
    */
-  async function drawPdfCenteredText(page, pdfDoc, font, text, cx, cy, size, color) {
+  /**
+   * opts.halo: 글자 둘레에 흰 윤곽선(화면의 drawOutlinedPinText와 같은 굵기: 글자 크기의 20%, 최대 2.8) —
+   * 번호가 도면 선과 겹쳐도 읽히게. 박스 안이 흰색이거나 글자가 흰색인(색 채운 박스) 곳에는 쓰지 않는다.
+   */
+  async function drawPdfCenteredText(page, pdfDoc, font, text, cx, cy, size, color, opts) {
     const t = String(text || '');
     if (!t || !(size > 0)) return;
+    const haloW = (opts && opts.halo) ? Math.max(0.5, Math.min(size * 0.2, 2.8)) : 0;
 
     if (!needsRasterText(t)) {
-      if (window.BSA_PDF_VECTOR.textAsPaths !== false && drawPdfStrokeText(page, t, cx, cy, size, color)) return;
+      if (window.BSA_PDF_VECTOR.textAsPaths === true && drawPdfStrokeText(page, t, cx, cy, size, color, haloW)) return;
       const tw = font.widthOfTextAtSize(t, size);
+      const tx = cx - tw / 2;
+      const ty = cy - size * 0.32;
+      if (haloW > 0) {
+        // 같은 글자를 흰색으로 여덟 방향에 겹쳐 윤곽선처럼(글꼴 그대로, 선 모양이 글자와 어긋나지 않음)
+        const white = PDFLib.rgb(1, 1, 1);
+        const r = haloW / 2;
+        for (let a = 0; a < 8; a++) {
+          const ang = (Math.PI / 4) * a;
+          page.drawText(t, { x: tx + r * Math.cos(ang), y: ty + r * Math.sin(ang), size, font, color: white });
+        }
+      }
       page.drawText(t, {
-        x: cx - tw / 2,
-        y: cy - size * 0.32,
+        x: tx,
+        y: ty,
         size,
         font,
         color
@@ -295,6 +317,13 @@
     ctx.fillStyle = pdfRgbToCss(color);
     ctx.textBaseline = 'middle';
     ctx.textAlign = 'center';
+    if (haloW > 0) {
+      ctx.lineJoin = 'round';
+      ctx.miterLimit = 2;
+      ctx.strokeStyle = '#ffffff';
+      ctx.lineWidth = haloW * dpr;
+      ctx.strokeText(t, canvas.width / 2, canvas.height / 2);
+    }
     ctx.fillText(t, canvas.width / 2, canvas.height / 2);
 
     const dataUrl = canvas.toDataURL('image/png');
@@ -865,7 +894,8 @@
       } else {
         await drawPdfCenteredText(
           page, outDoc, font, String(p.label || 'NO.01'),
-          box.x, box.y, fontSize, p.fill ? rgb(1, 1, 1) : color
+          box.x, box.y, fontSize, p.fill ? rgb(1, 1, 1) : color,
+          { halo: !p.fill }
         );
       }
     }
