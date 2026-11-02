@@ -9,6 +9,9 @@
  * - 번호는 **먼저 그은 선이 작은 번호**(그룹마다 seq = 그은 순서). 옮기거나 돌려도 번호는 그대로,
  *   선을 지우면 뒤 번호가 하나씩 당겨진다(빈 번호 없음). 「위치 순서로 다시 매기기」로 한 번에 왼→오른/위→아래 순서로.
  *   위치 찾기(이웃 선)는 여전히 공간 기준이고, 범위는 작은 번호~큰 번호로 쓴다(X3·X1 이웃 → X1~X3).
+ * - 빈 번호 건너뛰기·번호 직접 지정(2026-11-02): 그룹의 skip(건너뛸 번호 목록 — 자동 번호가 이 값을 건너뜀: skip [3] → 1,2,4,5)과
+ *   선의 num(그 선의 번호를 직접 지정 — 자동 번호 대신 머리글+num). 둘 다 없으면 예전과 똑같다(데이터·지문 동일).
+ *   번호 순서(범위 ~ 방향, 이웃)는 계속 그은 순서(seq) 기준이라 num을 줘도 이웃·범위 판단은 안 바뀐다.
  * - 선은 꼭짓점 2개 이상인 꺾은선. 각도 자유(꺾인 열·날개동). 같은 축에 그룹을 여러 개 둘 수 있다
  *   (그룹마다 머리글·시작 번호·방향·기본 폭).
  * - 폭(band): 선에서 수직 거리 ≤ 폭/2 안이면 그 선 하나(X2), 아니면 이웃 두 선 사이(X1~X2).
@@ -56,6 +59,63 @@
             k = Math.floor((k - 1) / 26);
         }
         return lower ? s.toLowerCase() : s;
+    }
+
+    /** 글자 번호 → 숫자 (A → 1, Z → 26, AA → 27). 글자가 아니면 null */
+    function lettersToSeq(str) {
+        const t = String(str == null ? '' : str).trim().toUpperCase();
+        if (!/^[A-Z]+$/.test(t)) return null;
+        let n = 0;
+        for (let i = 0; i < t.length; i++) n = n * 26 + (t.charCodeAt(i) - 64);
+        return n;
+    }
+
+    /** 입력 한 토큰(「3」「C」)을 번호로. 숫자(정수)면 그대로, 글자 번호 방식이면 글자도 허용. 못 읽으면 null */
+    function parseNumberToken(raw, numbering) {
+        const t = String(raw == null ? '' : raw).trim();
+        if (!t) return null;
+        if (/^-?\d+$/.test(t)) return parseInt(t, 10);
+        return normalizeNumbering(numbering) === 'upper' ? lettersToSeq(t) : null;
+    }
+
+    /** 건너뛸 번호 목록 정리 — 정수만, 중복 없이 오름차순 */
+    function normalizeSkip(arr) {
+        const out = [];
+        (Array.isArray(arr) ? arr : []).forEach((v) => {
+            const n = Number(v);
+            if (v !== null && v !== '' && Number.isInteger(n) && !out.includes(n)) out.push(n);
+        });
+        return out.sort((a, b) => a - b);
+    }
+
+    /** 「3, 7」「C,G」 같은 입력 글 → 번호 목록 (읽을 수 없는 토큰은 버림) */
+    function parseSkipText(text, numbering) {
+        return normalizeSkip(String(text == null ? '' : text).split(/[\s,;、]+/)
+            .map((tok) => parseNumberToken(tok, numbering)).filter((n) => n != null));
+    }
+
+    /** 건너뛸 번호를 입력 칸에 보일 글 (글자 방식이면 C, G) */
+    function formatSkipText(group) {
+        const g = group || {};
+        const mode = normalizeNumbering(g.numbering);
+        return normalizeSkip(g.skip).map((n) => (mode === 'num' || n < 1 ? String(n) : seqToLetters(n, false))).join(', ');
+    }
+
+    /** 그룹의 k번째(0부터) 자동 번호 — 시작 번호부터 세되 skip에 든 번호는 건너뜀 */
+    function groupNumberAt(group, k) {
+        const g = group || {};
+        const skip = new Set(normalizeSkip(g.skip));
+        let v = Math.round(num(g.start, 1));
+        let i = 0;
+        const want = Math.max(0, Math.round(num(k, 0)));
+        for (let guard = 0; guard < 100000; guard++) {
+            if (!skip.has(v)) {
+                if (i === want) return v;
+                i++;
+            }
+            v++;
+        }
+        return v;
     }
 
     /** 그룹의 n번째(시작 번호 포함한 값) 선 이름 — 머리글 + 번호/글자 */
@@ -125,6 +185,9 @@
         if (nb !== 'num') out.numbering = nb; // 숫자는 키 없음(예전 데이터 그대로)
         // 2026-10-21 내림차순(번호를 거꾸로: 1,2,3 → 3,2,1). 오름차순(기본)은 키 없음
         if (o.reverse === true) out.reverse = true;
+        // 2026-11-02 건너뛸 번호(없으면 키 자체가 없음 — 예전 데이터 모양 그대로)
+        const sk = normalizeSkip(o.skip);
+        if (sk.length) out.skip = sk;
         return out;
     }
 
@@ -283,6 +346,8 @@
                 if (ln && ln.seq !== null && ln.seq !== '' && Number.isFinite(Number(ln.seq))) line.seq = Number(ln.seq);
                 if (ln && ln.label != null && String(ln.label).trim()) line.label = String(ln.label).trim();
                 if (ln && ln.band != null && ln.band !== '' && Number.isFinite(Number(ln.band))) line.band = Math.max(0, Number(ln.band));
+                // 2026-11-02 번호 직접 지정(정수만)
+                if (ln && ln.num != null && ln.num !== '' && Number.isInteger(Number(ln.num))) line.num = Number(ln.num);
                 return line;
             }).filter(Boolean);
             assignMissingSeq(out);
@@ -423,7 +488,8 @@
             // 내림차순: 마지막 번호부터(오름차순 1,2,3 → 3,2,1)
             const k = group.reverse === true ? (ranks.size - 1 - k0) : k0;
             it.numberIndex = k;
-            it.autoName = groupSeqLabel(group, group.start + k);
+            // 번호 직접 지정(line.num)이 있으면 그 번호, 없으면 시작 번호부터 건너뛸 번호를 빼고 센 자동 번호
+            it.autoName = groupSeqLabel(group, Number.isInteger(it.line.num) ? it.line.num : groupNumberAt(group, k));
             it.name = it.line.label || it.autoName;
         });
         return { items, D, N };
@@ -580,9 +646,9 @@
         zones.forEach((z) => parts.push(`z|${roundPts([{ x: z.rect.x1, y: z.rect.y1 }, { x: z.rect.x2, y: z.rect.y2 }])}`));
         (grid.groups || []).forEach((g) => {
             // 번호 방식은 글자일 때만 붙임(숫자 그룹 지문은 예전과 같아 저장된 위치를 다시 계산하지 않음)
-            parts.push(`g${g.axis}|${g.prefix}|${g.start}|${g.band}${g.zoneId ? `|z${zones.findIndex((z) => z.id === g.zoneId)}` : ''}${g.numbering ? `|n${g.numbering}` : ''}${g.reverse ? '|r' : ''}`);
+            parts.push(`g${g.axis}|${g.prefix}|${g.start}|${g.band}${g.zoneId ? `|z${zones.findIndex((z) => z.id === g.zoneId)}` : ''}${g.numbering ? `|n${g.numbering}` : ''}${g.reverse ? '|r' : ''}${normalizeSkip(g.skip).length ? `|s${normalizeSkip(g.skip).join('.')}` : ''}`);
             (g.lines || []).forEach((ln) => {
-                parts.push(`l${ln.seq}|${ln.label || ''}|${ln.band != null ? ln.band : ''}|${roundPts(ln.pts)}`);
+                parts.push(`l${ln.seq}|${ln.label || ''}|${ln.band != null ? ln.band : ''}|${roundPts(ln.pts)}${Number.isInteger(ln.num) ? `|N${ln.num}` : ''}`);
             });
         });
         const str = parts.join('#');
@@ -1057,12 +1123,13 @@
             visible: src.visible,
             autoLocation: src.autoLocation,
             groups: src.groups.map((g) => {
-                const ng = createGroup(g.axis, { prefix: g.prefix, start: g.start, angle: g.angle, band: g.band, numbering: g.numbering, reverse: g.reverse === true, zoneId: g.zoneId ? zoneMap[g.zoneId] : '' });
+                const ng = createGroup(g.axis, { prefix: g.prefix, start: g.start, angle: g.angle, band: g.band, numbering: g.numbering, reverse: g.reverse === true, skip: g.skip, zoneId: g.zoneId ? zoneMap[g.zoneId] : '' });
                 ng.lines = (g.lines || []).map((ln) => {
                     const line = { id: uid('gl'), pts: ln.pts.map((p) => ({ x: p.x, y: p.y })) };
                     if (Number.isFinite(ln.seq)) line.seq = ln.seq;
                     if (ln.label) line.label = ln.label;
                     if (ln.band != null) line.band = ln.band;
+                    if (Number.isInteger(ln.num)) line.num = ln.num;
                     return line;
                 });
                 return ng;
@@ -1104,6 +1171,12 @@
         NUMBERINGS,
         normalizeNumbering,
         seqToLetters,
+        lettersToSeq,
+        parseNumberToken,
+        normalizeSkip,
+        parseSkipText,
+        formatSkipText,
+        groupNumberAt,
         groupSeqLabel,
         AXIS_SEP,
         GIRDER_MEMBER_RULES,

@@ -188,6 +188,11 @@
         return Number.isFinite(n) ? Math.round(n * 100) / 100 : '';
     }
 
+    /** 입력칸 문자열("12.5")을 숫자 셀로. 텍스트로 두면 엑셀 셀 왼쪽 위에 초록 삼각형(숫자가 텍스트)이 뜬다. */
+    function numOrText(v) {
+        return typeof v === 'string' && /^\s*-?\d+(\.\d+)?\s*$/.test(v) ? parseFloat(v) : v;
+    }
+
     /**
      * 2026-10-19 강도는 저장해 둔 값이 아니라 지금 건물(준공일·점검일)·계산식으로 다시 계산한 최종 강도.
      * 저장값은 입력할 때의 재령으로 굳어 있어(준공일이 없으면 α 없이), 준공일을 나중에 넣거나 고쳐도
@@ -363,7 +368,7 @@
                 aoa.push(['[평가 탭 입력표 — 부재별 값(직접 입력 우선, 빈칸은 도면 결함·비파괴값)]']);
                 aoa.push(['평가부재'].concat(INPUT_ITEMS.map(function (it) { return it.label + '(' + it.unit + ')'; })).concat(['SafetyMan 균열 구간']));
                 unitMembers(inputs, comp, uid).forEach(function (m) {
-                    var vals = INPUT_ITEMS.map(function (it) { var c = cellValue(inputs, comp, uid, m, it.key); return c.value !== '' ? c.value : (c.hint || ''); });
+                    var vals = INPUT_ITEMS.map(function (it) { var c = cellValue(inputs, comp, uid, m, it.key); return c.value !== '' ? numOrText(c.value) : (c.hint || ''); });
                     var w = parseFloat(cellValue(inputs, comp, uid, m, 'crackW').value);
                     aoa.push([m].concat(vals).concat([Number.isFinite(w) ? crackBand(w) : '']));
                 });

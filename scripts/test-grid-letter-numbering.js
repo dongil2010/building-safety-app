@@ -70,7 +70,7 @@ assert.strictEqual(G.computeGridLocation(zg, [{ x: 1000, y: 1505 }], ctx), 'B');
 assert.ok(app.includes('<select data-f="numbering"') && app.includes('>대문자 A, B, C</option>'));
 assert.ok(!app.includes('소문자 a, b, c'), '소문자 선택지 없음');
 assert.ok(app.includes("case 'numbering': {"));
-assert.ok(app.includes('G.groupSeqLabel(g, g.start)'), '그룹 목록 이름');
+assert.ok(app.includes('G.groupSeqLabel(g, G.groupNumberAt(g, 0))'), '그룹 목록 이름');
 const ens = app.slice(app.indexOf('function gridEnsureGroup('), app.indexOf('function gridAddLineAt('));
 assert.ok(ens.includes('numbering: tpl.numbering, prefix: tpl.prefix'), '새 구역 그룹이 글자 번호 이어받음');
 assert.ok(G.gridLocTextEm('a~b') > 0);

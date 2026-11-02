@@ -18068,9 +18068,9 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
         container.innerHTML = ndtStrengthSlots.map((slot, idx) => `
             <div style="border:1px solid var(--border-color); border-radius:10px; padding:0.7rem; display:flex; flex-direction:column; gap:0.6rem;">
                 <div style="display:flex; gap:0.5rem; align-items:flex-end;">
-                    <div class="form-group" style="flex:1; margin:0;">
+                    <div class="form-group" style="flex:1; min-width:0; margin:0;">
                         <label class="form-label">📍 측정 위치 ${ndtStrengthSlots.length > 1 ? `(${idx + 1})` : ''}${idx === 0 ? ' *' : ''}</label>
-                        <input type="text" class="form-control ndt-strength-slot-location" data-slot="${idx}" value="${slot.location || ''}" placeholder="예: 101동 1F 기둥 C1 하부(플렌지)">
+                        <input type="text" class="form-control ndt-strength-slot-location" data-slot="${idx}" value="${slot.location || ''}" placeholder="예: 101동 1F 기둥 C1 하부(플렌지)" style="width:100%; min-width:0; box-sizing:border-box;">
                     </div>
                     ${ndtStrengthSlots.length > 1 ? `<button type="button" class="btn btn-sm btn-outline ndt-strength-slot-remove" data-slot="${idx}" style="border-color:#ef4444; color:#ef4444; flex-shrink:0;" title="이 위치 삭제"><i class="fa-solid fa-trash"></i></button>` : ''}
                 </div>
@@ -30579,6 +30579,8 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
         const a = String(left || '').trim();
         const b = String(right || '').trim();
         if (!a || !b) return '';
+        // 2026-11-02 같은 부재끼리(보-보, 기둥-기둥…)는 「보 접합부」로 — 같은 이름을 두 번 쓰지 않는다
+        if (a === b) return `${a} 접합부`;
         return `${a}-${b} 접합부`;
     }
 
@@ -32123,7 +32125,7 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
 
     /**
      * 2026-10-30 한글(HWPX) 상태조사표 전용: 단위를 붙인 규모 글자.
-     * 폭만 → Cw:0.3mm / 길이만 → L: 5m / 개수만 → 3EA / 폭+길이 → 0.3/5.0 단위 없이 (-nEA는 그대로 뒤에).
+     * 폭만 → Cw:0.3 (mm 안 붙임) / 길이만 → L: 5m / 개수만 → 3EA / 폭+길이 → 0.3/5.0 단위 없이 (-nEA는 그대로 뒤에).
      * 「x」(가로x세로) 표기는 단위가 정해져 있지 않아 예전 그대로 둔다. 화면·PDF·엑셀은 바꾸지 않는다.
      */
     function formatCrackMeasurePairHwpx(m) {
@@ -32134,7 +32136,7 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
         const l = normalizeCrackDecimalText(strip(String((m && m.length) || '').replace(/^\s*L\s*[:=]\s*/i, ''), /\s*m\s*$/i));
         const n = strip((m && m.count) || '', /\s*EA\s*$/i);
         const eaSuffix = n ? ` -${n}EA` : '';
-        if (w && !l) return normalizeEaSpacingInText(`Cw:${w}mm${eaSuffix}`);
+        if (w && !l) return normalizeEaSpacingInText(`Cw:${w}${eaSuffix}`); // 2026-11-02 폭 뒤 mm 빼기(사용자): Cw:0.3
         if (w && l) return normalizeEaSpacingInText(`${w}/${l}${eaSuffix}`); // 2026-10-31 폭+길이는 단위 없이 예전 표기(사용자)
         if (l) return normalizeEaSpacingInText(`L: ${l}m${eaSuffix}`);
         if (n) return `${n}EA`;
@@ -43021,7 +43023,7 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
         const axisKo = (ax) => (ax === 'row' ? '행' : '열');
         const groupOpts = groups.map((g) => {
             const od = G.orderedLines(g, gctx);
-            const names = od.items.length > 1 ? `${G.groupSeqLabel(g, g.start)}…${G.groupSeqLabel(g, g.start + od.items.length - 1)}` : G.groupSeqLabel(g, g.start);
+            const names = od.items.length > 1 ? `${G.groupSeqLabel(g, G.groupNumberAt(g, 0))}…${G.groupSeqLabel(g, G.groupNumberAt(g, od.items.length - 1))}` : G.groupSeqLabel(g, G.groupNumberAt(g, 0));
             const ang = Math.abs(g.angle) > 0.01 ? ` · ${g.angle}°` : '';
             return `<option value="${gridEsc(g.id)}"${eg && g.id === eg.id ? ' selected' : ''}>${gridEsc(zoneTag(g))}${axisKo(g.axis)} ${gridEsc(names)} (${od.items.length}개${ang})</option>`;
         }).join('');
@@ -43094,6 +43096,9 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
                         </select></label>
                     </div>
                     <div class="grid-panel-row">
+                        <label title="도면에 없는 번호를 건너뜁니다. 예: 3, 7 → 1, 2, 4, 5, 6, 8 … (글자 번호면 C, G). 이미 그은 선 이름도 바로 바뀝니다">건너뛸 번호 <input type="text" data-f="gskip" value="${gridEsc(G.formatSkipText(eg))}" placeholder="예: 3, 7" maxlength="40" style="width:96px"></label>
+                    </div>
+                    <div class="grid-panel-row">
                         <button type="button" data-act="reverseOrder" title="선 위치는 그대로 두고 이 그룹의 번호 순서만 거꾸로(1,2,3 → 3,2,1 / A,B,C → C,B,A). 개별 이름을 준 선은 그대로">⇅ 순서 뒤집기</button>
                         ${ge.orderUndo && ge.orderUndo.groupId === eg.id ? '<button type="button" data-act="undoOrder" title="방금 바꾼 순서를 되돌림 (Ctrl+Z)">↶ 되돌리기</button>' : ''}
                     </div>
@@ -43114,6 +43119,9 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
                     <div class="grid-panel-row">
                         <label>이름 <input type="text" data-f="label" value="${gridEsc(selF.line.label || '')}" placeholder="자동 ${gridEsc(selAuto)}" maxlength="10" style="width:70px"></label>
                         <label>각도 <input type="number" data-f="langle" value="${G.lineAngle(selF.line, selF.group.axis, gctx)}" step="0.5" style="width:60px">°</label>
+                    </div>
+                    <div class="grid-panel-row">
+                        <label title="이 선의 번호만 직접 정합니다(예: 5 → ${gridEsc(selF.group.prefix || '')}5). 비우면 자동 번호. 이름 칸에 글자를 쓰면 그 이름이 우선">번호 <input type="text" data-f="lnum" value="${Number.isInteger(selF.line.num) ? gridEsc(G.normalizeNumbering(selF.group.numbering) === 'upper' && selF.line.num >= 1 ? G.seqToLetters(selF.line.num, false) : String(selF.line.num)) : ''}" placeholder="자동" maxlength="6" style="width:56px"></label>
                     </div>
                     <div class="grid-panel-row">
                         <label>폭 <input type="number" data-f="lband" value="${selF.line.band != null ? selF.line.band : ''}" placeholder="기본 ${Math.round(lineBandDefault)}" min="0" step="1" style="width:64px"></label>
@@ -43378,6 +43386,18 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
                 if (selF) {
                     const v = String(el.value || '').trim();
                     if (v) selF.line.label = v; else delete selF.line.label;
+                }
+                break;
+            case 'gskip':
+                if (eg) {
+                    const sk = G.parseSkipText(el.value, eg.numbering);
+                    if (sk.length) eg.skip = sk; else delete eg.skip;
+                }
+                break;
+            case 'lnum':
+                if (selF) {
+                    const n = G.parseNumberToken(el.value, selF.group.numbering);
+                    if (n != null) selF.line.num = n; else delete selF.line.num; // 비우거나 읽을 수 없으면 자동 번호
                 }
                 break;
             case 'langle': if (selF) G.setLineAngle(selF.line, selF.group.axis, Math.max(-89, Math.min(89, numOr(el.value, 0))), gctx); break;
@@ -60087,7 +60107,7 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
                 }
                 tableHtml += `
                     <tr>
-                        ${activeColumns.map(c => `<td style="${getSurveyCellColorStyle(c.key, d, cellCtx)}">${getSurveyCellText(c.key, d, cellCtx).replace(/\n/g, '<br>')}</td>`).join('')}
+                        ${activeColumns.map(c => `<td style="${getSurveyCellColorStyle(c.key, d, cellCtx)};mso-number-format:\\@">${getSurveyCellText(c.key, d, cellCtx).replace(/\n/g, '<br>')}</td>`).join('')}
                     </tr>
                 `;
             });
