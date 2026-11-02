@@ -440,17 +440,52 @@
         return null;
     }
 
-    /** 위치순으로 늘어선 번호가 한 방향으로 이어지는 정도(0~1). 글자가 없으면 1 */
+    /**
+     * 번호 글자의 계열(모양). 2026-11-02 증축으로 번호 체계가 바뀌는 도면(A~D 다음 1~4, X1~ 다음 A1~, Y'1~ 다음 Y1~)을
+     * 한 줄로 알아보기 위해 「같은 계열 안에서는 번호가 이어지고, 계열이 바뀌는 곳은 새 시작」으로 본다.
+     *  X1·X2 → 'X#' / A1 → 'A#' / 1·2 → '#' / A·B → 'L' / 가·나 → 'K' / ①② → 'C' / Y'1 → "Y'#"
+     */
+    function labelClass(label) {
+        const t = String(label == null ? '' : label).trim().replace(/['\u2019\u2032\u02BC\u00B4`]/g, "'");
+        if (!t) return '';
+        if (/^[A-Za-z]{1,2}'?$/.test(t)) return t.indexOf("'") >= 0 ? "L'" : 'L';
+        if (/^[가-힣]'?$/.test(t)) return 'K';
+        if (/^[①-⑳]$/.test(t)) return 'C';
+        return t.replace(/\d+/g, '#').toUpperCase();
+    }
+
+    /** 위치순 번호 줄을 계열별로 나눈 번호 → 계열 번호 목록(0부터). 글자 없는 표시는 앞 계열을 따른다 */
+    function seriesIndexes(labels) {
+        let cur = 0;
+        let prevClass = '';
+        return (labels || []).map((lb) => {
+            const c = labelClass(lb);
+            if (c && prevClass && c !== prevClass) cur++;
+            if (c) prevClass = c;
+            return cur;
+        });
+    }
+
+    /** 위치순으로 늘어선 번호가 한 방향으로 이어지는 정도(0~1). 글자가 없으면 1. 계열이 바뀌는 곳은 새 시작으로 봐 건너뛴다 */
     function sequenceScore(group) {
-        const vals = group.items.map((m) => labelOrder(m.label)).filter((v) => v != null);
-        if (vals.length < 2) return group.items.some((m) => m.label) ? 0.3 : 1;
-        let up = 0;
-        let down = 0;
-        for (let i = 1; i < vals.length; i++) {
-            if (vals[i] > vals[i - 1]) up++;
-            else if (vals[i] < vals[i - 1]) down++;
-        }
-        return Math.max(up, down) / (vals.length - 1);
+        const items = group.items
+            .map((m) => ({ v: labelOrder(m.label), c: labelClass(m.label) }))
+            .filter((x) => x.v != null);
+        if (items.length < 2) return group.items.some((m) => m.label) ? 0.3 : 1;
+        const pairs = items.length - 1;
+        let best = 0;
+        [1, -1].forEach((dir) => {
+            let ok = 0;
+            let breaks = 0;
+            for (let i = 1; i < items.length; i++) {
+                if (items[i].c !== items[i - 1].c) { ok++; breaks++; } // 계열 바뀜 = 새 시작
+                else if ((items[i].v - items[i - 1].v) * dir > 0) ok++;
+            }
+            // 계열이 너무 자주 바뀌면(A,3,B,7…) 번호 줄이 아니다 — 새 계열 시작은 많아야 전체의 40%
+            if (breaks > Math.max(1, Math.floor(pairs * 0.4))) return;
+            best = Math.max(best, ok / pairs);
+        });
+        return best;
     }
 
     /** axis 'col': 같은 높이(y)에 늘어선 표시 묶음(수직선 위치 = x) / 'row': 같은 x에 늘어선 묶음(수평선 위치 = y) */
@@ -566,15 +601,23 @@
     }
 
     function finishLines(lines) {
-        if (!lines.length) return { lines: [], labelled: false };
-        const a0 = Math.min.apply(null, lines.map((l) => l.a0));
-        const a1 = Math.max.apply(null, lines.map((l) => l.a1));
-        lines.forEach((l) => { l.a0 = a0; l.a1 = a1; });
+        if (!lines.length) return { lines: [], labelled: false, seriesCount: 0 };
         const labelled = lines.filter((l) => l.label);
         const distinct = new Set(labelled.map((l) => l.label)).size === labelled.length;
         const useLabels = labelled.length >= Math.ceil(lines.length * 0.9) && distinct;
         lines.forEach((l) => { if (!useLabels) l.label = ''; });
-        return { lines, labelled: useLabels };
+        // 번호 계열(A~D 다음 1~4 …): 도면 글자를 쓸 때만 나눈다. 계열마다 선 길이를 따로 맞춘다(증축동은 범위가 다를 수 있음)
+        const idx = useLabels ? seriesIndexes(lines.map((l) => l.label)) : lines.map(() => 0);
+        lines.forEach((l, i) => { l.series = idx[i]; });
+        const seriesCount = (idx.length ? Math.max.apply(null, idx) : 0) + 1;
+        for (let k = 0; k < seriesCount; k++) {
+            const mem = lines.filter((l) => l.series === k);
+            if (!mem.length) continue;
+            const a0 = Math.min.apply(null, mem.map((l) => l.a0));
+            const a1 = Math.max.apply(null, mem.map((l) => l.a1));
+            mem.forEach((l) => { l.a0 = a0; l.a1 = a1; });
+        }
+        return { lines, labelled: useLabels, seriesCount };
     }
 
     function detectByMarkers(data, dims, o) {
@@ -617,10 +660,11 @@
         const m = detectByMarkers(d, dm, o);
         if (m) {
             return {
-                cols: m.c.lines.map((l) => ({ x: l.pos, y1: l.a0, y2: l.a1, label: l.label, tier: 'M' })),
-                rows: m.r.lines.map((l) => ({ y: l.pos, x1: l.a0, x2: l.a1, label: l.label, tier: 'M' })),
+                cols: m.c.lines.map((l) => ({ x: l.pos, y1: l.a0, y2: l.a1, label: l.label, tier: 'M', series: l.series || 0 })),
+                rows: m.r.lines.map((l) => ({ y: l.pos, x1: l.a0, x2: l.a1, label: l.label, tier: 'M', series: l.series || 0 })),
                 weak: false,
                 labelled: { cols: !!m.c.labelled, rows: !!m.r.labelled },
+                seriesCount: { cols: m.c.seriesCount || (m.c.lines.length ? 1 : 0), rows: m.r.seriesCount || (m.r.lines.length ? 1 : 0) },
                 source: 'markers'
             };
         }
@@ -637,7 +681,7 @@
         };
     }
 
-    const api = { DEFAULTS, LABEL_RE, isLabelText, textFromItem, textInside, splitAxisSegments, chainPieces, labelAtEnd, bubbleAtEnd, findBubbles, findMarkers, alignGroups, labelOrder, detect };
+    const api = { DEFAULTS, LABEL_RE, isLabelText, labelClass, seriesIndexes, textFromItem, textInside, splitAxisSegments, chainPieces, labelAtEnd, bubbleAtEnd, findBubbles, findMarkers, alignGroups, labelOrder, detect };
     root.BSA = root.BSA || {};
     root.BSA.gridAutoDetect = api;
     if (typeof module !== 'undefined' && module.exports) module.exports = api;

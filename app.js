@@ -42740,8 +42740,8 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
     function gridAutoCandidatesByAxis(ap) {
         const rot = ((Number(ap.rot) || 0) % 360 + 360) % 360;
         const swap = rot === 90 || rot === 270;
-        const vert = ap.res.cols.map((l) => ({ pts: [{ x: l.x, y: l.y1 }, { x: l.x, y: l.y2 }], label: l.label || '' }));
-        const horz = ap.res.rows.map((l) => ({ pts: [{ x: l.x1, y: l.y }, { x: l.x2, y: l.y }], label: l.label || '' }));
+        const vert = ap.res.cols.map((l) => ({ pts: [{ x: l.x, y: l.y1 }, { x: l.x, y: l.y2 }], label: l.label || '', series: l.series || 0 }));
+        const horz = ap.res.rows.map((l) => ({ pts: [{ x: l.x1, y: l.y }, { x: l.x2, y: l.y }], label: l.label || '', series: l.series || 0 }));
         const labelled = ap.res.labelled || {};
         return swap
             ? { col: horz, row: vert, labelled: { col: !!labelled.rows, row: !!labelled.cols } }
@@ -42852,23 +42852,29 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
             const items = by[axis];
             if (!items.length) return;
             const labelled = !!by.labelled[axis];
-            const same = grid.groups.filter((g) => g.axis === axis && !g.zoneId).length;
             const base = G.DEFAULT_PREFIX[axis];
-            const g = G.createGroup(axis, {
-                // 도면 축 번호를 이름으로 쓰면 머리글 없이(도면 표기 그대로), 아니면 X·Y(둘째 그룹부터 AX·BX…)
-                prefix: labelled ? '' : (same ? `${String.fromCharCode(65 + same)}${base}` : base),
-                band: G.defaultBand(gctx.w, gctx.h)
+            // 2026-11-02 증축으로 번호 계열이 바뀌는 도면(A~D 다음 1~4 · X1~ 다음 A1~): 계열마다 그룹을 따로 둔다(도면 글자를 쓸 때만)
+            const seriesKeys = labelled ? Array.from(new Set(items.map((c) => c.series || 0))).sort((a, b) => a - b) : [0];
+            seriesKeys.forEach((sk) => {
+                const part = labelled ? items.filter((c) => (c.series || 0) === sk) : items;
+                if (!part.length) return;
+                const same = grid.groups.filter((g) => g.axis === axis && !g.zoneId).length;
+                const g = G.createGroup(axis, {
+                    // 도면 축 번호를 이름으로 쓰면 머리글 없이(도면 표기 그대로), 아니면 X·Y(둘째 그룹부터 AX·BX…)
+                    prefix: labelled ? '' : (same ? `${String.fromCharCode(65 + same)}${base}` : base),
+                    band: G.defaultBand(gctx.w, gctx.h)
+                });
+                part.forEach((c) => {
+                    const ln = { id: `gl_${Date.now().toString(36)}${Math.random().toString(36).slice(2, 7)}`, pts: c.pts.map((p) => ({ x: p.x, y: p.y })) };
+                    if (labelled && c.label) ln.label = c.label;
+                    G.addLineToGroup(g, ln);
+                    added++;
+                });
+                G.renumberBySpatialOrder(g, gctx); // 화면 기준 왼→오른 / 위→아래 번호
+                grid.groups.push(g);
+                ge.activeGroup[axis] = g.id;
+                ge.editGroupId = g.id;
             });
-            items.forEach((c) => {
-                const ln = { id: `gl_${Date.now().toString(36)}${Math.random().toString(36).slice(2, 7)}`, pts: c.pts.map((p) => ({ x: p.x, y: p.y })) };
-                if (labelled && c.label) ln.label = c.label;
-                G.addLineToGroup(g, ln);
-                added++;
-            });
-            G.renumberBySpatialOrder(g, gctx); // 화면 기준 왼→오른 / 위→아래 번호
-            grid.groups.push(g);
-            ge.activeGroup[axis] = g.id;
-            ge.editGroupId = g.id;
         });
         ge.autoPreview = null;
         ge.zoneId = null;
@@ -43255,8 +43261,10 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
         const autoSummary = autoPrev ? (() => {
             const r = autoPrev.res;
             const named = (r.labelled && (r.labelled.cols || r.labelled.rows)) ? ' · 도면 축 번호를 이름으로' : ' · 이름은 자동 번호';
+            const sc = r.seriesCount || {};
+            const seriesNote = ((sc.cols || 0) > 1 || (sc.rows || 0) > 1) ? ` · 번호 계열이 바뀜(열 ${sc.cols || 1}묶음 · 행 ${sc.rows || 1}묶음) → 묶음마다 그룹으로 나눔` : '';
             const how = r.source === 'markers' ? ' · 번호 풍선·글자 기준' : ' · <b style="color:#b45309">번호 풍선·글자를 못 찾아 선 기준으로 찾음</b>';
-            return `열 ${r.cols.length}개 · 행 ${r.rows.length}개 후보${how}${named}${r.weak ? ' · <b style="color:#b45309">확실하지 않음(긴 실선만 찾음)</b>' : ''}`;
+            return `열 ${r.cols.length}개 · 행 ${r.rows.length}개 후보${how}${named}${seriesNote}${r.weak ? ' · <b style="color:#b45309">확실하지 않음(긴 실선만 찾음)</b>' : ''}`;
         })() : '';
         const autoHtml = `
                 <div class="grid-panel-sec">
@@ -43375,6 +43383,9 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
                         <b>그룹 전체 (${(selF.group.lines || []).length}개)</b>
                         ${[-50, -10, -1, 1, 10, 50].map((d) => `<button type="button" data-act="nudgeGroup" data-d="${d}">${selF.group.axis === 'row' ? (d < 0 ? '▲' : '▼') : (d < 0 ? '◀' : '▶')}${Math.abs(d)}</button>`).join('')}
                     </div>
+                    <div class="grid-panel-row" title="증축 등으로 번호 체계가 바뀔 때(A~D 다음 1~4, X1~ 다음 A1~): 이 선과 그 뒤쪽 선(열은 오른쪽, 행은 아래쪽)을 새 그룹으로 나눕니다. 새 그룹은 머리글·시작 번호·번호 방식을 따로 정할 수 있습니다">
+                        <button type="button" data-act="splitGroup">여기부터 새 그룹으로 (번호 체계 바꾸기)</button>
+                    </div>
                     <div class="grid-panel-row">
                         <label>폭 <input type="number" data-f="lband" value="${selF.line.band != null ? selF.line.band : ''}" placeholder="기본 ${Math.round(lineBandDefault)}" min="0" step="1" style="width:64px"></label>
                     </div>
@@ -43488,6 +43499,30 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
             G.renumberBySpatialOrder(eg, gctx);
             gridChanged();
             window.showToast?.('위치 순서로 번호를 다시 매겼습니다.', 'success', 2000);
+            return;
+        }
+        if (act === 'splitGroup' && selF) {
+            const src = selF.group;
+            const items = G.orderedLines(src, gctx).items; // 화면 위치 순서
+            const at = items.findIndex((it) => it.line.id === selF.line.id);
+            if (at < 0) return;
+            if (at === 0) { window.showToast?.('맨 앞 선은 나눌 수 없습니다. 새 번호 체계가 시작되는 선을 골라 주세요.', 'info', 3000); return; }
+            const moving = items.slice(at).map((it) => it.line);
+            const same = grid.groups.filter((g) => g.axis === src.axis && (g.zoneId || null) === (src.zoneId || null)).length;
+            const ng = G.createGroup(src.axis, {
+                prefix: `${String.fromCharCode(65 + same)}${G.DEFAULT_PREFIX[src.axis]}`, // 예: AX — 머리글에서 바꿔 쓰세요
+                start: 1, angle: src.angle, band: src.band, zoneId: src.zoneId || ''
+            });
+            const ids = new Set(moving.map((l) => l.id));
+            src.lines = src.lines.filter((l) => !ids.has(l.id));
+            // 옮긴 선은 그은 순서(번호)를 위치 순서로 새로 매김 — 직접 준 이름(label)은 그대로 가져감
+            moving.forEach((l) => { delete l.seq; G.addLineToGroup(ng, l); });
+            G.renumberBySpatialOrder(ng, gctx);
+            grid.groups.push(ng);
+            ge.activeGroup[src.axis] = ng.id;
+            ge.editGroupId = ng.id;
+            gridChanged();
+            window.showToast?.(`선 ${moving.length}개를 새 그룹으로 나눴습니다. 위 「머리글」·「시작 번호」·「번호」에서 새 번호 체계를 정하세요(예: A, 시작 1, 숫자 → A1, A2…).`, 'success', 6500);
             return;
         }
         if (act === 'bulkNames' && eg) {

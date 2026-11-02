@@ -403,6 +403,49 @@ assert.strictEqual(D.labelOrder('Y\u20323'), 3);
     assert.deepStrictEqual(D.detect(d2, dims).rows.map((l) => l.label), names);
 }
 
+// 18) ★ 증축으로 번호 체계가 바뀌는 도면: A~D 다음 1~4 / X1~X3 다음 A1~A3 / Y'1~Y'3 다음 Y1~Y3 — 한 줄로 알아보고 계열별 그룹
+assert.deepStrictEqual(['A', 'B', 'X1', 'X2', '1', '2', "Y'1", 'Y1', '', 'Z'].map((x) => D.labelClass(x)), ['L', 'L', 'X#', 'X#', '#', '#', "Y'#", 'Y#', '', 'L']);
+assert.deepStrictEqual(D.seriesIndexes(['A', 'B', 'C', 'D', '1', '2', '3', '4']), [0, 0, 0, 0, 1, 1, 1, 1]);
+assert.deepStrictEqual(D.seriesIndexes(['X1', 'X2', 'X3', 'A1', 'A2', 'A3']), [0, 0, 0, 1, 1, 1]);
+assert.deepStrictEqual(D.seriesIndexes(["Y'1", "Y'2", 'Y1', 'Y2']), [0, 0, 1, 1]);
+assert.deepStrictEqual(D.seriesIndexes(['A', '', 'B']), [0, 0, 0], '글자 없는 칸은 앞 계열');
+{
+    const mixed = (names) => {
+        const d = { segments: [[10, 10, 10, H - 10]], small: [], texts: [] };
+        const ys = names.map((_, i) => 200 + i * 300);
+        names.forEach((nm, i) => {
+            d.small.push(...circlePoly(215, ys[i], 48));
+            d.texts.push(D.textFromItem(rotatedItem(nm, 215, ys[i], 90, 30, 26), convert));
+        });
+        return D.detect(d, dims);
+    };
+    let rr = mixed(['A', 'B', 'C', 'D', '1', '2', '3', '4']);
+    assert.strictEqual(rr.source, 'markers');
+    assert.deepStrictEqual(rr.rows.map((l) => l.label), ['A', 'B', 'C', 'D', '1', '2', '3', '4'], 'A~D 다음 1~4도 번호 줄');
+    assert.deepStrictEqual(rr.rows.map((l) => l.series), [0, 0, 0, 0, 1, 1, 1, 1]);
+    assert.strictEqual(rr.seriesCount.rows, 2);
+    rr = mixed(['X1', 'X2', 'X3', 'A1', 'A2', 'A3']);
+    assert.deepStrictEqual(rr.rows.map((l) => l.series), [0, 0, 0, 1, 1, 1], 'X1~ 다음 A1~');
+    // 계열이 두 줄뿐이라도(1,2 다음 A,B) 번호 줄
+    rr = mixed(['1', '2', 'A', 'B']);
+    assert.deepStrictEqual(rr.rows.map((l) => l.series), [0, 0, 1, 1]);
+    // 한 계열이면 그룹 하나
+    rr = mixed(['A', 'B', 'C']);
+    assert.strictEqual(rr.seriesCount.rows, 1);
+    // 번호가 뒤죽박죽(계열이 자주 바뀜)이면 번호 줄이 아니다
+    rr = mixed(['A', '3', 'B', '7', 'C']);
+    assert.ok(rr.source !== 'markers' || !rr.rows.length || rr.rows.every((l) => l.label === ''), '자주 바뀌는 줄은 안 씀');
+}
+// 계열마다 선 길이를 따로 맞춘다(증축동 범위가 달라도)
+{
+    const lines = [
+        { pos: 100, a0: 0, a1: 1000, label: 'A' }, { pos: 200, a0: 0, a1: 1000, label: 'B' },
+        { pos: 300, a0: 500, a1: 2000, label: '1' }, { pos: 400, a0: 500, a1: 2000, label: '2' }
+    ];
+    // finishLines는 내부 함수 — detect를 거쳐 확인(위 mixed 도면은 모두 같은 범위). 여기서는 계열 수만 본다.
+    assert.strictEqual(new Set(D.seriesIndexes(lines.map((l) => l.label))).size, 2);
+}
+
 // 9) 앱 연결: 모듈 로드(app.js보다 먼저) · 스냅 엔진이 자료를 내준다 · 패널 버튼
 const idx = fs.readFileSync(path.join(__dirname, '..', 'index.html'), 'utf8');
 assert.ok(idx.includes('js/shared/grid-auto-detect.js'));
@@ -429,4 +472,6 @@ assert.ok(app.includes("(act === 'nudge' || act === 'nudgeGroup') && selF"));
 }
 // 앱: 이름 한꺼번에(글자를 못 읽는 도면용)
 assert.ok(app.includes('data-act="bulkNames"') && app.includes("act === 'bulkNames' && eg"));
+// 앱: 적용은 계열마다 그룹 / 「여기부터 새 그룹으로」
+assert.ok(app.includes('seriesKeys.forEach((sk) =>') && app.includes('data-act="splitGroup"') && app.includes("act === 'splitGroup' && selF"));
 console.log('test-grid-auto-detect: ok');
