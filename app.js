@@ -47076,7 +47076,10 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
         if (isGrade3OutsideDrawing(ownFc) || isGrade3OutsideDrawing(ctx && ctx.floorCode)) {
             if (detail) return detail;
             const own = (d && d._exteriorFloorCode) ? String(getDefectLocationFloorLabel(d._exteriorFloorCode) || '') : '';
-            return own || label;
+            const fallback = own || label;
+            // 2026-11-02 한글(HWPX) 3종: 부대시설 도면에 상세 위치를 안 적었으면 위치 칸에 「외부」(사용자). 화면·엑셀·PDF는 예전 그대로
+            if (ctx && ctx.hwpxUnits && /부대시설/.test(fallback)) return '외부';
+            return fallback;
         }
         if (!detail || detail === label) return label;
         // 상세 위치에 이미 층이 적혀 있으면(「지하1층 기계실」 등) 층을 또 붙이지 않는다
