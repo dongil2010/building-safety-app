@@ -106,6 +106,48 @@
     return out.map(s => [s[0], s[1], s[2], s[3]]);
   }
 
+  /**
+   * 2026-11-02 행·열 자동 잡기용 자료 — 스냅 선분(상한 8000)과 따로, 수직·수평 선분 전부와 작은 선분(축 번호 모양)을 모은다.
+   * 좌표는 스냅과 같은 viewport 픽셀 좌표(= 핀·행열 선 좌표계).
+   */
+  function buildDetectData(raw, viewport) {
+    const L = Math.max(viewport.width, viewport.height, 1);
+    const smallMax = L * 0.04;
+    const segments = [];
+    const small = [];
+    for (const s of raw) {
+      const p1 = viewport.convertToViewportPoint(s[0], s[1]);
+      const p2 = viewport.convertToViewportPoint(s[2], s[3]);
+      const dx = p2[0] - p1[0], dy = p2[1] - p1[1];
+      const len = Math.sqrt(dx * dx + dy * dy);
+      if (len < 2) continue;
+      const ax = Math.abs(dx), ay = Math.abs(dy);
+      if ((ax <= ay * 0.02 || ay <= ax * 0.02) && segments.length < 80000) segments.push([p1[0], p1[1], p2[0], p2[1]]);
+      if (len <= smallMax && small.length < 60000) small.push([p1[0], p1[1], p2[0], p2[1]]);
+    }
+    return { segments, small, texts: [] };
+  }
+
+  /** PDF 글자(있으면) → viewport 픽셀 좌표의 가운데. CAD 글자가 선으로 그려진 PDF는 글자가 없다(그땐 작은 선 모양으로 판정) */
+  async function readTexts(page, viewport) {
+    const out = [];
+    try {
+      const tc = await page.getTextContent();
+      for (const it of (tc.items || [])) {
+        const str = String(it.str || '').trim();
+        if (!str || !it.transform) continue;
+        const tr = it.transform;
+        const len = Math.hypot(tr[0], tr[1]) || 1;
+        const w = Number(it.width) || 0;
+        const p0 = viewport.convertToViewportPoint(tr[4], tr[5]);
+        const p1 = viewport.convertToViewportPoint(tr[4] + (tr[0] / len) * w, tr[5] + (tr[1] / len) * w);
+        out.push({ str, x: (p0[0] + p1[0]) / 2, y: (p0[1] + p1[1]) / 2 });
+        if (out.length >= 20000) break;
+      }
+    } catch (_e) { /* 글자 없이도 동작 */ }
+    return out;
+  }
+
   function buildGrid(segments) {
     const grid = new Map();
     segments.forEach((s, i) => {
@@ -154,6 +196,10 @@
         const raw = extractSegments(opList, viewport, pdfjsLib.OPS);
         const segments = filterAndTransform(raw, viewport);
         entry.segments = segments;
+        try {
+          entry.detect = buildDetectData(raw, viewport);
+          entry.detect.texts = await readTexts(page, viewport);
+        } catch (_e) { entry.detect = null; }
         entry.grid = buildGrid(segments);
         entry.w = Math.round(viewport.width);
         entry.h = Math.round(viewport.height);
@@ -247,5 +293,12 @@
     return best ? { x: best.x, y: best.y, type: best.type } : null;
   }
 
-  window.BSA_PDF_SNAP = { ensureGeometry, isReady, snap };
+  /** 행·열 자동 잡기 자료: { segments, small, texts, w, h } 또는 null(캐드 PDF 원본이 없거나 아직 못 읽음) */
+  function getDetectionData(bldgId, floorCode) {
+    const entry = cache.get(bldgId + '_' + floorCode);
+    if (!entry || entry.status !== 'ready' || !entry.detect) return null;
+    return { segments: entry.detect.segments, small: entry.detect.small, texts: entry.detect.texts, w: entry.w, h: entry.h };
+  }
+
+  window.BSA_PDF_SNAP = { ensureGeometry, isReady, snap, getDetectionData };
 })();

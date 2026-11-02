@@ -42653,6 +42653,7 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
         // 구역 사각형(설정 중에만) — 선보다 먼저(아래)
         const zoneDraft = (ge.drag && ge.drag.kind === 'zoneNew' && ge.drag.moved && ge.drag.cur) ? ge.drag : null;
         if (zoneDraft || (grid && (grid.zones || []).length)) drawGridZones(ctx, grid, zoneDraft);
+        drawGridAutoPreview(ctx);
         if (!grid || !gridHasLines(grid)) return;
         const gctx = { rot: state.rotationAngle || 0, w: imgW, h: imgH };
         const s = state.view.scale || 1;
@@ -42730,6 +42731,150 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
             });
         });
         ctx.restore();
+    }
+
+    // ---- 2026-11-02 자동 잡기 ----
+    const GRID_AUTO_SENS = { normal: 0.30, short: 0.18, long: 0.50 };
+
+    /** 후보 → 화면 방향 기준 { col: [{pts,label}], row: [...] } (화면이 90·270° 돌아 있으면 수직선은 행, 수평선은 열) */
+    function gridAutoCandidatesByAxis(ap) {
+        const rot = ((Number(ap.rot) || 0) % 360 + 360) % 360;
+        const swap = rot === 90 || rot === 270;
+        const vert = ap.res.cols.map((l) => ({ pts: [{ x: l.x, y: l.y1 }, { x: l.x, y: l.y2 }], label: l.label || '' }));
+        const horz = ap.res.rows.map((l) => ({ pts: [{ x: l.x1, y: l.y }, { x: l.x2, y: l.y }], label: l.label || '' }));
+        const labelled = ap.res.labelled || {};
+        return swap
+            ? { col: horz, row: vert, labelled: { col: !!labelled.rows, row: !!labelled.cols } }
+            : { col: vert, row: horz, labelled: { col: !!labelled.cols, row: !!labelled.rows } };
+    }
+
+    function drawGridAutoPreview(ctx) {
+        const ge = window.BSA_gridEdit;
+        const ap = ge && ge.autoPreview;
+        if (!ap || ap.key !== getGridFloorKey()) return;
+        const s = state.view.scale || 1;
+        const rotRad = ((state.rotationAngle || 0) * Math.PI) / 180;
+        const by = gridAutoCandidatesByAxis(ap);
+        ctx.save();
+        ['col', 'row'].forEach((axis) => {
+            by[axis].forEach((c, i) => {
+                const a = c.pts[0];
+                const b = c.pts[1];
+                ctx.setLineDash([12 / s, 6 / s]);
+                ctx.lineCap = 'butt';
+                ctx.strokeStyle = '#ea580c';
+                ctx.lineWidth = 2.2 / s;
+                ctx.beginPath();
+                ctx.moveTo(a.x, a.y);
+                ctx.lineTo(b.x, b.y);
+                ctx.stroke();
+                ctx.setLineDash([]);
+                const text = c.label || '';
+                if (!text) return;
+                const fontPx = 12 / s;
+                ctx.font = `700 ${fontPx}px "Pretendard", "Malgun Gothic", sans-serif`;
+                const r = Math.max(10 / s, ctx.measureText(text).width / 2 + 4 / s);
+                [a, b].forEach((p) => {
+                    ctx.beginPath();
+                    ctx.arc(p.x, p.y, r, 0, Math.PI * 2);
+                    ctx.fillStyle = 'rgba(255, 247, 237, 0.95)';
+                    ctx.fill();
+                    ctx.strokeStyle = '#ea580c';
+                    ctx.lineWidth = 1.4 / s;
+                    ctx.stroke();
+                    ctx.save();
+                    ctx.translate(p.x, p.y);
+                    ctx.rotate(-rotRad);
+                    ctx.fillStyle = '#c2410c';
+                    ctx.textAlign = 'center';
+                    ctx.textBaseline = 'middle';
+                    ctx.fillText(text, 0, 0);
+                    ctx.restore();
+                });
+            });
+        });
+        ctx.restore();
+    }
+
+    async function gridAutoDetect() {
+        const ge = gridEditState();
+        const D = window.BSA && window.BSA.gridAutoDetect;
+        const snapApi = window.BSA_PDF_SNAP;
+        if (!D || !snapApi || typeof snapApi.getDetectionData !== 'function') {
+            window.showToast?.('자동 잡기 모듈을 불러오지 못했습니다. Ctrl+F5로 새로고침해 주세요.', 'error', 3000);
+            return;
+        }
+        const bldg = state.currentBuilding;
+        const fc = state.currentFloor;
+        if (!bldg || !fc || !state.bgImage) {
+            window.showToast?.('도면이 있는 층에서 쓸 수 있습니다.', 'info', 2000);
+            return;
+        }
+        window.showToast?.('도면에서 통심선을 찾는 중입니다…', 'info', 1500);
+        try { await ensureFloorPlanRefForPdf(bldg, fc); } catch (_e) { /* 아래에서 자료가 없으면 안내 */ }
+        const data = snapApi.getDetectionData(bldg.id, fc);
+        if (!data) {
+            window.showToast?.('이 층은 캐드 PDF 원본이 없어 자동으로 못 잡습니다(그림 도면). 직접 그어 주세요.', 'warning', 4500);
+            return;
+        }
+        const dims = getGridReliableDims() || { w: data.w, h: data.h };
+        const res = D.detect(
+            { segments: data.segments, small: data.small, texts: data.texts },
+            dims,
+            { minSpanFrac: GRID_AUTO_SENS[ge.autoSens || 'normal'] || GRID_AUTO_SENS.normal }
+        );
+        if (!res.cols.length && !res.rows.length) {
+            ge.autoPreview = null;
+            renderGridPanel();
+            drawCanvas();
+            window.showToast?.('통심선 후보를 못 찾았습니다. 민감도를 「짧은 선도」로 바꿔 다시 눌러 보거나 직접 그어 주세요.', 'warning', 5000);
+            return;
+        }
+        ge.autoPreview = { key: getGridFloorKey(), res, dims, rot: state.rotationAngle || 0 };
+        renderGridPanel();
+        drawCanvas();
+        window.showToast?.(`열 ${res.cols.length}개 · 행 ${res.rows.length}개 후보를 찾았습니다. 주황 점선이 맞으면 「적용」을 누르세요.`, 'success', 4500);
+    }
+
+    async function gridAutoApply() {
+        const ge = gridEditState();
+        const G = gridLib();
+        const ap = ge.autoPreview;
+        if (!G || !ap || ap.key !== getGridFloorKey()) return;
+        const grid = getCurrentFloorGrid(true);
+        const gctx = getGridCtx();
+        const by = gridAutoCandidatesByAxis(ap);
+        // 이미 그은 선이 있는 축은 지우지 않고 새 그룹으로 붙인다(겹치면 「그룹 삭제」로 지움)
+        const existing = ['col', 'row'].reduce((n, ax) => n + grid.groups.filter((g) => g.axis === ax && !g.zoneId).reduce((m, g) => m + (g.lines || []).length, 0), 0);
+        if (existing > 0 && !await window.appConfirm(`이 층에 이미 행·열 선 ${existing}개가 있습니다.\n기존 선은 그대로 두고 자동으로 잡은 선을 새 그룹으로 추가할까요?\n(겹치면 그룹을 골라 「그룹 삭제」로 지울 수 있습니다)`)) return;
+        let added = 0;
+        ['col', 'row'].forEach((axis) => {
+            const items = by[axis];
+            if (!items.length) return;
+            const labelled = !!by.labelled[axis];
+            const same = grid.groups.filter((g) => g.axis === axis && !g.zoneId).length;
+            const base = G.DEFAULT_PREFIX[axis];
+            const g = G.createGroup(axis, {
+                // 도면 축 번호를 이름으로 쓰면 머리글 없이(도면 표기 그대로), 아니면 X·Y(둘째 그룹부터 AX·BX…)
+                prefix: labelled ? '' : (same ? `${String.fromCharCode(65 + same)}${base}` : base),
+                band: G.defaultBand(gctx.w, gctx.h)
+            });
+            items.forEach((c) => {
+                const ln = { id: `gl_${Date.now().toString(36)}${Math.random().toString(36).slice(2, 7)}`, pts: c.pts.map((p) => ({ x: p.x, y: p.y })) };
+                if (labelled && c.label) ln.label = c.label;
+                G.addLineToGroup(g, ln);
+                added++;
+            });
+            G.renumberBySpatialOrder(g, gctx); // 화면 기준 왼→오른 / 위→아래 번호
+            grid.groups.push(g);
+            ge.activeGroup[axis] = g.id;
+            ge.editGroupId = g.id;
+        });
+        ge.autoPreview = null;
+        ge.sel = null;
+        ge.zoneId = null;
+        gridChanged();
+        window.showToast?.(`행·열 선 ${added}개를 적용했습니다. 틀린 선은 눌러서 지우거나 옮기세요. 이미 넣은 마킹 위치는 「이 층 마킹에 위치 채우기」로 맞춥니다.`, 'success', 5500);
     }
 
     // ---- 편집: 누르기 · 끌기 ----
@@ -43099,6 +43244,32 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
                 ? '선을 눌러 고르고 끌어서 옮기세요. 끝점을 끌면 기울어집니다. 빈 곳을 끌면 화면 이동.'
                 : `도면을 누르면 ${ge.tool === 'row' ? '가로 행(Y)' : '세로 열(X)'} 선이 생깁니다(먼저 그은 선이 작은 번호). 있는 선·끝점은 끌어서 옮기고, 빈 곳을 끌면 화면 이동.`);
         const lineBandDefault = selF ? G.lineBand({}, selF.group, gctx) : 0;
+        // 2026-11-02 자동 잡기: 캐드 PDF의 통심선·축 번호를 찾아 후보를 보여 주고, 맞으면 적용
+        const autoPrev = (ge.autoPreview && ge.autoPreview.key === getGridFloorKey()) ? ge.autoPreview : null;
+        const autoSens = ge.autoSens || 'normal';
+        const autoSummary = autoPrev ? (() => {
+            const r = autoPrev.res;
+            const named = (r.labelled && (r.labelled.cols || r.labelled.rows)) ? ' · 도면 축 번호를 이름으로' : ' · 이름은 자동 번호';
+            return `열 ${r.cols.length}개 · 행 ${r.rows.length}개 후보${named}${r.weak ? ' · <b style="color:#b45309">확실하지 않음(긴 실선만 찾음)</b>' : ''}`;
+        })() : '';
+        const autoHtml = `
+                <div class="grid-panel-sec">
+                    <div class="grid-panel-row"><b>자동 잡기</b> <small class="grid-panel-muted">캐드 PDF의 통심선·축 번호를 찾아 후보로 보여 줍니다</small></div>
+                    <div class="grid-panel-row">
+                        <label>민감도 <select data-f="autoSens" title="짧은 선도 후보에 넣으려면 「짧은 선도」, 벽선이 섞이면 「긴 선만」">
+                            <option value="normal"${autoSens === 'normal' ? ' selected' : ''}>보통</option>
+                            <option value="short"${autoSens === 'short' ? ' selected' : ''}>짧은 선도</option>
+                            <option value="long"${autoSens === 'long' ? ' selected' : ''}>긴 선만</option>
+                        </select></label>
+                        <button type="button" data-act="autoDetect">✨ 자동 잡기</button>
+                    </div>
+                    ${autoPrev ? `
+                    <div class="grid-panel-row">${autoSummary}</div>
+                    <div class="grid-panel-row">
+                        <button type="button" data-act="autoApply" class="active">적용</button>
+                        <button type="button" data-act="autoCancel">취소</button>
+                    </div>` : ''}
+                </div>`;
         const vi = ge.sel ? ge.sel.vertexIndex : null;
         const canDelVertex = !!(selF && vi != null && vi > 0 && vi < selF.line.pts.length - 1);
         panel.classList.toggle('collapsed', !!ge.collapsed);
@@ -43118,6 +43289,7 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
                     <button type="button" data-tool="zone" class="${ge.tool === 'zone' ? 'active' : ''}" title="한 도면에 여러 층이 있을 때 — 사각형 구역마다 번호를 따로">▭ 구역</button>
                 </div>
                 <div class="grid-panel-hint">${hint}</div>
+                ${autoHtml}
                 <div class="grid-panel-sec">
                     <div class="grid-panel-row"><b>구역</b> <small class="grid-panel-muted">한 도면에 여러 층 — 구역마다 번호 따로</small></div>
                     <div class="grid-panel-row">
@@ -43241,6 +43413,9 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
         if (act === 'close') { setGridEditActive(false); return; }
         if (act === 'collapse') { ge.collapsed = !ge.collapsed; renderGridPanel(); return; }
         if (act === 'copyFloors') { openGridCopyModal(); return; }
+        if (act === 'autoDetect') { gridAutoDetect().catch((err) => { console.warn('[행열 자동 잡기]', err); window.showToast?.('자동 잡기에 실패했습니다.', 'error', 3000); }); return; }
+        if (act === 'autoApply') { await gridAutoApply(); return; }
+        if (act === 'autoCancel') { ge.autoPreview = null; renderGridPanel(); drawCanvas(); return; }
         if (act === 'zoneAdd') {
             ge.tool = 'zone';
             ge.zoneRedrawId = null;
@@ -43462,6 +43637,9 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
                     if (n != null) selF.line.num = n; else delete selF.line.num; // 비우거나 읽을 수 없으면 자동 번호
                 }
                 break;
+            case 'autoSens':
+                ge.autoSens = (el.value === 'short' || el.value === 'long') ? el.value : 'normal';
+                return;
             case 'langle': if (selF) G.setLineAngle(selF.line, selF.group.axis, Math.max(-89, Math.min(89, numOr(el.value, 0))), gctx); break;
             case 'lband':
                 if (selF) {
