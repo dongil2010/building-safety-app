@@ -9226,15 +9226,17 @@ ${roundMobile ? '' : `<button type="button" class="icon-btn icon-btn-trash" titl
                                 ? '<span class="edit-floor-drawing-badge">✓ 도면 · 눌러서 보기</span>'
                                 : '<span class="edit-floor-drawing-badge">눌러서 도면 불러오기</span>'}
                         </span>
+                        <span class="edit-floor-drawing-actions">
                         <button type="button" class="btn btn-sm btn-outline edit-floor-drawing-replace" data-floor-code="${safeCode}" title="이 층 도면을 새 파일로 바꾸기 — 파일 이름은 상관없음, 층 이름·결함은 그대로 (도면 저장을 눌러야 반영)">
                             <i class="fa-solid fa-arrow-right-arrow-left"></i> 파일로 교체
                         </button>
                         <button type="button" class="btn btn-sm btn-outline edit-floor-drawing-rename" data-floor-code="${safeCode}" title="층 이름 바꾸기 (도면·결함은 그대로)">
                             <i class="fa-solid fa-pen"></i> 이름
                         </button>
-                        <button type="button" class="btn btn-sm btn-outline edit-floor-drawing-delete" style="border-color:#ef4444; color:#ef4444; font-size:0.72rem; padding:0.1rem 0.4rem;" data-floor-code="${safeCode}">
+                        <button type="button" class="btn btn-sm btn-outline edit-floor-drawing-delete" style="border-color:#ef4444; color:#ef4444;" data-floor-code="${safeCode}">
                             <i class="fa-solid fa-trash"></i> 도면 삭제
                         </button>
+                        </span>
                     </div>
                 `;
                 });

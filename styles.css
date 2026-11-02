@@ -8124,9 +8124,21 @@ body.add-building-modal-open .app-content {
     row-gap: 0.35rem;
 }
 
-.edit-floor-drawing-row > .btn {
+/* 2026-11-02 윗줄: 층 칩·[기존 N] 층 이름·눌러서 도면 보기 / 아랫줄: 단추 3개(크기 모두 같게) */
+.edit-floor-drawing-actions {
+    flex: 0 0 100%;
+    display: flex;
+    flex-wrap: wrap;
+    gap: 0.35rem;
+}
+
+.edit-floor-drawing-actions > .btn {
     flex-shrink: 0;
     white-space: nowrap;
+    font-size: 0.72rem;
+    padding: 0.1rem 0.4rem;
+    margin: 0;
+    line-height: 1.5;
 }
 
 .edit-floor-drawing-meta {
