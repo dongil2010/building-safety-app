@@ -140,14 +140,135 @@
   }
 
   /**
+   * 2026-11-02 핀 번호(NO.12·B1-3 …) 글자를 글꼴 없이 선(획)으로 그린다.
+   * 예전엔 PDF 안 글꼴(Helvetica, 내장 안 함)로 써서, PDF 뷰어에서는 멀쩡해도 EMF 등으로 바꾸는 변환기가 글꼴을 못 찾아
+   * 글자가 윤곽선 조각·찌그러진 모양으로 깨졌다. 선으로 그리면 어떤 변환기에서도 선 그대로 남는다.
+   * 좌표: 글자 높이 100, 왼쪽 위가 (0,0), 획 하나 = 점 목록(숫자 0~9는 struct-glyphs.js romans와 같은 획).
+   */
+  const STROKE_FONT = (function () {
+    const G = {
+      '0': [[[24,0],[14,5],[5,19],[0,43],[0,57],[5,81],[14,95],[24,100],[33,100],[43,95],[52,81],[57,57],[57,43],[52,19],[43,5],[33,0],[24,0]]],
+      '1': [[[0,19],[10,14],[24,0],[24,100]]],
+      '2': [[[5,24],[5,19],[10,10],[14,5],[24,0],[38,0],[48,5],[52,10],[57,19],[57,29],[52,38],[43,52],[0,100],[62,100]]],
+      '3': [[[10,0],[57,0],[29,38],[43,38],[52,43],[57,48],[62,62],[62,71],[57,86],[48,95],[33,100],[24,100],[10,95],[5,90],[0,81]]],
+      '4': [[[43,0],[0,67],[62,67]],[[43,0],[43,100]]],
+      '5': [[[48,0],[10,0],[5,43],[10,38],[19,33],[33,33],[48,38],[52,48],[57,62],[57,71],[52,86],[48,95],[33,100],[19,100],[10,95],[5,90],[0,81]]],
+      '6': [[[52,14],[48,5],[33,0],[24,0],[14,5],[5,19],[0,43],[0,67],[5,86],[14,95],[24,100],[29,100],[43,95],[52,86],[52,71],[52,67],[52,52],[43,43],[29,38],[24,38],[14,43],[5,52],[0,67]]],
+      '7': [[[19,100],[62,0],[0,0]]],
+      '8': [[[24,0],[10,5],[5,14],[5,24],[10,33],[19,43],[38,52],[52,62],[57,71],[57,86],[52,95],[38,100],[19,100],[5,95],[0,86],[0,71],[5,62],[19,52],[38,43],[48,33],[52,24],[52,14],[48,5],[33,0],[24,0]]],
+      '9': [[[48,33],[43,48],[38,57],[24,62],[10,57],[5,48],[0,33],[0,29],[5,14],[10,5],[24,0],[38,5],[43,14],[48,33],[48,57],[43,81],[38,95],[24,100],[19,100],[5,95],[5,86]]],
+      A: [[[0,100],[30,0],[60,100]],[[10,66],[50,66]]],
+      B: [[[0,0],[0,100]],[[0,0],[36,0],[50,8],[54,22],[50,36],[36,46],[0,46]],[[0,46],[40,46],[56,56],[60,74],[56,90],[40,100],[0,100]]],
+      C: [[[56,18],[44,4],[30,0],[18,4],[6,18],[0,40],[0,60],[6,82],[18,96],[30,100],[44,96],[56,82]]],
+      D: [[[0,0],[0,100]],[[0,0],[28,0],[46,10],[58,30],[60,50],[58,70],[46,90],[28,100],[0,100]]],
+      E: [[[56,0],[0,0],[0,100],[56,100]],[[0,50],[40,50]]],
+      F: [[[56,0],[0,0],[0,100]],[[0,50],[40,50]]],
+      G: [[[56,18],[44,4],[30,0],[18,4],[6,18],[0,40],[0,60],[6,82],[18,96],[30,100],[44,96],[56,82],[56,56],[34,56]]],
+      H: [[[0,0],[0,100]],[[56,0],[56,100]],[[0,50],[56,50]]],
+      I: [[[8,0],[8,100]]],
+      J: [[[40,0],[40,76],[34,92],[22,100],[10,96],[2,82]]],
+      K: [[[0,0],[0,100]],[[56,0],[2,56]],[[18,40],[56,100]]],
+      L: [[[0,0],[0,100],[50,100]]],
+      M: [[[0,100],[0,0],[30,60],[60,0],[60,100]]],
+      N: [[[0,100],[0,0],[56,100],[56,0]]],
+      O: [[[34,0],[17,6],[5,22],[0,50],[5,78],[17,94],[34,100],[51,94],[63,78],[68,50],[63,22],[51,6],[34,0]]], // 숫자 0보다 넓게(NO.와 N0. 구분)
+      P: [[[0,100],[0,0],[36,0],[50,6],[56,20],[50,34],[36,42],[0,42]]],
+      Q: [[[34,0],[17,6],[5,22],[0,50],[5,78],[17,94],[34,100],[51,94],[63,78],[68,50],[63,22],[51,6],[34,0]],[[40,74],[68,102]]],
+      R: [[[0,100],[0,0],[36,0],[50,6],[56,20],[50,34],[36,42],[0,42]],[[28,42],[56,100]]],
+      S: [[[56,14],[46,5],[34,0],[22,0],[10,5],[2,14],[2,24],[8,33],[16,38],[40,50],[50,57],[56,66],[56,82],[48,94],[34,100],[22,100],[10,94],[0,84]]],
+      T: [[[0,0],[60,0]],[[30,0],[30,100]]],
+      U: [[[0,0],[0,70],[6,90],[18,100],[38,100],[50,90],[56,70],[56,0]]],
+      V: [[[0,0],[28,100],[56,0]]],
+      W: [[[0,0],[16,100],[32,40],[48,100],[64,0]]],
+      X: [[[0,0],[56,100]],[[0,100],[56,0]]],
+      Y: [[[0,0],[28,48],[56,0]],[[28,48],[28,100]]],
+      Z: [[[0,0],[56,0],[0,100],[56,100]]],
+      '.': [[[2,92],[2,100]]],
+      ',': [[[3,92],[3,100],[0,108]]],
+      '-': [[[0,55],[30,55]]],
+      '_': [[[0,104],[50,104]]],
+      '/': [[[0,100],[30,0]]],
+      ':': [[[2,32],[2,40]],[[2,92],[2,100]]],
+      '?': [[[0,24],[4,10],[16,2],[28,2],[40,10],[44,24],[40,38],[22,50],[22,66]],[[22,88],[22,96]]],
+      '(': [[[16,-6],[6,20],[2,50],[6,80],[16,106]]],
+      ')': [[[0,-6],[10,20],[14,50],[10,80],[0,106]]]
+    };
+    const out = {};
+    Object.keys(G).forEach((ch) => {
+      let w = 0;
+      G[ch].forEach((s) => s.forEach((p) => { if (p[0] > w) w = p[0]; }));
+      out[ch] = { strokes: G[ch], w: w };
+    });
+    return out;
+  })();
+  const STROKE_GAP = 20;     // 글자 사이
+  const STROKE_SPACE = 40;   // 띄어쓰기
+
+  /** 글자 → 선 글자 배치. 선 글꼴에 없는 글자가 있으면 null(Helvetica 글자로 대신) */
+  function strokeTextLayout(text) {
+    const chars = Array.from(String(text || '').toUpperCase());
+    const glyphs = [];
+    let x = 0;
+    for (let i = 0; i < chars.length; i++) {
+      const ch = chars[i];
+      if (ch === ' ') { x += STROKE_SPACE; continue; }
+      const g = STROKE_FONT[ch];
+      if (!g) return null;
+      glyphs.push({ ch: ch, x: x, strokes: g.strokes });
+      x += g.w + STROKE_GAP;
+    }
+    if (!glyphs.length) return null;
+    return { glyphs: glyphs, width: x - STROKE_GAP };
+  }
+
+  /** 선(획)으로 가운데 정렬해 그린다. 그렸으면 true */
+  function drawPdfStrokeText(page, text, cx, cy, size, color) {
+    const lay = strokeTextLayout(text);
+    if (!lay) return false;
+    const capH = size * 0.72;
+    const k = capH / 100;
+    const x0 = cx - (lay.width * k) / 2;
+    const yTop = cy + capH / 2;
+    const thickness = Math.max(0.2, size * 0.1);
+    const cap = (PDFLib.LineCapStyle && PDFLib.LineCapStyle.Round !== undefined) ? PDFLib.LineCapStyle.Round : undefined;
+    lay.glyphs.forEach((g) => {
+      g.strokes.forEach((stroke) => {
+        for (let i = 1; i < stroke.length; i++) {
+          const a = stroke[i - 1];
+          const b = stroke[i];
+          const seg = {
+            start: { x: x0 + (g.x + a[0]) * k, y: yTop - a[1] * k },
+            end: { x: x0 + (g.x + b[0]) * k, y: yTop - b[1] * k },
+            thickness: thickness,
+            color: color
+          };
+          if (cap !== undefined) seg.lineCap = cap;
+          page.drawLine(seg);
+        }
+      });
+    });
+    return true;
+  }
+
+  // (테스트가 쓰도록 노출: 배치·글꼴·그리기·가운데 정렬 글자·원본 그래픽 상태 격리)
+  window.BSA_PDF_VECTOR.strokeText = {
+    layout: strokeTextLayout,
+    font: STROKE_FONT,
+    draw: drawPdfStrokeText,
+    drawCentered: drawPdfCenteredText,
+    isolate: isolatePageGraphicsState
+  };
+
+  /**
    * 한글 등은 StandardFonts로 인코딩 불가 → 캔버스 래스터를 PNG로 임베드.
-   * ASCII(핀 번호 등)는 Helvetica 벡터 텍스트 유지.
+   * ASCII(핀 번호 등)는 선 글자(글꼴 없음)로, 선 글꼴에 없는 글자만 Helvetica 벡터 텍스트.
    */
   async function drawPdfCenteredText(page, pdfDoc, font, text, cx, cy, size, color) {
     const t = String(text || '');
     if (!t || !(size > 0)) return;
 
     if (!needsRasterText(t)) {
+      if (window.BSA_PDF_VECTOR.textAsPaths !== false && drawPdfStrokeText(page, t, cx, cy, size, color)) return;
       const tw = font.widthOfTextAtSize(t, size);
       page.drawText(t, {
         x: cx - tw / 2,
@@ -566,6 +687,27 @@
     };
   };
 
+  /**
+   * 원본 페이지 내용 앞에 q, 뒤에 Q를 두어 원본이 남긴 그래픽 상태가 새 마킹에 이어지지 않게 한다.
+   * 원본에 짝 안 맞는 q/Q가 있어도 우리 q/Q가 감싸므로 마킹은 늘 기본 상태에서 시작한다. 실패해도 출력은 그대로 진행.
+   */
+  function isolatePageGraphicsState(pdfDoc, page) {
+    try {
+      if (!PDFLib || !page || !page.node) return false;
+      const node = page.node;
+      if (typeof node.normalize === 'function') node.normalize();
+      const contents = node.Contents();
+      if (!contents || typeof contents.insert !== 'function') return false;
+      const qRef = pdfDoc.context.register(pdfDoc.context.stream('q\n'));
+      contents.insert(0, qRef);
+      page.pushOperators(PDFLib.popGraphicsState());
+      return true;
+    } catch (e) {
+      console.warn('[BSA_PDF_VECTOR] 원본 그래픽 상태 격리 실패(그대로 진행)', e);
+      return false;
+    }
+  }
+
   window.exportFloorPlanVectorPdf = async function (pdfDataUrl, defects, imgW, imgH, options) {
     if (typeof PDFLib === 'undefined') {
       throw new Error('pdf-lib가 로드되지 않았습니다.');
@@ -578,6 +720,8 @@
     const { PDFDocument, rgb, StandardFonts } = PDFLib;
     const outDoc = await PDFDocument.load(bytes);
     const page = outDoc.getPages()[0];
+    // 2026-11-02 원본(캐드) PDF가 그림을 그린 뒤 남긴 그리기 상태(선 모양·점선·글자 모드 …)가 덧그리는 마킹에 새지 않게 q … Q로 가둔다
+    isolatePageGraphicsState(outDoc, page);
     // 2026-10-30 페이지 회전(/Rotate 90·180·270)·자르기 상자 원점 반영.
     // 마킹 좌표는 pdf.js가 회전까지 적용해 그린 그림 기준인데, pdf-lib는 회전 전 좌표계에 그려서
     // /Rotate 180 도면은 마킹이 180° 돌아 나왔다 → 화면에 보이는 좌표계로 cm 행렬을 한 번 깔고 그린다.
