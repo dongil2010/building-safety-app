@@ -178,6 +178,14 @@
         return r.bottom + appliedPanelLift();
     }
 
+    /** 창(시트) 위 끝 ? 들어올리기 전 위치(px). 잴 수 없으면 null */
+    function panelUnliftedTop(panel) {
+        if (!panel || typeof panel.getBoundingClientRect !== 'function') return null;
+        var r = panel.getBoundingClientRect();
+        if (!r || !isFinite(r.top) || !(r.bottom > r.top)) return null;
+        return r.top + appliedPanelLift();
+    }
+
     function isDefectDrawerPanel(panel) {
         return !!(panel && panel.closest && panel.closest('#defectModal') && !isNdtDrawerPanel(panel));
     }
@@ -225,8 +233,16 @@
                 // (예전 0.85배 고정 → 버튼줄이 키보드에 걸려 중간에 멈춘 것처럼 보였다)
                 // 아래에 붙은 시트는 키보드 높이만큼, 위에서부터 꽉 찬 옆 패널은 CSS로 키보드 위 높이로 줄어 거의 0.
                 var cardBottom = panelUnliftedBottom(state.panel);
-                if (cardBottom != null) lift = Math.max(lift, Math.ceil(cardBottom - (box.top + box.height)));
-                else lift = Math.max(lift, Math.round(state.keyboardH * 0.85));
+                if (cardBottom != null) {
+                    // 2026-11-02 창은 CSS가 키보드 위 높이로 줄어 있으므로(applyLift가 키보드 높이를 창에 넘김) 칸이 보이게 하는 건
+                    // 창 안 스크롤이 맡고, 창 자체는 「아래 끝이 키보드 바로 위」까지만 올린다. 칸 위치로 더 올리면 창 위쪽(상세위치 칸 등)이 화면 밖으로 나간다.
+                    lift = Math.max(0, Math.ceil(cardBottom - (box.top + box.height)));
+                    // 창 위쪽이 화면 밖으로 나가지 않게(줄어들기 전 값으로 잴 때도) — 위쪽 여백 4px까지만
+                    var cardTop = panelUnliftedTop(state.panel);
+                    if (cardTop != null) lift = Math.min(lift, Math.max(0, Math.floor(cardTop - (box.top + 4))));
+                } else {
+                    lift = Math.max(lift, Math.round(state.keyboardH * 0.85));
+                }
             }
         } else if (!state.panel && state.keyboardH > 72) {
             // 페이지 본문 입력: 화면 전체를 일부 밀어 올림
@@ -277,7 +293,8 @@
         var body = defectBodyOf(field);
         if (!body) return;
         if (state.keyboardH > 72) {
-            body.style.setProperty('padding-bottom', (state.keyboardH + 24) + 'px', 'important');
+            // 2026-11-02 창이 키보드 위 높이로 줄어들므로 키보드 높이만큼 여백을 또 줄 필요가 없다(예전엔 창이 그대로여서 필요했음)
+            body.style.setProperty('padding-bottom', '24px', 'important');
             body.setAttribute('data-bsa-kb-pad', '1');
         } else if (body.hasAttribute('data-bsa-kb-pad')) {
             body.style.removeProperty('padding-bottom');
@@ -317,6 +334,13 @@
         if (state.panel) {
             state.panel.style.setProperty('--bsa-kb-lift', lift + 'px');
             state.panel.classList.toggle('bsa-kb-lifted', lift > 0 || state.keyboardH > 72);
+            // 2026-11-02 결함 수정창: CSS의 「키보드 위 높이로 줄이기」(max-height)가 쓰는 값을 창에 직접 넘긴다.
+            // styles.css가 body.bsa-keyboard-open에서 --bsa-kb-height를 0으로 다시 정해 두어, 루트에 넣은 값이 body 아래에서는 0으로 보였다
+            // (그래서 창이 줄지 않고 통째로 위로만 밀려 상세위치 칸이 화면 밖으로 나갔다). 키보드가 내려가면 clearLift가 지워 원래 높이로 돌아온다.
+            if (isDefectDrawerPanel(state.panel)) {
+                state.panel.style.setProperty('--bsa-kb-height', state.keyboardH + 'px');
+                state.panel.style.setProperty('--bsa-kb-inner-h', Math.round(window.innerHeight || 0) + 'px');
+            }
         }
         syncDockFollow(lift);
     }
@@ -361,6 +385,8 @@
         if (state.panel) {
             state.panel.classList.remove('bsa-kb-lifted');
             state.panel.style.removeProperty('--bsa-kb-lift');
+            state.panel.style.removeProperty('--bsa-kb-height');
+            state.panel.style.removeProperty('--bsa-kb-inner-h');
         }
         document.querySelectorAll('.bsa-kb-drag-handle').forEach(function (handle) {
             handle.remove();
@@ -368,6 +394,8 @@
         document.querySelectorAll('.bsa-kb-lifted').forEach(function (panel) {
             panel.classList.remove('bsa-kb-lifted');
             panel.style.removeProperty('--bsa-kb-lift');
+            panel.style.removeProperty('--bsa-kb-height');
+            panel.style.removeProperty('--bsa-kb-inner-h');
         });
         state.panel = null;
         state.overlay = null;

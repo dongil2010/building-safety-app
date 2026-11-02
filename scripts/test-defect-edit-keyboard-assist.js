@@ -82,8 +82,9 @@ function setup(opts) {
 {
     const s = setup({ scrollable: true });
     s.docL.focusin({ target: s.field }); s.flush();
-    assert.ok(/px$/.test(s.dbody.style._m['padding-bottom'] || ''), '키보드 높이 여백');
-    assert.strictEqual(parseInt(s.dbody.style._m['padding-bottom'], 10), 400 + 24);
+    assert.ok(/px$/.test(s.dbody.style._m['padding-bottom'] || ''), '아래 여백');
+    // 2026-11-02 창이 키보드 위 높이로 줄어들므로 키보드 높이만큼 여백을 또 주지 않는다(24px만)
+    assert.strictEqual(parseInt(s.dbody.style._m['padding-bottom'], 10), 24);
     assert.ok(s.dbody.scrollTop > 0, '스크롤');
     assert.ok(s.field.getBoundingClientRect().bottom <= 600 - 12, '키보드 위');
     assert.ok(!s.mirrorEls.some((m) => m.id === 'bsaKbMirror' && m.classList.contains('is-open')), '미리보기 없음');
