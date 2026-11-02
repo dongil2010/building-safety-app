@@ -9156,8 +9156,8 @@ ${roundMobile ? '' : `<button type="button" class="icon-btn icon-btn-trash" titl
                                 <strong style="color:#1f1f1f;">[신규]</strong> ${escapeHtml(item.fileName)}
                                 ${willReplace ? '<span class="edit-floor-drawing-badge" style="color:#b45309;">기존 도면 교체</span>' : '<span class="edit-floor-drawing-badge">새 층</span>'}
                             </span>
-                            <select class="form-control edit-drawing-floor-select" data-idx="${idx}" style="width:auto; font-size:0.78rem; padding:0.2rem 0.4rem; flex-shrink:0;">
-                                ${window.buildFloorCodeOptionsHtml(item.floorCode)}
+                            <select class="form-control edit-drawing-floor-select" data-idx="${idx}" style="width:auto; max-width:11rem; font-size:0.78rem; padding:0.2rem 0.4rem; flex-shrink:0;">
+                                ${window.buildFloorCodeOptionsHtml(item.floorCode, existingFloors)}
                             </select>
                         </div>
                     `;
@@ -9178,8 +9178,8 @@ ${roundMobile ? '' : `<button type="button" class="icon-btn icon-btn-trash" titl
                                             ${isFinal ? '✅' : '⬜'} ${escapeHtml(item.fileName)}${isFinal ? ' (저장됨)' : ''}
                                         </span>
                                         ${!isFinal ? `<button type="button" class="btn btn-sm btn-outline pick-final-edit-drawing" data-idx="${idx}" style="font-size:0.68rem; padding:0.1rem 0.5rem; flex-shrink:0;">이 파일 저장</button>` : ''}
-                                        <select class="form-control edit-drawing-floor-select" data-idx="${idx}" style="width:auto; font-size:0.72rem; padding:0.15rem 0.3rem; flex-shrink:0;">
-                                            ${window.buildFloorCodeOptionsHtml(item.floorCode)}
+                                        <select class="form-control edit-drawing-floor-select" data-idx="${idx}" style="width:auto; max-width:11rem; font-size:0.72rem; padding:0.15rem 0.3rem; flex-shrink:0;">
+                                            ${window.buildFloorCodeOptionsHtml(item.floorCode, existingFloors)}
                                         </select>
                                     </div>`;
                                 }).join('')}
@@ -9208,6 +9208,9 @@ ${roundMobile ? '' : `<button type="button" class="icon-btn icon-btn-trash" titl
                                 ? '<span class="edit-floor-drawing-badge">✓ 도면 · 눌러서 보기</span>'
                                 : '<span class="edit-floor-drawing-badge">눌러서 도면 불러오기</span>'}
                         </span>
+                        <button type="button" class="btn btn-sm btn-outline edit-floor-drawing-replace" data-floor-code="${safeCode}" title="이 층 도면을 새 파일로 바꾸기 — 파일 이름은 상관없음, 층 이름·결함은 그대로 (도면 저장을 눌러야 반영)">
+                            <i class="fa-solid fa-arrow-right-arrow-left"></i> 파일로 교체
+                        </button>
                         <button type="button" class="btn btn-sm btn-outline edit-floor-drawing-rename" data-floor-code="${safeCode}" title="층 이름 바꾸기 (도면·결함은 그대로)">
                             <i class="fa-solid fa-pen"></i> 이름
                         </button>
@@ -9233,7 +9236,7 @@ ${roundMobile ? '' : `<button type="button" class="icon-btn icon-btn-trash" titl
                 }
             };
             row.addEventListener('click', (e) => {
-                if (e.target.closest('.edit-floor-drawing-delete') || e.target.closest('.edit-floor-drawing-rename')) return;
+                if (e.target.closest('.edit-floor-drawing-delete') || e.target.closest('.edit-floor-drawing-rename') || e.target.closest('.edit-floor-drawing-replace')) return;
                 if (e.target.closest('.add-drawing-drag-handle')) return;
                 openView();
             });
@@ -9245,6 +9248,33 @@ ${roundMobile ? '' : `<button type="button" class="icon-btn icon-btn-trash" titl
             });
         });
         if (existingFloors.length) markDrawinglessFloorsInEditPreview(bldg, existingFloors);
+        // 2026-11-02 기존 층 1:1 교체: 파일 이름과 상관없이 이 층에 새 파일을 짝지운다(같은 층의 대기 파일은 이것 하나로 바뀜)
+        preview.querySelectorAll('.edit-floor-drawing-replace').forEach((btn) => {
+            btn.addEventListener('click', (e) => {
+                e.stopPropagation();
+                const code = btn.getAttribute('data-floor-code');
+                const target = existingFloors.find((f) => f && f.floorCode === code);
+                if (!code || !target) return;
+                const picker = document.createElement('input');
+                picker.type = 'file';
+                picker.accept = 'image/*,application/pdf,.pdf';
+                picker.addEventListener('change', () => {
+                    const file = (picker.files || [])[0];
+                    if (!file) return;
+                    const item = assignDrawingUploadItems([file], [])[0];
+                    item.floorCode = code;
+                    item.floorLabel = target.floorLabel || window.getFloorLabelFromCode(code);
+                    item.rank = window.getFloorRankFromCode(code);
+                    item.matched = true;
+                    window.selectedEditUploadedDrawings = (window.selectedEditUploadedDrawings || [])
+                        .filter((it) => !it || it.floorCode !== code).concat([item]);
+                    window.editDrawingPreviewManualOrder = true;
+                    renderEditDrawingPreview();
+                    window.showToast?.(`${item.floorLabel}에 "${file.name}"을(를) 짝지었습니다. 아래 「도면 저장」을 눌러야 교체됩니다.`, 'info', 4200);
+                });
+                picker.click();
+            });
+        });
         preview.querySelectorAll('.edit-floor-drawing-rename').forEach((btn) => {
             btn.addEventListener('click', async (e) => {
                 e.stopPropagation();
@@ -9302,6 +9332,9 @@ ${roundMobile ? '' : `<button type="button" class="icon-btn icon-btn-trash" titl
                 const item = (window.selectedEditUploadedDrawings || [])[idx];
                 if (!item) return;
                 await applyFloorSelectValue(item, ev.target.value);
+                // 기존 층에 짝지었으면 그 층의 현재 이름(바꿔 둔 이름·외부 이름)을 그대로 쓴다
+                const hit = existingFloors.find((f) => f && f.floorCode === item.floorCode);
+                if (hit && hit.floorLabel) item.floorLabel = hit.floorLabel;
                 renderEditDrawingPreview();
             });
         });

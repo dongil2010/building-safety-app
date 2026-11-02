@@ -937,11 +937,23 @@ window.getFloorRankFromCode = function(code) {
     return 0;
 };
 
-window.buildFloorCodeOptionsHtml = function(selectedCode) {
+window.buildFloorCodeOptionsHtml = function(selectedCode, existingFloors) {
+    // 2026-11-02 existingFloors(도면 수정창): 이 건물에 이미 있는 층(외부 도면 포함)을 맨 위에 「교체」 대상으로 보여 준다 —
+    // 파일 이름을 기존 층 이름과 똑같이 맞추지 않아도 고른 층의 도면을 1:1로 바꿀 수 있다.
+    const esc = (v) => String(v == null ? '' : v).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;');
+    const ex = (Array.isArray(existingFloors) ? existingFloors : []).filter((f) => f && f.floorCode);
+    const exCodes = new Set(ex.map((f) => f.floorCode));
     // 선택된 층이 정해진 목록(B10F~30F, ROOF, EXT)에 없는 사용자 직접입력 값이면,
     // 그 값도 목록에 끼워넣어 계속 선택된 상태로 보이게 한다 (필로티/기계실/중2층 등 자유 이름)
-    const isCustomSelected = selectedCode && !window.FLOOR_CODE_OPTION_LIST.includes(selectedCode);
-    let html = window.FLOOR_CODE_OPTION_LIST.map(code => {
+    const isCustomSelected = selectedCode && !window.FLOOR_CODE_OPTION_LIST.includes(selectedCode) && !exCodes.has(selectedCode);
+    let html = '';
+    if (ex.length) {
+        html += '<optgroup label="기존 도면 교체 (1:1)">' + ex.map((f) => {
+            const label = f.floorLabel || ((typeof window.getFloorLabelFromCode === 'function') ? window.getFloorLabelFromCode(f.floorCode) : f.floorCode);
+            return `<option value="${esc(f.floorCode)}" ${f.floorCode === selectedCode ? 'selected' : ''}>${esc(label)} ← 교체</option>`;
+        }).join('') + '</optgroup><optgroup label="새 층으로 추가">';
+    }
+    html += window.FLOOR_CODE_OPTION_LIST.filter((code) => !exCodes.has(code)).map(code => {
         if (code === window.EXT_NEXT_OPTION) return `<option value="${code}">외부 (자동 번호: 외부1, 외부2…)</option>`;
         const label = (typeof window.getFloorLabelFromCode === 'function') ? window.getFloorLabelFromCode(code) : code;
         const sel = code === selectedCode ? 'selected' : '';
@@ -956,6 +968,7 @@ window.buildFloorCodeOptionsHtml = function(selectedCode) {
         html += `<option value="${selectedCode}" selected>${shownLabel}</option>`;
     }
     html += `<option value="__CUSTOM_FLOOR__">➕ [층 이름 직접 입력...]</option>`;
+    if (ex.length) html += '</optgroup>';
     return html;
 };
 
