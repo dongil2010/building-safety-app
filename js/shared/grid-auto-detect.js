@@ -249,8 +249,26 @@
             comps.get(r).push(i);
         }
         const found = [];
-        comps.forEach((idxs) => {
-            if (idxs.length < 3 || idxs.length > 400) return;
+        comps.forEach((idxs0) => {
+            if (idxs0.length < 3 || idxs0.length > 400) return;
+            // 2026-11-02 풍선 옆에 붙은 선(번호 풍선에서 뻗은 지시선·통심선 토막)이 덩어리를 가로로 늘려 풍선으로 못 알아보던 문제:
+            // 한쪽 끝이 아무와도 안 이어진 선분(= 달랑 붙은 선)을 반복해서 떼면 닫힌 고리만 남는다.
+            let idxs = idxs0.slice();
+            for (let guard = 0; guard < idxs0.length; guard++) {
+                const dangling = idxs.filter((i) => {
+                    const q = segs[i];
+                    return [[q[0], q[1]], [q[2], q[3]]].some(([x, y]) => !idxs.some((j) => {
+                        if (j === i) return false;
+                        const t = segs[j];
+                        return Math.hypot(t[0] - x, t[1] - y) <= eps || Math.hypot(t[2] - x, t[3] - y) <= eps;
+                    }));
+                });
+                if (!dangling.length) break;
+                const drop = new Set(dangling);
+                idxs = idxs.filter((i) => !drop.has(i));
+                if (idxs.length < 3) break;
+            }
+            if (idxs.length < 3) return;
             let x0 = Infinity, y0 = Infinity, x1 = -Infinity, y1 = -Infinity;
             const pts = [];
             idxs.forEach((i) => {

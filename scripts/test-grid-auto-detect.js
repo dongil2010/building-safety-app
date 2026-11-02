@@ -251,6 +251,47 @@ function rotatedRows(withBubbles) {
     assert.deepStrictEqual(rr.rows.map((l) => l.label), ['Y1', 'Y2', 'Y3'], '돌아간 두 조각 글자 순서');
 }
 
+// 12) ★ 실제 도면 모양: 원(곡선을 잘게 나눈 고리) 옆에 지시선/통심선 토막이 붙어 있고, 글자는 선으로 그려져 읽을 수 없음
+function circlePoly(cx, cy, r, n = 16) {
+    const out = [];
+    for (let i = 0; i < n; i++) {
+        const a0 = (i / n) * Math.PI * 2;
+        const a1 = ((i + 1) / n) * Math.PI * 2;
+        out.push([cx + r * Math.cos(a0), cy + r * Math.sin(a0), cx + r * Math.cos(a1), cy + r * Math.sin(a1)]);
+    }
+    return out;
+}
+/** 글자를 선으로 그린 모양(원 안의 작은 선 몇 개 — 이어지지 않음) */
+function strokeGlyph(cx, cy) {
+    return [[cx - 12, cy + 14, cx, cy - 14], [cx, cy - 14, cx + 12, cy + 14], [cx - 7, cy + 4, cx + 7, cy + 4]];
+}
+const stubRows = { segments: [[10, 10, W - 10, 10], [300, 300, 3700, 300], [300, 2500, 3700, 2500]], small: [], texts: [] };
+[700, 1400, 2100].forEach((y) => {
+    stubRows.small.push(...circlePoly(200, y, 45));
+    stubRows.small.push([245, y, 345, y]);              // 원 오른쪽 끝에 붙은 지시선(가로로 늘어지는 모양)
+    stubRows.small.push(...strokeGlyph(200, y));        // 글자(선) — 읽을 수 없음
+    stubRows.segments.push([400, y, 3700, y]);          // 이어지는 통심선
+});
+const bubbles = D.findBubbles(stubRows.small, dims, D.DEFAULTS);
+assert.strictEqual(bubbles.length, 3, '붙은 선을 떼고 원 3개');
+assert.ok(bubbles.every((b) => Math.abs(b.x - 200) < 3 && b.r > 40 && b.r < 50), '지시선이 가운데·반지름을 늘리지 않음');
+r = D.detect(stubRows, dims);
+assert.strictEqual(r.source, 'markers');
+assert.deepStrictEqual(r.rows.map((l) => Math.round(l.y)), [700, 1400, 2100], '지시선 달린 원 → 행');
+assert.ok(r.rows.every((l) => l.label === ''), '글자를 못 읽으면 이름은 자동 번호');
+assert.ok(r.rows[0].x2 >= 3600, '통심선 끝까지');
+// 위쪽 열 원 + 아래로 붙은 지시선
+const stubCols = { segments: [[300, 300, 3700, 300], [300, 2500, 3700, 2500]], small: [], texts: [] };
+[800, 1400, 2000, 2600].forEach((x) => {
+    stubCols.small.push(...circlePoly(x, 200, 45));
+    stubCols.small.push([x, 245, x, 345]);
+    stubCols.segments.push([x, 400, x, 2500]);
+});
+r = D.detect(stubCols, dims);
+assert.deepStrictEqual(r.cols.map((l) => Math.round(l.x)), [800, 1400, 2000, 2600]);
+// 붙은 선만 있는 덩어리·열린 고리는 여전히 풍선이 아님
+assert.strictEqual(D.findBubbles([[100, 100, 200, 100], [200, 100, 200, 160], [200, 160, 100, 160]], dims, D.DEFAULTS).length, 0);
+
 // 9) 앱 연결: 모듈 로드(app.js보다 먼저) · 스냅 엔진이 자료를 내준다 · 패널 버튼
 const idx = fs.readFileSync(path.join(__dirname, '..', 'index.html'), 'utf8');
 assert.ok(idx.includes('js/shared/grid-auto-detect.js'));

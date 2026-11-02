@@ -30,10 +30,23 @@
   }
 
   /** 원본 PDF 콘텐츠 스트림에서 선분(도면 원본 좌표)을 뽑아, viewport 기준 픽셀 좌표로 변환한다 */
-  function extractSegments(opList, viewport, OPS) {
+  function extractSegments(opList, viewport, OPS, curvePolys) {
     let ctm = [1, 0, 0, 1, 0, 0];
     const stack = [];
     const raw = [];
+    // 2026-11-02 곡선(원·호)을 잘게 나눈 선분 — 번호 풍선(원) 모양 판정용. 스냅용 raw에는 넣지 않는다(chord만).
+    const bez = (x0, y0, x1, y1, x2, y2, x3, y3) => {
+      if (!curvePolys) return;
+      let px = x0, py = y0;
+      for (let k = 1; k <= 4; k++) {
+        const t = k / 4, u = 1 - t;
+        const bx = u * u * u * x0 + 3 * u * u * t * x1 + 3 * u * t * t * x2 + t * t * t * x3;
+        const by = u * u * u * y0 + 3 * u * u * t * y1 + 3 * u * t * t * y2 + t * t * t * y3;
+        const a = applyMatrix(ctm, px, py), b = applyMatrix(ctm, bx, by);
+        curvePolys.push([a[0], a[1], b[0], b[1]]);
+        px = bx; py = by;
+      }
+    };
 
     for (let i = 0; i < opList.fnArray.length; i++) {
       const fn = opList.fnArray[i];
@@ -59,11 +72,15 @@
             raw.push([p1[0], p1[1], p2[0], p2[1]]);
             x = nx; y = ny;
           } else if (op === OPS.curveTo) {
+            bez(x, y, coords[ci], coords[ci + 1], coords[ci + 2], coords[ci + 3], coords[ci + 4], coords[ci + 5]);
             const x3 = coords[ci + 4], y3 = coords[ci + 5];
             const p1 = applyMatrix(ctm, x, y), p2 = applyMatrix(ctm, x3, y3);
             raw.push([p1[0], p1[1], p2[0], p2[1]]); // 곡선은 시작~끝점 직선으로 근사 (CAD 도면은 대부분 직선)
             ci += 6; x = x3; y = y3;
           } else if (op === OPS.curveTo2 || op === OPS.curveTo3) {
+            // curveTo2: 첫 제어점 = 현재점 / curveTo3: 둘째 제어점 = 끝점 (pdf.js 규칙)
+            if (op === OPS.curveTo2) bez(x, y, x, y, coords[ci], coords[ci + 1], coords[ci + 2], coords[ci + 3]);
+            else bez(x, y, coords[ci], coords[ci + 1], coords[ci + 2], coords[ci + 3], coords[ci + 2], coords[ci + 3]);
             const x2 = coords[ci + 2], y2 = coords[ci + 3];
             const p1 = applyMatrix(ctm, x, y), p2 = applyMatrix(ctm, x2, y2);
             raw.push([p1[0], p1[1], p2[0], p2[1]]);
@@ -110,7 +127,7 @@
    * 2026-11-02 행·열 자동 잡기용 자료 — 스냅 선분(상한 8000)과 따로, 수직·수평 선분 전부와 작은 선분(축 번호 모양)을 모은다.
    * 좌표는 스냅과 같은 viewport 픽셀 좌표(= 핀·행열 선 좌표계).
    */
-  function buildDetectData(raw, viewport) {
+  function buildDetectData(raw, viewport, curvePolys) {
     const L = Math.max(viewport.width, viewport.height, 1);
     const smallMax = L * 0.04;
     const segments = [];
@@ -124,6 +141,13 @@
       const ax = Math.abs(dx), ay = Math.abs(dy);
       if ((ax <= ay * 0.02 || ay <= ax * 0.02) && segments.length < 80000) segments.push([p1[0], p1[1], p2[0], p2[1]]);
       if (len <= smallMax && small.length < 60000) small.push([p1[0], p1[1], p2[0], p2[1]]);
+    }
+    // 곡선(원·호)은 잘게 나눈 선분으로(풍선 둘레). 직선 위주 raw의 chord 근사와 중복되지만 작은 선 판정에는 더 정확하다
+    for (const s of (curvePolys || [])) {
+      const p1 = viewport.convertToViewportPoint(s[0], s[1]);
+      const p2 = viewport.convertToViewportPoint(s[2], s[3]);
+      const len = Math.hypot(p2[0] - p1[0], p2[1] - p1[1]);
+      if (len >= 1.2 && len <= smallMax && small.length < 90000) small.push([p1[0], p1[1], p2[0], p2[1]]);
     }
     return { segments, small, texts: [] };
   }
@@ -192,11 +216,12 @@
         const scale = dim / Math.max(baseViewport.width, baseViewport.height, 1);
         const viewport = page.getViewport({ scale });
         const opList = await page.getOperatorList();
-        const raw = extractSegments(opList, viewport, pdfjsLib.OPS);
+        const curvePolys = [];
+        const raw = extractSegments(opList, viewport, pdfjsLib.OPS, curvePolys);
         const segments = filterAndTransform(raw, viewport);
         entry.segments = segments;
         try {
-          entry.detect = buildDetectData(raw, viewport);
+          entry.detect = buildDetectData(raw, viewport, curvePolys);
           entry.detect.texts = await readTexts(page, viewport);
         } catch (_e) { entry.detect = null; }
         entry.grid = buildGrid(segments);
