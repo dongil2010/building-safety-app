@@ -42827,7 +42827,7 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
             ge.autoPreview = null;
             renderGridPanel();
             drawCanvas();
-            window.showToast?.('통심선 후보를 못 찾았습니다. 민감도를 「짧은 선도」로 바꿔 다시 눌러 보거나 직접 그어 주세요.', 'warning', 5000);
+            window.showToast?.('번호 풍선·글자를 못 찾았습니다(글자가 그림으로 된 PDF일 수 있음). 민감도를 「짧은 선도」로 바꿔 다시 눌러 보거나 직접 그어 주세요.', 'warning', 5000);
             return;
         }
         ge.autoPreview = { key: getGridFloorKey(), res, dims, rot: state.rotationAngle || 0 };
@@ -43250,11 +43250,12 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
         const autoSummary = autoPrev ? (() => {
             const r = autoPrev.res;
             const named = (r.labelled && (r.labelled.cols || r.labelled.rows)) ? ' · 도면 축 번호를 이름으로' : ' · 이름은 자동 번호';
-            return `열 ${r.cols.length}개 · 행 ${r.rows.length}개 후보${named}${r.weak ? ' · <b style="color:#b45309">확실하지 않음(긴 실선만 찾음)</b>' : ''}`;
+            const how = r.source === 'markers' ? ' · 번호 풍선·글자 기준' : ' · <b style="color:#b45309">번호 풍선·글자를 못 찾아 선 기준으로 찾음</b>';
+            return `열 ${r.cols.length}개 · 행 ${r.rows.length}개 후보${how}${named}${r.weak ? ' · <b style="color:#b45309">확실하지 않음(긴 실선만 찾음)</b>' : ''}`;
         })() : '';
         const autoHtml = `
                 <div class="grid-panel-sec">
-                    <div class="grid-panel-row"><b>자동 잡기</b> <small class="grid-panel-muted">캐드 PDF의 통심선·축 번호를 찾아 후보로 보여 줍니다</small></div>
+                    <div class="grid-panel-row"><b>자동 잡기</b> <small class="grid-panel-muted">캐드 PDF의 번호 풍선·글자를 찾아 통심선 후보를 보여 줍니다</small></div>
                     <div class="grid-panel-row">
                         <label>민감도 <select data-f="autoSens" title="짧은 선도 후보에 넣으려면 「짧은 선도」, 벽선이 섞이면 「긴 선만」">
                             <option value="normal"${autoSens === 'normal' ? ' selected' : ''}>보통</option>

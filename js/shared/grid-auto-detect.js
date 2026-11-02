@@ -2,7 +2,18 @@
  * 행·열(통심) 선 자동 잡기 — 순수 계산 모듈 (DOM·pdf.js 없음)
  *
  * 2026-11-02 사용자 요청: 「행열 자동으로 잡아줄 수 있냐 / 캐드 PDF / 축 번호는 원일 수도, 네모 두꺼운 선 옆 번호일 수도」.
- * 캐드 벡터 PDF에서 읽은 선분(이미지 좌표, js/pdf-vector-snap.js)에서 도면을 길게 가로지르는 수직·수평 선을 찾는다.
+ * 캐드 벡터 PDF에서 읽은 선분·글자(이미지 좌표, js/pdf-vector-snap.js)로 통심선을 찾는다.
+ *
+ * ★ 2026-11-02 「선 말고 번호 풍선이랑 글자 쪽을 봐야하는데」 — 1순위는 **축 번호 표시**다(선은 보조).
+ *   (가) 번호 풍선: 작은 선들이 닫힌 고리(원·네모·마름모)를 이루고 크기가 알맞으면 풍선. 안에 도면 글자가 있으면 그 이름.
+ *   (나) 도면 글자: 1, A, X1, ①, 가 … 모양의 글자(풍선 밖에 번호만 있어도).
+ *   (다) 같은 높이(또는 같은 세로줄)에 나란히 늘어선 표시 3개 이상(풍선이면 2개 이상)이 한 축의 번호 줄이다.
+ *        위쪽 줄은 열(수직선 위치 = 표시의 x), 왼쪽 줄은 행(수평선 위치 = 표시의 y). 번호가 1,2,3처럼 이어지는지도 본다.
+ *   (라) 위·아래(왼·오른쪽)에 같은 번호 줄이 또 있으면 그 사이가 선 길이, 하나뿐이면 반대편 도면 끝까지.
+ *        표시 근처에 긴 선이 있으면 그 선 위치·길이를 쓴다(풍선 가운데에 정확히 맞춤).
+ *   표시를 못 찾았을 때만 아래 선 기반 방식으로 돌아간다.
+ *
+ * (보조) 선 기반: 수직·수평 선을 찾는다.
  *
  * 1) 수직/수평(±1°) 선분만 모아 같은 위치(±0.05%)끼리 묶고, 일점쇄선처럼 끊어진 조각을 이어 한 줄로(틈 1.2%까지).
  * 2) 도면 폭·높이의 일정 비율(기본 30%) 이상 가로지르는 줄만 후보. 도면 테두리(가장자리 + 거의 전체 길이)는 뺀다.
@@ -28,7 +39,11 @@
         frameEdgeFrac: 0.015,   // 가장자리 이만큼 안 + 거의 전체 길이면 도면 테두리
         weakSpanFrac: 0.60,     // C등급(긴 실선) 최소 길이
         labelRadiusFrac: 0.035, // 선 끝에서 축 번호를 찾는 거리
-        bubbleMinSegs: 4        // 선 끝 둘레의 작은 선 수(원·네모 축 번호)
+        bubbleMinSegs: 4,       // 선 끝 둘레의 작은 선 수(원·네모 축 번호)
+        bubbleMinDiaFrac: 0.006, // 번호 풍선 지름(긴 변 대비) 범위
+        bubbleMaxDiaFrac: 0.05,
+        alignTolFrac: 0.006,    // 같은 높이(세로줄)로 보는 오차
+        snapTolFrac: 0.012      // 표시 ↔ 긴 선·반대편 표시를 같은 축으로 보는 거리
     };
 
     // 도면 글자로 인정하는 축 번호 모양: 1, 12, A, AB, X1, Y3, A-1, 1-1, ①, ⓐ, 가, A'
@@ -188,17 +203,306 @@
         return { lines: out, tier: out[0].tier, labelled: useLabels };
     }
 
+    // =====================================================================
+    // 1순위: 번호 풍선 · 도면 글자
+    // =====================================================================
+
+    /** 작은 선분들을 끝점이 맞닿은 것끼리 묶어, 닫힌 고리 모양(원·네모·마름모) 중 풍선 크기인 것의 가운데·반지름 */
+    function findBubbles(small, dims, o) {
+        const L = Math.max(dims.w, dims.h);
+        const eps = Math.max(1.5, L * 0.0008);
+        const rMin = L * o.bubbleMinDiaFrac / 2;
+        const rMax = L * o.bubbleMaxDiaFrac / 2;
+        const segs = (small || []).filter((q) => q && q.length >= 4);
+        const n = segs.length;
+        if (!n) return [];
+        const parent = new Array(n);
+        for (let i = 0; i < n; i++) parent[i] = i;
+        const find = (i) => { while (parent[i] !== i) { parent[i] = parent[parent[i]]; i = parent[i]; } return i; };
+        const union = (a, b) => { const ra = find(a); const rb = find(b); if (ra !== rb) parent[ra] = rb; };
+        // 끝점 공간 해시
+        const cell = eps * 2;
+        const grid = new Map();
+        const key = (x, y) => Math.floor(x / cell) + ',' + Math.floor(y / cell);
+        for (let i = 0; i < n; i++) {
+            [[segs[i][0], segs[i][1]], [segs[i][2], segs[i][3]]].forEach(([x, y]) => {
+                const cx = Math.floor(x / cell);
+                const cy = Math.floor(y / cell);
+                for (let dx = -1; dx <= 1; dx++) {
+                    for (let dy = -1; dy <= 1; dy++) {
+                        const arr = grid.get((cx + dx) + ',' + (cy + dy));
+                        if (arr) arr.forEach((j) => {
+                            const t = segs[j];
+                            if (Math.hypot(t[0] - x, t[1] - y) <= eps || Math.hypot(t[2] - x, t[3] - y) <= eps) union(i, j);
+                        });
+                    }
+                }
+                const k = key(x, y);
+                const a = grid.get(k);
+                if (a) a.push(i); else grid.set(k, [i]);
+            });
+        }
+        const comps = new Map();
+        for (let i = 0; i < n; i++) {
+            const r = find(i);
+            if (!comps.has(r)) comps.set(r, []);
+            comps.get(r).push(i);
+        }
+        const found = [];
+        comps.forEach((idxs) => {
+            if (idxs.length < 3 || idxs.length > 400) return;
+            let x0 = Infinity, y0 = Infinity, x1 = -Infinity, y1 = -Infinity;
+            const pts = [];
+            idxs.forEach((i) => {
+                const q = segs[i];
+                pts.push([q[0], q[1]], [q[2], q[3]]);
+                x0 = Math.min(x0, q[0], q[2]); x1 = Math.max(x1, q[0], q[2]);
+                y0 = Math.min(y0, q[1], q[3]); y1 = Math.max(y1, q[1], q[3]);
+            });
+            const w = x1 - x0;
+            const h = y1 - y0;
+            const r = (w + h) / 4;
+            if (r < rMin || r > rMax) return;
+            if (w < h * 0.75 || h < w * 0.75) return;      // 거의 정사각 틀
+            const cx = (x0 + x1) / 2;
+            const cy = (y0 + y1) / 2;
+            // 끝점이 가운데에서 비슷한 거리(원·마름모·네모 꼭짓점) — 들쭉날쭉한 덩어리(글자·해칭)는 제외
+            const dist = pts.map((q) => Math.hypot(q[0] - cx, q[1] - cy));
+            const mean = dist.reduce((a, b) => a + b, 0) / dist.length;
+            const dev = dist.filter((d) => Math.abs(d - mean) > mean * 0.3).length;
+            if (dev > dist.length * 0.15) return;
+            found.push({ x: cx, y: cy, r: Math.max(w, h) / 2 });
+        });
+        // 이중 원 등 겹친 것은 바깥 것 하나만
+        found.sort((a, b) => b.r - a.r);
+        const kept = [];
+        found.forEach((f) => {
+            if (!kept.some((k) => Math.hypot(k.x - f.x, k.y - f.y) < k.r * 0.6)) kept.push(f);
+        });
+        return kept;
+    }
+
+    /** 풍선 안 글자(여러 조각이면 이어 붙임) → 도면 글자 모양이면 그 글자, 아니면 '' */
+    function textInside(texts, b) {
+        const inside = (texts || []).filter((t) => t && Math.hypot(t.x - b.x, t.y - b.y) <= b.r * 1.05);
+        if (!inside.length) return '';
+        const joined = inside.slice().sort((p, q) => (p.x - q.x) || (p.y - q.y)).map((t) => String(t.str).trim()).join('');
+        if (isLabelText(joined)) return joined;
+        const near = inside.slice().sort((p, q) => Math.hypot(p.x - b.x, p.y - b.y) - Math.hypot(q.x - b.x, q.y - b.y));
+        for (let i = 0; i < near.length; i++) if (isLabelText(near[i].str)) return String(near[i].str).trim();
+        return '';
+    }
+
+    /** 표시 후보: 풍선(안 글자 포함) + 풍선 밖의 도면 글자 */
+    function findMarkers(data, dims, o) {
+        const bubbles = findBubbles(data.small, dims, o);
+        const markers = bubbles.map((b) => ({ x: b.x, y: b.y, r: b.r, bubble: true, label: textInside(data.texts, b) }));
+        (data.texts || []).forEach((t) => {
+            if (!t || !isLabelText(t.str)) return;
+            if (bubbles.some((b) => Math.hypot(t.x - b.x, t.y - b.y) <= b.r * 1.05)) return; // 이미 풍선 안
+            markers.push({ x: t.x, y: t.y, r: 0, bubble: false, label: String(t.str).trim() });
+        });
+        return markers;
+    }
+
+    /** 번호 글자 → 순서 값(1, 2 … / A=1, B=2 / X3 → 3 / ① → 1 / 가=1). 못 읽으면 null */
+    function labelOrder(str) {
+        const t = String(str == null ? '' : str).trim().replace(/'$/, '');
+        if (!t) return null;
+        let m = t.match(/(\d+)(?!.*\d)/);
+        if (m) return parseInt(m[1], 10);
+        if (/^[A-Za-z]{1,2}$/.test(t)) return t.toUpperCase().split('').reduce((a, c) => a * 26 + (c.charCodeAt(0) - 64), 0);
+        const circ = '①②③④⑤⑥⑦⑧⑨⑩⑪⑫⑬⑭⑮⑯⑰⑱⑲⑳'.indexOf(t);
+        if (circ >= 0) return circ + 1;
+        const ko = '가나다라마바사아자차카타파하'.indexOf(t);
+        if (ko >= 0) return ko + 1;
+        return null;
+    }
+
+    /** 위치순으로 늘어선 번호가 한 방향으로 이어지는 정도(0~1). 글자가 없으면 1 */
+    function sequenceScore(group) {
+        const vals = group.items.map((m) => labelOrder(m.label)).filter((v) => v != null);
+        if (vals.length < 2) return group.items.some((m) => m.label) ? 0.3 : 1;
+        let up = 0;
+        let down = 0;
+        for (let i = 1; i < vals.length; i++) {
+            if (vals[i] > vals[i - 1]) up++;
+            else if (vals[i] < vals[i - 1]) down++;
+        }
+        return Math.max(up, down) / (vals.length - 1);
+    }
+
+    /** axis 'col': 같은 높이(y)에 늘어선 표시 묶음(수직선 위치 = x) / 'row': 같은 x에 늘어선 묶음(수평선 위치 = y) */
+    function alignGroups(markers, axis, dims, o) {
+        const L = Math.max(dims.w, dims.h);
+        const tol = L * o.alignTolFrac;
+        const cross = (m) => (axis === 'col' ? m.y : m.x);   // 묶음을 정하는 값
+        const along = (m) => (axis === 'col' ? m.x : m.y);   // 선 위치가 될 값
+        const sorted = markers.slice().sort((a, b) => cross(a) - cross(b));
+        const groups = [];
+        sorted.forEach((m) => {
+            const g = groups.find((q) => Math.abs(q.cross - cross(m)) <= tol);
+            if (g) {
+                g.items.push(m);
+                g.cross = g.items.reduce((s, it) => s + cross(it), 0) / g.items.length;
+            } else {
+                groups.push({ cross: cross(m), items: [m] });
+            }
+        });
+        const minGap = L * 0.01;
+        const out = [];
+        groups.forEach((g) => {
+            g.items.sort((a, b) => along(a) - along(b));
+            // 너무 붙은 표시(같은 풍선의 중복 글자)는 하나만
+            const uniq = [];
+            g.items.forEach((m) => {
+                const last = uniq[uniq.length - 1];
+                if (last && along(m) - along(last) < minGap) {
+                    if (m.bubble && !last.bubble) uniq[uniq.length - 1] = m;
+                    return;
+                }
+                uniq.push(m);
+            });
+            g.items = uniq;
+            const bubbles = uniq.filter((m) => m.bubble).length;
+            const need = bubbles >= Math.ceil(uniq.length * 0.6) ? 2 : 3;
+            if (uniq.length < need) return;
+            g.bubbleFrac = bubbles / uniq.length;
+            g.seq = sequenceScore(g);
+            if (g.seq < 0.7) return; // 번호가 이어지지 않는 늘어섬(치수 글자 등)은 축 번호가 아니다
+            g.score = uniq.length * (g.bubbleFrac >= 0.6 ? 2 : 1) * g.seq;
+            out.push(g);
+        });
+        out.sort((a, b) => b.score - a.score);
+        return out;
+    }
+
+    /** 도면 내용 범위(테두리·바깥 점 무시) — 반대편 끝까지 그을 때 쓴다 */
+    function contentRange(segments, dims) {
+        const xs = [];
+        const ys = [];
+        (segments || []).forEach((q) => {
+            xs.push((q[0] + q[2]) / 2);
+            ys.push((q[1] + q[3]) / 2);
+        });
+        if (xs.length < 4) return { x0: 0, x1: dims.w, y0: 0, y1: dims.h };
+        xs.sort((a, b) => a - b);
+        ys.sort((a, b) => a - b);
+        const at = (arr, f) => arr[Math.min(arr.length - 1, Math.max(0, Math.floor(arr.length * f)))];
+        return { x0: at(xs, 0.01), x1: at(xs, 0.99), y0: at(ys, 0.01), y1: at(ys, 0.99) };
+    }
+
+    /** 표시 묶음 → 선들. counterpart: 반대편(위↔아래) 묶음이 있으면 그 사이가 길이 */
+    function linesFromGroup(axis, g, counter, dims, content, chains, o) {
+        const L = Math.max(dims.w, dims.h);
+        const snapTol = L * o.snapTolFrac;
+        const full = axis === 'col' ? [content.y0, content.y1] : [content.x0, content.x1];
+        const along = (m) => (axis === 'col' ? m.x : m.y);
+        const crossOf = (m) => (axis === 'col' ? m.y : m.x);
+        const lines = [];
+        g.items.forEach((m) => {
+            let pos = along(m);
+            let a0;
+            let a1;
+            // 반대편 묶음에서 같은 위치(±허용)의 표시
+            const twin = counter ? counter.items.find((q) => Math.abs(along(q) - pos) <= snapTol * 0.6) : null;
+            if (twin) {
+                pos = (pos + along(twin)) / 2;
+                a0 = Math.min(crossOf(m), crossOf(twin));
+                a1 = Math.max(crossOf(m), crossOf(twin));
+            } else {
+                // 이 줄이 도면의 어느 쪽에 있나 → 반대편 내용 끝까지
+                const mid = (full[0] + full[1]) / 2;
+                const c = crossOf(m);
+                if (c <= mid) { a0 = c; a1 = full[1]; } else { a0 = full[0]; a1 = c; }
+            }
+            // 근처 긴 선이 있으면 그 위치·길이(더 정확)
+            let best = null;
+            chains.forEach((ch) => {
+                const d = Math.abs(ch.pos - pos);
+                if (d > snapTol) return;
+                const overlap = Math.min(ch.a1, a1) - Math.max(ch.a0, a0);
+                if (overlap < (a1 - a0) * 0.5) return;
+                if (!best || d < best.d) best = { d, ch };
+            });
+            if (best) {
+                pos = best.ch.pos;
+                a0 = Math.min(a0, best.ch.a0);
+                a1 = Math.max(a1, best.ch.a1);
+            }
+            lines.push({ pos, a0, a1, label: m.label || '', tier: 'M' });
+        });
+        // 같은 위치 중복 제거
+        lines.sort((a, b) => a.pos - b.pos);
+        const dedup = [];
+        lines.forEach((l) => {
+            const last = dedup[dedup.length - 1];
+            if (last && l.pos - last.pos < L * 0.004) return;
+            dedup.push(l);
+        });
+        return dedup;
+    }
+
+    function finishLines(lines) {
+        if (!lines.length) return { lines: [], labelled: false };
+        const a0 = Math.min.apply(null, lines.map((l) => l.a0));
+        const a1 = Math.max.apply(null, lines.map((l) => l.a1));
+        lines.forEach((l) => { l.a0 = a0; l.a1 = a1; });
+        const labelled = lines.filter((l) => l.label);
+        const distinct = new Set(labelled.map((l) => l.label)).size === labelled.length;
+        const useLabels = labelled.length >= Math.ceil(lines.length * 0.9) && distinct;
+        lines.forEach((l) => { if (!useLabels) l.label = ''; });
+        return { lines, labelled: useLabels };
+    }
+
+    function detectByMarkers(data, dims, o) {
+        const markers = findMarkers(data, dims, o);
+        if (markers.length < 2) return null;
+        const content = contentRange(data.segments, dims);
+        const L = Math.max(dims.w, dims.h);
+        const split = splitAxisSegments(data.segments, o.angleTol);
+        const colChains = chainPieces(split.cols, L * o.posTolFrac, L * o.gapFrac).filter((c) => c.a1 - c.a0 >= dims.h * 0.2);
+        const rowChains = chainPieces(split.rows, L * o.posTolFrac, L * o.gapFrac).filter((c) => c.a1 - c.a0 >= dims.w * 0.2);
+        const pick = (axis, chains) => {
+            const groups = alignGroups(markers, axis, dims, o);
+            if (!groups.length) return { lines: [], labelled: false };
+            const best = groups[0];
+            const span = axis === 'col' ? dims.h : dims.w;
+            // 반대편에 같은 번호 줄이 또 있으면(위·아래 / 왼·오른쪽) 그 사이가 선 길이
+            const counter = groups.find((g) => g !== best && Math.abs(g.cross - best.cross) >= span * 0.15
+                && g.items.filter((m) => best.items.some((q) => Math.abs((axis === 'col' ? m.x - q.x : m.y - q.y)) <= L * o.snapTolFrac * 0.6)).length >= Math.ceil(best.items.length * 0.6));
+            return finishLines(linesFromGroup(axis, best, counter || null, dims, content, chains, o));
+        };
+        const c = pick('col', colChains);
+        const r = pick('row', rowChains);
+        if (!c.lines.length && !r.lines.length) return null;
+        return { c, r };
+    }
+
     /**
-     * data: { segments: [[x1,y1,x2,y2]…](수직·수평 위주, 이미지 좌표), small: [[…]](작은 선분, 축 번호 모양 판정용),
+     * data: { segments: [[x1,y1,x2,y2]…](수직·수평 위주, 이미지 좌표), small: [[…]](작은 선분 — 번호 풍선 모양 판정용),
      *         texts: [{ str, x, y }](글자 중심, 이미지 좌표) }
      * dims: { w, h } 이미지 좌표 크기. opts: DEFAULTS 덮어쓰기.
-     * 반환: { cols: [{ x, y1, y2, label, tier }], rows: [{ y, x1, x2, label, tier }], weak: bool }
+     * 반환: { cols: [{ x, y1, y2, label, tier }], rows: [{ y, x1, x2, label, tier }], weak: bool, source: 'markers'|'lines' }
+     *   tier: 'M' 번호 풍선·글자 기반 / 'A'·'B'·'C' 선 기반(C = 확실하지 않음)
      */
     function detect(data, dims, opts) {
         const o = Object.assign({}, DEFAULTS, opts || {});
         const d = data || {};
         const dm = { w: num(dims && dims.w, 0), h: num(dims && dims.h, 0) };
         if (!(dm.w > 0 && dm.h > 0)) return { cols: [], rows: [], weak: false };
+        // 1순위: 번호 풍선·글자
+        const m = detectByMarkers(d, dm, o);
+        if (m) {
+            return {
+                cols: m.c.lines.map((l) => ({ x: l.pos, y1: l.a0, y2: l.a1, label: l.label, tier: 'M' })),
+                rows: m.r.lines.map((l) => ({ y: l.pos, x1: l.a0, x2: l.a1, label: l.label, tier: 'M' })),
+                weak: false,
+                labelled: { cols: !!m.c.labelled, rows: !!m.r.labelled },
+                source: 'markers'
+            };
+        }
+        // 보조: 선 기반
         const split = splitAxisSegments(d.segments, o.angleTol);
         const c = detectAxis('col', split.cols, dm, d, o);
         const r = detectAxis('row', split.rows, dm, d, o);
@@ -206,11 +510,12 @@
             cols: c.lines.map((l) => ({ x: l.pos, y1: l.a0, y2: l.a1, label: l.label, tier: l.tier })),
             rows: r.lines.map((l) => ({ y: l.pos, x1: l.a0, x2: l.a1, label: l.label, tier: l.tier })),
             weak: [c.tier, r.tier].filter(Boolean).every((t) => t === 'C') && !!(c.lines.length || r.lines.length),
-            labelled: { cols: !!c.labelled, rows: !!r.labelled }
+            labelled: { cols: !!c.labelled, rows: !!r.labelled },
+            source: 'lines'
         };
     }
 
-    const api = { DEFAULTS, LABEL_RE, isLabelText, splitAxisSegments, chainPieces, labelAtEnd, bubbleAtEnd, detect };
+    const api = { DEFAULTS, LABEL_RE, isLabelText, splitAxisSegments, chainPieces, labelAtEnd, bubbleAtEnd, findBubbles, findMarkers, alignGroups, labelOrder, detect };
     root.BSA = root.BSA || {};
     root.BSA.gridAutoDetect = api;
     if (typeof module !== 'undefined' && module.exports) module.exports = api;
