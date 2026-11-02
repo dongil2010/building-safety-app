@@ -2,7 +2,7 @@
 'use strict';
 /**
  * 2026-11-02 결함핀 수정창(#defectModal): 폰·태블릿 키보드에 입력칸이 가리면
- * ① 본문 아래 키보드 높이 여백 + 스크롤로 칸을 키보드 위로, ② 그래도 가리면 화면 맨 위 미리보기 줄(칸 이름+내용, 실시간), 칸을 벗어나면 숨김.
+ * 본문 아래 키보드 높이 여백 + 스크롤로 칸을 키보드 위로(맨 위 미리보기 줄은 2026-11-02 뺌).
  * 숫자 키패드 칸(data-bsa-kb-skip)·PC는 그대로.
  */
 const assert = require('assert');
@@ -88,19 +88,12 @@ function setup(opts) {
     assert.ok(s.field.getBoundingClientRect().bottom <= 600 - 12, '키보드 위');
     assert.ok(!s.mirrorEls.some((m) => m.id === 'bsaKbMirror' && m.classList.contains('is-open')), '미리보기 없음');
 }
-// B) 스크롤해도 가리면 → 미리보기 줄(칸 이름 + 내용 실시간), 벗어나면 숨김·여백 원래대로
+// B) 칸을 벗어나면 여백 원래대로, 미리보기 줄은 없음(2026-11-02 사용자 요청으로 뺌)
 {
     const s = setup({ scrollable: false });
     s.docL.focusin({ target: s.field }); s.flush();
-    const ms = s.mirrorEls.filter((x) => x.id === 'bsaKbMirror');
-    assert.strictEqual(ms.length, 1, '미리보기 줄 하나');
-    const m = ms[0];
-    assert.ok(m && m.classList.contains('is-open'), '미리보기 열림');
-    assert.strictEqual(m._lab.textContent, '비고 :');
-    s.field.value = '균열 보수 필요'; s.field.fire('input');
-    assert.strictEqual(m._val.textContent, '균열 보수 필요', '실시간');
+    assert.strictEqual(s.mirrorEls.filter((x) => x.id === 'bsaKbMirror').length, 0, '미리보기 줄 없음');
     s.doc.activeElement = null; s.docL.focusout({}); s.flush();
-    assert.ok(!m.classList.contains('is-open'), '벗어나면 숨김');
     assert.ok(!('padding-bottom' in s.dbody.style._m), '여백 해제');
 }
 // C) 숫자 키패드 칸(data-bsa-kb-skip)은 건드리지 않음
@@ -110,5 +103,5 @@ function setup(opts) {
     assert.strictEqual(s.mirrorEls.filter((x) => x.id === 'bsaKbMirror').length, 0);
     assert.ok(!('padding-bottom' in s.dbody.style._m));
 }
-assert.ok(css.indexOf('.bsa-kb-mirror.is-open { display: flex; }') >= 0 && /\.bsa-kb-mirror \{[^}]*pointer-events: none/.test(css));
+assert.ok(css.indexOf('bsa-kb-mirror') < 0 && src.indexOf('bsaKbMirror') < 0, '미리보기 줄 코드 없음');
 console.log('test-defect-edit-keyboard-assist: ok');
