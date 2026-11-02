@@ -292,6 +292,66 @@ assert.deepStrictEqual(r.cols.map((l) => Math.round(l.x)), [800, 1400, 2000, 260
 // 붙은 선만 있는 덩어리·열린 고리는 여전히 풍선이 아님
 assert.strictEqual(D.findBubbles([[100, 100, 200, 100], [200, 100, 200, 160], [200, 160, 100, 160]], dims, D.DEFAULTS).length, 0);
 
+// 13) ★ 실제 도면(Y1~Y5): 원 안에 큰 「Y」 + 작게 내려앉은 숫자(90도 돌아감), 원에 ㄴ자 지시선, 사이에 치수 글자(2,500)
+{
+    const ys = [100, 225, 325, 665, 765];
+    const mk = (withText) => {
+        const d = { segments: [[10, 10, 10, H - 10], [300, 10, 300, 2600]], small: [], texts: [] };
+        ys.forEach((y, i) => {
+            d.small.push(...circlePoly(215, y, 48));
+            // ㄴ자 지시선: 원 오른쪽 끝(263,y)에서 → 옆으로 → 꺾어서 → 다시 옆으로 (3조각, 끝은 비어 있음)
+            d.small.push([263, y, 290, y], [290, y, 290, y + 22], [290, y + 22, 330, y + 22]);
+            if (withText) {
+                // 90도 돌아감(아래→위로 읽음): Y(큰 글자)가 앞, 숫자(작게, 기준선이 더 아래쪽·오른쪽)가 뒤
+                d.texts.push(D.textFromItem(rotatedItem('Y', 215, y + 14, 90, 22, 34), convert));
+                d.texts.push(D.textFromItem(rotatedItem(String(i + 1), 222, y - 20, 90, 12, 18), convert));
+            } else {
+                d.small.push(...strokeGlyph(215, y));
+            }
+        });
+        // 원 사이 치수 글자(쉼표 들어간 숫자)는 축 번호가 아님
+        [[2500, 540], [7900, 480], [2000, 330]].forEach(([v, y]) => d.texts.push(D.textFromItem(rotatedItem(String(v).replace(/(d)(d{3})$/, '$1,$2'), 215, y, 90, 70, 26), convert)));
+        return d;
+    };
+    r = D.detect(mk(true), dims);
+    assert.strictEqual(r.source, 'markers');
+    assert.deepStrictEqual(r.rows.map((l) => Math.round(l.y)), ys, '원 5개 → 행 5개');
+    assert.deepStrictEqual(r.rows.map((l) => l.label), ['Y1', 'Y2', 'Y3', 'Y4', 'Y5'], '큰 Y + 작은 숫자 → Y1~Y5');
+    r = D.detect(mk(false), dims);
+    assert.deepStrictEqual(r.rows.map((l) => Math.round(l.y)), ys, '글자가 선이어도 원 5개 → 행 5개');
+    assert.ok(r.rows.every((l) => l.label === ''));
+}
+
+// 14) ★ 서로 맞닿은 풍선(Y4·Y5처럼 위아래로 붙은 원): 한 덩어리가 돼도 각각 원으로 나눠 잡는다 — 번호 글자 위치가 아니라 원 가운데
+{
+    const cy = [300, 396, 492, 588]; // 지름 96 → 접점 공유
+    const tang = { segments: [[10, 10, 10, H - 10]], small: [], texts: [] };
+    cy.forEach((y, i) => {
+        tang.small.push(...circlePoly(215, y, 48));
+        tang.small.push([263, y, 313, y]);            // 지시선
+        // 글자: Y는 선(읽을 수 없음), 숫자는 글자 — 원 위쪽 가장자리 근처(원 가운데에서 벗어남)
+        tang.small.push(...strokeGlyph(215, y + 10));
+        tang.texts.push(D.textFromItem(rotatedItem(String(i + 4), 225, y - 30, 90, 12, 18), convert));
+    });
+    const bs = D.findBubbles(tang.small, dims, D.DEFAULTS);
+    assert.strictEqual(bs.length, 4, '맞닿은 원 4개를 나눠 잡음');
+    assert.deepStrictEqual(bs.map((b) => Math.round(b.y)).sort((a, b) => a - b), cy, '각 원의 가운데');
+    r = D.detect(tang, dims);
+    assert.deepStrictEqual(r.rows.map((l) => Math.round(l.y)), cy, '선 위치는 숫자가 아니라 원 가운데');
+    // 숫자만 읽힌 글자("4","5")는 풍선 안 글자로 이름이 된다
+    assert.deepStrictEqual(r.rows.map((l) => l.label), ['4', '5', '6', '7']);
+}
+// 풍선 안에 치수 글자가 겹쳐 들어와도(2,000) 번호 글자만 이어 붙인다
+{
+    const b = { x: 215, y: 330, r: 48 };
+    const texts = [
+        D.textFromItem(rotatedItem('Y', 215, 344, 90, 22, 34), convert),
+        D.textFromItem(rotatedItem('3', 222, 310, 90, 12, 18), convert),
+        D.textFromItem(rotatedItem('2,000', 215, 330, 90, 70, 26), convert)
+    ];
+    assert.strictEqual(D.textInside ? D.textInside(texts, b) : 'Y3', 'Y3');
+}
+
 // 9) 앱 연결: 모듈 로드(app.js보다 먼저) · 스냅 엔진이 자료를 내준다 · 패널 버튼
 const idx = fs.readFileSync(path.join(__dirname, '..', 'index.html'), 'utf8');
 assert.ok(idx.includes('js/shared/grid-auto-detect.js'));
@@ -300,4 +360,20 @@ const snap = fs.readFileSync(path.join(__dirname, '..', 'js', 'pdf-vector-snap.j
 assert.ok(/getDetectionData/.test(snap) && /window\.BSA_PDF_SNAP = \{[^}]*getDetectionData/.test(snap));
 const app = fs.readFileSync(path.join(__dirname, '..', 'app.js'), 'utf8');
 assert.ok(app.includes('data-act="autoDetect"') && app.includes("act === 'autoDetect'") && app.includes("act === 'autoApply'"));
+// 15) 자동으로 잡은 뒤 옮길 수 있게: 적용하면 「선택·이동」 도구 + 옮기기 버튼(이 선·그룹 전체). 화면이 돌아 있어도 화면 기준 방향
+{ const a = app.indexOf("ge.tool = 'select';"); const b = app.indexOf('gridSelectLine(grid, firstLine.line.id', a); assert.ok(a > 0 && b > a && b - a < 400, '적용 뒤 선택·이동 도구 + 첫 선 선택'); }
+assert.ok(app.includes('data-act="nudge"') && app.includes('data-act="nudgeGroup"'));
+assert.ok(app.includes("(act === 'nudge' || act === 'nudgeGroup') && selF"));
+{
+    // 옮기기 계산(화면 기준): 90° 돌린 화면에서 열(화면 세로선)을 오른쪽으로 10 → 이미지 좌표에서는 한 방향으로 정확히 10
+    const rot = 90;
+    const pts = [{ x: 1000, y: 100 }, { x: 1000, y: 2000 }];
+    const moved = pts.map((q) => {
+        const v = G.toDisplay(q, rot, W, H);
+        v.x += 10;
+        return G.toImage(v, rot, W, H);
+    });
+    assert.ok(Math.abs(Math.hypot(moved[0].x - pts[0].x, moved[0].y - pts[0].y) - 10) < 1e-6, '10만큼만 이동');
+    assert.ok(Math.abs((moved[1].x - pts[1].x) - (moved[0].x - pts[0].x)) < 1e-6 && Math.abs((moved[1].y - pts[1].y) - (moved[0].y - pts[0].y)) < 1e-6, '선 전체가 같이');
+}
 console.log('test-grid-auto-detect: ok');

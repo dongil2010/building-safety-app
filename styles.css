@@ -18224,3 +18224,8 @@ html.bsa-kb-dock-follow body.defect-modal-open #tab-map #mobileMapDock.mobile-ca
     bottom: calc(var(--bsa-kb-dock-bottom, 60dvh) + 0.22rem) !important;
     transition: bottom 0.22s ease !important;
 }
+
+/* 2026-11-02 행·열 선 옮기기 버튼(◀▶ ▲▼) */
+.grid-lines-panel .grid-nudge-row { display: flex; flex-wrap: wrap; align-items: center; gap: 3px; }
+.grid-lines-panel .grid-nudge-row > b { flex: 0 0 100%; font-size: 0.74rem; }
+.grid-lines-panel .grid-nudge-row button { padding: 2px 6px; font-size: 0.72rem; min-width: 34px; }

@@ -279,17 +279,39 @@
             });
             const w = x1 - x0;
             const h = y1 - y0;
-            const r = (w + h) / 4;
-            if (r < rMin || r > rMax) return;
-            if (w < h * 0.75 || h < w * 0.75) return;      // 거의 정사각 틀
-            const cx = (x0 + x1) / 2;
-            const cy = (y0 + y1) / 2;
-            // 끝점이 가운데에서 비슷한 거리(원·마름모·네모 꼭짓점) — 들쭉날쭉한 덩어리(글자·해칭)는 제외
-            const dist = pts.map((q) => Math.hypot(q[0] - cx, q[1] - cy));
-            const mean = dist.reduce((a, b) => a + b, 0) / dist.length;
-            const dev = dist.filter((d) => Math.abs(d - mean) > mean * 0.3).length;
-            if (dev > dist.length * 0.15) return;
-            found.push({ x: cx, y: cy, r: Math.max(w, h) / 2 });
+            // 끝점이 가운데(cx, cy)에서 비슷한 거리(원·마름모·네모 꼭짓점) — 들쭉날쭉한 덩어리(글자·해칭)는 제외
+            const roundish = (list, cx, cy) => {
+                if (list.length < 3) return false;
+                const dist = list.map((q) => Math.hypot(q[0] - cx, q[1] - cy));
+                const mean = dist.reduce((a, b) => a + b, 0) / dist.length;
+                return dist.filter((d) => Math.abs(d - mean) > mean * 0.3).length <= dist.length * 0.15;
+            };
+            const short = Math.min(w, h);
+            const long = Math.max(w, h);
+            const rShort = short / 2;
+            if (rShort < rMin || rShort > rMax) return;
+            if (w >= h * 0.75 && h >= w * 0.75) {
+                // 거의 정사각 틀: 풍선 하나
+                const cx = (x0 + x1) / 2;
+                const cy = (y0 + y1) / 2;
+                if (roundish(pts, cx, cy)) found.push({ x: cx, y: cy, r: Math.max(w, h) / 2 });
+                return;
+            }
+            // 2026-11-02 풍선이 서로 맞닿아 한 덩어리가 된 경우(Y4·Y5처럼 위아래로 붙은 원): 긴 쪽을 짧은 쪽 크기로 n등분
+            const k = Math.round(long / short);
+            if (k < 2 || k > 8 || Math.abs(long / short - k) > 0.15) return;
+            const horizontal = w > h;
+            const step = long / k;
+            const parts = [];
+            for (let i = 0; i < k; i++) {
+                const cx = horizontal ? x0 + step * (i + 0.5) : (x0 + x1) / 2;
+                const cy = horizontal ? (y0 + y1) / 2 : y0 + step * (i + 0.5);
+                const half = step / 2;
+                const inBox = pts.filter((q) => Math.abs(q[0] - cx) <= half + 1 && Math.abs(q[1] - cy) <= half + 1);
+                if (!roundish(inBox, cx, cy)) return; // 한 칸이라도 원이 아니면 이 덩어리는 풍선 줄이 아니다
+                parts.push({ x: cx, y: cy, r: half });
+            }
+            parts.forEach((b) => found.push(b));
         });
         // 이중 원 등 겹친 것은 바깥 것 하나만
         found.sort((a, b) => b.r - a.r);
@@ -345,10 +367,22 @@
         const dir = inside.find((t) => Number.isFinite(t.dx) && Number.isFinite(t.dy));
         const ux = dir ? dir.dx : 1;
         const uy = dir ? dir.dy : 0;
-        const joined = inside.slice().sort((p, q) => (p.x * ux + p.y * uy) - (q.x * ux + q.y * uy)).map((t) => String(t.str).trim()).join('');
-        if (isLabelText(joined)) return joined;
-        const near = inside.slice().sort((p, q) => Math.hypot(p.x - b.x, p.y - b.y) - Math.hypot(q.x - b.x, q.y - b.y));
-        for (let i = 0; i < near.length; i++) if (isLabelText(near[i].str)) return String(near[i].str).trim();
+        // 번호 글자 조각만(쉼표·마침표가 든 치수 글자, 긴 숫자 제외) 읽는 순서로
+        const pieces = inside
+            .filter((t) => /^[A-Za-z0-9'_-가-힣①-⑳ⓐ-ⓩⒶ-Ⓩ]{1,3}$/.test(String(t.str).trim()))
+            .sort((p, q) => (p.x * ux + p.y * uy) - (q.x * ux + q.y * uy));
+        // 이어 붙인 가장 긴 글자부터(Y + 1 → Y1), 같은 길이면 풍선 가운데에 가까운 조합
+        for (let n = Math.min(pieces.length, 4); n >= 1; n--) {
+            let best = null;
+            for (let i = 0; i + n <= pieces.length; i++) {
+                const win = pieces.slice(i, i + n);
+                const str = win.map((t) => String(t.str).trim()).join('');
+                if (!isLabelText(str)) continue;
+                const d = win.reduce((a, t) => a + Math.hypot(t.x - b.x, t.y - b.y), 0) / n;
+                if (!best || d < best.d) best = { str, d };
+            }
+            if (best) return best.str;
+        }
         return '';
     }
 
@@ -574,7 +608,7 @@
         };
     }
 
-    const api = { DEFAULTS, LABEL_RE, isLabelText, textFromItem, splitAxisSegments, chainPieces, labelAtEnd, bubbleAtEnd, findBubbles, findMarkers, alignGroups, labelOrder, detect };
+    const api = { DEFAULTS, LABEL_RE, isLabelText, textFromItem, textInside, splitAxisSegments, chainPieces, labelAtEnd, bubbleAtEnd, findBubbles, findMarkers, alignGroups, labelOrder, detect };
     root.BSA = root.BSA || {};
     root.BSA.gridAutoDetect = api;
     if (typeof module !== 'undefined' && module.exports) module.exports = api;

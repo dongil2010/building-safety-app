@@ -42871,10 +42871,15 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
             ge.editGroupId = g.id;
         });
         ge.autoPreview = null;
-        ge.sel = null;
         ge.zoneId = null;
+        // 2026-11-02 「자동으로 잡고 좀 옮길 수 있게」 — 적용하면 바로 「선택·이동」 도구로 바꿔 선을 끌거나 ◀▶ 버튼으로 옮길 수 있게 한다
+        ge.tool = 'select';
+        ge.bendArmed = false;
+        const firstGroup = grid.groups.find((g) => g.id === ge.editGroupId) || grid.groups[grid.groups.length - 1];
+        const firstLine = firstGroup && G.orderedLines(firstGroup, gctx).items[0];
+        if (firstLine) gridSelectLine(grid, firstLine.line.id, null); else ge.sel = null;
         gridChanged();
-        window.showToast?.(`행·열 선 ${added}개를 적용했습니다. 틀린 선은 눌러서 지우거나 옮기세요. 이미 넣은 마킹 위치는 「이 층 마킹에 위치 채우기」로 맞춥니다.`, 'success', 5500);
+        window.showToast?.(`행·열 선 ${added}개를 적용했습니다. 선을 끌어서 옮기거나 아래 「이 선 옮기기」·「그룹 전체」 ◀▶ 버튼으로 맞추세요. 틀린 선은 「선 삭제」. 이미 넣은 마킹 위치는 「이 층 마킹에 위치 채우기」로 맞춥니다.`, 'success', 7000);
     }
 
     // ---- 편집: 누르기 · 끌기 ----
@@ -43358,6 +43363,14 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
                     <div class="grid-panel-row">
                         <label title="이 선의 번호만 직접 정합니다(예: 5 → ${gridEsc(selF.group.prefix || '')}5). 비우면 자동 번호. 이름 칸에 글자를 쓰면 그 이름이 우선">번호 <input type="text" data-f="lnum" value="${Number.isInteger(selF.line.num) ? gridEsc(G.normalizeNumbering(selF.group.numbering) === 'upper' && selF.line.num >= 1 ? G.seqToLetters(selF.line.num, false) : String(selF.line.num)) : ''}" placeholder="자동" maxlength="6" style="width:56px"></label>
                     </div>
+                    <div class="grid-panel-row grid-nudge-row" title="화면 기준으로 ${selF.group.axis === 'row' ? '위·아래' : '왼쪽·오른쪽'}으로 옮깁니다(도면 px). 선을 끌어서 옮겨도 됩니다">
+                        <b>이 선 옮기기</b>
+                        ${[-50, -10, -1, 1, 10, 50].map((d) => `<button type="button" data-act="nudge" data-d="${d}">${selF.group.axis === 'row' ? (d < 0 ? '▲' : '▼') : (d < 0 ? '◀' : '▶')}${Math.abs(d)}</button>`).join('')}
+                    </div>
+                    <div class="grid-panel-row grid-nudge-row" title="이 그룹의 모든 선을 같이 옮깁니다 — 자동으로 잡은 선이 통째로 조금 어긋났을 때">
+                        <b>그룹 전체 (${(selF.group.lines || []).length}개)</b>
+                        ${[-50, -10, -1, 1, 10, 50].map((d) => `<button type="button" data-act="nudgeGroup" data-d="${d}">${selF.group.axis === 'row' ? (d < 0 ? '▲' : '▼') : (d < 0 ? '◀' : '▶')}${Math.abs(d)}</button>`).join('')}
+                    </div>
                     <div class="grid-panel-row">
                         <label>폭 <input type="number" data-f="lband" value="${selF.line.band != null ? selF.line.band : ''}" placeholder="기본 ${Math.round(lineBandDefault)}" min="0" step="1" style="width:64px"></label>
                     </div>
@@ -43486,6 +43499,20 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
         }
         if (act === 'angleAll' && eg) {
             eg.lines.forEach((ln) => G.setLineAngle(ln, eg.axis, eg.angle, gctx));
+            gridChanged();
+            return;
+        }
+        if ((act === 'nudge' || act === 'nudgeGroup') && selF) {
+            const d = Number(btn.getAttribute('data-d')) || 0;
+            if (!d) return;
+            const targets = act === 'nudgeGroup' ? (selF.group.lines || []) : [selF.line];
+            targets.forEach((ln) => {
+                ln.pts = ln.pts.map((q) => {
+                    const v = G.toDisplay(q, gctx.rot, gctx.w, gctx.h); // 화면 기준으로 옮긴 뒤 이미지 좌표로 되돌림(화면이 돌아 있어도 방향이 맞음)
+                    if (selF.group.axis === 'row') v.y += d; else v.x += d;
+                    return G.toImage(v, gctx.rot, gctx.w, gctx.h);
+                });
+            });
             gridChanged();
             return;
         }
