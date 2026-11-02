@@ -32,7 +32,9 @@
         rafPending: false,
         blurTimer: null,
         pointerDown: false,     // 손가락이 화면에 닿아 있는 동안
-        clearAfterTap: false    // 그동안 칸을 벗어났으면, 손을 뗀 뒤(클릭이 끝난 뒤) 내린다
+        clearAfterTap: false,   // 그동안 칸을 벗어났으면, 손을 뗀 뒤(클릭이 끝난 뒤) 내린다
+        liftKb: 0,              // 2026-11-02 마지막으로 창 높이를 맞춘 때의 키보드 높이
+        settleTimer: null       // 키보드가 다 올라온 뒤 한 번 더 맞추기
     };
     // 2026-10-12: 칸에 입력한 뒤 같은 창의 버튼(부동침하 「이동 보정 → 적용」 등)을 누르면 칸이 포커스를 잃어
     // 140ms 뒤 끌기 손잡이를 떼고 들어올림을 풀었다 → 버튼이 손가락 밑에서 위로 튀어 손을 뗄 때의 클릭이 엉뚱한 곳(목록)에 떨어졌다.
@@ -168,6 +170,18 @@
         return isFinite(v) ? v : 0;
     }
 
+    /** 창(시트) 아래 끝 ? 들어올리기 전 위치(px). 잴 수 없으면 null */
+    function panelUnliftedBottom(panel) {
+        if (!panel || typeof panel.getBoundingClientRect !== 'function') return null;
+        var r = panel.getBoundingClientRect();
+        if (!r || !isFinite(r.bottom) || !(r.bottom > r.top)) return null;
+        return r.bottom + appliedPanelLift();
+    }
+
+    function isDefectDrawerPanel(panel) {
+        return !!(panel && panel.closest && panel.closest('#defectModal') && !isNdtDrawerPanel(panel));
+    }
+
     /** 칸이 지금 보이는 화면 안에 있는지(키보드 위) */
     function fieldVisibleNow(field) {
         var box = getVisualViewportBox();
@@ -207,7 +221,12 @@
                     lift = Math.max(lift, Math.ceil(rect.top - ndtTargetTop));
                 }
             } else {
-                lift = Math.max(lift, Math.round(state.keyboardH * 0.85));
+                // 2026-11-02 결함핀 수정창: 창 아래 끝(버튼줄)이 키보드 바로 위에 오도록 실제 창 아래 끝으로 잰다.
+                // (예전 0.85배 고정 → 버튼줄이 키보드에 걸려 중간에 멈춘 것처럼 보였다)
+                // 아래에 붙은 시트는 키보드 높이만큼, 위에서부터 꽉 찬 옆 패널은 CSS로 키보드 위 높이로 줄어 거의 0.
+                var cardBottom = panelUnliftedBottom(state.panel);
+                if (cardBottom != null) lift = Math.max(lift, Math.ceil(cardBottom - (box.top + box.height)));
+                else lift = Math.max(lift, Math.round(state.keyboardH * 0.85));
             }
         } else if (!state.panel && state.keyboardH > 72) {
             // 페이지 본문 입력: 화면 전체를 일부 밀어 올림
@@ -242,12 +261,53 @@
         }
     }
 
+    // ── 2026-11-02 결함핀 수정창: 입력칸이 키보드에 가리지 않게 ──
+    // ① 창 본문 아래에 키보드 높이만큼 여백 → 끝 칸까지 스크롤해 키보드 위로 올린다
+    var DEFECT_MODAL_ID = 'defectModal';
+
+    function isDefectEditField(field) {
+        return !!(field && field.closest && field.closest('#' + DEFECT_MODAL_ID));
+    }
+
+    function defectBodyOf(field) {
+        return field && field.closest ? field.closest('#' + DEFECT_MODAL_ID + ' .defect-drawer-body') : null;
+    }
+
+    function applyDefectBodyPad(field) {
+        var body = defectBodyOf(field);
+        if (!body) return;
+        if (state.keyboardH > 72) {
+            body.style.setProperty('padding-bottom', (state.keyboardH + 24) + 'px', 'important');
+            body.setAttribute('data-bsa-kb-pad', '1');
+        } else if (body.hasAttribute('data-bsa-kb-pad')) {
+            body.style.removeProperty('padding-bottom');
+            body.removeAttribute('data-bsa-kb-pad');
+        }
+    }
+
+    function clearDefectBodyPad() {
+        document.querySelectorAll('[data-bsa-kb-pad]').forEach(function (b) {
+            b.style.removeProperty('padding-bottom');
+            b.removeAttribute('data-bsa-kb-pad');
+        });
+    }
+
+    /** 결함핀 수정창: 여백 → 칸을 키보드 위로 스크롤 */
+    function updateDefectEditAssist(scroll) {
+        var f = state.activeField;
+        if (!isDefectEditField(f)) return;
+        applyDefectBodyPad(f);
+        if (scroll && !fieldVisibleNow(f)) scrollFieldIntoView(f);
+    }
+
     function totalLift() {
         return Math.max(0, Math.round(state.autoLift + state.dragLift));
     }
 
     function applyLift() {
         var lift = totalLift();
+        state.liftKb = state.keyboardH;
+        document.documentElement.style.setProperty('--bsa-kb-inner-h', Math.round(window.innerHeight || 0) + 'px');
         document.documentElement.style.setProperty('--bsa-kb-height', state.keyboardH + 'px');
         document.documentElement.style.setProperty('--bsa-kb-lift', lift + 'px');
         document.body.classList.toggle('bsa-keyboard-open', state.keyboardH > 72 || lift > 0);
@@ -258,13 +318,44 @@
             state.panel.style.setProperty('--bsa-kb-lift', lift + 'px');
             state.panel.classList.toggle('bsa-kb-lifted', lift > 0 || state.keyboardH > 72);
         }
+        syncDockFollow(lift);
+    }
+
+    /**
+     * 2026-11-02 결함핀 수정창(아래 시트)이 열린 채 키보드가 뜨면 시트는 transform으로 올라가는데,
+     * 도면 아래 툴바(#mobileMapDock)는 CSS로 「시트 높이(60dvh) 위」에 고정돼 따라오지 않아 중간에 멈춰 보였다.
+     * → 시트가 실제로 올라간 윗변 높이를 재서 툴바를 그 위에 붙인다(아래 시트일 때만, 옆 패널·PC는 그대로).
+     */
+    function syncDockFollow(lift) {
+        var root = document.documentElement;
+        var p = state.panel;
+        var on = false;
+        if (p && isDefectDrawerPanel(p) && (lift > 0 || state.keyboardH > 72)
+            && typeof p.getBoundingClientRect === 'function') {
+            var r = p.getBoundingClientRect();
+            var applied = appliedPanelLift();
+            var ih = window.innerHeight || 0;
+            var unliftedTop = r.top + applied;
+            var unliftedBottom = r.bottom + applied;
+            // 화면 아래에 붙은 시트(아래 끝 ≈ 화면 아래)일 때만
+            if (ih > 0 && isFinite(unliftedTop) && Math.abs(unliftedBottom - ih) <= 24 && unliftedTop > 0) {
+                var gap = Math.max(0, Math.round(ih - (unliftedTop - lift)));
+                root.style.setProperty('--bsa-kb-dock-bottom', gap + 'px');
+                on = true;
+            }
+        }
+        if (root.classList) root.classList.toggle('bsa-kb-dock-follow', on);
+        if (!on) root.style.removeProperty('--bsa-kb-dock-bottom');
     }
 
     function clearLift() {
+        clearDefectBodyPad();
         state.keepLift = false;
         state.autoLift = 0;
         state.dragLift = 0;
         state.keyboardH = 0;
+        state.liftKb = 0;
+        if (state.settleTimer) { clearTimeout(state.settleTimer); state.settleTimer = null; }
         state.dragging = false;
         state.activeField = null;
         if (state.panel) {
@@ -284,6 +375,9 @@
         document.body.classList.remove('bsa-kb-page-lift');
         document.documentElement.style.removeProperty('--bsa-kb-height');
         document.documentElement.style.removeProperty('--bsa-kb-lift');
+        document.documentElement.style.removeProperty('--bsa-kb-inner-h');
+        document.documentElement.style.removeProperty('--bsa-kb-dock-bottom');
+        if (document.documentElement.classList) document.documentElement.classList.remove('bsa-kb-dock-follow');
     }
 
     function ensureDragHandle(panel) {
@@ -335,6 +429,17 @@
         }
     }
 
+    /** 화면(키보드) 크기 바뀜: 바로 맞추고, 움직임이 멎은 뒤 한 번 더(키보드가 다 올라온 높이로) */
+    function onViewportChange() {
+        scheduleLayoutUpdate();
+        if (!state.activeField) return;
+        if (state.settleTimer) clearTimeout(state.settleTimer);
+        state.settleTimer = setTimeout(function () {
+            state.settleTimer = null;
+            updateLayout(false);
+        }, 200);
+    }
+
     function scheduleLayoutUpdate() {
         if (state.rafPending) return;
         state.rafPending = true;
@@ -356,7 +461,11 @@
         state.keyboardH = measureKeyboardHeight();
         var nextLift = computeAutoLift(state.activeField);
         // 키보드 높이가 거의 그대로면(주소창·스크롤로 생긴 몇 px) 창을 다시 옮기지 않는다
-        var kbChanged = Math.abs(state.keyboardH - prevKb) > 40;
+        // 2026-11-02 키보드는 여러 번에 나눠(작은 resize 여러 번) 올라온다. 직전 값과 비교하면 한 번에 40px 넘게
+        // 바뀌지 않아 창이 처음 잰 높이에서 멈췄다 → 마지막으로 맞춘 높이와 비교 + 멈춘(안정) 뒤엔 작은 차이도 맞춘다
+        var drift = Math.abs(state.keyboardH - state.liftKb);
+        var kbStable = Math.abs(state.keyboardH - prevKb) <= 2;
+        var kbChanged = drift > 40 || (kbStable && drift > 4);
         // 창 안 목록을 스크롤해 칸 위치가 바뀌어도 창은 그대로 둔다(칸 따라 창이 오르내리면 덜컹거림)
         // 같은 창에서 다음 칸으로 옮겨 갈 때: 창은 그 자리에 두고(사용자가 끌어 둔 위치 포함) 창 안 목록만 스크롤.
         // 그래도 칸이 안 보일 때만 창 높이를 다시 잡는다. (칸마다 창이 오르내리던 문제)
@@ -364,6 +473,7 @@
             scrollFieldIntoView(state.activeField);
             if (fieldVisibleNow(state.activeField)) {
                 updateHandle();
+                updateDefectEditAssist(false);
                 return;
             }
             state.keepLift = false;
@@ -371,6 +481,11 @@
         if (forceScroll || kbChanged) {
             state.autoLift = nextLift;
             applyLift();
+            // 결함핀 수정창: 키보드 위 높이로 줄어든 뒤의 창 아래 끝으로 한 번 더(옆 패널이 위로 밀려나지 않게)
+            if (isDefectDrawerPanel(state.panel)) {
+                state.autoLift = computeAutoLift(state.activeField);
+                applyLift();
+            }
         }
 
         // 칸을 화면 안으로 끌어오는 스크롤은 포커스했을 때·키보드가 막 뜨거나 바뀌었을 때만(스크롤할 때마다 하면 목록이 튄다)
@@ -381,6 +496,7 @@
         }
 
         updateHandle();
+        updateDefectEditAssist(forceScroll || kbChanged);
     }
 
     function updateHandle() {
@@ -506,10 +622,10 @@
         document.addEventListener('pointercancel', onPointerUpCapture, true);
 
         if (window.visualViewport) {
-            window.visualViewport.addEventListener('resize', scheduleLayoutUpdate);
-            window.visualViewport.addEventListener('scroll', scheduleLayoutUpdate);
+            window.visualViewport.addEventListener('resize', onViewportChange);
+            window.visualViewport.addEventListener('scroll', onViewportChange);
         }
-        window.addEventListener('resize', scheduleLayoutUpdate);
+        window.addEventListener('resize', onViewportChange);
         window.addEventListener('orientationchange', function () {
             setTimeout(function () { updateLayout(true); }, 320);
         });

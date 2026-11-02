@@ -18150,3 +18150,17 @@ html.layout-tablet #tab-map #mobileMapFabBar .mobile-fab-btn {
     }
     #tab-home .building-row.building-row-dong .building-row-actions-compact .icon-btn-label { font-size: 0.76rem !important; }
 }
+
+
+/* 2026-11-02 결함핀 수정창: 키보드 높이만큼 통째로 올릴 때 창 위쪽이 화면 밖으로 나가지 않게 키보드 위 높이로 줄임(터치 기기만 bsa-kb-lifted) */
+body.bsa-keyboard-open #defectModal.open .defect-drawer-card.bsa-kb-lifted {
+    max-height: calc(var(--bsa-kb-inner-h, 100vh) - var(--bsa-kb-height, 0px) - 0.5rem) !important;
+    min-height: 0 !important;
+}
+
+/* 2026-11-02 결함핀 수정창(아래 시트) + 키보드: 도면 아래 툴바를 올라간 시트 윗변에 붙여 같이 올린다(JS가 높이 계산) */
+html.bsa-kb-dock-follow body.defect-modal-open #tab-map #mobileMapDock.mobile-canvas-dock {
+    position: fixed !important;
+    bottom: calc(var(--bsa-kb-dock-bottom, 60dvh) + 0.22rem) !important;
+    transition: bottom 0.22s ease !important;
+}

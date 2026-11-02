@@ -1,6 +1,7 @@
 /**
  * 「내용 비우기 (핀 위치 유지)」(2026-10-20) — 마킹 자리(핀·박스·지시선·NO.)는 두고 결함 내용만 비운다.
- * 이전 회차 사진(prevRoundPhotos)·이월 표시·위치 칸·번호·평가 구역은 건드리지 않는다.
+ * 이전 회차 사진(prevRoundPhotos)·이월 표시·번호·평가 구역·행·열 위치(gridLoc)는 건드리지 않는다.
+ * 2026-10-31 상세 위치(location)도 통째로 비운다(opts.emptyLocation: 1·2종 '' · 3종 층 이름).
  */
 (function (root) {
     'use strict';
@@ -13,8 +14,10 @@
     function isEmpty(v) { return v == null || v === '' || v === false || (Array.isArray(v) && !v.length); }
 
     /** 이 마킹에 비울 것이 있는가 */
-    function hasContent(d) {
+    function emptyLocOf(opts) { return String((opts && opts.emptyLocation) || ''); }
+    function hasContent(d, opts) {
         if (!d) return false;
+        if (d.location != null && String(d.location) !== emptyLocOf(opts)) return true;
         if (TEXT.some(function (k) { return Object.prototype.hasOwnProperty.call(d, k) && !isEmpty(d[k]); })) return true;
         if (FLAGS.some(function (k) { return d[k] === true; })) return true;
         if (ARRAYS.some(function (k) { return Array.isArray(d[k]) && d[k].length; })) return true;
@@ -27,9 +30,11 @@
     }
 
     /** 내용 칸만 비운다(사진은 여기서 안 건드림 — 앱이 사진 기록과 함께 뗀다). 바뀌었으면 true */
-    function clearContentFields(d) {
+    function clearContentFields(d, opts) {
         if (!d) return false;
         var changed = false;
+        var emptyLoc = emptyLocOf(opts);
+        if (d.location != null && String(d.location) !== emptyLoc) { d.location = emptyLoc; changed = true; }
         TEXT.forEach(function (k) {
             if (Object.prototype.hasOwnProperty.call(d, k) && !isEmpty(d[k])) { d[k] = ''; changed = true; }
         });

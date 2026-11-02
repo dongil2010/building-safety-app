@@ -11585,6 +11585,26 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
                 ctx.restore();
             }
 
+            // 2026-10-31 자동으로 찾은 테두리 모서리 제안(확인 전)
+            if (window.cadCalibrationState && Array.isArray(window.cadCalibrationState.proposal)) {
+                const sc = Math.max(state.view.scale || 1, 0.01);
+                window.cadCalibrationState.proposal.forEach((p, i) => {
+                    ctx.save();
+                    ctx.strokeStyle = '#f97316';
+                    ctx.fillStyle = 'rgba(249, 115, 22, 0.22)';
+                    ctx.lineWidth = 3 / sc;
+                    const r = 22 / sc;
+                    ctx.beginPath(); ctx.arc(p.x, p.y, r, 0, Math.PI * 2); ctx.fill(); ctx.stroke();
+                    ctx.beginPath();
+                    ctx.moveTo(p.x - r * 1.6, p.y); ctx.lineTo(p.x + r * 1.6, p.y);
+                    ctx.moveTo(p.x, p.y - r * 1.6); ctx.lineTo(p.x, p.y + r * 1.6);
+                    ctx.stroke();
+                    ctx.font = `bold ${Math.round(16 / sc)}px "Pretendard", "Malgun Gothic", "맑은 고딕", sans-serif`;
+                    ctx.fillStyle = '#ea580c';
+                    ctx.fillText(`기준점 ${i + 1}(자동)`, p.x + r + 4, p.y - 4);
+                    ctx.restore();
+                });
+            }
             if (window.cadCalibrationState && window.cadCalibrationState.pt1) {
                 const p1 = window.cadCalibrationState.pt1;
                 ctx.save();
@@ -45688,7 +45708,21 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
         if (hintEl) {
             hintEl.style.background = 'rgba(2, 132, 199, 0.95)';
             hintEl.style.color = '#ffffff';
-            hintEl.innerHTML = `<i class="fa-solid fa-crosshairs"></i> <strong>[캐드 보정 1/2단계]</strong> 캐드에서 찍으셨던 <strong>첫 번째 기준점(예: 도면 좌상단 기둥)</strong>을 클릭하세요. <button id="btnCancelCadCalib" style="margin-left:8px;padding:2px 8px;border-radius:4px;border:none;background:#ef4444;color:#fff;cursor:pointer;font-weight:700;">취소</button>`;
+            hintEl.innerHTML = `<i class="fa-solid fa-crosshairs"></i> <strong>[캐드 보정 1/2단계]</strong> 캐드에서 찍으셨던 <strong>첫 번째 기준점(예: 도면 좌상단 기둥)</strong>을 클릭하세요. <button id="btnCancelCadCalib" style="margin-left:8px;padding:2px 8px;border-radius:4px;border:none;background:#ef4444;color:#fff;cursor:pointer;font-weight:700;">취소</button> <label id="lblCadAutoDetect" title="도면 가장 바깥 테두리 모서리를 찾아 기준점으로 제안" style="margin-left:8px;cursor:pointer;font-weight:700;white-space:nowrap;"><input type="checkbox" id="chkCadAutoDetect" style="vertical-align:middle;margin-right:3px;cursor:pointer;"${isCadAutoDetectOn() ? ' checked' : ''}>자동 인식</label>`;
+            const chkAuto = document.getElementById('chkCadAutoDetect');
+            if (chkAuto) {
+                chkAuto.onclick = (e) => { e.stopPropagation(); };
+                chkAuto.onchange = (e) => {
+                    e.stopPropagation();
+                    setCadAutoDetectOn(!!chkAuto.checked);
+                    const cur = window.cadCalibrationState;
+                    if (chkAuto.checked && cur && cur.step === 1 && !cur.pt1) {
+                        proposeCadFrameCorners().catch((err) => console.warn('[CAD] 테두리 자동 찾기 실패', err));
+                    }
+                };
+            }
+            const lblAuto = document.getElementById('lblCadAutoDetect');
+            if (lblAuto) lblAuto.onclick = (e) => { e.stopPropagation(); };
             const btnCancel = document.getElementById('btnCancelCadCalib');
             if (btnCancel) {
                 btnCancel.onclick = (e) => {
@@ -45698,6 +45732,76 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
             }
         }
         window.showToast?.('📍 [1/2] 캐드에서 찍은 첫 번째 기준점(예: 좌상단 기둥)을 도면에서 클릭해 주세요.', 'info', 5000);
+        // 2026-10-31 기준점은 늘 도면 테두리(가장 바깥 사각형) 모서리 — 그림에서 찾아 제안(확인 후에만 적용)
+        if (isCadAutoDetectOn()) setTimeout(() => { proposeCadFrameCorners().catch((e) => console.warn('[CAD] 테두리 자동 찾기 실패', e)); }, 0);
+    }
+
+    /** 캐드 보정 「자동 인식」 켜짐 여부(기본 켬, 이 기기에 기억) */
+    function isCadAutoDetectOn() {
+        try { return localStorage.getItem('bsa.cadAutoDetect') !== '0'; } catch (_) { return true; }
+    }
+    function setCadAutoDetectOn(on) {
+        try { localStorage.setItem('bsa.cadAutoDetect', on ? '1' : '0'); } catch (_) { /* ignore */ }
+    }
+
+    /** 지금 층 도면 그림에서 테두리 사각형을 찾는다(그림 좌표). 못 찾으면 null */
+    function detectCadFrameOnCurrentFloor() {
+        const det = window.BSA && window.BSA.shared && window.BSA.shared.cadFrameDetect;
+        const img = state.bgImage;
+        if (!det || !img) return null;
+        const nw = img.naturalWidth || img.width, nh = img.naturalHeight || img.height;
+        if (!(nw > 0 && nh > 0)) return null;
+        const k = Math.min(1, 1600 / Math.max(nw, nh));
+        const w = Math.max(16, Math.round(nw * k)), h = Math.max(16, Math.round(nh * k));
+        const cv = document.createElement('canvas');
+        cv.width = w; cv.height = h;
+        const cx = cv.getContext('2d', { willReadFrequently: true });
+        cx.fillStyle = '#fff'; cx.fillRect(0, 0, w, h);
+        cx.drawImage(img, 0, 0, w, h);
+        let data;
+        try { data = cx.getImageData(0, 0, w, h).data; } catch (_e) { return null; }
+        const f = det.detectOuterFrame(det.toGray(data, w, h), w, h);
+        if (!f) return null;
+        const dims = getFloorPlanDisplayDims();
+        const sx = (dims.w || nw) / w, sy = (dims.h || nh) / h;
+        // 선 두께 바깥쪽 끝을 그림 좌표로
+        return Object.assign({}, f, { left: f.left * sx, right: (f.right + 1) * sx, top: f.top * sy, bottom: (f.bottom + 1) * sy });
+    }
+
+    async function proposeCadFrameCorners() {
+        const calib = window.cadCalibrationState;
+        if (!calib || calib.step !== 1 || calib.pt1) return;
+        const det = window.BSA && window.BSA.shared && window.BSA.shared.cadFrameDetect;
+        const frame = detectCadFrameOnCurrentFloor();
+        if (!frame || !det) {
+            window.showToast?.('도면 테두리를 자동으로 찾지 못했습니다. 기준점 두 곳을 직접 클릭해 주세요.', 'info', 4000);
+            return;
+        }
+        const pair = det.matchCadRefsToFrame(frame, calib.data && calib.data.refPoint1, calib.data && calib.data.refPoint2);
+        if (!pair) return;
+        calib.proposal = pair;
+        drawCanvas();
+        const pick = await window.appChoose(
+            `도면 테두리(가장 바깥 사각형) 모서리를 찾았습니다(신뢰도 ${Math.round(frame.confidence * 100)}%).\n`
+            + '화면의 주황 표시 두 곳이 캐드 기준점 1·2와 같은 자리면 「이 자리로」를 누르세요.\n'
+            + '다르면 「직접 찍기」로 두 곳을 클릭하면 됩니다. 들인 뒤에도 아래 막대로 위치를 다듬을 수 있습니다.',
+            [
+                { label: '이 자리로', detail: '기준점 1 → 2 순서로 테두리 모서리 사용' },
+                { label: '직접 찍기', detail: '도면에서 두 곳을 클릭' }
+            ],
+            { title: '캐드 기준점 자동 찾기', okText: '선택', defaultIndex: 0 }
+        );
+        const cur = window.cadCalibrationState;
+        if (!cur || cur !== calib) return;
+        cur.proposal = null;
+        if (pick === 0 && cur.step === 1 && !cur.pt1) {
+            cur.pt1 = pair[0];
+            cur.pt2 = pair[1];
+            cur.step = 2;
+            finishCad2PointCalibration();
+            return;
+        }
+        drawCanvas();
     }
 
     /** CAD JSON 글을 지금 층에 불러오기 — 파일 고르기·바탕화면 바로 읽기가 같은 검사·흐름을 쓴다 */
@@ -45797,7 +45901,8 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
         if (!C) return;
         const floorKey = `${state.currentBuildingId}_${state.currentFloor}`;
         const list = (state.defects && state.defects[floorKey]) || [];
-        const targets = list.filter((d) => d && C.hasContent(d));
+        const clearOpts = { emptyLocation: composeDefectLocation('', state.currentFloor) };
+        const targets = list.filter((d) => d && C.hasContent(d, clearOpts));
         if (!targets.length) { window.showToast?.('이 층에는 비울 결함 내용이 없습니다.', 'info', 3000); return; }
         const photoN = targets.reduce((s, d) => s + C.currentPhotoCount(d), 0);
         const bldg = state.currentBuilding || (state.buildings || []).find((b) => b.id === state.currentBuildingId);
@@ -45805,8 +45910,8 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
         const name = String((bldg && bldg.name) || '').replace(/^🏢\s*/, '');
         const ok = await window.appConfirm(
             `${name} · ${fl}\n마킹 ${targets.length}개의 결함 내용을 비웁니다.\n` +
-            `(종류·부재·원인·크기·개수·비고·진행 표시${photoN ? ` · 이번 회차 사진 ${photoN}장 떼기` : ''})\n\n` +
-            '핀·박스·지시선·번호는 그대로이고, 이전 회차 사진·다른 층·다른 동은 건드리지 않습니다.\n되돌리기(Ctrl+Z)로 돌아갈 수 있습니다.',
+            `(종류·부재·원인·크기·개수·비고·진행 표시·상세위치${photoN ? ` · 이번 회차 사진 ${photoN}장 떼기` : ''})\n\n` +
+            '핀·박스·지시선·번호·행·열 위치는 그대로이고, 이전 회차 사진·다른 층·다른 동은 건드리지 않습니다.\n되돌리기(Ctrl+Z)로 돌아갈 수 있습니다.',
             { title: '내용 비우기 (핀 위치 유지)', okText: `${targets.length}개 비우기`, danger: true }
         );
         if (!ok) return;
@@ -45819,7 +45924,7 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
         targets.forEach((d) => {
             const photoCount = C.currentPhotoCount(d);
             const beforeIds = photoCount ? defectPhotoIdList(d, photoCount) : [];
-            const changed = C.clearContentFields(d);
+            const changed = C.clearContentFields(d, clearOpts);
             if (changed) touchDefectUpdatedAt(d);
             if (photoCount) {
                 C.unlinkCurrentPhotos(d, beforeIds);
@@ -45843,7 +45948,7 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
     // 건물 층 목록 ∪ 기기 메모리의 이 건물 키). 서버를 따로 읽지 않는다. 확인창을 기다리는 사이 동기화가 목록을
     // 새 객체로 바꿔 끼울 수 있어 확인·백업 뒤에 목록을 다시 읽어 적용하고, 되돌리기는 한 번에 모든 층이 돌아간다.
     // 비우는 칸·보존하는 것은 「이 층만」과 같다(핀·박스·지시선·번호·이전 회차 사진·위치 칸은 그대로).
-    const DEFECT_CONTENT_CLEAR_FIELDS_TEXT = '종류·부재·원인·크기·폭·길이·개수·비고·진행 표시';
+    const DEFECT_CONTENT_CLEAR_FIELDS_TEXT = '종류·부재·원인·크기·폭·길이·개수·비고·진행 표시·상세위치';
 
     /** 읽기만 하는 계획: 층마다 { fc, key, label, total, targets, photoN } + 합계 */
     function planClearContentsForAllFloors(bldgId) {
@@ -45854,7 +45959,7 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
         const base = planClearDetailForAllFloors(id); // 층 목록만 빌려 쓴다(대상 판정은 아래에서 내용 기준으로 다시)
         base.floors.forEach((f) => {
             const list = Array.isArray(state.defects && state.defects[f.key]) ? state.defects[f.key] : [];
-            const targets = list.filter((d) => d && C.hasContent(d));
+            const targets = list.filter((d) => d && C.hasContent(d, { emptyLocation: composeDefectLocation('', f.fc) }));
             const photoN = targets.reduce((s, d) => s + C.currentPhotoCount(d), 0);
             out.floors.push({ fc: f.fc, key: f.key, label: f.label, total: list.length, targets, photoN });
             if (targets.length) { out.targetFloors += 1; out.targetCount += targets.length; out.photoCount += photoN; }
@@ -45864,10 +45969,10 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
     }
 
     /** 한 마킹의 내용 비우기(이 층만과 같은 처리) */
-    function applyDefectContentClearTo(d, C) {
+    function applyDefectContentClearTo(d, C, fc) {
         const photoCount = C.currentPhotoCount(d);
         const beforeIds = photoCount ? defectPhotoIdList(d, photoCount) : [];
-        const changed = C.clearContentFields(d);
+        const changed = C.clearContentFields(d, { emptyLocation: composeDefectLocation('', fc) });
         if (changed) touchDefectUpdatedAt(d);
         if (photoCount) {
             C.unlinkCurrentPhotos(d, beforeIds);
@@ -45895,7 +46000,7 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
             `「${describeBuildingForClear(bId)}」 건물의 모든 층(${plan0.floorCount}개 층 확인)에서\n` +
             `마킹 ${plan0.targetCount}개 · ${plan0.targetFloors}개 층의 결함 내용을 비웁니다.\n${lines}\n\n` +
             `(${DEFECT_CONTENT_CLEAR_FIELDS_TEXT}${plan0.photoCount ? ` · 이번 회차 사진 ${plan0.photoCount}장 떼기` : ''})\n\n` +
-            '핀·박스·지시선·번호·위치 칸은 그대로이고, 이전 회차 사진·다른 동은 건드리지 않습니다.\n' +
+            '핀·박스·지시선·번호·행·열 위치는 그대로이고, 이전 회차 사진·다른 동은 건드리지 않습니다.\n' +
             '이 층 화면에서 되돌리기(Ctrl+Z) 한 번으로 전체 층을 취소할 수 있습니다.',
             { title: '내용 비우기 — 전체 층', okText: `전체 ${plan0.targetCount}개 비우기`, danger: true }
         );
@@ -45915,7 +46020,7 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
         const hit = plan.floors.filter((f) => f.targets.length);
         pushDefectHistory(hit.filter((f) => f.key !== curKey).map((f) => f.key)); // 한 번에 모든 층 되돌리기
         let n = 0;
-        hit.forEach((f) => { f.targets.forEach((d) => { applyDefectContentClearTo(d, C); n++; }); });
+        hit.forEach((f) => { f.targets.forEach((d) => { applyDefectContentClearTo(d, C, f.fc); n++; }); });
         if (typeof markFloorKeyDirty === 'function') hit.forEach((f) => markFloorKeyDirty(f.key));
         saveStateToLocalStorage();
         if (typeof recordAfterBulkOp === 'function') recordAfterBulkOp(snaps);
@@ -45935,7 +46040,7 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
         if (!C) return;
         const bId = state.currentBuildingId;
         const floorKey = `${bId}_${state.currentFloor}`;
-        const here = ((state.defects && state.defects[floorKey]) || []).filter((d) => d && C.hasContent(d));
+        const here = ((state.defects && state.defects[floorKey]) || []).filter((d) => d && C.hasContent(d, { emptyLocation: composeDefectLocation('', state.currentFloor) }));
         const all = planClearContentsForAllFloors(bId);
         if (!here.length && !all.targetCount) { window.showToast?.(`비울 결함 내용이 없습니다. (${all.floorCount || 1}개 층 확인)`, 'info', 3000); return; }
         // 다른 층에는 비울 것이 없으면 물을 필요가 없다 → 이 층만 (기존 흐름)
