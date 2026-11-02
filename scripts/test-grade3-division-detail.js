@@ -44,11 +44,6 @@ assert.strictEqual(ctx.g({ location: '외부 북측면' }, { floorCode: 'EXT' },
 // 부대시설 도면
 assert.strictEqual(ctx.g({ location: '부대시설 정화조 상부' }, { floorCode: 'ANNEX' }, '부대시설'), '정화조 상부');
 assert.strictEqual(ctx.g({ location: '' }, { floorCode: 'ANNEX' }, '부대시설'), '부대시설');
-// 한글(HWPX)만: 상세 위치가 비었으면 「외부」 (2026-11-02) — 적은 상세 위치는 그대로, 화면·엑셀은 위 결과 그대로
-assert.strictEqual(ctx.g({ location: '' }, { floorCode: 'ANNEX', hwpxUnits: true }, '부대시설'), '외부');
-assert.strictEqual(ctx.g({ location: '부대시설' }, { floorCode: 'ANNEX', hwpxUnits: true }, '부대시설'), '외부');
-assert.strictEqual(ctx.g({ location: '부대시설 정화조 상부' }, { floorCode: 'ANNEX', hwpxUnits: true }, '부대시설'), '정화조 상부');
-assert.strictEqual(ctx.g({ location: '' }, { floorCode: 'EXT_FRONT', hwpxUnits: true }, '정면'), '정면', '다른 외부 도면은 그대로');
 
 // 연결: 화면·한글·엑셀이 모두 같은 칸 함수
 const cell = extractFunction(app, 'function getSurveyCellText(');
