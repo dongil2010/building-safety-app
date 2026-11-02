@@ -315,10 +315,11 @@ assert.strictEqual(D.findBubbles([[100, 100, 200, 100], [200, 100, 200, 160], [2
     };
     r = D.detect(mk(true), dims);
     assert.strictEqual(r.source, 'markers');
-    assert.deepStrictEqual(r.rows.map((l) => Math.round(l.y)), ys, '원 5개 → 행 5개');
+    // ㄴ자 지시선(원에서 → 꺾어서 y+22)의 끝이 실제 통심선 높이다 — 원 가운데가 아니다
+    assert.deepStrictEqual(r.rows.map((l) => Math.round(l.y)), ys.map((y) => y + 22), '지시선 끝 높이');
     assert.deepStrictEqual(r.rows.map((l) => l.label), ['Y1', 'Y2', 'Y3', 'Y4', 'Y5'], '큰 Y + 작은 숫자 → Y1~Y5');
     r = D.detect(mk(false), dims);
-    assert.deepStrictEqual(r.rows.map((l) => Math.round(l.y)), ys, '글자가 선이어도 원 5개 → 행 5개');
+    assert.deepStrictEqual(r.rows.map((l) => Math.round(l.y)), ys.map((y) => y + 22), '글자가 선이어도 지시선 끝 높이');
     assert.ok(r.rows.every((l) => l.label === ''));
 }
 
@@ -350,6 +351,28 @@ assert.strictEqual(D.findBubbles([[100, 100, 200, 100], [200, 100, 200, 160], [2
         D.textFromItem(rotatedItem('2,000', 215, 330, 90, 70, 26), convert)
     ];
     assert.strictEqual(D.textInside ? D.textInside(texts, b) : 'Y3', 'Y3');
+}
+
+// 16) ★ 사용자 화면(Y1~Y3): 선은 원 가운데가 아니라 지시선 끝(ㄴ자로 아래로/위로 꺾인 것 포함)에 찍혀야 한다
+{
+    const circles = [207, 385, 565];
+    const tips = [247, 385, 521];   // Y1: 아래로 40 꺾임 / Y2: 곧음 / Y3: 위로 44 꺾임
+    const d = { segments: [[10, 10, 10, H - 10]], small: [], texts: [] };
+    circles.forEach((cy, i) => {
+        d.small.push(...circlePoly(345, cy, 82));
+        const tip = tips[i];
+        if (tip === cy) d.small.push([427, cy, 470, cy]);
+        else d.small.push([427, cy, 448, cy], [448, cy, 448, tip], [448, tip, 470, tip]);
+        d.texts.push(D.textFromItem(rotatedItem('Y', 345, cy + 30, 90, 24, 36), convert), D.textFromItem(rotatedItem(String(i + 1), 360, cy - 40, 90, 12, 20), convert));
+    });
+    r = D.detect(d, { w: 4000, h: 2800 });
+    assert.deepStrictEqual(r.rows.map((l) => Math.round(l.y)), tips, '선 = 지시선 끝');
+    assert.deepStrictEqual(r.rows.map((l) => l.label), ['Y1', 'Y2', 'Y3']);
+    // 지시선이 없는 풍선은 가운데
+    const plain = { segments: [], small: circlePoly(345, 600, 82), texts: [] };
+    plain.small.push(...circlePoly(345, 900, 82));
+    const pr = D.findBubbles(plain.small, { w: 4000, h: 2800 }, D.DEFAULTS);
+    assert.ok(pr.every((b) => b.tipX === undefined && b.tipY === undefined));
 }
 
 // 9) 앱 연결: 모듈 로드(app.js보다 먼저) · 스냅 엔진이 자료를 내준다 · 패널 버튼

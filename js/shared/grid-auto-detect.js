@@ -269,6 +269,31 @@
                 if (idxs.length < 3) break;
             }
             if (idxs.length < 3) return;
+            // 2026-11-02 「여기로 찍혀야함」 — 풍선 가운데가 아니라 풍선에서 뻗은 지시선(ㄴ자로 꺾인 것 포함)의 끝이 실제 통심선 위치다.
+            // 떼어 낸 선분 중 어디에도 안 이어진 자유 끝점을 지시선 끝 후보로 둔다.
+            const keep = new Set(idxs);
+            const tips = [];
+            idxs0.forEach((i) => {
+                if (keep.has(i)) return;
+                const q = segs[i];
+                [[q[0], q[1]], [q[2], q[3]]].forEach(([x, y]) => {
+                    const free = !idxs0.some((j) => {
+                        if (j === i) return false;
+                        const t = segs[j];
+                        return Math.hypot(t[0] - x, t[1] - y) <= eps || Math.hypot(t[2] - x, t[3] - y) <= eps;
+                    });
+                    if (free) tips.push({ x, y });
+                });
+            });
+            const tipFor = (cx, cy, r) => {
+                let best = null;
+                tips.forEach((t) => {
+                    const d = Math.hypot(t.x - cx, t.y - cy);
+                    if (d <= r * 1.05 || d > r * 6) return;
+                    if (!best || d < best.d) best = { x: t.x, y: t.y, d };
+                });
+                return best ? { tipX: best.x, tipY: best.y } : {};
+            };
             let x0 = Infinity, y0 = Infinity, x1 = -Infinity, y1 = -Infinity;
             const pts = [];
             idxs.forEach((i) => {
@@ -294,7 +319,8 @@
                 // 거의 정사각 틀: 풍선 하나
                 const cx = (x0 + x1) / 2;
                 const cy = (y0 + y1) / 2;
-                if (roundish(pts, cx, cy)) found.push({ x: cx, y: cy, r: Math.max(w, h) / 2 });
+                const rr = Math.max(w, h) / 2;
+                if (roundish(pts, cx, cy)) found.push(Object.assign({ x: cx, y: cy, r: rr }, tipFor(cx, cy, rr)));
                 return;
             }
             // 2026-11-02 풍선이 서로 맞닿아 한 덩어리가 된 경우(Y4·Y5처럼 위아래로 붙은 원): 긴 쪽을 짧은 쪽 크기로 n등분
@@ -309,7 +335,7 @@
                 const half = step / 2;
                 const inBox = pts.filter((q) => Math.abs(q[0] - cx) <= half + 1 && Math.abs(q[1] - cy) <= half + 1);
                 if (!roundish(inBox, cx, cy)) return; // 한 칸이라도 원이 아니면 이 덩어리는 풍선 줄이 아니다
-                parts.push({ x: cx, y: cy, r: half });
+                parts.push(Object.assign({ x: cx, y: cy, r: half }, tipFor(cx, cy, half)));
             }
             parts.forEach((b) => found.push(b));
         });
@@ -389,7 +415,7 @@
     /** 표시 후보: 풍선(안 글자 포함) + 풍선 밖의 도면 글자 */
     function findMarkers(data, dims, o) {
         const bubbles = findBubbles(data.small, dims, o);
-        const markers = bubbles.map((b) => ({ x: b.x, y: b.y, r: b.r, bubble: true, label: textInside(data.texts, b) }));
+        const markers = bubbles.map((b) => ({ x: b.x, y: b.y, r: b.r, bubble: true, label: textInside(data.texts, b), tipX: b.tipX, tipY: b.tipY }));
         (data.texts || []).forEach((t) => {
             if (!t || !isLabelText(t.str)) return;
             if (bubbles.some((b) => Math.hypot(t.x - b.x, t.y - b.y) <= b.r * 1.3)) return; // 이미 풍선 안
@@ -490,7 +516,8 @@
         const L = Math.max(dims.w, dims.h);
         const snapTol = L * o.snapTolFrac;
         const full = axis === 'col' ? [content.y0, content.y1] : [content.x0, content.x1];
-        const along = (m) => (axis === 'col' ? m.x : m.y);
+        // 선 위치: 풍선에서 뻗은 지시선의 끝이 있으면 그 좌표(열은 x, 행은 y), 없으면 풍선 가운데
+        const along = (m) => (axis === 'col' ? (Number.isFinite(m.tipX) ? m.tipX : m.x) : (Number.isFinite(m.tipY) ? m.tipY : m.y));
         const crossOf = (m) => (axis === 'col' ? m.y : m.x);
         const lines = [];
         g.items.forEach((m) => {
