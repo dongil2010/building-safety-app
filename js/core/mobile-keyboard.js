@@ -242,6 +242,130 @@
         }
     }
 
+    // ── 2026-11-02 결함핀 수정창: 입력칸이 키보드에 가리지 않게 ──
+    // ① 창 본문 아래에 키보드 높이만큼 여백 → 끝 칸까지 스크롤해 키보드 위로 올린다
+    // ② 그래도 가려지면(스크롤 못 함) 보이는 화면 맨 위에 「칸 이름 + 지금 적는 내용」 미리보기 줄
+    var DEFECT_MODAL_ID = 'defectModal';
+    var mirror = { el: null, field: null };
+
+    function isDefectEditField(field) {
+        return !!(field && field.closest && field.closest('#' + DEFECT_MODAL_ID));
+    }
+
+    function defectBodyOf(field) {
+        return field && field.closest ? field.closest('#' + DEFECT_MODAL_ID + ' .defect-drawer-body') : null;
+    }
+
+    function applyDefectBodyPad(field) {
+        var body = defectBodyOf(field);
+        if (!body) return;
+        if (state.keyboardH > 72) {
+            body.style.setProperty('padding-bottom', (state.keyboardH + 24) + 'px', 'important');
+            body.setAttribute('data-bsa-kb-pad', '1');
+        } else if (body.hasAttribute('data-bsa-kb-pad')) {
+            body.style.removeProperty('padding-bottom');
+            body.removeAttribute('data-bsa-kb-pad');
+        }
+    }
+
+    function clearDefectBodyPad() {
+        document.querySelectorAll('[data-bsa-kb-pad]').forEach(function (b) {
+            b.style.removeProperty('padding-bottom');
+            b.removeAttribute('data-bsa-kb-pad');
+        });
+    }
+
+    /** 칸 이름: label[for] → 같은 묶음의 label → aria-label → placeholder */
+    function fieldLabelText(field) {
+        if (!field) return '';
+        var t = '';
+        try {
+            if (field.id && window.CSS && CSS.escape) {
+                var lb = document.querySelector('label[for="' + CSS.escape(field.id) + '"]');
+                if (lb) t = lb.textContent;
+            }
+            if (!t && field.closest) {
+                var lab = field.closest('label');
+                if (lab) t = lab.textContent;
+            }
+            if (!t && field.closest) {
+                var grp = field.closest('.form-group, .defect-field, .field, .form-row');
+                var gl = grp && grp.querySelector('label, .form-label, .field-label');
+                if (gl) t = gl.textContent;
+            }
+        } catch (_e) { /* ignore */ }
+        if (!t) t = field.getAttribute('aria-label') || field.getAttribute('placeholder') || '';
+        return String(t).replace(/\s+/g, ' ').trim().slice(0, 24);
+    }
+
+    function fieldValueText(field) {
+        if (!field) return '';
+        if (field.isContentEditable) return field.textContent || '';
+        return field.value != null ? String(field.value) : '';
+    }
+
+    function ensureMirror() {
+        if (mirror.el && document.body.contains(mirror.el)) return mirror.el;
+        var el = document.createElement('div');
+        el.id = 'bsaKbMirror';
+        el.className = 'bsa-kb-mirror';
+        el.setAttribute('aria-hidden', 'true');
+        el.innerHTML = '<span class="bsa-kb-mirror-label"></span><span class="bsa-kb-mirror-value"></span>';
+        document.body.appendChild(el);
+        mirror.el = el;
+        return el;
+    }
+
+    function positionMirror() {
+        if (!mirror.el) return;
+        var box = getVisualViewportBox();
+        mirror.el.style.top = Math.round(box.top) + 'px';
+        mirror.el.style.left = Math.round(box.left) + 'px';
+        mirror.el.style.width = Math.round(box.width) + 'px';
+    }
+
+    function updateMirrorText() {
+        if (!mirror.el || !mirror.field) return;
+        var lab = fieldLabelText(mirror.field);
+        mirror.el.querySelector('.bsa-kb-mirror-label').textContent = lab ? lab + ' :' : '입력 중 :';
+        var v = fieldValueText(mirror.field);
+        var valEl = mirror.el.querySelector('.bsa-kb-mirror-value');
+        valEl.textContent = v || ' ';
+        valEl.classList.toggle('is-empty', !v);
+        valEl.scrollLeft = valEl.scrollWidth;
+    }
+
+    function onMirrorInput() { updateMirrorText(); }
+
+    function showMirror(field) {
+        var el = ensureMirror();
+        if (mirror.field !== field) {
+            if (mirror.field) mirror.field.removeEventListener('input', onMirrorInput);
+            mirror.field = field;
+            field.addEventListener('input', onMirrorInput);
+        }
+        positionMirror();
+        updateMirrorText();
+        el.classList.add('is-open');
+    }
+
+    function hideMirror() {
+        if (mirror.field) mirror.field.removeEventListener('input', onMirrorInput);
+        mirror.field = null;
+        if (mirror.el) mirror.el.classList.remove('is-open');
+    }
+
+    /** 결함핀 수정창: 여백 → 스크롤 → 그래도 가려지면 미리보기 줄 */
+    function updateDefectEditAssist(scroll) {
+        var f = state.activeField;
+        if (!isDefectEditField(f)) { hideMirror(); return; }
+        applyDefectBodyPad(f);
+        if (scroll && !fieldVisibleNow(f)) scrollFieldIntoView(f);
+        if (!fieldVisibleNow(f)) showMirror(f);
+        else if (mirror.field === f) positionMirror();
+        if (mirror.field === f && fieldVisibleNow(f)) hideMirror();
+    }
+
     function totalLift() {
         return Math.max(0, Math.round(state.autoLift + state.dragLift));
     }
@@ -261,6 +385,8 @@
     }
 
     function clearLift() {
+        hideMirror();
+        clearDefectBodyPad();
         state.keepLift = false;
         state.autoLift = 0;
         state.dragLift = 0;
@@ -364,6 +490,7 @@
             scrollFieldIntoView(state.activeField);
             if (fieldVisibleNow(state.activeField)) {
                 updateHandle();
+                updateDefectEditAssist(false);
                 return;
             }
             state.keepLift = false;
@@ -381,6 +508,7 @@
         }
 
         updateHandle();
+        updateDefectEditAssist(forceScroll || kbChanged);
     }
 
     function updateHandle() {
@@ -522,7 +650,8 @@
         isActive: isTouchKeyboardUi,
         refresh: function () { updateLayout(true); },
         reset: clearLift,
-        bindBodyScrollDrag: bindBodyScrollDrag
+        bindBodyScrollDrag: bindBodyScrollDrag,
+        _fieldLabelText: fieldLabelText
     };
 
     window.BSA.resetMobileKeyboard = clearLift;
