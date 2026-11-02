@@ -42743,9 +42743,13 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
         const vert = ap.res.cols.map((l) => ({ pts: [{ x: l.x, y: l.y1 }, { x: l.x, y: l.y2 }], label: l.label || '', series: l.series || 0 }));
         const horz = ap.res.rows.map((l) => ({ pts: [{ x: l.x1, y: l.y }, { x: l.x2, y: l.y }], label: l.label || '', series: l.series || 0 }));
         const labelled = ap.res.labelled || {};
-        return swap
+        const out = swap
             ? { col: horz, row: vert, labelled: { col: !!labelled.rows, row: !!labelled.cols } }
             : { col: vert, row: horz, labelled: { col: !!labelled.cols, row: !!labelled.rows } };
+        // 2026-11-02 찾을 방향: 입면도처럼 열(X)만 필요한 도면은 행 후보를 뺀다
+        if (ap.axes === 'cols') out.row = [];
+        if (ap.axes === 'rows') out.col = [];
+        return out;
     }
 
     function drawGridAutoPreview(ctx) {
@@ -42821,7 +42825,7 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
         const res = D.detect(
             { segments: data.segments, small: data.small, texts: data.texts },
             dims,
-            { minSpanFrac: GRID_AUTO_SENS[ge.autoSens || 'normal'] || GRID_AUTO_SENS.normal }
+            { minSpanFrac: GRID_AUTO_SENS[ge.autoSens || 'normal'] || GRID_AUTO_SENS.normal, outerOnly: ge.autoOuter !== 'all' }
         );
         if (!res.cols.length && !res.rows.length) {
             ge.autoPreview = null;
@@ -42830,10 +42834,11 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
             window.showToast?.('번호 풍선·글자를 못 찾았습니다(글자가 그림으로 된 PDF일 수 있음). 민감도를 「짧은 선도」로 바꿔 다시 눌러 보거나 직접 그어 주세요.', 'warning', 5000);
             return;
         }
-        ge.autoPreview = { key: getGridFloorKey(), res, dims, rot: state.rotationAngle || 0 };
+        ge.autoPreview = { key: getGridFloorKey(), res, dims, rot: state.rotationAngle || 0, axes: ge.autoAxes || 'both' };
         renderGridPanel();
         drawCanvas();
-        window.showToast?.(`열 ${res.cols.length}개 · 행 ${res.rows.length}개 후보를 찾았습니다. 주황 점선이 맞으면 「적용」을 누르세요.`, 'success', 4500);
+        const shown = gridAutoCandidatesByAxis(ge.autoPreview);
+        window.showToast?.(`열 ${shown.col.length}개 · 행 ${shown.row.length}개 후보를 찾았습니다. 주황 점선이 맞으면 「적용」을 누르세요.`, 'success', 4500);
     }
 
     async function gridAutoApply() {
@@ -43258,13 +43263,15 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
         // 2026-11-02 자동 잡기: 캐드 PDF의 통심선·축 번호를 찾아 후보를 보여 주고, 맞으면 적용
         const autoPrev = (ge.autoPreview && ge.autoPreview.key === getGridFloorKey()) ? ge.autoPreview : null;
         const autoSens = ge.autoSens || 'normal';
+        const autoAxes = ge.autoAxes || 'both';
         const autoSummary = autoPrev ? (() => {
             const r = autoPrev.res;
+            const byAx = gridAutoCandidatesByAxis(autoPrev);
             const named = (r.labelled && (r.labelled.cols || r.labelled.rows)) ? ' · 도면 축 번호를 이름으로' : ' · 이름은 자동 번호';
             const sc = r.seriesCount || {};
             const seriesNote = ((sc.cols || 0) > 1 || (sc.rows || 0) > 1) ? ` · 번호 계열이 바뀜(열 ${sc.cols || 1}묶음 · 행 ${sc.rows || 1}묶음) → 묶음마다 그룹으로 나눔` : '';
             const how = r.source === 'markers' ? ' · 번호 풍선·글자 기준' : ' · <b style="color:#b45309">번호 풍선·글자를 못 찾아 선 기준으로 찾음</b>';
-            return `열 ${r.cols.length}개 · 행 ${r.rows.length}개 후보${how}${named}${seriesNote}${r.weak ? ' · <b style="color:#b45309">확실하지 않음(긴 실선만 찾음)</b>' : ''}`;
+            return `열 ${byAx.col.length}개 · 행 ${byAx.row.length}개 후보${how}${named}${seriesNote}${r.weak ? ' · <b style="color:#b45309">확실하지 않음(긴 실선만 찾음)</b>' : ''}`;
         })() : '';
         const autoHtml = `
                 <div class="grid-panel-sec">
@@ -43276,6 +43283,19 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
                             <option value="long"${autoSens === 'long' ? ' selected' : ''}>긴 선만</option>
                         </select></label>
                         <button type="button" data-act="autoDetect">✨ 자동 잡기</button>
+                    </div>
+                    <div class="grid-panel-row">
+                        <label>번호 위치 <select data-f="autoOuter" title="기본은 건물 바깥(외곽)에 있는 번호만 — 주차칸·방 번호 같은 안쪽 번호는 무시합니다. 축 번호가 건물 안쪽에 있는 도면만 「안쪽도」">
+                            <option value="outer"${(ge.autoOuter || 'outer') === 'outer' ? ' selected' : ''}>외곽만 (기본)</option>
+                            <option value="all"${ge.autoOuter === 'all' ? ' selected' : ''}>안쪽도</option>
+                        </select></label>
+                    </div>
+                    <div class="grid-panel-row">
+                        <label>찾을 방향 <select data-f="autoAxes" title="입면도처럼 위쪽 번호(열)만 필요한 도면은 「열만」">
+                            <option value="both"${autoAxes === 'both' ? ' selected' : ''}>열 + 행</option>
+                            <option value="cols"${autoAxes === 'cols' ? ' selected' : ''}>열만 (입면도)</option>
+                            <option value="rows"${autoAxes === 'rows' ? ' selected' : ''}>행만</option>
+                        </select></label>
                     </div>
                     ${autoPrev ? `
                     <div class="grid-panel-row">${autoSummary}</div>
@@ -43723,6 +43743,13 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
                     if (n != null) selF.line.num = n; else delete selF.line.num; // 비우거나 읽을 수 없으면 자동 번호
                 }
                 break;
+            case 'autoOuter':
+                ge.autoOuter = el.value === 'all' ? 'all' : 'outer';
+                return;
+            case 'autoAxes':
+                ge.autoAxes = (el.value === 'cols' || el.value === 'rows') ? el.value : 'both';
+                if (ge.autoPreview) { ge.autoPreview.axes = ge.autoAxes; renderGridPanel(); drawCanvas(); }
+                return;
             case 'autoSens':
                 ge.autoSens = (el.value === 'short' || el.value === 'long') ? el.value : 'normal';
                 return;

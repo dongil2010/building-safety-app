@@ -43,7 +43,9 @@
         bubbleMinDiaFrac: 0.006, // 번호 풍선 지름(긴 변 대비) 범위
         bubbleMaxDiaFrac: 0.05,
         alignTolFrac: 0.006,    // 같은 높이(세로줄)로 보는 오차
-        snapTolFrac: 0.012      // 표시 ↔ 긴 선·반대편 표시를 같은 축으로 보는 거리
+        snapTolFrac: 0.012,     // 표시 ↔ 긴 선·반대편 표시를 같은 축으로 보는 거리
+        outerOnly: true,        // 2026-11-02 도면 외곽(건물 바깥)에 있는 번호만 — 주차칸·방 번호 같은 안쪽 번호는 제외
+        outerBand: 0.10         // 외곽으로 보는 폭(건물 영역의 위·아래·왼·오른쪽 가장자리 10% 안쪽까지 + 그 바깥)
     };
 
     // 도면 글자로 인정하는 축 번호 모양: 1, 12, A, AB, X1, Y3, A-1, 1-1, ①, ⓐ, 가, A'
@@ -533,6 +535,35 @@
         return out;
     }
 
+    /**
+     * 건물 영역(footprint) — 선분 가운데점의 3~97% 범위. 축 번호 풍선은 건물 바깥에 몇 개뿐이라 이 범위 바깥(또는 가장자리)에 놓인다.
+     * 2026-11-02 「주차칸 숫자를 인식해버림 / 기본적으로 외곽에 있는 숫자나 알파벳」 — 건물 안쪽 번호는 축 번호가 아니다.
+     */
+    function footprintRange(data, dims) {
+        const xs = [];
+        const ys = [];
+        const add = (q) => { xs.push((q[0] + q[2]) / 2); ys.push((q[1] + q[3]) / 2); };
+        // 수직·수평 선분(벽·칸막이·치수선)만 — 번호 풍선의 작은 선(원 둘레)이 영역을 바깥으로 끌어당기지 않게
+        (data.segments || []).forEach(add);
+        if (xs.length < 30) return { x0: 0, x1: dims.w, y0: 0, y1: dims.h, ok: false };
+        xs.sort((a, b) => a - b);
+        ys.sort((a, b) => a - b);
+        const at = (arr, f) => arr[Math.min(arr.length - 1, Math.max(0, Math.floor(arr.length * f)))];
+        const r = { x0: at(xs, 0.03), x1: at(xs, 0.97), y0: at(ys, 0.03), y1: at(ys, 0.97) };
+        // 건물이 도면의 30%도 안 차지하면(자료가 적거나 일부만 읽힘) 외곽 판정을 하지 않는다
+        r.ok = (r.x1 - r.x0) >= dims.w * 0.3 && (r.y1 - r.y0) >= dims.h * 0.3;
+        return r;
+    }
+
+    /** 번호 줄(묶음)이 건물 영역 바깥·가장자리에 있나. 열 묶음(같은 y)은 위·아래, 행 묶음(같은 x)은 왼·오른쪽 가장자리 */
+    function isOuterGroup(axis, g, fp, o) {
+        if (!o.outerOnly || !fp || !fp.ok) return true;
+        const lo = axis === 'col' ? fp.y0 : fp.x0;
+        const hi = axis === 'col' ? fp.y1 : fp.x1;
+        const band = (hi - lo) * o.outerBand;
+        return g.cross <= lo + band || g.cross >= hi - band;
+    }
+
     /** 도면 내용 범위(테두리·바깥 점 무시) — 반대편 끝까지 그을 때 쓴다 */
     function contentRange(segments, dims) {
         const xs = [];
@@ -573,11 +604,19 @@
                 const c = crossOf(m);
                 if (c <= mid) { a0 = c; a1 = full[1]; } else { a0 = full[0]; a1 = c; }
             }
-            // 근처 긴 선이 있으면 그 위치·길이(더 정확)
+            // 근처 긴 선이 있으면 그 위치·길이(더 정확).
+            // 2026-11-02 입면도(X1~X19)에서 풍선 옆을 지나가는 다른 세로선(지시선·치수선)에 달라붙어 선이 엉뚱한 곳에 그어지던 문제:
+            // ① 풍선 가운데(또는 지시선 끝)와 아주 가깝고(풍선 반지름의 절반·최소 0.3%) ② 그 선이 풍선에서 이어져 나온 것(한쪽 끝이 풍선 4배 이내)일 때만 맞춘다.
+            const rr = m.r || 0;
+            const tight = Math.max(rr * 0.5, L * 0.003, 3);
+            const near = Math.max(rr * 4, L * 0.02);
+            // 지시선이 있으면 그 끝에서부터 얼마나 떨어져 시작하는지(풍선 ~ 지시선 ~ 틈 ~ 통심선)
+            const cm = axis === 'col' ? (Number.isFinite(m.tipY) ? m.tipY : m.y) : (Number.isFinite(m.tipX) ? m.tipX : m.x);
             let best = null;
             chains.forEach((ch) => {
                 const d = Math.abs(ch.pos - pos);
-                if (d > snapTol) return;
+                if (d > tight) return;
+                if (Math.min(Math.abs(ch.a0 - cm), Math.abs(ch.a1 - cm)) > near) return;
                 const overlap = Math.min(ch.a1, a1) - Math.max(ch.a0, a0);
                 if (overlap < (a1 - a0) * 0.5) return;
                 if (!best || d < best.d) best = { d, ch };
@@ -628,8 +667,9 @@
         const split = splitAxisSegments(data.segments, o.angleTol);
         const colChains = chainPieces(split.cols, L * o.posTolFrac, L * o.gapFrac).filter((c) => c.a1 - c.a0 >= dims.h * 0.2);
         const rowChains = chainPieces(split.rows, L * o.posTolFrac, L * o.gapFrac).filter((c) => c.a1 - c.a0 >= dims.w * 0.2);
+        const fp = footprintRange(data, dims);
         const pick = (axis, chains) => {
-            const groups = alignGroups(markers, axis, dims, o);
+            const groups = alignGroups(markers, axis, dims, o).filter((g) => isOuterGroup(axis, g, fp, o));
             if (!groups.length) return { lines: [], labelled: false };
             const best = groups[0];
             const span = axis === 'col' ? dims.h : dims.w;
@@ -681,7 +721,7 @@
         };
     }
 
-    const api = { DEFAULTS, LABEL_RE, isLabelText, labelClass, seriesIndexes, textFromItem, textInside, splitAxisSegments, chainPieces, labelAtEnd, bubbleAtEnd, findBubbles, findMarkers, alignGroups, labelOrder, detect };
+    const api = { footprintRange, isOuterGroup, DEFAULTS, LABEL_RE, isLabelText, labelClass, seriesIndexes, textFromItem, textInside, splitAxisSegments, chainPieces, labelAtEnd, bubbleAtEnd, findBubbles, findMarkers, alignGroups, labelOrder, detect };
     root.BSA = root.BSA || {};
     root.BSA.gridAutoDetect = api;
     if (typeof module !== 'undefined' && module.exports) module.exports = api;

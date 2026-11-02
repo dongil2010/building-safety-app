@@ -446,6 +446,63 @@ assert.deepStrictEqual(D.seriesIndexes(['A', '', 'B']), [0, 0, 0], '글자 없�
     assert.strictEqual(new Set(D.seriesIndexes(lines.map((l) => l.label))).size, 2);
 }
 
+// 19) ★ 입면도(X1~X19): 풍선 옆을 지나가는 다른 긴 세로선(지시선·치수선)에 달라붙지 않는다 — 선은 풍선 가운데
+{
+    const xs = Array.from({ length: 19 }, (_, i) => 300 + i * 190);
+    const d = { segments: [[10, 10, 10, H - 10]], small: [], texts: [] };
+    xs.forEach((x, i) => {
+        d.small.push(...circlePoly(x, 150, 45));
+        d.small.push([x, 195, x, 215]);                       // 풍선 아래 짧은 눈금
+        d.texts.push(D.textFromItem(rotatedItem(String(i + 1), x, 150, 0, 30, 26), convert));
+        // 풍선에서 이어지지 않은 긴 세로선(주석 지시선): 풍선 옆 30px, 아래쪽에서 시작
+        d.segments.push([x + 30, 700, x + 30, 2300]);
+    });
+    r = D.detect(d, dims);
+    assert.strictEqual(r.cols.length, 19, '열 19개');
+    assert.deepStrictEqual(r.cols.map((l) => Math.round(l.x)), xs, '풍선 가운데에 — 옆 지시선에 안 붙음');
+    // 풍선에서 이어져 내려오는 같은 위치의 긴 선은 맞춤(몇 px 어긋나도)
+    d.segments.push([xs[3] + 3, 215, xs[3] + 3, 2500]);
+    r = D.detect(d, dims);
+    assert.ok(Math.abs(r.cols[3].x - (xs[3] + 3)) < 0.5, '풍선에서 이어진 선에는 맞춤');
+}
+// 앱: 찾을 방향(열+행 / 열만 / 행만)
+// (app.js 연결은 아래 앱 연결 구간에서 확인)
+
+// 20) ★ 주차칸 숫자(건물 안쪽에 늘어선 1,2,3…)는 축 번호가 아니다 — 기본은 외곽(건물 바깥)에 있는 번호만
+{
+    const d = { segments: [[10, 10, 10, H - 10], [10, 10, W - 10, 10]], small: [], texts: [] };
+    // 건물 본체: 300~3700 × 400~2500 에 벽선·칸막이 선이 가득(축 번호는 이 바깥 y=200, x=200)
+    for (let i = 0; i < 80; i++) {
+        d.segments.push([300 + i * 42, 400, 300 + i * 42, 2500]);
+        d.segments.push([300, 400 + i * 27, 3700, 400 + i * 27]);
+    }
+    // 외곽 축 번호: 위쪽 줄 A~E, 왼쪽 줄 1~3
+    [800, 1400, 2000, 2600, 3200].forEach((x, i) => {
+        d.small.push(...circlePoly(x, 220, 45));
+        d.texts.push(D.textFromItem(rotatedItem('ABCDE'[i], x, 220, 0, 22, 26), convert));
+    });
+    [900, 1500, 2100].forEach((y, i) => {
+        d.small.push(...circlePoly(220, y, 45));
+        d.texts.push(D.textFromItem(rotatedItem(String(i + 1), 220, y, 0, 14, 26), convert));
+    });
+    // 건물 안쪽 주차칸 번호: 같은 높이에 16개가 줄지어 있음(원 안 숫자 1~16 + 큰 글씨 33~47) — 개수가 더 많아 점수가 더 높다
+    for (let i = 0; i < 16; i++) {
+        const x = 420 + i * 200;
+        d.small.push(...circlePoly(x, 1200, 40));
+        d.texts.push(D.textFromItem(rotatedItem(String(i + 1), x, 1200, 0, 20, 24), convert));
+        d.texts.push(D.textFromItem(rotatedItem(String(33 + i), x, 1900, 0, 30, 40), convert));
+    }
+    r = D.detect(d, dims);
+    assert.deepStrictEqual(r.cols.map((l) => l.label), ['A', 'B', 'C', 'D', 'E'], '외곽(위쪽) 알파벳만 — 안쪽 주차칸 숫자 제외');
+    assert.deepStrictEqual(r.rows.map((l) => l.label), ['1', '2', '3'], '외곽(왼쪽) 숫자만');
+    // 「안쪽도」로 바꾸면 안쪽 줄도 후보(개수가 많은 줄이 먼저)
+    r = D.detect(d, dims, { outerOnly: false });
+    assert.strictEqual(r.cols.length, 16, '안쪽도 허용하면 16개 줄이 뽑힘');
+    // 건물 영역 계산
+    const fp = D.footprintRange(d, dims);
+    assert.ok(fp.ok && fp.y0 > 350 && fp.y1 < 2550, '건물 영역');
+}
+
 // 9) 앱 연결: 모듈 로드(app.js보다 먼저) · 스냅 엔진이 자료를 내준다 · 패널 버튼
 const idx = fs.readFileSync(path.join(__dirname, '..', 'index.html'), 'utf8');
 assert.ok(idx.includes('js/shared/grid-auto-detect.js'));
@@ -474,4 +531,6 @@ assert.ok(app.includes("(act === 'nudge' || act === 'nudgeGroup') && selF"));
 assert.ok(app.includes('data-act="bulkNames"') && app.includes("act === 'bulkNames' && eg"));
 // 앱: 적용은 계열마다 그룹 / 「여기부터 새 그룹으로」
 assert.ok(app.includes('seriesKeys.forEach((sk) =>') && app.includes('data-act="splitGroup"') && app.includes("act === 'splitGroup' && selF"));
+assert.ok(app.includes('data-f="autoAxes"') && app.includes("case 'autoAxes':") && app.includes("ap.axes === 'cols'"));
+assert.ok(app.includes('data-f="autoOuter"') && app.includes("case 'autoOuter':") && app.includes('outerOnly: ge.autoOuter'));
 console.log('test-grid-auto-detect: ok');
