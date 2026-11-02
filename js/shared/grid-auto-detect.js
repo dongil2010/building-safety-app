@@ -282,11 +282,52 @@
         return kept;
     }
 
-    /** 풍선 안 글자(여러 조각이면 이어 붙임) → 도면 글자 모양이면 그 글자, 아니면 '' */
+    /**
+     * PDF 글자 한 조각(pdf.js getTextContent 항목) → 화면(이미지) 좌표의 글자 가운데와 읽는 방향.
+     * 2026-11-02 90도 돌아간 글자(수평선 쪽 번호)를 못 읽던 문제: 글자 시작점(기준선)만 쓰면 돌아간 글자는 가운데에서
+     * 글자 높이만큼 옆으로 벗어난다. 글자 방향·위쪽을 항목 행렬(transform)에서 구해 가운데를 직접 계산한다.
+     * convert(x, y): PDF 사용자 좌표 → 이미지 좌표 [x, y] (viewport.convertToViewportPoint)
+     * 반환: { str, x, y, dx, dy } (dx, dy = 글자 읽는 방향의 단위 벡터, 이미지 좌표) 또는 null
+     */
+    function textFromItem(item, convert) {
+        if (!item || !item.transform || typeof convert !== 'function') return null;
+        const str = String(item.str == null ? '' : item.str).trim();
+        if (!str) return null;
+        const tr = item.transform;
+        const a = num(tr[0], 0), b = num(tr[1], 0), c = num(tr[2], 0), d = num(tr[3], 0);
+        const e = num(tr[4], 0), f = num(tr[5], 0);
+        const lenX = Math.hypot(a, b);
+        const fontH = Math.hypot(c, d) || lenX || 1;
+        // 글자 방향(가로)과 위쪽(세로) 단위 벡터 — 사용자 좌표
+        let ux = lenX > 1e-9 ? a / lenX : 1;
+        let uy = lenX > 1e-9 ? b / lenX : 0;
+        const vx = fontH > 1e-9 ? c / fontH : -uy;
+        const vy = fontH > 1e-9 ? d / fontH : ux;
+        let w = Math.abs(num(item.width, 0));
+        if (!(w > 0)) w = str.length * fontH * 0.55;           // 폭을 모르면 글자 수로 어림
+        const h = Math.abs(num(item.height, 0)) || fontH;
+        const cxU = e + ux * (w / 2) + vx * (h * 0.35);        // 기준선에서 위로 글자 높이의 ~1/3(대문자·숫자 가운데)
+        const cyU = f + uy * (w / 2) + vy * (h * 0.35);
+        const pc = convert(cxU, cyU);
+        const p0 = convert(e, f);
+        const p1 = convert(e + ux, f + uy);
+        let dx = p1[0] - p0[0];
+        let dy = p1[1] - p0[1];
+        const dl = Math.hypot(dx, dy) || 1;
+        dx /= dl;
+        dy /= dl;
+        return { str, x: pc[0], y: pc[1], dx, dy };
+    }
+
+    /** 풍선 안 글자(여러 조각이면 읽는 방향 순으로 이어 붙임) → 도면 글자 모양이면 그 글자, 아니면 '' */
     function textInside(texts, b) {
-        const inside = (texts || []).filter((t) => t && Math.hypot(t.x - b.x, t.y - b.y) <= b.r * 1.05);
+        const inside = (texts || []).filter((t) => t && Math.hypot(t.x - b.x, t.y - b.y) <= b.r * 1.3);
         if (!inside.length) return '';
-        const joined = inside.slice().sort((p, q) => (p.x - q.x) || (p.y - q.y)).map((t) => String(t.str).trim()).join('');
+        // 읽는 방향(가로·세로·돌아간 글자 모두)에 따라 위치 순으로 정렬
+        const dir = inside.find((t) => Number.isFinite(t.dx) && Number.isFinite(t.dy));
+        const ux = dir ? dir.dx : 1;
+        const uy = dir ? dir.dy : 0;
+        const joined = inside.slice().sort((p, q) => (p.x * ux + p.y * uy) - (q.x * ux + q.y * uy)).map((t) => String(t.str).trim()).join('');
         if (isLabelText(joined)) return joined;
         const near = inside.slice().sort((p, q) => Math.hypot(p.x - b.x, p.y - b.y) - Math.hypot(q.x - b.x, q.y - b.y));
         for (let i = 0; i < near.length; i++) if (isLabelText(near[i].str)) return String(near[i].str).trim();
@@ -299,7 +340,7 @@
         const markers = bubbles.map((b) => ({ x: b.x, y: b.y, r: b.r, bubble: true, label: textInside(data.texts, b) }));
         (data.texts || []).forEach((t) => {
             if (!t || !isLabelText(t.str)) return;
-            if (bubbles.some((b) => Math.hypot(t.x - b.x, t.y - b.y) <= b.r * 1.05)) return; // 이미 풍선 안
+            if (bubbles.some((b) => Math.hypot(t.x - b.x, t.y - b.y) <= b.r * 1.3)) return; // 이미 풍선 안
             markers.push({ x: t.x, y: t.y, r: 0, bubble: false, label: String(t.str).trim() });
         });
         return markers;
@@ -515,7 +556,7 @@
         };
     }
 
-    const api = { DEFAULTS, LABEL_RE, isLabelText, splitAxisSegments, chainPieces, labelAtEnd, bubbleAtEnd, findBubbles, findMarkers, alignGroups, labelOrder, detect };
+    const api = { DEFAULTS, LABEL_RE, isLabelText, textFromItem, splitAxisSegments, chainPieces, labelAtEnd, bubbleAtEnd, findBubbles, findMarkers, alignGroups, labelOrder, detect };
     root.BSA = root.BSA || {};
     root.BSA.gridAutoDetect = api;
     if (typeof module !== 'undefined' && module.exports) module.exports = api;

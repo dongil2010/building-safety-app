@@ -134,14 +134,13 @@
     try {
       const tc = await page.getTextContent();
       for (const it of (tc.items || [])) {
-        const str = String(it.str || '').trim();
-        if (!str || !it.transform) continue;
-        const tr = it.transform;
-        const len = Math.hypot(tr[0], tr[1]) || 1;
-        const w = Number(it.width) || 0;
-        const p0 = viewport.convertToViewportPoint(tr[4], tr[5]);
-        const p1 = viewport.convertToViewportPoint(tr[4] + (tr[0] / len) * w, tr[5] + (tr[1] / len) * w);
-        out.push({ str, x: (p0[0] + p1[0]) / 2, y: (p0[1] + p1[1]) / 2 });
+        // 90도 돌아간 글자도 가운데를 바르게(js/shared/grid-auto-detect.js textFromItem)
+        const api = window.BSA && window.BSA.gridAutoDetect;
+        const t = api && typeof api.textFromItem === 'function'
+          ? api.textFromItem(it, (x, y) => viewport.convertToViewportPoint(x, y))
+          : null;
+        if (!t) continue;
+        out.push(t);
         if (out.length >= 20000) break;
       }
     } catch (_e) { /* 글자 없이도 동작 */ }

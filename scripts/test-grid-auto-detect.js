@@ -194,6 +194,63 @@ assert.strictEqual(D.labelOrder('C'), 3);
 assert.strictEqual(D.labelOrder('②'), 2);
 assert.strictEqual(D.labelOrder('다'), 3);
 
+// 11) ★ 90도 돌아간 글자(수평선 쪽 번호)도 가운데·읽는 방향을 바르게 — pdf.js 글자 항목(transform) → 이미지 좌표
+const PAGE_H = 3000;
+const convert = (x, y) => [x, PAGE_H - y]; // PDF(아래가 0) → 화면(위가 0)
+/** 화면 좌표 (cx, cy)가 글자 가운데가 되도록, 각도 θ(도)로 돌린 글자 항목을 만든다 */
+function rotatedItem(str, cx, cy, deg, w, fontH) {
+    const th = deg * Math.PI / 180;
+    const ux = Math.cos(th), uy = Math.sin(th);      // 글자 방향(사용자 좌표)
+    const vx = -Math.sin(th), vy = Math.cos(th);     // 위쪽
+    const centerU = [cx, PAGE_H - cy];
+    const e = centerU[0] - ux * (w / 2) - vx * (fontH * 0.35);
+    const f = centerU[1] - uy * (w / 2) - vy * (fontH * 0.35);
+    return { str, width: w, height: fontH, transform: [fontH * ux, fontH * uy, fontH * vx, fontH * vy, e, f] };
+}
+[0, 90, 180, 270].forEach((deg) => {
+    const t = D.textFromItem(rotatedItem('A', 500, 300, deg, 24, 30), convert);
+    assert.ok(t && t.str === 'A', deg + '도 글자 읽힘');
+    assert.ok(Math.abs(t.x - 500) < 0.5 && Math.abs(t.y - 300) < 0.5, deg + '도 글자 가운데: ' + t.x + ',' + t.y);
+});
+// 읽는 방향 벡터(이미지 좌표): 0도 → 오른쪽, 90도(아래에서 위로 읽음) → 위쪽(y 감소)
+let t0 = D.textFromItem(rotatedItem('A', 500, 300, 0, 24, 30), convert);
+let t90 = D.textFromItem(rotatedItem('A', 500, 300, 90, 24, 30), convert);
+assert.ok(t0.dx > 0.99 && Math.abs(t0.dy) < 0.01);
+assert.ok(Math.abs(t90.dx) < 0.01 && t90.dy < -0.99);
+// 폭을 모르면 글자 수로 어림 / 빈 글자·행렬 없음은 null
+assert.ok(D.textFromItem({ str: 'AB', transform: [30, 0, 0, 30, 100, 100] }, convert));
+assert.strictEqual(D.textFromItem({ str: ' ', transform: [30, 0, 0, 30, 100, 100] }, convert), null);
+assert.strictEqual(D.textFromItem({ str: 'A' }, convert), null);
+
+// 왼쪽 행 번호가 전부 90도 돌아가 있어도(글자 시작점이 가운데에서 벗어나도) 행을 잡는다 — 풍선 있음 / 없음
+function rotatedRows(withBubbles) {
+    const d = markersOnly({ left: false });
+    const ys = [700, 1400, 2100];
+    ys.forEach((y, i) => {
+        if (withBubbles) d.small.push(...bubble(200, y, 45));
+        const it = rotatedItem('ABC'[i], 200, y, 90, 24, 30);
+        d.texts.push(D.textFromItem(it, convert));
+    });
+    return d;
+}
+[true, false].forEach((withBubbles) => {
+    const rr = D.detect(rotatedRows(withBubbles), dims);
+    assert.strictEqual(rr.source, 'markers');
+    assert.deepStrictEqual(rr.rows.map((l) => Math.round(l.y)), [700, 1400, 2100], '돌아간 글자 행 위치 (풍선 ' + withBubbles + ')');
+    assert.deepStrictEqual(rr.rows.map((l) => l.label), ['A', 'B', 'C'], '돌아간 글자 이름');
+});
+// 풍선 안에서 돌아간 글자 두 조각(Y, 1)은 읽는 방향 순서로 이어 붙인다 → 'Y1'
+{
+    const d = { segments: [], small: [], texts: [] };
+    [700, 1400, 2100].forEach((y, i) => {
+        d.small.push(...bubble(200, y, 45));
+        d.texts.push(D.textFromItem(rotatedItem('Y', 200, y + 8, 90, 12, 24), convert)); // 읽는 방향(위쪽)으로 아래가 먼저 = Y
+        d.texts.push(D.textFromItem(rotatedItem(String(i + 1), 200, y - 8, 90, 12, 24), convert));
+    });
+    const rr = D.detect(d, dims);
+    assert.deepStrictEqual(rr.rows.map((l) => l.label), ['Y1', 'Y2', 'Y3'], '돌아간 두 조각 글자 순서');
+}
+
 // 9) 앱 연결: 모듈 로드(app.js보다 먼저) · 스냅 엔진이 자료를 내준다 · 패널 버튼
 const idx = fs.readFileSync(path.join(__dirname, '..', 'index.html'), 'utf8');
 assert.ok(idx.includes('js/shared/grid-auto-detect.js'));
