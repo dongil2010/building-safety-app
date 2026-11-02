@@ -82,8 +82,12 @@
      * cycle: { groupId, lastId } (앞 클릭), selectedIds: 지금 선택 id Set
      */
     function nextGroupMemberOnBoxClick(members, groupId, cycle, selectedIds) {
-        const list = (members || []).filter((m) => m && !m.surveyExtra);
-        if (!list.length) return null;
+        const all = (members || []).filter((m) => m && !m.surveyExtra);
+        if (!all.length) return null;
+        // 2026-11-02 「번호 부여」를 아직 안 한 화살표(surveyNumbered === false)는 박스를 눌러도 고르지 않는다 — 그 화살표는 끝을 눌러 고른다.
+        // 번호 있는 마킹만 X-1 → X-2 … 순환. 번호 있는 마킹이 하나도 없으면 대표 하나만(순환 없음).
+        const numbered = all.filter(isSurveyNumberedMarking);
+        const list = numbered.length ? numbered : [preferNumberedMarkingRepresentative(all)];
         if (list.length === 1) return list[0];
         const st = cycle || {};
         let idx = 0;

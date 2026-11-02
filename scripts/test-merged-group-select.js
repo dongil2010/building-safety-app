@@ -48,7 +48,16 @@ function testNumberedGroupAlsoCycles() {
         { id: 'n', groupId: 'g', surveyNumbered: true },
         { id: 'u', groupId: 'g', surveyNumbered: false }
     ].sort(asn.compareMarkingForRepresentative);
-    assert.deepStrictEqual(clicks(members, 3), ['p', 'n', 'u']);
+    // 2026-11-02 번호 부여를 안 한 화살표(u)는 박스 클릭 순환에서 뺀다 — 번호 있는 마킹(p, n)만 순환
+    assert.deepStrictEqual(clicks(members, 4), ['p', 'n', 'p', 'n']);
+    // 그 상태에서 u를 골라 둔 뒤 박스를 눌러도 u 쪽으로 가지 않고 대표로
+    assert.strictEqual(asn.nextGroupMemberOnBoxClick(members, 'g', null, new Set(['u'])).id, 'p');
+    // 번호 부여한 뒤(surveyNumbered:true)에는 순환에 들어온다
+    const after = members.map((m) => (m.id === 'u' ? Object.assign({}, m, { surveyNumbered: true }) : m));
+    assert.deepStrictEqual(clicks(after, 3), ['p', 'n', 'u']);
+    // 번호 있는 마킹이 하나도 없으면 대표 하나만(순환 없음)
+    const none = [{ id: 'x', groupId: 'g', surveyNumbered: false }, { id: 'y', groupId: 'g', surveyNumbered: false }];
+    assert.deepStrictEqual(clicks(none, 3), ['x', 'x', 'x']);
     assert.strictEqual(asn.nextGroupMemberOnBoxClick([members[0]], 'g', null, null).id, 'p');
     assert.strictEqual(asn.nextGroupMemberOnBoxClick([], 'g', null, null), null);
 }
