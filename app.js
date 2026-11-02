@@ -8292,7 +8292,7 @@ ${roundMobile ? '' : `<button type="button" class="icon-btn icon-btn-trash" titl
         let warningHtml = '';
         if (hasUnmatched || hasDuplicate) {
             warningHtml = `<div class="add-drawing-preview-warning">
-                ${hasUnmatched ? '파일명에서 층을 못 찾은 파일은 파일 이름 그대로 새 층으로 넣습니다. 다르면 아래에서 바꿔 주세요.' : ''}
+                ${hasUnmatched ? '⚠️ 파일명에서 층을 못 찾은 파일이 있습니다. 아래 목록에서 층을 고르기 전에는 저장되지 않습니다.' : ''}
                 ${hasDuplicate ? '<br>같은 층으로 묶인 파일은 "이 파일 저장" 버튼으로 고른 파일 하나만 실제로 저장됩니다.' : ''}
             </div>`;
         }
@@ -8379,6 +8379,23 @@ ${roundMobile ? '' : `<button type="button" class="icon-btn icon-btn-trash" titl
     }
 
     // 업로드 파일 → 층 코드. 인식 실패는 1F로 몰지 않고 파일 이름 그대로 새 층(중복이면 -2, -3).
+    /**
+     * 2026-11-02 도면 파일 이름에서 층을 못 찾은 파일(matched === false)은 파일 이름이 그대로 층 이름·코드가 되어
+     * 상태조사표 번호가 「파일이름-1」로 나왔다. 층을 직접 고르기 전에는 저장하지 않는다.
+     * 막았으면 true(저장 중단). 층을 고르면(applyFloorSelectValue가 matched = true) 풀린다.
+     */
+    async function blockSaveForUnassignedDrawingFloors(items) {
+        const bad = (items || []).filter((it) => it && it.matched === false);
+        if (!bad.length) return false;
+        const lines = bad.slice(0, 6).map((it) => `· ${it.fileName}`).join('\n') + (bad.length > 6 ? `\n· 외 ${bad.length - 6}개` : '');
+        const msg = `층을 못 찾은 도면이 ${bad.length}개 있습니다.\n\n${lines}\n\n`
+            + `파일 이름은 층 이름·번호가 될 수 없습니다. 각 도면 오른쪽의 층 목록에서 층을 골라 주세요.\n`
+            + `(목록에 없는 층은 「➕ 층 이름 직접 입력」)`;
+        if (typeof window.appAlert === 'function') await window.appAlert(msg, { title: '층을 먼저 고르세요' });
+        else window.showToast?.('층을 못 찾은 도면이 있습니다. 층을 골라 주세요.', 'warning', 5000);
+        return true;
+    }
+
     function assignDrawingUploadItems(files, usedCodes) {
         const used = (usedCodes || []).slice();
         const fi = window.BSA && window.BSA.floorIdentity;
@@ -8426,7 +8443,7 @@ ${roundMobile ? '' : `<button type="button" class="icon-btn icon-btn-trash" titl
 
         const unmatchedCount = newItems.filter(it => it.matched === false).length;
         if (unmatchedCount > 0) {
-            window.showToast(`${unmatchedCount}개 파일은 층 이름을 파일명에서 못 찾아 파일 이름 그대로 새 층으로 넣었습니다. 다르면 목록에서 바꿔 주세요.`, 'warning', 5500);
+            window.showToast(`${unmatchedCount}개 파일은 층을 파일명에서 못 찾았습니다. 목록에서 층을 고르기 전에는 저장되지 않습니다.`, 'warning', 5500);
         }
     }
 
@@ -8618,6 +8635,7 @@ ${roundMobile ? '' : `<button type="button" class="icon-btn icon-btn-trash" titl
     const btnSaveBuilding = document.getElementById('btnSaveBuilding');
     if (btnSaveBuilding) {
         btnSaveBuilding.addEventListener('click', async () => {
+            if (await blockSaveForUnassignedDrawingFloors(window.selectedUploadedDrawings)) return;
             const siteNameInput = document.getElementById('inputBuildingSiteName');
             const dongInput = document.getElementById('inputBuildingDong');
             const siteName = (siteNameInput ? siteNameInput.value : '').trim();
@@ -9127,7 +9145,7 @@ ${roundMobile ? '' : `<button type="button" class="icon-btn icon-btn-trash" titl
             if (hasUnmatched || hasDuplicate || replacingCodes.length > 0) {
                 const warnParts = [];
                 if (hasUnmatched) {
-                    warnParts.push('⚠️ 파일명에서 층을 못 찾은 파일은 파일 이름 그대로 <b>새 층</b>으로 넣습니다. 이름이 다르면 아래에서 바꿔 주세요.');
+                    warnParts.push('⚠️ 파일명에서 층을 못 찾은 파일이 있습니다. 아래 목록에서 <b>층을 고르기 전에는 저장되지 않습니다</b>(파일 이름은 층 이름·번호가 될 수 없음).');
                 }
                 if (hasDuplicate) {
                     warnParts.push('같은 층으로 묶인 파일은 "이 파일 저장" 버튼으로 고른 파일 하나만 실제로 저장됩니다.');
@@ -9667,7 +9685,7 @@ ${roundMobile ? '' : `<button type="button" class="icon-btn icon-btn-trash" titl
 
         const unmatchedCount = parsedItems.filter(it => it.matched === false).length;
         if (unmatchedCount > 0) {
-            window.showToast(`${unmatchedCount}개 파일은 층 이름을 파일명에서 못 찾아 파일 이름 그대로 새 층으로 넣었습니다. 다르면 목록에서 바꿔 주세요.`, 'warning', 5500);
+            window.showToast(`${unmatchedCount}개 파일은 층을 파일명에서 못 찾았습니다. 목록에서 층을 고르기 전에는 저장되지 않습니다.`, 'warning', 5500);
         }
     }
 
@@ -9693,6 +9711,7 @@ ${roundMobile ? '' : `<button type="button" class="icon-btn icon-btn-trash" titl
         btnSaveEditBuilding.addEventListener('click', async () => {
             const bldg = window.currentEditingBuilding;
             if (!bldg) return;
+            if (await blockSaveForUnassignedDrawingFloors(window.selectedEditUploadedDrawings)) return;
 
             const siteNameInput = document.getElementById('inputEditBuildingSiteName');
             const dongInput = document.getElementById('inputEditBuildingDong');
@@ -46597,6 +46616,16 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
         try { nameLabel = (typeof window.getFloorLabelFromCode === 'function') ? String(window.getFloorLabelFromCode(raw) || '') : ''; } catch (_e) { nameLabel = ''; }
         const byNameLabel = nameLabel && nameLabel !== raw.trim() ? namedPrefix(nameLabel) : '';
         if (byNameLabel) return byNameLabel;
+        // 2026-11-02 층 이름이 「지상N층」·「N층」이면 N — 층 코드가 도면 파일 이름이어도(파일명에서 층을 못 찾아 파일 이름이 층 코드가 된 경우)
+        // 번호가 「파일이름-1」이 아니라 「N-1」로 나오게. 층 이름만 바르게 바꿔 두면 된다.
+        const groundNo = (text) => {
+            const t = String(text || '').replace(/\s*\([^)]*\)\s*$/, '').trim();
+            const gm = t.match(/^지상\s*(\d{1,3})\s*(?:층|F)?$/i) || t.match(/^(\d{1,3})\s*(?:층|F)$/i);
+            return gm ? String(parseInt(gm[1], 10)) : '';
+        };
+        // 층 코드와 다른 층 이름이 있을 때만(코드 자체가 「지상2층」 같은 예전 방식은 그대로 둔다)
+        const byGroundName = nameLabel && nameLabel !== raw.trim() ? groundNo(nameLabel) : '';
+        if (byGroundName) return byGroundName;
         // 2026-10-28 어떤 규칙에도 안 걸린 특이한 층(필로티·중2층·직접 입력한 이름 …)은 층 이름 첫 글자의 초성(로마자)으로.
         //   ㄱG ㄴN ㄷD ㄹR ㅁM ㅂB ㅅS ㅈJ ㅊC ㅋK ㅌT ㅍP ㅎH (쌍자음은 평자음), ㅇ은 건너뛰고 다음 글자, 영문은 첫 글자 대문자.
         //   이름에 숫자가 있으면 초성+숫자(중2층 → J2). 지하주차장 → J.
@@ -46624,6 +46653,10 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
         };
         const byOdd = oddInitialPrefix(nameLabel || raw);
         if (byOdd) return byOdd;
+        // 2026-11-02 도면 파일 이름 같은 긴 이름(공백·밑줄이 있고 12글자 넘음)은 번호 접두사로 쓰지 않는다 — 층을 알 수 없으니 「?」.
+        // (예: 「2025년 하반기 빛고을국악전수관 결함위치도외_003」 → 번호 「?-1」. 도면 수정에서 층 이름을 「지상1층」으로 바꾸면 「1-1」)
+        const rawName = String(floorCode || '').trim();
+        if (rawName.length > 12 && /[\s_]/.test(rawName)) return '?';
         return floorCode || '';
     }
 
