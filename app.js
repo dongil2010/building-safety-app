@@ -53335,7 +53335,7 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
         const bldgId = bldg.id;
         const availableFloors = listNdtFloorCodesForBuilding(bldgId);
         const floorsData = [];
-        const exteriorCodes = collectExteriorFloorCodes(availableFloors);
+        const exteriorCodes = collectExteriorFloorCodes(availableFloors, bldg);
         const exteriorSet = new Set(exteriorCodes);
         let exteriorMerged = false;
         availableFloors.forEach(fc => {
@@ -53507,7 +53507,7 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
         // 등록된 결함/사진은 개수 제한 없이 전부 반영한다. 표 행이 많아지면 한글 워드프로세서가
         // 자동으로 다음 페이지까지 이어 그려주므로, 결함 개수만큼 그대로 행을 추가한다.
         const floorsData = [];
-        const exteriorCodes = collectExteriorFloorCodes(availableFloors);
+        const exteriorCodes = collectExteriorFloorCodes(availableFloors, bldg);
         const exteriorSet = new Set(exteriorCodes);
         let exteriorMerged = false;
         availableFloors.forEach(fc => {

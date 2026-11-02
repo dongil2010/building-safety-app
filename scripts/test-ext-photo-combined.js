@@ -94,10 +94,10 @@ assert.ok(/for \(let i = 0; i < albumItems\.length; i \+= 6\)/.test(preview), '1
 assert.ok(/2\. \$\{albumFloorLabel\} 현장 결함 사진첩 \(총 \$\{albumItems\.length\}개 사진\)/.test(preview));
 // 위치도는 외부 도면마다 그대로
 assert.ok(/data-role="location-map-page" data-floor="\$\{escapeReportHtml\(floorCode\)\}"/.test(preview), '위치도 페이지는 도면마다');
-// hwpx 두 호출부에 bldg 전달 + 서버 읽기 없음
-assert.strictEqual((app.match(/= collectExteriorFloorCodes\(availableFloors, bldg\)/g) || []).length, 1, '미리보기만 bldg 이름으로 판정');
-// 한글(hwpx) 출력 코드는 지문 테스트(test-pdf-preview-hwpx-layout)가 지키는 영역 — 호출부는 그대로(동 분할 다른 동 이름 판정은 사용자 확인 후)
-assert.strictEqual((app.match(/= collectExteriorFloorCodes\(availableFloors\);/g) || []).length, 2, 'hwpx 호출 2곳은 그대로');
+// 미리보기 + hwpx 두 호출부(한 동 출력·여러 동 출력) 모두 그 건물(bldg)의 층 이름으로 외부를 판정 + 서버 읽기 없음
+// 2026-11-02 여러 동 한글: 지금 열어 둔 동이 아닌 동의 이름만 바꾼 외부 도면(「외부-정면」 …)이 외부로 안 잡혀 층마다 표·사진첩이 따로 나오던 것
+assert.strictEqual((app.match(/= collectExteriorFloorCodes\(availableFloors, bldg\)/g) || []).length, 3, '미리보기·hwpx 두 곳 모두 bldg 이름으로 판정');
+assert.strictEqual((app.match(/= collectExteriorFloorCodes\(availableFloors\);/g) || []).length, 0, 'bldg 없는 호출은 없다');
 const helper = extract('buildCombinedExteriorPhotoEntries') + extract('collectExteriorFloorCodes');
 assert.ok(!/fetch\(|firestore|getDoc|onSnapshot|\.get\(\)/i.test(helper), '서버 읽기 없음');
 // hwpx: 외부는 한 슬롯(EXT)의 합친 결함으로 사진첩을 만든다(1·2종: 슬롯 안 photoItems, 3종: 전역 사진첩) — 그대로
