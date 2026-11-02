@@ -384,8 +384,42 @@ function testHeavyLoadItems() {
     assert.ok(q.DEFAULT_FAVORITES.component['비구조체'].length <= q.VISIBLE_LIMIT.component);
 }
 
+// ---------- 8) 2026-11-02 회사 결함표(엑셀 180개) 대조: 부재 문맥에 맞는 원인 연결 ----------
+function testMemberContextCauses() {
+    env.window.state = {};
+    const crack = (cat, comp, type) => {
+        const g = api.getCauseDisplayGroups(type)[0];
+        return api.getDefaultCausePresetList(g.key, g.types, cat, comp);
+    };
+    // 창 하부·문 상부 벽체는 창호(창)가 아니라 개구부 주변 벽체 → 건조수축 다음에 개구부 주위 응력집중
+    ['창 하부 벽체', '창 상부 벽체', '문 상부 벽체', '문 측면 벽체', '창하부 벽체', '벽체 개구부'].forEach((comp) => {
+        assert.strictEqual(api.getCauseMemberGroup('비구조체', comp), '개구부벽체', comp);
+        assert.deepStrictEqual(crack('비구조체', comp, '수직균열').slice(0, 2), ['건조수축 및 재료적 특성', '개구부 주위 응력집중'], comp);
+    });
+    // 진짜 창호는 그대로 창호
+    assert.strictEqual(api.getCauseMemberGroup('비구조체', '창호'), '창호');
+    // 개구부와 상관없는 구조 벽체는 사용자 지정 순서(건조수축 → 이질재료 거동차이 → 내력부족)를 지킨다
+    assert.deepStrictEqual(crack('구조체', '벽체', '수직균열').slice(0, 3), ['건조수축 및 재료적 특성', '이질재료 거동차이', '내력부족']);
+    // 벽체와 만나는 비구조체 기둥·벽체 접합부 균열: 건조수축 다음이 이질재료 접합부 거동차이
+    assert.deepStrictEqual(crack('비구조체', '기둥', '수직균열').slice(0, 2), ['건조수축 및 재료적 특성', '이질재료 접합부 거동차이']);
+    assert.deepStrictEqual(crack('비구조체', '벽체 접합부', '수직균열').slice(0, 2), ['건조수축 및 재료적 특성', '이질재료 접합부 거동차이']);
+    assert.deepStrictEqual(crack('구조체', '기둥', '수직균열').slice(0, 3), ['건조수축 및 재료적 특성', '이질재료 거동차이', '내력부족']);
+    // 마감재 오염·들뜸: 같은 키를 두 번 써서 회사 결함표 원인이 사라지던 문제(상부 방수층 파손·건조수축이 목록에 있음)
+    assert.ok(crack('마감재', '천장 마감재', '오염').includes('상부 방수층 파손'));
+    assert.ok(crack('마감재', '벽체 타일', '들뜸').includes('건조수축 및 재료적 특성'));
+    assert.ok(api.defectCausePreset['들뜸'].includes('바탕 균열 전달'));
+    // 결함 종류: 엑셀에 많이 나오는 조합이 목록에 보임
+    assert.ok(api.getDefectTypePresetFor('비구조체', '기둥').includes('이격'));
+    assert.ok(api.getDefectTypePresetFor('구조체', '기둥').indexOf('이격') < 0);
+    ['이격', '철근노출', '백태'].forEach((t) => assert.ok(api.getDefectTypePresetFor('마감재', '슬래브').includes(t), t));
+    assert.ok(api.getDefectTypePresetFor('마감재', '벽체 타일').includes('이격'));
+    assert.ok(api.getDefectTypePresetFor('비구조체', '난간').includes('균열'));
+    assert.ok(api.getDefectTypePresetFor('비구조체', '벽체').includes('오염'));
+}
+
 testHeavyLoadItems();
 testEveryTypeHasCause();
+testMemberContextCauses();
 testAutoCheckedCause();
 testCustomOrderRules();
 (async () => {

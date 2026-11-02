@@ -28,7 +28,22 @@
         ['floorDrawingDarken', 2],
         ['styleShapes', 2],
         ['locationMapLegend', 1],
-        ['locationMapLegendBox', 1]
+        ['locationMapLegendBox', 1],
+        // 2026-11-02 부재 명칭·결함 내용·발생 원인 세팅(직접 추가·숨김·순서·★)은 계정이 아니라 회사 공통
+        //  — 맵의 키(분류 또는 결함 종류) 하나가 한 칸. 사용 빈도(defectPickUsage)는 계정별로 남긴다.
+        ['customDefectTypes', 2],
+        ['customDefectCauses', 2],
+        ['customDefectComponents', 2],
+        ['hiddenDefectComponents', 2],
+        ['hiddenDefectTypes', 2],
+        ['hiddenDefectCauses', 2],
+        ['defectComponentOrder', 2],
+        ['defectTypeOrder', 2],
+        ['defectCauseOrder', 2],
+        ['favoriteDefectComponents', 2],
+        ['favoriteDefectTypes', 2],
+        ['favoriteDefectCauses', 2],
+        ['defectCauseAutoCheck', 1]
     ];
     var KEYS = SPEC.map(function (s) { return s[0]; });
     var DEPTH = {};

@@ -171,46 +171,47 @@ async function testPerAccountPresets() {
     )(window, localStorage, db, { onLine: online }, () => { synced++; }, '', () => {}, { warn() {} });
 
     let api = make(null, false);
-    ['favoriteDefectComponents', 'favoriteDefectTypes', 'favoriteDefectCauses', 'defectPickUsage', 'defectCauseAutoCheck']
-        .forEach((f) => assert.ok(api.DEFECT_PIN_PRESET_FIELDS.includes(f), 'preset field ' + f));
+    // 2026-11-02 부재·결함·원인 세팅(추가·숨김·순서·★·자동 체크)은 회사 공통 — 계정에는 사용 빈도만 남는다
+    assert.deepStrictEqual(api.DEFECT_PIN_PRESET_FIELDS, ['defectPickUsage']);
+    const cs = require(path.join(__dirname, '..', 'js', 'core', 'company-settings-merge.js'));
+    ['customDefectTypes', 'customDefectCauses', 'customDefectComponents', 'hiddenDefectComponents', 'hiddenDefectTypes',
+        'hiddenDefectCauses', 'defectComponentOrder', 'defectTypeOrder', 'defectCauseOrder', 'favoriteDefectComponents',
+        'favoriteDefectTypes', 'favoriteDefectCauses', 'defectCauseAutoCheck']
+        .forEach((f) => assert.ok(cs.KEYS.includes(f), 'company setting ' + f));
+    assert.ok(!cs.KEYS.includes('defectPickUsage'), 'usage stays per account');
 
-    // 오프라인·로컬 저장 → 다시 불러오기
+    // 오프라인·로컬 저장 → 다시 불러오기 (사용 빈도만)
     window.state = {
         uid: 'u1',
         customDefectCauses: { '균열': ['내 원인'] },
-        favoriteDefectComponents: { '구조체': ['기둥', '큰보'] },
-        favoriteDefectCauses: { '균열': ['과하중'] },
         defectPickUsage: { component: { '구조체': { '큰보': 5 } } },
         defectCauseAutoCheck: false
     };
     api.persistUserDefectPinPresetsLocal('u1');
     const saved = JSON.parse(store['building_safety_user_defect_pin_v1_u1']);
-    assert.deepStrictEqual(saved.presets.favoriteDefectComponents, { '구조체': ['기둥', '큰보'] });
-    assert.strictEqual(saved.presets.defectCauseAutoCheck, false);
+    assert.deepStrictEqual(Object.keys(saved.presets), ['defectPickUsage']);
 
-    window.state = { uid: 'u1' };
+    window.state = { uid: 'u1', customDefectCauses: { '균열': ['회사 원인'] } };
     await api.loadAndApplyUserDefectPinPresets('u1', null);
-    assert.deepStrictEqual(window.state.customDefectCauses, { '균열': ['내 원인'] }, 'existing custom kept');
-    assert.deepStrictEqual(window.state.favoriteDefectCauses, { '균열': ['과하중'] });
-    assert.strictEqual(window.state.defectCauseAutoCheck, false);
+    assert.deepStrictEqual(window.state.customDefectCauses, { '균열': ['회사 원인'] }, 'company setting is not overwritten by the account');
     assert.strictEqual(window.state.defectPickUsage.component['구조체']['큰보'], 5);
 
-    // 다른 계정은 이 계정 설정을 보지 않음
+    // 다른 계정은 이 계정의 사용 빈도를 보지 않음
     window.state = { uid: 'u2' };
     await api.loadAndApplyUserDefectPinPresets('u2', null);
-    assert.ok(!window.state.favoriteDefectCauses, 'u2 must not get u1 presets');
+    assert.ok(!window.state.defectPickUsage, 'u2 must not get u1 usage');
 
-    // 클라우드가 더 새로우면 클라우드 (구버전 클라우드에 새 필드가 없으면 로컬 값 유지)
+    // 클라우드가 더 새로우면 클라우드 — 예전에 계정에 저장된 부재·원인 세팅은 더 이상 덮어쓰지 않음
     window.state = { uid: 'u1', favoriteDefectTypes: { '구조체': ['누수'] } };
     api = make(null, true);
     await api.loadAndApplyUserDefectPinPresets('u1', {
-        defectPinPresets: { customDefectCauses: { '누수': ['클라우드 원인'] } },
+        defectPinPresets: { customDefectCauses: { '누수': ['옛 계정 원인'] }, defectPickUsage: { type: { '구조체': { '누수': 2 } } } },
         defectPinPresetsUpdatedAt: Date.now() + 60000
     });
-    assert.deepStrictEqual(window.state.customDefectCauses, { '누수': ['클라우드 원인'] });
+    assert.strictEqual(window.state.customDefectCauses, undefined, 'legacy account vocab ignored');
     assert.deepStrictEqual(window.state.favoriteDefectTypes, { '구조체': ['누수'] });
-    const payload = api.getUserDefectPinPresetsPayload();
-    assert.strictEqual(payload.defectCauseAutoCheck, true, 'auto-check defaults on');
+    assert.strictEqual(window.state.defectPickUsage.type['구조체']['누수'], 2);
+    assert.deepStrictEqual(Object.keys(api.getUserDefectPinPresetsPayload()), ['defectPickUsage']);
 }
 
 // ---------- 4) 수기 입력은 자동 추가 안 함 / 결함 열 때 원인 안 바꿈 ----------

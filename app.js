@@ -390,33 +390,15 @@ document.addEventListener('DOMContentLoaded', () => {
         });
     }
 
+    // 2026-11-02 부재 명칭·결함 내용·발생 원인 세팅(직접 추가·숨김·순서·★·원인 자동 체크)은 회사 공통 —
+    // 회사 문서에 칸별로 저장(js/core/company-settings-merge.js SPEC). 계정(users/{uid}.defectPinPresets)에는 사용 빈도만 남긴다.
     function getUserDefectPinPresetsPayload() {
         return {
-            customDefectTypes: window.state.customDefectTypes || {},
-            customDefectCauses: window.state.customDefectCauses || {},
-            customDefectComponents: window.state.customDefectComponents || {},
-            hiddenDefectComponents: window.state.hiddenDefectComponents || {},
-            hiddenDefectTypes: window.state.hiddenDefectTypes || {},
-            hiddenDefectCauses: window.state.hiddenDefectCauses || {},
-            defectComponentOrder: window.state.defectComponentOrder || {},
-            defectTypeOrder: window.state.defectTypeOrder || {},
-            defectCauseOrder: window.state.defectCauseOrder || {},
-            // 2026-09-28 맛도리 세팅: ★즐겨찾기 · 사용 빈도 · 원인 자동 체크 (계정별)
-            favoriteDefectComponents: window.state.favoriteDefectComponents || {},
-            favoriteDefectTypes: window.state.favoriteDefectTypes || {},
-            favoriteDefectCauses: window.state.favoriteDefectCauses || {},
-            defectPickUsage: window.state.defectPickUsage || {},
-            defectCauseAutoCheck: window.state.defectCauseAutoCheck !== false
+            defectPickUsage: window.state.defectPickUsage || {}
         };
     }
 
-    const DEFECT_PIN_PRESET_FIELDS = [
-        'customDefectTypes', 'customDefectCauses', 'customDefectComponents',
-        'hiddenDefectComponents', 'hiddenDefectTypes', 'hiddenDefectCauses',
-        'defectComponentOrder', 'defectTypeOrder', 'defectCauseOrder',
-        'favoriteDefectComponents', 'favoriteDefectTypes', 'favoriteDefectCauses',
-        'defectPickUsage', 'defectCauseAutoCheck'
-    ];
+    const DEFECT_PIN_PRESET_FIELDS = ['defectPickUsage'];
 
     function applyDefectPinPresets(presets) {
         if (!presets || typeof presets !== 'object') return false;
@@ -529,20 +511,8 @@ document.addEventListener('DOMContentLoaded', () => {
 
     function resetDefectPinPresetsToDefaults() {
         // 로그아웃 시 메모리만 비움 — 실제 “앱 기본 세팅” 복원은 resetOptionManagerAll / applyBuiltInDefectPinDefaults
-        window.state.customDefectTypes = { '구조체': [], '비구조체': [], '마감재': [] };
-        window.state.customDefectCauses = {};
-        window.state.customDefectComponents = { '구조체': [], '비구조체': [], '마감재': [] };
-        window.state.hiddenDefectComponents = { '구조체': [], '비구조체': [], '마감재': [] };
-        window.state.hiddenDefectTypes = { '구조체': [], '비구조체': [], '마감재': [] };
-        window.state.hiddenDefectCauses = {};
-        window.state.defectComponentOrder = {};
-        window.state.defectTypeOrder = {};
-        window.state.defectCauseOrder = {};
-        window.state.favoriteDefectComponents = {};
-        window.state.favoriteDefectTypes = {};
-        window.state.favoriteDefectCauses = {};
+        // 2026-11-02 회사 공통 세팅(직접 추가·숨김·순서·★)은 비우지 않는다 — 비우면 다음 동기화가 빈 값을 회사 문서에 올릴 수 있음
         window.state.defectPickUsage = {};
-        window.state.defectCauseAutoCheck = true;
     }
 
     async function syncAfterImportWithRetry(label) {
@@ -30554,13 +30524,8 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
         const componentSelect = document.getElementById('defectComponent');
         const componentInput = document.getElementById('defectComponentInput');
         if (isDefectBulkEditMode()) markDefectBulkFieldChanged('component');
-        // 목록에 없으면 커스텀으로 확보
-        if (!window.state.customDefectComponents) window.state.customDefectComponents = { '구조체': [], '비구조체': [], '마감재': [] };
-        if (!window.state.customDefectComponents['구조체']) window.state.customDefectComponents['구조체'] = [];
-        const presetHas = (DEFECT_COMPONENT_PRESET['구조체'] || []).includes(name);
-        if (!presetHas && !window.state.customDefectComponents['구조체'].includes(name)) {
-            window.state.customDefectComponents['구조체'].push(name);
-        }
+        // 2026-11-02 조합한 접합부(예: 기둥-벽체 접합부)는 이 결함에만 쓴다 — 부재 목록(customDefectComponents)에 저장해 하단 부재 칩에 쌓이지 않게 함.
+        // 목록에 없는 이름은 아래 populateDefectComponentDropdown이 이번 선택값으로만 보여 준다.
         // 2026-10-19 적용했으면 접합부 고르기 끝 — 다시 고르려면 「접합부」 단추를 다시 누른다
         window._defectComponentJointMode = false;
         populateDefectComponentDropdown('구조체', name);
@@ -30645,6 +30610,10 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
             if (currentComponent && isJointComponentName(currentComponent) && !componentOptions.includes(currentComponent)) {
                 componentOptions.unshift(currentComponent);
             }
+        }
+        // 2026-11-02 조합해서 쓴 접합부는 목록에 저장하지 않으므로, 지금 고른 동안만 칩으로 보여 준다(다른 부재를 고르면 사라짐)
+        if (!jointMode && currentComponent && isJointComponentName(currentComponent) && !componentOptions.includes(currentComponent)) {
+            componentOptions = [currentComponent].concat(componentOptions);
         }
         const onComponentPick = (value) => {
             if (isDefectBulkEditMode()) markDefectBulkFieldChanged('component');
@@ -31046,7 +31015,7 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
 
     // ── 비구조체: 부재별 결함 종류 ──
     const MASONRY_WALL_DEFECTS = [
-        '상태양호', ...WALL_CRACK_KINDS, '이격', '줄눈 손상/탈락', '배부름·전도 징후', '백태/유출', '누수', '파손/결손', '기타'
+        '상태양호', ...WALL_CRACK_KINDS, '이격', '줄눈 손상/탈락', '배부름·전도 징후', '백태/유출', '누수', '오염', '들뜸', '파손/결손', '기타'
     ];
     const PARTITION_WALL_DEFECTS = [
         '상태양호', '균열', '이격/파손', '변형·기울음', '마감 손상', '기타'
@@ -31070,7 +31039,7 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
         '상태양호', '변형/들뜸', '파손', '이음부 손상', '부식', '누수', '체결부 이완', '기타'
     ];
     const RAILING_DEFECTS = [
-        '상태양호', '부식/녹', '변형·기울음', '파손/결손', '이격/흔들림',
+        '상태양호', '균열', '부식/녹', '변형·기울음', '파손/결손', '이격/흔들림',
         '체결부 이완', '낙하·탈락 위험', '높이·간격 불량', '마감 손상', '기타'
     ];
     // 비구조 벽체 접합부(조적·ALC·칸막이 등 이질재료 접합)
@@ -31113,10 +31082,11 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
     ];
 
     // 2026-10-30 회사 결함표 기준 — 마감·비구조 항목 결함(결함 칸에는 결함만)
-    const COMPANY_TILE_DEFECTS = ['상태양호', '균열', '들뜸', '파손', '탈락', '박락', '줄눈 손상', '백태', '오염', '기타'];
+    // 2026-11-02 엑셀 180개 대조: 타일·마감재에도 이격·철근노출(바탕 부재 마감)이 자주 나옴
+    const COMPANY_TILE_DEFECTS = ['상태양호', '균열', '들뜸', '파손', '탈락', '박락', '이격', '줄눈 손상', '백태', '오염', '기타'];
     const SPRAY_FINISH_DEFECTS = ['상태양호', '박락', '들뜸', '탈락', '파손', '오염', '기타'];
-    const COMPANY_FINISH_DEFECTS = ['상태양호', '균열', '들뜸', '파손', '박락', '탈락', '오염', '처짐', '누수흔적', '도장열화', '기타'];
-    const NONSTRUCT_SITE_DEFECTS = ['상태양호', '균열', '파손', '침하', '물고임', '부식', '변형', '기타'];
+    const COMPANY_FINISH_DEFECTS = ['상태양호', '균열', '들뜸', '파손', '박락', '탈락', '이격', '철근노출', '백태', '오염', '처짐', '누수흔적', '도장열화', '기타'];
+    const NONSTRUCT_SITE_DEFECTS = ['상태양호', '균열', '파손', '침하', '물고임', '이격', '누수', '부식', '변형', '기타'];
 
     const componentDefectPreset = {
         '철골기둥': STEEL_MEMBER_DEFECTS,
@@ -31312,6 +31282,11 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
             const el = document.getElementById(id);
             if (el) { el.addEventListener('change', refreshDefectOpeningPosRow); el.addEventListener('input', refreshDefectOpeningPosRow); }
         });
+        // 개구부 결함을 켜고 끄면 원인 후보(개구부 주위 응력집중)도 새 문맥으로 — 직접 고른 원인은 그대로(자동 체크분만 다시 계산)
+        document.getElementById('defectOpeningCrackCheck')?.addEventListener('change', () => {
+            if (window._defectFormHydrating) return;
+            try { refreshDefectTypeAfterComponentChange(document.getElementById('defectCategory')?.value || ''); } catch (_) {}
+        });
         document.addEventListener('click', (e) => { if (e.target && e.target.closest && e.target.closest('#defectComponentChips, .defect-component-chip, [data-component]')) setTimeout(refreshDefectOpeningPosRow, 0); }, true);
     })();
 
@@ -31376,6 +31351,14 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
         if (key && category === '비구조체') {
             if (key === '벽체') return MASONRY_WALL_DEFECTS;
             if (key === '바닥' || key.includes('포장') || key.includes('점검로') || key.includes('배수로') || key.includes('부대시설')) return NONSTRUCT_SITE_DEFECTS;
+        }
+        // 2026-11-02 비구조체로 적은 RC 부재(기둥·보·슬래브·RC벽체 …)는 벽체와 만나는 곳의 이격이 자주 나온다
+        if (key && category === '비구조체' && ['기둥', 'RC기둥', '보(G)', '보(B)', '슬래브', 'RC벽체', '파라펫', '옹벽'].includes(key) && componentDefectPreset[key]) {
+            const base = componentDefectPreset[key];
+            if (!base.includes('이격')) {
+                const at = base.indexOf('기타');
+                return at < 0 ? base.concat('이격') : base.slice(0, at).concat('이격', base.slice(at));
+            }
         }
         if (key && componentDefectPreset[key]) return componentDefectPreset[key];
         // 키워드 매칭 (직접 입력 부재명)
@@ -33634,6 +33617,10 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
             '*': CRACK_MASONRY_CAUSES
         },
         '벽체접합부': { '*': [C_MISM, C_DS, C_MISM_WORK, C_WORK, C_MISM_JOINT] },
+        // 2026-11-02 회사 결함표(엑셀 180개): 문·창 주변 벽체 균열은 건조수축 + 개구부 주위 응력집중을 함께 적는다(개구부 균열의 43~52%)
+        '개구부벽체': { '*': [C_DS, C_OPEN, C_RESTR, C_CORNER, C_MISM_JOINT, '부등침하'] },
+        // 비구조체 기둥(기둥-벽체 이질재료 접합) 균열: 건조수축 다음이 이질재료 접합부 거동차이(32%)
+        '비구조기둥': { '*': [C_DS, C_MISM_JOINT, C_MISM, C_RESTR, C_WORK] },
         'ALC벽': { '*': CRACK_NONSTRUCT_CAUSES },
         '칸막이벽': { '*': CRACK_NONSTRUCT_CAUSES },
         '비구조기타': { '*': [C_DS, C_MISM, C_WORK, '외부 충격'] },
@@ -33687,7 +33674,7 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
         '조적벽체 균열': CRACK_MASONRY_CAUSES.slice(),
         // ── 구조체 공통 ──
         '누수': ['방수층 파손', C_WET, C_PIPE, '배수 불량', '노후화', '기타'],
-        '철근노출': ['피복두께 부족', '철근 부식 팽창', C_WORK, '시공 다짐 불량', C_POST, '콘크리트 중성화', '기타'],
+        '철근노출': ['피복두께 부족', '철근 부식 팽창', C_WORK, '다짐 시공미흡', '시공 다짐 불량', C_POST, '콘크리트 중성화', '기타'],
         '백태/유출': [C_WET, '방수층 파손', '배수 불량', '콘크리트 투수성 증가', C_WORK, '기타'],
         '박리/박락': ['철근 부식 팽창', C_WORK, '노후화', '염해', C_POST, '동결융해 반복', '기타'],
         '콘크리트 박리': ['철근 부식 팽창', C_WORK, C_WET, '피복두께 부족', '동결융해 반복', '기타'],
@@ -33696,10 +33683,11 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
         // ── 비구조체 ──
         '이격': [C_MISM, C_DS, C_WORK, C_MISM_WORK, '부등침하', C_MISM_JOINT, '기타'],
         // 2026-10-30 회사 결함표: 마감재 결함(들뜸·박락·탈락·오염 …)과 흔한 원인
-        '들뜸': [C_WORK, C_AGING, '바탕 균열 전달', C_WET, '기타'],
+        // (아래 마감재 구간에 있던 옛 '들뜸'·'오염' 목록이 이 줄을 덮어써서 회사 결함표 원인이 안 나오던 것을 합침 — 같은 키를 두 번 쓰지 말 것)
+        '들뜸': [C_WORK, C_AGING, C_DS, '바탕 균열 전달', C_MISM_JOINT, C_WET, '부착력 저하', '온도변화 수축팽창', '기타'],
         '박락': [C_WORK, C_AGING, '철근 부식 팽창', C_POST, '기타'],
         '탈락': [C_WORK, C_AGING, C_MBAR, '사용자 부주의', '기타'],
-        '오염': [C_PIPE, '상부 방수층 파손', C_WET, C_MANAGE, C_AGING, '기타'],
+        '오염': [C_PIPE, '상부 방수층 파손', C_WET, '결로', C_MANAGE, C_AGING, '사용·환경 오염', '기타'],
         '누수흔적': [C_PIPE, '상부 방수층 파손', C_WET, C_AGING, '기타'],
         '물고임': ['배수 불량', C_WORK, C_MANAGE, '기타'],
         '도장열화': [C_AGING, C_WET, C_WORK, '기타'],
@@ -33811,12 +33799,6 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
         '마모/손상': [
             '통행 마모', '충격', '유지관리 부족', '재료 노후', '기타'
         ],
-        '들뜸': [
-            '접착 불량', '습기', '온도변화', '시공 불량', '기타'
-        ],
-        '오염': [
-            '사용·환경 오염', '누수', '유지관리 부족', '기타'
-        ],
         '타일 들뜸/탈락': [
             '접착 모르타르 노후화', '온도·열팽창', '습기 침투', '시공 불량(바탕재 미흡)',
             '진동·충격', '바탕 균열 전달', '동결융해', '기타'
@@ -33863,7 +33845,10 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
     function getCauseMemberGroup(category, component) {
         const k = normalizeComponentKey(component);
         if (k) {
+            // 2026-11-02 회사 결함표: 「창 하부 벽체」·「문 상부 벽체」·「개구부」 → 창호가 아니라 개구부 주변 벽체(개구부 주위 응력집중)
+            if (/(창|문)(상부|하부|측면)/.test(k) || k.includes('개구부')) return '개구부벽체';
             if ((k.includes('벽체') && k.includes('접합')) || k === '벽체접합부') return '벽체접합부';
+            if (category === '비구조체' && k.includes('기둥') && !k.includes('접합') && !k.includes('SRC') && !k.includes('철골')) return '비구조기둥';
             if (k.includes('철골')) return '철골';
             if (k.includes('데크')) return '데크슬래브';
             if (k.includes('접합')) return 'RC접합부';
@@ -33967,6 +33952,12 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
         if (!isLeakCauseKey(key)) return list;
         return uniqCauseList(LEAK_TOP_CAUSES.concat(list));
     }
+    /** 부재 문맥에 따라 균열 원인 맨 위 두 번째에 올릴 원인(맨 위는 늘 건조수축 및 재료적 특성) — 2026-11-02 */
+    const CRACK_LEAD_BY_GROUP = {
+        '개구부벽체': [C_OPEN],
+        '벽체접합부': [C_MISM_JOINT],
+        '비구조기둥': [C_MISM_JOINT]
+    };
     function rankCausesByCompany(key, list) {
         const rk = companyCauseRankKey(key);
         let base = uniqCauseList(list);
@@ -34010,7 +34001,10 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
                 .map((t) => String(t || '').trim()).filter(Boolean);
             const merged = [];
             kinds.forEach((t) => { merged.push(...(byMember[t] || byMember['*'] || CORE_CRACK_CAUSE_PRESET)); });
-            return leakCauseOrder(k, finishCauseOrder(k, category, rankCausesByCompany(k, merged)));
+            const ranked = rankCausesByCompany(k, merged);
+            const lead = CRACK_LEAD_BY_GROUP[group];
+            const out = lead ? uniqCauseList([ranked[0]].concat(lead, ranked)) : ranked;
+            return leakCauseOrder(k, finishCauseOrder(k, category, out));
         }
         const byMember = DEFECT_CAUSE_BY_MEMBER[k];
         if (byMember && byMember[group]) return leakCauseOrder(k, finishCauseOrder(k, category, rankCausesByCompany(k, byMember[group])));
@@ -34153,12 +34147,19 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
 
     /** 결함 수정창의 지금 분류·부재 (원인 기본 목록 문맥) */
     function getCurrentDefectCauseContext() {
+        let component = getDefectComboValue(
+            document.getElementById('defectComponent'),
+            document.getElementById('defectComponentInput')
+        ) || '';
+        // 「개구부 결함」을 체크했거나 개구부 위치(창 상부 …)를 골랐으면 벽체 계열의 원인 문맥을 개구부 주변 벽체로
+        const openChk = document.getElementById('defectOpeningCrackCheck');
+        const openPos = (document.getElementById('defectOpeningPos')?.value || '').trim();
+        if (((openChk && openChk.checked) || openPos) && (document.getElementById('defectCategory')?.value || '') !== '마감재' && /벽|^\s*$/.test(component) && !/개구부|(창|문)\s*(상부|하부|측면)/.test(component)) {
+            component = (component + ' 개구부').trim();
+        }
         return {
             category: document.getElementById('defectCategory')?.value || '',
-            component: getDefectComboValue(
-                document.getElementById('defectComponent'),
-                document.getElementById('defectComponentInput')
-            ) || ''
+            component
         };
     }
 
@@ -34953,7 +34954,7 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
         if (Array.isArray(ctx.hiddenList)) ctx.hiddenList.length = 0;
         if (Array.isArray(ctx.customList)) ctx.customList.length = 0;
         if (Array.isArray(ctx.orderList)) {
-            // 빈 순서 = 앱 기본 순서. 기본 목록을 복사해 두면 나중에 기본값을 고쳐도 이 계정만 옛 순서에 묶임
+            // 빈 순서 = 앱 기본 순서. 기본 목록을 복사해 두면 나중에 기본값을 고쳐도 이 회사만 옛 순서에 묶임
             ctx.orderList.length = 0;
         }
         if (ctx.favField && ctx.favBucket) {
@@ -35001,19 +35002,13 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
         migrateDefectComponentStateShape();
         window.state.hiddenDefectComponents = { '구조체': [], '비구조체': [], '마감재': [] };
         window.state.customDefectComponents = { '구조체': [], '비구조체': [], '마감재': [] };
-        window.state.defectComponentOrder = {
-            '구조체': (DEFECT_COMPONENT_PRESET['구조체'] || []).slice(),
-            '비구조체': (DEFECT_COMPONENT_PRESET['비구조체'] || []).slice(),
-            '마감재': (DEFECT_COMPONENT_PRESET['마감재'] || []).slice()
-        };
+        // 2026-11-02 프로그램 기본 세팅 = 코드의 목록. 순서는 비워 두어 기본 목록을 따른다 —
+        // 목록을 복사해 얼려 두면 프로그램이 기본 목록을 고쳐도(원인·결함 추가 등) 회사가 옛 목록에 묶인다.
+        window.state.defectComponentOrder = {};
 
         window.state.hiddenDefectTypes = { '구조체': [], '비구조체': [], '마감재': [] };
         window.state.customDefectTypes = { '구조체': [], '비구조체': [], '마감재': [] };
-        window.state.defectTypeOrder = {
-            '구조체': (categoryDefectPreset['구조체'] || []).slice(),
-            '비구조체': (categoryDefectPreset['비구조체'] || []).slice(),
-            '마감재': (categoryDefectPreset['마감재'] || []).slice()
-        };
+        window.state.defectTypeOrder = {};
 
         window.state.hiddenDefectCauses = {};
         window.state.customDefectCauses = {};
@@ -35025,7 +35020,7 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
     }
 
     async function resetOptionManagerAll() {
-        const ok = await window.appConfirm('부재·결함종류·발생원인 전체를 앱 기본 세팅으로 되돌릴까요?\n(숨긴 항목 복원 · 직접 추가 전부 삭제 · 순서는 기본 순서)');
+        const ok = await window.appConfirm('부재·결함종류·발생원인 전체를 앱 기본 세팅으로 되돌릴까요?\n(숨긴 항목 복원 · 직접 추가 전부 삭제 · 순서는 기본 순서)\n※ 이 세팅은 회사 공통이라 우리 회사 모든 계정에 적용됩니다.');
         if (!ok) return;
 
         applyBuiltInDefectPinDefaults();
