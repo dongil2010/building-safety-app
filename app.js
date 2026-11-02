@@ -43342,6 +43342,10 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
                         <button type="button" data-act="reverseOrder" title="선 위치는 그대로 두고 이 그룹의 번호 순서만 거꾸로(1,2,3 → 3,2,1 / A,B,C → C,B,A). 개별 이름을 준 선은 그대로">⇅ 순서 뒤집기</button>
                         ${ge.orderUndo && ge.orderUndo.groupId === eg.id ? '<button type="button" data-act="undoOrder" title="방금 바꾼 순서를 되돌림 (Ctrl+Z)">↶ 되돌리기</button>' : ''}
                     </div>
+                    <div class="grid-panel-row" title="글자가 선으로 그려져 못 읽은 도면용 — 이 그룹의 선 이름을 위치 순서(열: 왼→오른, 행: 위→아래)대로 한꺼번에 붙입니다. 빈칸이나 쉼표로 구분. 「-」는 자동 번호로 되돌림">
+                        <label>이름 한꺼번에 <input type="text" data-f="bulkNames" placeholder="예: Y'1 Y'2 Y'3 Y1 Y2 Y3" style="width:170px"></label>
+                        <button type="button" data-act="bulkNames">적용</button>
+                    </div>
                     <div class="grid-panel-row">
                         <button type="button" data-act="renumber" title="지금 보이는 위치 순서(열: 왼→오른, 행: 위→아래)로 번호를 한 번만 다시 매김. 그 뒤로 새로 긋는 선은 다시 맨 끝 번호">위치 순서로 다시 매기기</button>
                     </div>
@@ -43484,6 +43488,25 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
             G.renumberBySpatialOrder(eg, gctx);
             gridChanged();
             window.showToast?.('위치 순서로 번호를 다시 매겼습니다.', 'success', 2000);
+            return;
+        }
+        if (act === 'bulkNames' && eg) {
+            const row = btn.closest('.grid-panel-row');
+            const inp = row && row.querySelector('[data-f="bulkNames"]');
+            const names = String(inp ? inp.value : '').split(/[\s,;]+/).filter(Boolean);
+            if (!names.length) { window.showToast?.("이름을 빈칸으로 구분해 적어 주세요. 예: Y'1 Y'2 Y1 Y2", 'info', 3000); return; }
+            const items = G.orderedLines(eg, gctx).items; // 화면 위치 순서
+            let n = 0;
+            items.forEach((it, i) => {
+                if (i >= names.length) return;
+                const v = names[i].slice(0, 10);
+                if (v === '-' || v === '_') delete it.line.label; else it.line.label = v;
+                n++;
+            });
+            gridChanged();
+            window.showToast?.(names.length === items.length
+                ? `선 ${n}개의 이름을 붙였습니다.`
+                : `선 ${items.length}개 중 ${n}개에 이름을 붙였습니다(적은 이름 ${names.length}개).`, names.length === items.length ? 'success' : 'warning', 4000);
             return;
         }
         if (act === 'reverseOrder' && eg) {

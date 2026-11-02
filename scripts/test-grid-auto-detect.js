@@ -375,6 +375,34 @@ assert.strictEqual(D.findBubbles([[100, 100, 200, 100], [200, 100, 200, 160], [2
     assert.ok(pr.every((b) => b.tipX === undefined && b.tipY === undefined));
 }
 
+// 17) ★ 프라임 표기 Y'1 · Y′2 · A' — 두 줄로 이어진 번호(Y'1~Y'3, Y1~Y3)
+["Y'1", 'Y\u20322', "A'", "Y'", "A1'", 'Y\u20193'].forEach((x) => assert.ok(D.isLabelText(x), x));
+["Y''1", "Y'1'2", 'Y,1', '2,500'].forEach((x) => assert.ok(!D.isLabelText(x), x));
+assert.strictEqual(D.labelOrder("Y'2"), 2);
+assert.strictEqual(D.labelOrder('Y\u20323'), 3);
+{
+    const names = ["Y'1", "Y'2", "Y'3", 'Y1', 'Y2', 'Y3'];
+    const ys = [100, 490, 650, 770, 865, 945];
+    const d = { segments: [[10, 10, 10, H - 10]], small: [], texts: [] };
+    ys.forEach((y, i) => {
+        d.small.push(...circlePoly(215, y, 48));
+        // Y · 프라임 · 숫자가 따로 떨어진 글자 조각(90도 돌아감, 아래→위로 읽음)
+        const base = names[i].replace(/'/g, '');
+        d.texts.push(D.textFromItem(rotatedItem('Y', 215, y + 22, 90, 18, 28), convert));
+        if (names[i].indexOf("'") >= 0) d.texts.push(D.textFromItem(rotatedItem("'", 215, y + 4, 90, 5, 14), convert));
+        d.texts.push(D.textFromItem(rotatedItem(base.slice(1), 215, y - 14, 90, 12, 20), convert));
+    });
+    r = D.detect(d, dims);
+    assert.deepStrictEqual(r.rows.map((l) => l.label), names, "Y'1~Y'3, Y1~Y3 (프라임 조각 포함)");
+    // 한 조각으로 들어 있어도
+    const d2 = { segments: [], small: [], texts: [] };
+    ys.forEach((y, i) => {
+        d2.small.push(...circlePoly(215, y, 48));
+        d2.texts.push(D.textFromItem(rotatedItem(names[i], 215, y, 90, 40, 26), convert));
+    });
+    assert.deepStrictEqual(D.detect(d2, dims).rows.map((l) => l.label), names);
+}
+
 // 9) 앱 연결: 모듈 로드(app.js보다 먼저) · 스냅 엔진이 자료를 내준다 · 패널 버튼
 const idx = fs.readFileSync(path.join(__dirname, '..', 'index.html'), 'utf8');
 assert.ok(idx.includes('js/shared/grid-auto-detect.js'));
@@ -399,4 +427,6 @@ assert.ok(app.includes("(act === 'nudge' || act === 'nudgeGroup') && selF"));
     assert.ok(Math.abs(Math.hypot(moved[0].x - pts[0].x, moved[0].y - pts[0].y) - 10) < 1e-6, '10만큼만 이동');
     assert.ok(Math.abs((moved[1].x - pts[1].x) - (moved[0].x - pts[0].x)) < 1e-6 && Math.abs((moved[1].y - pts[1].y) - (moved[0].y - pts[0].y)) < 1e-6, '선 전체가 같이');
 }
+// 앱: 이름 한꺼번에(글자를 못 읽는 도면용)
+assert.ok(app.includes('data-act="bulkNames"') && app.includes("act === 'bulkNames' && eg"));
 console.log('test-grid-auto-detect: ok');

@@ -47,7 +47,9 @@
     };
 
     // 도면 글자로 인정하는 축 번호 모양: 1, 12, A, AB, X1, Y3, A-1, 1-1, ①, ⓐ, 가, A'
-    const LABEL_RE = /^(?:[A-Za-z]{1,2}[-_]?\d{1,3}|\d{1,3}(?:-\d{1,2})?|[A-Za-z]{1,2}'?|[가-힣]|[①-⑳]|[ⓐ-ⓩ]|[Ⓐ-Ⓩ])$/;
+    // 2026-11-02 프라임(Y'1 · Y′2 · A')도 축 번호: ' ’ ′ ʼ ´ `
+    const PR = "['\u2019\u2032\u02BC\u00B4`]";
+    const LABEL_RE = new RegExp('^(?:[A-Za-z]{1,2}' + PR + '?[-_]?\\d{1,3}' + PR + '?|\\d{1,3}(?:-\\d{1,2})?' + PR + '?|[A-Za-z]{1,2}' + PR + '?|[가-힣]' + PR + '?|[①-⑳]|[ⓐ-ⓩ]|[Ⓐ-Ⓩ])$');
 
     function isLabelText(s) {
         return LABEL_RE.test(String(s == null ? '' : s).trim());
@@ -395,7 +397,7 @@
         const uy = dir ? dir.dy : 0;
         // 번호 글자 조각만(쉼표·마침표가 든 치수 글자, 긴 숫자 제외) 읽는 순서로
         const pieces = inside
-            .filter((t) => /^[A-Za-z0-9'_-가-힣①-⑳ⓐ-ⓩⒶ-Ⓩ]{1,3}$/.test(String(t.str).trim()))
+            .filter((t) => /^[A-Za-z0-9'\u2019\u2032\u02BC\u00B4`_\-가-힣①-⑳ⓐ-ⓩⒶ-Ⓩ]{1,3}$/.test(String(t.str).trim()))
             .sort((p, q) => (p.x * ux + p.y * uy) - (q.x * ux + q.y * uy));
         // 이어 붙인 가장 긴 글자부터(Y + 1 → Y1), 같은 길이면 풍선 가운데에 가까운 조합
         for (let n = Math.min(pieces.length, 4); n >= 1; n--) {
@@ -426,7 +428,7 @@
 
     /** 번호 글자 → 순서 값(1, 2 … / A=1, B=2 / X3 → 3 / ① → 1 / 가=1). 못 읽으면 null */
     function labelOrder(str) {
-        const t = String(str == null ? '' : str).trim().replace(/'$/, '');
+        const t = String(str == null ? '' : str).trim().replace(/['\u2019\u2032\u02BC\u00B4`]+/g, '');
         if (!t) return null;
         let m = t.match(/(\d+)(?!.*\d)/);
         if (m) return parseInt(m[1], 10);
