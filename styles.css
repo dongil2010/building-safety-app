@@ -2447,6 +2447,35 @@ html:not(.layout-tablet) #tab-map .inspect-sidebar-left .defect-badge-no {
     line-height: 1.2;
 }
 
+/* 2026-11-02 외부 조사항목: 마킹이 있는 도면 이름. 다른 도면이면 눌러서 이동 */
+.defect-list-item-floor {
+    align-self: flex-start;
+    font-size: 0.66rem;
+    font-weight: 700;
+    line-height: 1.3;
+    padding: 0.02rem 0.35rem;
+    border-radius: 999px;
+    color: #475569;
+    background: #f1f5f9;
+    border: 1px solid #cbd5e1;
+    white-space: nowrap;
+}
+
+.defect-list-item-floor.is-other {
+    color: #1d4ed8;
+    background: #eff6ff;
+    border-color: #93c5fd;
+}
+
+.defect-list-item.is-other-floor {
+    cursor: pointer;
+    opacity: 0.88;
+}
+
+.defect-list-item.is-other-floor:hover {
+    opacity: 1;
+}
+
 .defect-list-item-measure {
     align-self: flex-start;
     font-weight: 800;

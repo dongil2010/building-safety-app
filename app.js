@@ -751,6 +751,8 @@ document.addEventListener('DOMContentLoaded', () => {
         const mapTab = document.getElementById('tab-map');
         if (!mapTab || mapTab.offsetParent === null) return hide();
         if (document.body.classList.contains('defect-modal-open')) return hide();
+        // 2026-11-02 외부는 번호가 모든 외부 도면에 걸쳐 있어 한 도면만 보면 늘 빈 번호처럼 보인다 — 알리지 않고 당기자고도 하지 않는다
+        if (typeof isExteriorFloorCode === 'function' && isExteriorFloorCode(state.currentFloor)) return hide();
         const key = `${state.currentBuildingId}_${state.currentFloor}`;
         let gaps = [];
         try { gaps = findDefectMarkingNumberGaps(getFloorDefectsForNumbering(key)); } catch (_e) { gaps = []; }
@@ -24769,8 +24771,8 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
     }
 
     // 손상 유형 필터링이 적용된 현재 층 결함 목록 반환
-    function getCurrentFloorFilteredDefects() {
-        let list = getCurrentFloorDefects();
+    function getCurrentFloorFilteredDefects(baseList) {
+        let list = baseList || getCurrentFloorDefects();
         if (window.state.bookmarkOnlyFilter) {
             list = list.filter(d => !!d.isBookmark);
         }
@@ -25231,6 +25233,37 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
     }
 
     // 좌측 사이드바에 표시되는 "현재 층에 등록된 결함" 간단 목록 렌더링
+    /** 외부 도면을 보는 중인가 — 조사항목에 도면 이름 표시·다른 외부 도면 마킹 포함 */
+    function isExteriorListMode() {
+        return !!(state.currentBuildingId && state.currentFloor
+            && typeof isExteriorFloorCode === 'function' && isExteriorFloorCode(state.currentFloor));
+    }
+
+    /**
+     * 외부 조사항목 목록: 지금 도면 행 + 다른 외부 도면의 행(번호순으로 섞음). 다른 도면 행에는 _listFloorCode를 붙인 사본을 쓴다
+     * (원본 마킹은 건드리지 않는다). 번호는 그대로 — 빈 번호를 당기지 않는다.
+     */
+    function appendOtherExteriorListRows(rows) {
+        if (!isExteriorListMode()) return rows;
+        const id = state.currentBuildingId;
+        const extra = [];
+        listExteriorFloorCodesForBuilding(id).forEach((fc) => {
+            if (fc === state.currentFloor) return;
+            const list = (state.defects && state.defects[String(id) + '_' + fc]) || [];
+            if (!list.length) return;
+            getDefectsForListPanel(getCurrentFloorFilteredDefects(list), list).forEach((r) => {
+                if (!r || isDefectMapUnregistered(r)) return;
+                extra.push(Object.assign({}, r, { _listFloorCode: fc }));
+            });
+        });
+        if (!extra.length) return rows;
+        const seen = new Set((rows || []).map((r) => r && r.id).filter(Boolean));
+        const merged = (rows || []).concat(extra.filter((r) => !r.id || !seen.has(r.id)));
+        const withIdx = merged.map((r, i) => ({ r, i, p: parseDefectNoParts(r) }));
+        withIdx.sort((a, b) => (a.p.main - b.p.main) || (a.p.suffix - b.p.suffix) || (a.i - b.i));
+        return withIdx.map((x) => x.r);
+    }
+
     function renderDefectListPanel(options = {}) {
         const panel = document.getElementById('defectListPanel');
         const summaryEl = document.getElementById('defectListSummary');
@@ -25258,7 +25291,9 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
         const unregisteredItems = elevationList
             ? getExteriorMapUnregisteredDefects(state.currentBuildingId, state.currentFloor)
             : allForList.filter(d => isPreviousRoundDefect(d) && isDefectMapUnregistered(d));
-        const defects = getDefectsForListPanel(getCurrentFloorFilteredDefects(), allFloorDefects);
+        let defects = getDefectsForListPanel(getCurrentFloorFilteredDefects(), allFloorDefects);
+        // 2026-11-02 외부: 조사항목에 모든 외부 도면의 마킹번호를 보여 주고, 다른 도면의 것은 눌러서 그 도면으로 이동
+        defects = appendOtherExteriorListRows(defects);
 
         if (summaryEl) {
             const counts = { columnWall: 0, beamSlab: 0, nonStructural: 0, finishing: 0 };
@@ -25683,6 +25718,20 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
             lines.appendChild(prevBadge);
         }
 
+        // 2026-11-02 외부: 어느 도면에 있는지 표시. 지금 도면이 아니면 눌러서 그 도면으로 이동
+        const otherFloorCode = (d._listFloorCode && d._listFloorCode !== state.currentFloor) ? d._listFloorCode : '';
+        if (isExteriorListMode()) {
+            const fcCode = d._listFloorCode || state.currentFloor;
+            const floorChip = document.createElement('span');
+            floorChip.className = 'defect-list-item-floor' + (otherFloorCode ? ' is-other' : '');
+            floorChip.textContent = (otherFloorCode ? '↗ ' : '') + (getDefectLocationFloorLabel(fcCode) || fcCode);
+            lines.appendChild(floorChip);
+            if (otherFloorCode) {
+                row.classList.add('is-other-floor');
+                row.title = `「${getDefectLocationFloorLabel(otherFloorCode) || otherFloorCode}」 도면에 있는 마킹 — 눌러서 그 도면으로 이동`;
+            }
+        }
+
         row.appendChild(lines);
 
         const actions = document.createElement('div');
@@ -25702,10 +25751,14 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
         deleteBtn.innerHTML = '<i class="fa-solid fa-trash"></i>';
         actions.appendChild(deleteBtn);
 
-        row.appendChild(actions);
+        if (!otherFloorCode) row.appendChild(actions); // 다른 도면 마킹은 이동만(수정·삭제는 그 도면에서)
 
         row.addEventListener('click', (e) => {
             if (actions.contains(e.target)) return;
+            if (otherFloorCode) {
+                if (typeof window.viewDefectOnMapFromSurvey === 'function') window.viewDefectOnMapFromSurvey(d.id);
+                return;
+            }
             if (isUnregistered) {
                 startMapRegisterForDefect(d.id);
                 return;
