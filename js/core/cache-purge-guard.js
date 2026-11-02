@@ -61,7 +61,28 @@
         return typeof localValue === 'string' && localValue.indexOf('data:') === 0;
     }
 
-    var api = { pruneBlockReason: pruneBlockReason, selectPurgeable: selectPurgeable, isUnuploadedLocalPhoto: isUnuploadedLocalPhoto };
+    /**
+     * 2026-11-02 오프라인 데이터 2일 유예 삭제 — 어느 건물이 지금 지울 때가 됐나.
+     * stamps: { 건물id: 「전부 서버에 올라간 것을 확인한 시각(ms)」 } — 새 오프라인 작업·새로 받기를 하면 그 표시는 지워진다.
+     * graceMs 이상 지났고, 지난 시도(lastTry)로부터 retryMs 이상 지난 건물만. 현재 열어 둔 건물(skipId)은 건너뛴다.
+     */
+    function offlineExpiryDue(stamps, now, graceMs, lastTry, retryMs, skipId) {
+        var s = stamps || {};
+        var t = lastTry || {};
+        var n = Number(now) || 0;
+        var grace = Number(graceMs) || 0;
+        var retry = Number(retryMs) || 0;
+        return Object.keys(s).filter(function (id) {
+            var at = Number(s[id]);
+            if (!id || !(at > 0)) return false;
+            if (skipId && id === skipId) return false;
+            if (n - at < grace) return false;
+            var last = Number(t[id]) || 0;
+            return !(last > 0 && n - last < retry);
+        });
+    }
+
+    var api = { pruneBlockReason: pruneBlockReason, selectPurgeable: selectPurgeable, isUnuploadedLocalPhoto: isUnuploadedLocalPhoto, offlineExpiryDue: offlineExpiryDue };
     if (root) {
         root.BSA = root.BSA || {};
         root.BSA.cachePurgeGuard = api;

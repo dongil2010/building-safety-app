@@ -1210,11 +1210,18 @@ document.addEventListener('DOMContentLoaded', () => {
         // 2026-10-19 오래된 캐시 정리는 여기서 하지 않는다 — 연결 순간 정리가 올리기보다 먼저 돌아 안 올라간 사진 사본을 지울 수 있었다.
         // 올리기·서버 확인이 끝난 뒤 runOfflineReturnSync가 정리한다(정리 쪽에도 보호 규칙: js/core/cache-purge-guard.js).
         setTimeout(() => { if (typeof window.runOfflineReturnSync === 'function') window.runOfflineReturnSync('online'); }, 4000);
+        setTimeout(() => { if (window.bsaOfflineExpiry) window.bsaOfflineExpiry.run('online'); }, 60000);
     });
     // 2026-10-16 오프라인을 겪었다는 표시 — 인터넷 복귀 후 올리기·확인·「비울까요?」를 이때만 한다
-    const markOfflineWorked = () => { try { localStorage.setItem('bsa_offline_worked_v1', '1'); } catch (_e) { /* ignore */ } };
+    const markOfflineWorked = () => {
+        try { localStorage.setItem('bsa_offline_worked_v1', '1'); } catch (_e) { /* ignore */ }
+        // 2026-11-02 새 오프라인 작업이 생기면 「2일 뒤 삭제」 카운트다운을 멈춘다(다시 올리고 확인한 뒤 새로 시작)
+        try { if (window.bsaOfflineExpiry) window.bsaOfflineExpiry.clearAll(); } catch (_e) { /* ignore */ }
+    };
     if (navigator.onLine === false) markOfflineWorked();
     else setTimeout(() => { if (typeof window.runOfflineReturnSync === 'function') window.runOfflineReturnSync('boot'); }, 20000);
+    if (navigator.onLine !== false) setTimeout(() => { if (window.bsaOfflineExpiry) window.bsaOfflineExpiry.run('boot'); }, 90000);
+    setInterval(() => { if (window.bsaOfflineExpiry) window.bsaOfflineExpiry.run('timer'); }, 6 * 60 * 60 * 1000);
     window.addEventListener('offline', () => {
         markOfflineWorked();
         updateOfflineBadge();
@@ -66457,6 +66464,8 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
             try { localStorage.removeItem('bsa_offline_worked_v1'); } catch (_e) { /* ignore */ }
             window.showToast('모두 서버에 올라간 것을 확인했습니다. 최신 데이터를 다시 받아 오프라인 준비를 새로 합니다…', 'info', 4000);
             const rr = await refreshOfflineBuildingsAfterReturn(bldgs);
+            // 2026-11-02 전부 올라간 것을 확인했다 → 2일 유예 뒤 기기의 오프라인 데이터를 지운다(서버에만 남김). 새 오프라인 작업·손으로 새로 받기를 하면 멈춤.
+            try { if (window.bsaOfflineExpiry) window.bsaOfflineExpiry.stamp(bldgs.map((b) => b.id)); } catch (_e) { /* ignore */ }
             if (rr.failed.length) {
                 window.showToast(`최신으로 다시 받기가 일부 실패했습니다 (${rr.failed.map((b) => b.name || b.id).join(', ')}). 오프라인 준비 창에서 「최신으로 다시 받기」를 눌러 주세요.`, 'warning', 7000);
             } else {
@@ -66472,6 +66481,91 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
             }, 1500);
         }
     }
+
+    // ---- 2026-11-02 오프라인 데이터 2일 유예 삭제 ----
+    // 「오프라인 데이터 서버에 다 올렸으면 2일 유예를 주고 오프라인 데이터를 삭제해서 서버에만 남겨」
+    // 올리고 서버 확인(runOfflineReturnSync ③)이 끝난 시각을 건물마다 적어 두고, 2일이 지나면
+    //  ① 다시 한 번 서버에 다 올라가 있는지 확인(안 올라간 게 있으면 지우지 않음)한 뒤
+    //  ② 오프라인 준비 기록·받아 둔 사진·8000 도면 → 기기의 도면·사진 사본을 지운다.
+    // 지우지 않는 것: 아직 서버에 안 올라간 사진·변경(진행률 일지·올릴 층)이 있는 건물, 지금 열어 둔 건물(다음에 다시 본다).
+    // 새 오프라인 작업(오프라인 전환)·손으로 오프라인 준비를 다시 하면 표시를 지워 카운트다운이 멈춘다.
+    const OFFLINE_EXPIRY_GRACE_MS = 2 * 24 * 60 * 60 * 1000;
+    const OFFLINE_EXPIRY_RETRY_MS = 6 * 60 * 60 * 1000;
+    let _offlineExpiryRunning = false;
+    function offlineExpiryKey(kind) { return `bsa_offline_expiry_${kind}_v1_${(window.state && window.state.companyId) || ''}`; }
+    function readOfflineExpiry(kind) {
+        try { return JSON.parse(localStorage.getItem(offlineExpiryKey(kind)) || '{}') || {}; } catch (_e) { return {}; }
+    }
+    function writeOfflineExpiry(kind, obj) {
+        try { localStorage.setItem(offlineExpiryKey(kind), JSON.stringify(obj || {})); } catch (_e) { /* ignore */ }
+    }
+    window.bsaOfflineExpiry = {
+        GRACE_MS: OFFLINE_EXPIRY_GRACE_MS,
+        stamp(ids) {
+            const m = readOfflineExpiry('at');
+            const now = Date.now();
+            (ids || []).forEach((id) => { if (id) m[id] = now; });
+            writeOfflineExpiry('at', m);
+        },
+        clear(id) {
+            const m = readOfflineExpiry('at');
+            if (id && m[id] != null) { delete m[id]; writeOfflineExpiry('at', m); }
+        },
+        clearAll() {
+            if (Object.keys(readOfflineExpiry('at')).length) writeOfflineExpiry('at', {});
+        },
+        pending() { return readOfflineExpiry('at'); },
+        async run(reason) {
+            if (_offlineExpiryRunning) return { skipped: 'running' };
+            if (!db || !window.state || !window.state.companyId || navigator.onLine === false) return { skipped: 'offline' };
+            const guard = window.BSA && window.BSA.cachePurgeGuard;
+            if (!guard || typeof guard.offlineExpiryDue !== 'function') return { skipped: 'noguard' };
+            const stamps = readOfflineExpiry('at');
+            if (!Object.keys(stamps).length) return { skipped: 'none' };
+            let why = '';
+            try {
+                why = guard.pruneBlockReason({
+                    offlineReturnPending: localStorage.getItem('bsa_offline_worked_v1') === '1',
+                    offlineReturnRunning: !!_offlineReturnRunning,
+                    syncing: !!_syncInFlight,
+                    dirtyCount: _dirtyFloorKeys.size,
+                    photoSavesPending: (window._defectPhotoSaves && window._defectPhotoSaves.size) || 0
+                });
+            } catch (_e) { why = 'unknown'; }
+            if (why) return { skipped: why };
+            const lastTry = readOfflineExpiry('try');
+            const due = guard.offlineExpiryDue(stamps, Date.now(), OFFLINE_EXPIRY_GRACE_MS, lastTry, OFFLINE_EXPIRY_RETRY_MS, window.state.currentBuildingId || null);
+            if (!due.length) return { skipped: 'notdue' };
+            _offlineExpiryRunning = true;
+            const cleared = [];
+            try {
+                for (const id of due) {
+                    if (navigator.onLine === false) break;
+                    const b = (window.state.buildings || []).find((x) => x && x.id === id);
+                    lastTry[id] = Date.now();
+                    writeOfflineExpiry('try', lastTry);
+                    if (!b) { this.clear(id); continue; } // 이미 없는 건물
+                    // ① 지우기 직전에 서버에 다 올라가 있는지 다시 확인 — 하나라도 안 올라갔으면 지우지 않는다
+                    let problems = [];
+                    try { problems = await verifyBuildingOnServer(b); } catch (e) { problems = ['서버 확인 실패']; }
+                    if (problems.length) { console.info('[오프라인 2일 삭제] 보류:', b.name || id, problems); continue; }
+                    // ② 오프라인 준비 사본(받아 둔 사진·8000 도면·준비 기록) → 도면·사진 사본(서버에 안 올라간 사진은 남김)
+                    try { await clearOfflinePrep([b]); } catch (e) { console.warn('[오프라인 2일 삭제] 준비 비우기 실패', e); continue; }
+                    try { await purgeBuildingIndexedDbAssets(id, { keepUnuploaded: true }); } catch (e) { console.warn('[오프라인 2일 삭제] 기기 사본 삭제 실패', e); continue; }
+                    this.clear(id);
+                    delete lastTry[id];
+                    cleared.push(b.name || id);
+                }
+                writeOfflineExpiry('try', lastTry);
+            } finally {
+                _offlineExpiryRunning = false;
+            }
+            if (cleared.length && typeof window.showToast === 'function') {
+                window.showToast(`서버에 모두 올라간 지 2일이 지나 기기의 오프라인 데이터를 지웠습니다 (${cleared.join(', ')}). 서버에는 그대로 있습니다.`, 'info', 6000);
+            }
+            return { cleared };
+        }
+    };
 
     // ---- 2026-10-19 최신으로 다시 받기(오프라인 준비 상태 새로) ----
     // 「온라인 연결될 때마다 오프라인 상태에서 업데이트되어서 그게 다시 오프라인이 되어야」 — 올리고 확인한 뒤 서버의 합쳐진 최신을
@@ -66837,6 +66931,8 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
                     const { round, bldg: b } = jobs[j];
                     const who = round.buildings.length > 1 ? `${round.label} ${formatDongRowLabel(b)}` : round.label;
                     try {
+                        // 2026-11-02 손으로 새로 받으면(현장 준비) 「2일 뒤 삭제」는 취소
+                        try { if (window.bsaOfflineExpiry) window.bsaOfflineExpiry.clear(b.id); } catch (_e) { /* ignore */ }
                         const rec = await runOfflinePrep(b, {
                             hiRes: !!wrap.querySelector('#offlinePrepHiRes').checked,
                             isCancelled: () => cancelFlag,
