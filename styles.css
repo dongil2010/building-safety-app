@@ -8116,15 +8116,34 @@ body.add-building-modal-open .app-content {
     background: #eff6ff;
 }
 
+/* 2026-11-02 좁은 창(폰·좁은 수정창)에서 이름 칸이 세로로 한 글자씩 쪼개지던 문제:
+   이름 칸은 최소 폭을 지키고, 단추가 안 들어가면 단추 줄이 다음 줄로 내려간다 */
+.edit-floor-drawing-row {
+    flex-wrap: wrap;
+    justify-content: flex-start;
+    row-gap: 0.35rem;
+}
+
+.edit-floor-drawing-row > .btn {
+    flex-shrink: 0;
+    white-space: nowrap;
+}
+
 .edit-floor-drawing-meta {
     min-width: 0;
-    flex: 1;
+    flex: 1 1 9rem;
+    overflow-wrap: anywhere;
+}
+
+.edit-floor-drawing-meta > strong {
+    white-space: nowrap;
 }
 
 .edit-floor-drawing-badge {
+    display: block;
     color: #16a34a;
     font-size: 0.75rem;
-    margin-left: 0.4rem;
+    margin-top: 0.1rem;
     font-weight: 700;
 }
 
