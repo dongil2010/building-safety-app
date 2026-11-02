@@ -47360,6 +47360,14 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
         return { struct: isStruct ? on : '-', nonstruct: isStruct ? '-' : on };
     }
 
+    /**
+     * 2026-11-02 1·2종 한글(HWPX): 부대시설 도면에 상세 위치를 안 적으면 위치 칸이 비어 나왔다 → 「외부」.
+     * 적은 위치·행·열이 있으면 쓰지 않는다(호출하는 쪽이 비었을 때만 부름). 화면·PDF·엑셀은 그대로.
+     */
+    function hwpxAnnexEmptyLocationText(floorCode) {
+        return /부대시설/.test(String(getDefectLocationFloorLabel(floorCode) || '')) ? '외부' : '';
+    }
+
     function getReportSurveyRowValues(d, ctx, isGrade3, colCount) {
         ctx = ctx || {};
         const marks = getSurveyStructMarks(d, isGrade3);
@@ -47395,7 +47403,8 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
         // 행·열(통심) 위치가 있으면 「행·열\n실 이름(상세 위치)」 두 줄, 없으면 예전 그대로
         const gridLocCell = (typeof getDefectGridRoomForReport === 'function') ? getDefectGridRoomForReport(d, ctx.floorCode) : '';
         const loc = gridLocCell || extractDefectLocationDetail(d.location, ctx.floorCode)
-            || getSurveyCellText('location', d, { floorCode: ctx.floorCode });
+            || getSurveyCellText('location', d, { floorCode: ctx.floorCode })
+            || (ctx.hwpxUnits ? hwpxAnnexEmptyLocationText(ctx.floorCode) : '');
         const content = [surveyContentComponentText(d), getSurveyCellText('defectType', d)]
             .map(s => (s || '').trim()).filter(s => s && s !== '-').join(' ') || '-';
         return [
@@ -57132,7 +57141,7 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
                 if (!tc) return;
                 const raw = getDefectGridRoomForReport(d, fc, undefined, { roomFirst: true });
                 if (!raw) {
-                    setTcText(tc, getSurveyCellText('location', d, { floorCode: fc }));
+                    setTcText(tc, getSurveyCellText('location', d, { floorCode: fc }) || hwpxAnnexEmptyLocationText(fc));
                     return;
                 }
                 const subList = tc.getElementsByTagNameNS(HP_NS, 'subList')[0];
