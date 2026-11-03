@@ -40572,7 +40572,13 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
         }
     }
 
-    function receivePhoneRelayPhoto(dataUrl) {
+    function receivePhoneRelayPhoto(dataUrl, item) {
+        // 보내는 폰이 「갤러리에만」으로 찍은 사진: 결함·전경사진에 넣지 않음 (원본은 받은 기기 갤러리에 저장됨)
+        if (item && window.BsaPhotoRelayLib && window.BsaPhotoRelayLib.isGalleryOnlyName(item.name)) {
+            window.showToast('휴대폰에서 사진을 받았습니다. 갤러리에만 저장했습니다.', 'info');
+            updatePhoneRelayButtonLabel();
+            return;
+        }
         if (typeof isOverviewPhotosModalOpen === 'function' && isOverviewPhotosModalOpen()) {
             const bldgId = window._overviewPhotosBuildingId || window.state.currentBuildingId;
             const bldg = (window.state.buildings || []).find((b) => b.id === bldgId);
@@ -40754,7 +40760,7 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
     // 2026-10-19 오프라인 직접 사진 전송(앱 전용, js/core/photo-relay-native.js): 받은 사진은 위 receivePhoneRelayPhoto 로
     if (window.BsaPhotoRelayUI && typeof window.BsaPhotoRelayUI.init === 'function') {
         window.BsaPhotoRelayUI.init({
-            receive: (dataUrl) => receivePhoneRelayPhoto(dataUrl),
+            receive: (dataUrl, item) => receivePhoneRelayPhoto(dataUrl, item),
             toast: (msg, type) => { if (typeof window.showToast === 'function') window.showToast(msg, type || 'info'); },
             onReceiverChange: () => updatePhoneRelayButtonLabel()
         });

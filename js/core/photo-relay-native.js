@@ -78,6 +78,11 @@
         return { handle, drain, get delivered() { return delivered; } };
     }
 
+    /** 보내는 쪽이 「갤러리에만」으로 찍은 사진(파일 이름이 SNAPG_ 로 시작) → 받는 쪽은 결함에 넣지 않는다. */
+    function isGalleryOnlyName(name) {
+        return /^SNAPG_/.test(String(name == null ? '' : name));
+    }
+
     /**
      * 화면에 띄울 받기 QR. 전용 Wi-Fi(또는 휴대폰 핫스팟) QR이 있으면 그것, 없으면 「같은 Wi-Fi」 QR(핫스팟 없이 공유기로).
      * pref === 'lan' 이면 같은 Wi-Fi QR 을 먼저.
@@ -208,11 +213,12 @@
 
         async function shoot() {
             if (busy) return { busy: true, shots: 0 };
+            const shootOpts = (opts.getCaptureOptions && opts.getCaptureOptions()) || {};
             busy = true;
             let taken = 0;
             try {
                 for (let guard = 0; guard < 500; guard++) {
-                    const r = await plugin.capture();
+                    const r = await plugin.capture(shootOpts);
                     if (!r || !r.captured) break;
                     taken += 1;
                     shots += 1;
@@ -308,6 +314,8 @@
         let sendScreen = null;
         let shooter = null;
         let continuous = false;
+        /** true 면 받는 기기 갤러리에만 두고 결함에는 넣지 않음 */
+        let galleryOnly = false;
         let inited = false;
         let startingReceiver = false;
         /** 'auto' | 'lan' — 같은 Wi-Fi QR 을 먼저 보일지 */
@@ -342,12 +350,13 @@
             }
             pump = createInboxPump({
                 plugin,
-                receive: (dataUrl) => receive(dataUrl),
+                receive: (dataUrl, item) => receive(dataUrl, item),
                 onChange: () => { renderOffline(); onReceiverChange(); }
             });
             shooter = createShooter({
                 plugin,
                 isContinuous: () => continuous,
+                getCaptureOptions: () => ({ galleryOnly }),
                 isReady: () => senderState && senderState.state === 'ready',
                 isOpen: () => !!(sendScreen && sendScreen.classList.contains('open'))
             });
@@ -870,6 +879,17 @@
             toggle.appendChild(cb);
             toggle.appendChild(sw);
 
+            const toggle2 = el('label', 'psm-toggle');
+            const cb2 = el('input');
+            cb2.type = 'checkbox';
+            const tt2 = el('span', 'psm-toggle-text');
+            tt2.appendChild(el('b', null, '갤러리에만 보내기'));
+            tt2.appendChild(el('small', null, '체크하면 받는 기기 갤러리에만 저장하고 결함에는 넣지 않습니다. 해제하면 결함에 바로 들어갑니다.'));
+            const sw2 = el('span', 'psm-switch');
+            toggle2.appendChild(tt2);
+            toggle2.appendChild(cb2);
+            toggle2.appendChild(sw2);
+
             const stats = el('div', 'psm-stats');
             const mk = (label) => {
                 const box = el('div', 'psm-stat');
@@ -921,8 +941,6 @@
             body.appendChild(conn);
             body.appendChild(manual);
             body.appendChild(scan);
-            body.appendChild(shoot);
-            body.appendChild(toggle);
             body.appendChild(stats);
             body.appendChild(last);
             body.appendChild(sub);
@@ -930,12 +948,21 @@
             body.appendChild(diag);
             sendScreen.appendChild(head);
             sendScreen.appendChild(body);
+            // 촬영 버튼은 화면 맨 아래(엄지 닿는 곳)에 고정
+            const foot = el('footer', 'psm-foot');
+            foot.appendChild(toggle2);
+            foot.appendChild(toggle);
+            foot.appendChild(shoot);
+            sendScreen.appendChild(foot);
             document.body.appendChild(sendScreen);
 
             close.addEventListener('click', closeSendMode);
             cb.addEventListener('change', () => { continuous = cb.checked; try { localStorage.setItem('bsaRelayContinuous', continuous ? '1' : '0'); } catch (_e) { /* ignore */ } });
             try { continuous = localStorage.getItem('bsaRelayContinuous') === '1'; } catch (_e) { continuous = false; }
             cb.checked = continuous;
+            cb2.addEventListener('change', () => { galleryOnly = cb2.checked; try { localStorage.setItem('bsaRelayGalleryOnly', galleryOnly ? '1' : '0'); } catch (_e) { /* ignore */ } });
+            try { galleryOnly = localStorage.getItem('bsaRelayGalleryOnly') === '1'; } catch (_e) { galleryOnly = false; }
+            cb2.checked = galleryOnly;
             scan.addEventListener('click', async () => {
                 try {
                     const r = await plugin.senderScan();
@@ -1045,7 +1072,7 @@
         return { available, init, isReceiving, onModalOpen, openSendMode, closeSendMode, openQrScreen, closeQrScreen, setMode };
     }
 
-    const api = { getPlugin, createInboxPump, describeReceiver, describeSender, senderNeedsManual, createShooter, validateHotspotInput, loadManualHotspot, saveManualHotspot, fixActionFor, needsManual, pickQr, diagLine, createUi };
+    const api = { getPlugin, createInboxPump, describeReceiver, describeSender, senderNeedsManual, createShooter, isGalleryOnlyName, validateHotspotInput, loadManualHotspot, saveManualHotspot, fixActionFor, needsManual, pickQr, diagLine, createUi };
     if (typeof module === 'object' && module.exports) module.exports = api;
     if (root && typeof root.document !== 'undefined') {
         root.BsaPhotoRelayLib = api;

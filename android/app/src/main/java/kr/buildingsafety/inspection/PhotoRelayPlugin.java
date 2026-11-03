@@ -503,7 +503,9 @@ public class PhotoRelayPlugin extends Plugin implements RelayEvents {
             File dir = new File(getContext().getCacheDir(), "relay-capture");
             if (!dir.exists()) dir.mkdirs();
             String stamp = new SimpleDateFormat("yyyyMMdd_HHmmss", Locale.US).format(new Date());
-            File file = new File(dir, "SNAP_" + stamp + ".jpg");
+            // galleryOnly: 파일 이름 앞에 SNAPG_ → 받는 쪽 웹이 결함에 넣지 않고 갤러리에만 둔다
+            String prefix = call.getBoolean("galleryOnly", false) ? "SNAPG_" : "SNAP_";
+            File file = new File(dir, prefix + stamp + ".jpg");
             if (!file.exists()) file.createNewFile();
             Uri uri = FileProvider.getUriForFile(getContext(), getContext().getPackageName() + ".fileprovider", file);
             Intent intent = new Intent(MediaStore.ACTION_IMAGE_CAPTURE);

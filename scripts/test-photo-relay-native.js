@@ -148,10 +148,12 @@ function mockPlugin(inbox) {
     assert.ok(/id="phoneRelayOnlinePane"[\s\S]*id="mobileQrCanvas"/.test(html), '기존 QR(인터넷) 그대로');
     assert.ok(/id="phoneRelayOfflinePane"/.test(html) && /id="btnOpenPhotoSendMode"/.test(html));
     assert.ok(/<script src="js\/core\/photo-relay-native\.js\?v=[^"]+"><\/script>[\s\S]*<script src="app\.js\?v=/.test(html), 'app.js 보다 먼저 읽음');
-    assert.ok(/BsaPhotoRelayUI\.init\(\{\s*receive: \(dataUrl\) => receivePhoneRelayPhoto\(dataUrl\)/.test(app));
+    assert.ok(/BsaPhotoRelayUI\.init\(\{\s*receive: \(dataUrl, item\) => receivePhoneRelayPhoto\(dataUrl, item\)/.test(app));
     assert.ok(/onModalOpen\(\{ onlineUnavailable: true \}\)/.test(app), '인터넷이 없으면 오프라인 탭으로 열림(예전엔 경고만 뜨고 안 열림)');
     assert.ok(/db\.collection\('photoRelay'\)/.test(app), '기존 인터넷 방식 유지');
 
+
+    assert.ok(relay.isGalleryOnlyName('SNAPG_20260101_101010.jpg') && !relay.isGalleryOnlyName('SNAP_20260101_101010.jpg') && !relay.isGalleryOnlyName(null), '갤러리에만 이름 표식');
 
     // 8) 2026-10-19 「받는쪽 핫스팟 켜주는 기능이랑 핫스팟 qr도 보여주는 기능」 — 전용 Wi-Fi 실패 시 휴대폰 핫스팟으로
     {
