@@ -417,7 +417,35 @@ function testMemberContextCauses() {
     assert.ok(api.getDefectTypePresetFor('비구조체', '벽체').includes('오염'));
 }
 
+// ---------- 9) 2026-11-03 회사 결함표(엑셀 160건 보고서) 집계 반영 ----------
+function testExcelStatsPresets() {
+    env.window.state = {};
+    const list = (cat, comp, type) => {
+        const g = api.getCauseDisplayGroups(type)[0];
+        return api.getDefaultCausePresetList(g.key, g.types, cat, comp);
+    };
+    // 구조체 탭의 보 이름 4개는 그대로 — 균열 맨 위 3개(사용자 지정) 뒤에 주변부재의 구속
+    const beams = ['보(G)', '보(B)', '철골보(G)', '철골보(B)'];
+    beams.forEach((b) => assert.ok(api.DEFECT_COMPONENT_PRESET['구조체'].includes(b), 'kept ' + b));
+    ['보(G)', '보(B)'].forEach((b) => {
+        ['수직균열', '수평균열', '경사균열'].forEach((t) => {
+            const l = list('구조체', b, t);
+            assert.deepStrictEqual(l.slice(0, 3), ['건조수축 및 재료적 특성', '이질재료 거동차이', '내력부족'], b + '/' + t);
+            assert.ok(l.includes('주변부재의 구속'), b + '/' + t + ' 구속');
+        });
+    });
+    // 슬래브 균열: 결함부위 수분유입·상부 방수층 파손이 목록에 있음
+    ['결함부위 수분유입', '상부 방수층 파손'].forEach((c) => assert.ok(list('구조체', '슬래브', '균열').includes(c), c));
+    // 부식/녹: 철골은 시공미흡 → 노후화 → 방청 불량, 그 밖의 부재는 노후화 → 시공미흡
+    assert.deepStrictEqual(list('구조체', '철골보(G)', '부식/녹').slice(0, 3), ['시공미흡', '경과년수 증대에 따른 노후화', '방청 불량']);
+    assert.deepStrictEqual(list('구조체', '철골보(B)', '부식/녹').slice(0, 3), ['시공미흡', '경과년수 증대에 따른 노후화', '방청 불량']);
+    assert.deepStrictEqual(list('비구조체', '난간', '부식/녹').slice(0, 2), ['경과년수 증대에 따른 노후화', '시공미흡']);
+    // 구조체 박리/박락: 시공미흡 31% → 철근 부식 팽창 19%
+    assert.deepStrictEqual(list('구조체', '보(G)', '박리/박락').slice(0, 2), ['시공미흡', '철근 부식 팽창']);
+}
+
 testHeavyLoadItems();
+testExcelStatsPresets();
 testEveryTypeHasCause();
 testMemberContextCauses();
 testAutoCheckedCause();

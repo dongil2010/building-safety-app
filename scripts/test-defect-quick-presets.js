@@ -70,7 +70,8 @@ function testTypeToCauseMapping() {
     assert.deepStrictEqual(top('누수'), ['방수층 파손']);
     assert.deepStrictEqual(top('철근노출'), ['피복두께 부족']);
     assert.deepStrictEqual(top('박리/박락'), ['철근 부식 팽창']);
-    assert.deepStrictEqual(top('부식/녹'), ['방청 불량']);
+    // 2026-11-03 엑셀 160건 보고서 집계: 부식/녹은 노후화가 맨 위(40%), 방청 불량은 9%
+    assert.deepStrictEqual(top('부식/녹'), ['경과년수 증대에 따른 노후화']);
     assert.deepStrictEqual(top('부식'), ['노후화']);
     assert.deepStrictEqual(top('파손'), ['시공미흡']);
     assert.ok(causePreset['균열'].includes('부등침하') && causePreset['균열'].includes('철근 부식 팽창'));
