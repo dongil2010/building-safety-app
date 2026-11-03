@@ -18285,3 +18285,30 @@ html.bsa-kb-dock-follow body.defect-modal-open #tab-map #mobileMapDock.mobile-ca
     color: #475569;
     margin-right: 0.25rem;
 }
+/* 2026-11-03 평가단위: 층 골라 묶기 편집 */
+.stats-eval-add { border-style: dashed !important; }
+.stats-eval-editor {
+    margin: 0.35rem 0.85rem 0.6rem;
+    padding: 0.6rem 0.75rem;
+    border: 1px solid #93c5fd;
+    border-radius: 10px;
+    background: #f8fbff;
+}
+.stats-eval-editor-title { font-weight: 700; margin-bottom: 0.4rem; }
+.stats-eval-range { display: flex; flex-wrap: wrap; align-items: center; gap: 0.35rem; font-size: 0.88rem; margin-bottom: 0.45rem; }
+.stats-eval-floor-list { display: flex; flex-wrap: wrap; gap: 0.35rem; }
+.stats-eval-floor-pick {
+    display: inline-flex;
+    align-items: center;
+    gap: 0.25rem;
+    padding: 0.25rem 0.55rem;
+    border: 1px solid #cbd5e1;
+    border-radius: 999px;
+    background: #fff;
+    font-size: 0.85rem;
+    cursor: pointer;
+}
+.stats-eval-floor-pick.active { border-color: #2563eb; background: #dbeafe; font-weight: 700; }
+.stats-eval-floor-pick small { color: #94a3b8; font-weight: 400; }
+.stats-eval-editor-actions { display: flex; justify-content: flex-end; gap: 0.4rem; margin-top: 0.55rem; }
+.stats-eval-unit-name { font-size: 0.78rem; color: #2563eb; }

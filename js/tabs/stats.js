@@ -1874,111 +1874,90 @@
     }
 
     /**
-     * 2026-11-03 평가 표 층 묶기 단위. 지하·지상은 각각 안에서만 묶고(지하1층과 지상1층은 안 섞음),
-     * 옥상·옥탑·외부·기타 층은 늘 한 층씩. 지하는 지상에 가까운 층부터(지하1층~지하2층, 지하3층…), 지상은 1층부터.
+     * 2026-11-03 평가단위: 사용자가 층을 골라 묶는다(1평가단위 = 지하2층~지상2층, 2평가단위 = 지상2층~지상4층 …).
+     * 지하·지상을 넘어 묶어도 되고, 한 층이 두 평가단위에 들어가도 된다(합계는 층마다 한 번만 센다).
+     * 평가단위에 안 든 층은 평가단위 뒤에 한 층씩 그대로 보인다.
      */
-    var EVAL_FLOOR_UNITS = [
-        { key: '1', label: '1개층', size: 1 },
-        { key: '2', label: '2개층', size: 2 },
-        { key: '3', label: '3개층', size: 3 },
-        { key: '4', label: '4개층', size: 4 },
-        { key: '5', label: '5개층', size: 5 },
-        { key: 'all', label: '지하·지상 전체', size: Infinity }
-    ];
-
-    /** 층 줄(낮은 층→높은 층)을 묶음 목록으로: [[fr, fr], [fr], ...] */
-    function groupEvalFloors(floorRows, size) {
-        var chunks = [];
-        var run = [];
-        var runKey = '';
-        var flush = function () {
-            if (!run.length) return;
-            var list = runKey === 'basement' ? run.slice().reverse() : run;
-            var parts = [];
-            for (var i = 0; i < list.length; i += size) parts.push(list.slice(i, i + size));
-            if (runKey === 'basement') {
-                parts = parts.map(function (c) { return c.reverse(); }).reverse();
-            }
-            chunks = chunks.concat(parts);
-            run = [];
-        };
-        (floorRows || []).forEach(function (fr) {
-            var zone = (fr.zoneInfo && fr.zoneInfo.key) || '';
-            var groupable = size > 1 && (zone === 'basement' || zone === 'ground');
-            if (!groupable || zone !== runKey) flush();
-            if (groupable) {
-                runKey = zone;
-                run.push(fr);
-            } else {
-                runKey = '';
-                chunks.push([fr]);
-            }
-        });
-        flush();
-        return chunks;
-    }
-
-    /** 층(또는 층 묶음) 줄 + 맨 아래 합계. 칸 = { n, nos } */
-    function buildEvalTableRows(payload, size) {
-        var out = [];
-        var total = {};
-        var totalNos = {};
-        groupEvalFloors(payload.floorRows || [], size || 1).forEach(function (chunk) {
-            if (!chunk.some(function (fr) { return fr.rowCount > 0; })) return;
-            var map = {};
-            var noMap = {};
-            chunk.forEach(function (fr) {
-                Object.keys(fr.componentEval || {}).forEach(function (mk) {
-                    var src = fr.componentEval[mk] || {};
-                    var srcNos = (fr.componentEvalNos && fr.componentEvalNos[mk]) || {};
-                    var b = map[mk] || (map[mk] = {});
-                    var nb = noMap[mk] || (noMap[mk] = {});
-                    Object.keys(src).forEach(function (ck) {
-                        b[ck] = (b[ck] || 0) + src[ck];
-                        nb[ck] = (nb[ck] || []).concat(srcNos[ck] || []);
-                    });
+    function evalMergeFloors(chunk) {
+        var map = {};
+        var noMap = {};
+        chunk.forEach(function (fr) {
+            Object.keys(fr.componentEval || {}).forEach(function (mk) {
+                var src = fr.componentEval[mk] || {};
+                var srcNos = (fr.componentEvalNos && fr.componentEvalNos[mk]) || {};
+                var b = map[mk] || (map[mk] = {});
+                var nb = noMap[mk] || (noMap[mk] = {});
+                Object.keys(src).forEach(function (ck) {
+                    b[ck] = (b[ck] || 0) + src[ck];
+                    nb[ck] = (nb[ck] || []).concat(srcNos[ck] || []);
                 });
             });
-            var first = chunk[0];
-            var last = chunk[chunk.length - 1];
-            out.push({
-                floorCode: first.floorCode,
-                floorCodes: chunk.map(function (fr) { return fr.floorCode; }),
-                label: chunk.length > 1 ? first.floorLabel + '~' + last.floorLabel : first.floorLabel,
-                members: evalMembersFor(map).map(function (m) {
-                    var b = map[m.key] || {};
-                    var nb = noMap[m.key] || {};
-                    var tb = total[m.key] || (total[m.key] = {});
-                    var tnb = totalNos[m.key] || (totalNos[m.key] = {});
-                    return {
-                        key: m.key,
-                        label: m.label,
-                        cells: EVAL_COLUMNS.map(function (c) {
-                            var n = b[c.key] || 0;
-                            tb[c.key] = (tb[c.key] || 0) + n;
-                            tnb[c.key] = (tnb[c.key] || []).concat(nb[c.key] || []);
-                            return { key: c.key, n: n, nos: nb[c.key] || [] };
-                        })
-                    };
-                })
-            });
         });
-        if (out.length) {
-            out.push({
-                floorCode: '',
-                floorCodes: [],
-                label: '합계',
-                isTotal: true,
-                members: evalMembersFor(total).map(function (m) {
-                    var tb = total[m.key] || {};
-                    var tnb = totalNos[m.key] || {};
-                    return {
-                        key: m.key,
-                        label: m.label,
-                        cells: EVAL_COLUMNS.map(function (c) { return { key: c.key, n: tb[c.key] || 0, nos: tnb[c.key] || [] }; })
-                    };
-                })
-            });
+        return { map: map, noMap: noMap };
+    }
+
+    function evalRowFrom(merged, extra) {
+        var row = {
+            members: evalMembersFor(merged.map).map(function (m) {
+                var b = merged.map[m.key] || {};
+                var nb = merged.noMap[m.key] || {};
+                return {
+                    key: m.key,
+                    label: m.label,
+                    cells: EVAL_COLUMNS.map(function (c) { return { key: c.key, n: b[c.key] || 0, nos: nb[c.key] || [] }; })
+                };
+            })
+        };
+        Object.keys(extra).forEach(function (k) { row[k] = extra[k]; });
+        return row;
+    }
+
+    /** 고른 층 이름을 건물 층 순서대로: 이어진 층은 「지하2층~지상2층」, 떨어진 층은 쉼표 */
+    function evalFloorRangeLabel(codes, floorRows) {
+        var idx = [];
+        (floorRows || []).forEach(function (fr, i) { if (codes.indexOf(fr.floorCode) >= 0) idx.push(i); });
+        var parts = [];
+        for (var i = 0; i < idx.length; i++) {
+            var j = i;
+            while (j + 1 < idx.length && idx[j + 1] === idx[j] + 1) j++;
+            var a = floorRows[idx[i]].floorLabel;
+            var b = floorRows[idx[j]].floorLabel;
+            parts.push(i === j ? a : a + '~' + b);
+            i = j;
+        }
+        return parts.join(', ');
+    }
+
+    /**
+     * 표 줄: units 없으면(null) 층마다 한 줄. units = [[층코드…], …]면 평가단위마다 한 줄 + 안 든 층 한 줄씩.
+     * 맨 아래 합계는 묶기와 상관없이 결함 있는 층을 한 번씩만 더한다.
+     */
+    function buildEvalTableRows(payload, units) {
+        var floorRows = payload.floorRows || [];
+        var out = [];
+        var used = {};
+        (units || []).forEach(function (codes, i) {
+            var chunk = floorRows.filter(function (fr) { return (codes || []).indexOf(fr.floorCode) >= 0; });
+            if (!chunk.length) return;
+            chunk.forEach(function (fr) { used[fr.floorCode] = true; });
+            out.push(evalRowFrom(evalMergeFloors(chunk), {
+                floorCode: chunk[0].floorCode,
+                floorCodes: chunk.map(function (fr) { return fr.floorCode; }),
+                unitName: (i + 1) + '평가단위',
+                label: evalFloorRangeLabel(codes, floorRows)
+            }));
+        });
+        floorRows.forEach(function (fr) {
+            if (used[fr.floorCode] || !(fr.rowCount > 0)) return;
+            out.push(evalRowFrom(evalMergeFloors([fr]), {
+                floorCode: fr.floorCode,
+                floorCodes: [fr.floorCode],
+                label: fr.floorLabel
+            }));
+        });
+        var withData = floorRows.filter(function (fr) { return fr.rowCount > 0; });
+        if (out.length && withData.length) {
+            out.push(evalRowFrom(evalMergeFloors(withData), { floorCode: '', floorCodes: [], label: '합계', isTotal: true }));
         }
         return out;
     }
@@ -1994,80 +1973,183 @@
         return lines.join('\n');
     }
 
-    var EVAL_UNIT_KEY = 'bsa_stats_eval_floor_unit';
-    function readEvalUnit() {
-        var v = '1';
-        try { v = localStorage.getItem(EVAL_UNIT_KEY) || '1'; } catch (e) {}
-        return EVAL_FLOOR_UNITS.some(function (u) { return u.key === v; }) ? v : '1';
+    /** 평가단위는 건물마다 이 기기에 저장 { 건물id: [[층코드…], …] }, 보기(층별/평가단위별)도 기억 */
+    var EVAL_UNITS_KEY = 'bsa_stats_eval_units';
+    var EVAL_MODE_KEY = 'bsa_stats_eval_mode';
+    var evalEditIndex = null;
+    function readEvalUnitsAll() {
+        try {
+            var v = JSON.parse(localStorage.getItem(EVAL_UNITS_KEY) || '{}');
+            return v && typeof v === 'object' ? v : {};
+        } catch (e) { return {}; }
     }
-    var evalFloorUnit = readEvalUnit();
+    function readEvalUnits(bldgId) {
+        var list = readEvalUnitsAll()[String(bldgId)];
+        return Array.isArray(list) ? list.map(function (x) { return Array.isArray(x) ? x : []; }) : [];
+    }
+    function saveEvalUnits(bldgId, units) {
+        var all = readEvalUnitsAll();
+        if (units.length) all[String(bldgId)] = units; else delete all[String(bldgId)];
+        try { localStorage.setItem(EVAL_UNITS_KEY, JSON.stringify(all)); } catch (e) {}
+    }
+    function readEvalMode() {
+        try { return localStorage.getItem(EVAL_MODE_KEY) === 'units' ? 'units' : 'floor'; } catch (e) { return 'floor'; }
+    }
 
-    function renderEvalTable(payload, root) {
+    function renderEvalUnitEditor(floorRows, codes, index) {
+        var opts = floorRows.map(function (fr) {
+            return '<option value="' + esc(fr.floorCode) + '">' + esc(fr.floorLabel) + '</option>';
+        }).join('');
+        var boxes = floorRows.map(function (fr) {
+            var on = codes.indexOf(fr.floorCode) >= 0;
+            return '<label class="stats-eval-floor-pick' + (on ? ' active' : '') + '"><input type="checkbox" data-eval-floor="' + esc(fr.floorCode) + '"'
+                + (on ? ' checked' : '') + '>' + esc(fr.floorLabel) + (fr.rowCount > 0 ? '' : ' <small>(결함 없음)</small>') + '</label>';
+        }).join('');
+        return '<div class="stats-eval-editor">'
+            + '<div class="stats-eval-editor-title">' + (index + 1) + '평가단위 — 묶을 층을 고르세요</div>'
+            + '<div class="stats-eval-range">범위로 고르기: <select data-eval-from>' + opts + '</select> ~ <select data-eval-to>' + opts + '</select>'
+            + ' <button type="button" class="btn btn-secondary btn-sm" data-eval-range>범위 적용</button></div>'
+            + '<div class="stats-eval-floor-list">' + boxes + '</div>'
+            + '<div class="stats-eval-editor-actions">'
+            + '<button type="button" class="btn btn-danger btn-sm" data-eval-delete>이 평가단위 삭제</button>'
+            + '<button type="button" class="btn btn-primary btn-sm" data-eval-close>완료</button></div>'
+            + '</div>';
+    }
+
+    function renderEvalTable(payload, root, bldg) {
         if (!root) return;
-        var unit = EVAL_FLOOR_UNITS.filter(function (u) { return u.key === evalFloorUnit; })[0] || EVAL_FLOOR_UNITS[0];
+        var bldgId = bldg && bldg.id;
+        var mode = readEvalMode();
+        var units = bldgId ? readEvalUnits(bldgId) : [];
+        if (evalEditIndex != null && (mode !== 'units' || evalEditIndex >= units.length)) evalEditIndex = null;
+        var floorRows = (payload && payload.floorRows) || [];
+        var rerender = function () { renderEvalTable(payload, root, bldg); };
+
         var head = '<div class="stats-panel-head"><h3 class="stats-panel-title">층별·부재별 결함 현황 (평가)</h3>'
-            + '<button type="button" class="btn btn-secondary btn-sm" data-eval-copy>표 복사</button></div>'
-            + '<div class="chips-container stats-eval-units" role="group" aria-label="층 묶기"><span class="stats-eval-units-label">층 묶기</span>'
-            + EVAL_FLOOR_UNITS.map(function (u) {
-                var on = u.key === unit.key;
-                return '<button type="button" class="chip' + (on ? ' active' : '') + '" data-eval-unit="' + u.key + '" aria-pressed="' + (on ? 'true' : 'false') + '">' + esc(u.label) + '</button>';
+            + '<button type="button" class="btn btn-secondary btn-sm" data-eval-copy>표 복사</button></div>';
+        var modeBar = '<div class="chips-container stats-eval-units" role="group" aria-label="보기">'
+            + [['floor', '층별'], ['units', '평가단위별']].map(function (m) {
+                var on = m[0] === mode;
+                return '<button type="button" class="chip' + (on ? ' active' : '') + '" data-eval-mode="' + m[0] + '" aria-pressed="' + (on ? 'true' : 'false') + '">' + m[1] + '</button>';
             }).join('') + '</div>';
-        var rows = payload ? buildEvalTableRows(payload, unit.size) : [];
-        var bindUnits = function () {
-            root.querySelectorAll('[data-eval-unit]').forEach(function (btn) {
-                btn.addEventListener('click', function () {
-                    evalFloorUnit = btn.getAttribute('data-eval-unit');
-                    try { localStorage.setItem(EVAL_UNIT_KEY, evalFloorUnit); } catch (e) {}
-                    renderEvalTable(payload, root);
+        var unitBar = '';
+        if (mode === 'units' && payload) {
+            unitBar = '<div class="chips-container stats-eval-units">'
+                + units.map(function (codes, i) {
+                    var on = i === evalEditIndex;
+                    var range = evalFloorRangeLabel(codes, floorRows) || '층 미선택';
+                    return '<button type="button" class="chip' + (on ? ' active' : '') + '" data-eval-edit="' + i + '">' + (i + 1) + '평가단위 · ' + esc(range) + '</button>';
+                }).join('')
+                + '<button type="button" class="chip stats-eval-add" data-eval-add>＋ 평가단위 추가</button></div>';
+            if (evalEditIndex != null) unitBar += renderEvalUnitEditor(floorRows, units[evalEditIndex] || [], evalEditIndex);
+        }
+
+        var rows = payload ? buildEvalTableRows(payload, mode === 'units' ? units : null) : [];
+        var tableHtml;
+        if (!rows.length) {
+            tableHtml = '<p class="stats-empty">' + (payload ? '결함 데이터가 없습니다.' : '건물을 선택하면 평가 표를 볼 수 있습니다.') + '</p>';
+        } else {
+            var noWidth = 0;
+            floorRows.forEach(function (fr) {
+                EVAL_MEMBERS.forEach(function (m) {
+                    var b = (fr.componentCrackBins && fr.componentCrackBins[m.key]) || {};
+                    noWidth += b.none || 0;
                 });
             });
-        };
-        if (!rows.length) {
-            root.innerHTML = head + '<p class="stats-empty">' + (payload ? '결함 데이터가 없습니다.' : '건물을 선택하면 평가 표를 볼 수 있습니다.') + '</p>';
-            bindUnits();
-            return;
-        }
-        var noWidth = 0;
-        (payload.floorRows || []).forEach(function (fr) {
-            EVAL_MEMBERS.forEach(function (m) {
-                var b = (fr.componentCrackBins && fr.componentCrackBins[m.key]) || {};
-                noWidth += b.none || 0;
-            });
-        });
-        var noAttr = function (nos, title) {
-            var list = sortDefectNos(nos);
-            if (!list.length) return '';
-            return ' data-bin-nos="' + esc(list.join(',')) + '" data-bin-title="' + esc(title) + '" tabindex="0"';
-        };
-        var body = rows.map(function (fl) {
-            var current = !fl.isTotal && fl.floorCodes.indexOf(payload.currentFloor) >= 0;
-            return fl.members.map(function (m, i) {
-                var cls = [];
-                if (current) cls.push('stats-row-current');
-                if (fl.isTotal) cls.push('stats-eval-total');
-                if (i === 0) cls.push('stats-eval-floor-start');
-                var floorCell = i === 0
-                    ? '<th scope="rowgroup" rowspan="' + fl.members.length + '" class="stats-eval-floor">' + esc(fl.label) + '</th>'
-                    : '';
-                var cells = m.cells.map(function (c) {
-                    var label = EVAL_COLUMNS.filter(function (x) { return x.key === c.key; })[0].label;
-                    return '<td class="stats-kind-col ' + (c.n ? 'stats-cell-hit stats-bin-nos' : 'stats-cell-zero') + '"'
-                        + (c.n ? noAttr(c.nos, fl.label + ' · ' + m.label + ' · ' + label) : '') + '>' + (c.n || '') + '</td>';
+            var noAttr = function (nos, title) {
+                var list = sortDefectNos(nos);
+                if (!list.length) return '';
+                return ' data-bin-nos="' + esc(list.join(',')) + '" data-bin-title="' + esc(title) + '" tabindex="0"';
+            };
+            var body = rows.map(function (fl) {
+                var current = !fl.isTotal && fl.floorCodes.indexOf(payload.currentFloor) >= 0;
+                var place = (fl.unitName ? '<span class="stats-eval-unit-name">' + esc(fl.unitName) + '</span><br>' : '') + esc(fl.label);
+                return fl.members.map(function (m, i) {
+                    var cls = [];
+                    if (current) cls.push('stats-row-current');
+                    if (fl.isTotal) cls.push('stats-eval-total');
+                    if (i === 0) cls.push('stats-eval-floor-start');
+                    var floorCell = i === 0
+                        ? '<th scope="rowgroup" rowspan="' + fl.members.length + '" class="stats-eval-floor">' + place + '</th>'
+                        : '';
+                    var cells = m.cells.map(function (c) {
+                        var label = EVAL_COLUMNS.filter(function (x) { return x.key === c.key; })[0].label;
+                        return '<td class="stats-kind-col ' + (c.n ? 'stats-cell-hit stats-bin-nos' : 'stats-cell-zero') + '"'
+                            + (c.n ? noAttr(c.nos, (fl.unitName ? fl.unitName + ' ' : '') + fl.label + ' · ' + m.label + ' · ' + label) : '') + '>' + (c.n || '') + '</td>';
+                    }).join('');
+                    return '<tr' + (cls.length ? ' class="' + cls.join(' ') + '"' : '') + '>' + floorCell + '<th scope="row">' + esc(m.label) + '</th>' + cells + '</tr>';
                 }).join('');
-                return '<tr' + (cls.length ? ' class="' + cls.join(' ') + '"' : '') + '>' + floorCell + '<th scope="row">' + esc(m.label) + '</th>' + cells + '</tr>';
             }).join('');
-        }).join('');
-        var note = '구조체로 체크한 기둥·RC벽체·보·슬래브만 셉니다(구분 미기재는 구조체). 균열은 결함마다 가장 넓은 폭으로 한 칸에 들어갑니다. 층 묶기는 지하·지상 안에서만 묶고 옥상·옥탑·외부는 따로 둡니다. 숫자를 누르면 결함 번호가 보입니다.';
-        if (noWidth) note += ' 폭을 적지 않은 균열 ' + noWidth + '건은 표에 없습니다.';
-        root.innerHTML = head
-            + '<div class="table-responsive stats-table-wrap"><table class="data-table stats-matrix-table stats-eval-table">'
-            + '<thead><tr><th>위치</th><th>부재</th>' + EVAL_COLUMNS.map(function (c) { return '<th class="stats-kind-col">' + esc(c.label) + '</th>'; }).join('') + '</tr></thead>'
-            + '<tbody>' + body + '</tbody></table></div>'
-            + '<p class="stats-hint">' + esc(note) + '</p>';
-        bindUnits();
+            var note = '구조체로 체크한 기둥·RC벽체·보·슬래브만 셉니다(구분 미기재는 구조체). 균열은 결함마다 가장 넓은 폭으로 한 칸에 들어갑니다. 숫자를 누르면 결함 번호가 보입니다.';
+            if (mode === 'units') note += ' 평가단위에 안 넣은 층은 아래에 한 층씩 나오고, 합계는 층마다 한 번만 더합니다. 평가단위는 이 기기에 건물별로 저장됩니다.';
+            if (noWidth) note += ' 폭을 적지 않은 균열 ' + noWidth + '건은 표에 없습니다.';
+            tableHtml = '<div class="table-responsive stats-table-wrap"><table class="data-table stats-matrix-table stats-eval-table">'
+                + '<thead><tr><th>위치</th><th>부재</th>' + EVAL_COLUMNS.map(function (c) { return '<th class="stats-kind-col">' + esc(c.label) + '</th>'; }).join('') + '</tr></thead>'
+                + '<tbody>' + body + '</tbody></table></div>'
+                + '<p class="stats-hint">' + esc(note) + '</p>';
+        }
+        root.innerHTML = head + modeBar + unitBar + tableHtml;
+
+        var on = function (sel, fn) { root.querySelectorAll(sel).forEach(function (el) { el.addEventListener(el.tagName === 'INPUT' ? 'change' : 'click', function () { fn(el); }); }); };
+        on('[data-eval-mode]', function (el) {
+            try { localStorage.setItem(EVAL_MODE_KEY, el.getAttribute('data-eval-mode')); } catch (e) {}
+            evalEditIndex = null;
+            rerender();
+        });
+        on('[data-eval-add]', function () {
+            if (!bldgId) return;
+            units.push([]);
+            saveEvalUnits(bldgId, units);
+            evalEditIndex = units.length - 1;
+            rerender();
+        });
+        on('[data-eval-edit]', function (el) {
+            var i = parseInt(el.getAttribute('data-eval-edit'), 10);
+            evalEditIndex = evalEditIndex === i ? null : i;
+            rerender();
+        });
+        on('[data-eval-floor]', function (el) {
+            var codes = units[evalEditIndex] || [];
+            var code = el.getAttribute('data-eval-floor');
+            codes = codes.filter(function (c) { return c !== code; });
+            if (el.checked) codes.push(code);
+            units[evalEditIndex] = codes;
+            saveEvalUnits(bldgId, units);
+            rerender();
+        });
+        on('[data-eval-range]', function () {
+            var from = root.querySelector('[data-eval-from]').value;
+            var to = root.querySelector('[data-eval-to]').value;
+            var codes = floorRows.map(function (fr) { return fr.floorCode; });
+            var a = codes.indexOf(from), b = codes.indexOf(to);
+            if (a < 0 || b < 0) return;
+            units[evalEditIndex] = codes.slice(Math.min(a, b), Math.max(a, b) + 1);
+            saveEvalUnits(bldgId, units);
+            rerender();
+        });
+        on('[data-eval-delete]', function () {
+            units.splice(evalEditIndex, 1);
+            saveEvalUnits(bldgId, units);
+            evalEditIndex = null;
+            rerender();
+        });
+        on('[data-eval-close]', function () {
+            evalEditIndex = null;
+            rerender();
+        });
+        // 범위 고르기 기본값: 지금 고른 층의 처음·끝
+        var sel = units[evalEditIndex] || [];
+        if (evalEditIndex != null && sel.length) {
+            var picked = floorRows.filter(function (fr) { return sel.indexOf(fr.floorCode) >= 0; });
+            var fromEl = root.querySelector('[data-eval-from]');
+            var toEl = root.querySelector('[data-eval-to]');
+            if (fromEl && picked.length) fromEl.value = picked[0].floorCode;
+            if (toEl && picked.length) toEl.value = picked[picked.length - 1].floorCode;
+        }
         var copyBtn = root.querySelector('[data-eval-copy]');
         if (copyBtn) {
             copyBtn.addEventListener('click', function () {
+                if (!rows.length) return;
                 var text = evalTableToTsv(rows);
                 var done = function () { if (window.showToast) window.showToast('표를 복사했습니다. 한글·엑셀에 붙여 넣으세요.', 'success', 2000); };
                 if (navigator.clipboard && navigator.clipboard.writeText) {
@@ -2692,7 +2774,7 @@
         renderLintPanel(payload, document.getElementById('statsLintSection'));
         renderMatrixTable(payload, statsView);
         renderNdtStatsPanels(bldg);
-        renderEvalTable(bldg ? payload : null, ensureEvalMount());
+        renderEvalTable(bldg ? payload : null, ensureEvalMount(), bldg);
         updateHint(statsView, bldg);
         applyCategoryVisibility();
     };
@@ -2725,7 +2807,7 @@
         title: '통계',
         features: [
             '대분류: 상태조사 / 비파괴조사 / 평가',
-            '평가: 층 × 기둥·벽·큰보·작은보·슬래브, 균열폭 4구간 + 박리·박락·누수·철근노출 건수, 층 묶기(1~5개층·지하/지상 전체), 표 복사',
+            '평가: 층 × 기둥·벽·큰보·작은보·슬래브, 균열폭 4구간 + 박리·박락·누수·철근노출 건수, 평가단위(층을 골라 묶기, 건물별 이 기기 저장), 표 복사',
             '건물 전체 결함 종류 집계',
             '층별 결함 종류 표 (현재 선택 층 강조)',
             '층묶음 보기: 지하·지상·옥상·부대 구역별 집계',
