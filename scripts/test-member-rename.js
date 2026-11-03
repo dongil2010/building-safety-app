@@ -60,7 +60,7 @@ assert.strictEqual(again.changed, false, 'idempotent');
 const u = q.migrateMemberUsageCounts({ '큰보': 3, '보(G)': 2, '기둥': 1 });
 assert.deepStrictEqual(u.counts, { '보(G)': 5, '기둥': 1 });
 assert.strictEqual(q.migrateMemberUsageCounts({ '기둥': 1 }).changed, false);
-assert.deepStrictEqual(q.DEFAULT_FAVORITES.component['구조체'], ['기둥', '보(G)', '보(B)', '슬래브', '벽체', '계단', '옹벽', '파라펫', '기초']);
+assert.deepStrictEqual(q.DEFAULT_FAVORITES.component['구조체'], ['기둥', '보(G)', '보(B)', '슬래브', '벽체', 'RC벽체', '계단', '옹벽']);
 
 // app.js 프리셋
 const app = fs.readFileSync(path.join(root, 'app.js'), 'utf8').replace(/\r\n/g, '\n');
@@ -70,7 +70,7 @@ const pick = (re) => {
     return m[1];
 };
 const structPreset = pick(/const DEFECT_COMPONENT_PRESET = \{\s*'구조체': \[([\s\S]*?)\],\s*\/\//);
-['보(G)', '보(B)', '철골보(G)', '철골보(B)', '캔틸레버보'].forEach((v) => assert.ok(structPreset.includes(`'${v}'`), 'preset has ' + v));
+['보(G)', '보(B)', '철골보(G)', '철골보(B)'].forEach((v) => assert.ok(structPreset.includes(`'${v}'`), 'preset has ' + v));
 ["'큰보'", "'작은보'", "'철골거더'", "'철골빔'", "'보',"].forEach((v) => assert.ok(!structPreset.includes(v), 'preset lacks ' + v));
 const jl = pick(/const DEFECT_JOINT_LEFT = \[([^\]]*)\]/);
 const jr = pick(/const DEFECT_JOINT_RIGHT = \[([^\]]*)\]/);

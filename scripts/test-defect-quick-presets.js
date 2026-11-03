@@ -111,11 +111,12 @@ function testVisibleChips() {
             assert.ok(compPreset[cat].includes(name), `default favorite component ${cat}/${name} must exist in preset`);
         });
     });
-    ['기둥', '보(G)', '보(B)', '슬래브', '벽체', '계단', '옹벽', '파라펫', '기초'].forEach((n) => assert.ok(compPreset['구조체'].includes(n)));
+    ['기둥', '보(G)', '보(B)', '철골보(G)', '철골보(B)', '슬래브', '벽체', '계단', '옹벽'].forEach((n) => assert.ok(compPreset['구조체'].includes(n)));
     // 2026-09-28 그냥 '보'와 예전 이름(큰보·작은보·철골거더·철골빔)은 목록에서 빠짐
     ['보', '큰보', '작은보', '철골거더', '철골빔'].forEach((n) => assert.ok(!compPreset['구조체'].includes(n), 'renamed/removed ' + n));
-    // 기존 이름 유지
-    ['RC기둥', '보(G)', '보(B)', '철골보(G)', '철골보(B)', 'RC벽체', '데크슬래브'].forEach((n) => assert.ok(compPreset['구조체'].includes(n), 'kept ' + n));
+    // 보(G)·보(B)·철골보(G)·철골보(B)는 그대로(사용자 지정), 엑셀에 한 번도 안 나온 이름은 기본 목록에서 빠짐(2026-11-03)
+    ['보(G)', '보(B)', '철골보(G)', '철골보(B)', 'RC벽체'].forEach((n) => assert.ok(compPreset['구조체'].includes(n), 'kept ' + n));
+    ['RC기둥', '철골기둥', 'SRC기둥', '데크슬래브', '캔틸레버보', '기초'].forEach((n) => assert.ok(!compPreset['구조체'].includes(n), 'dropped ' + n));
     // 기본 결함 종류 즐겨찾기는 앱에 실제 있는 라벨만 (오타 방지)
     Object.values(q.DEFAULT_FAVORITES.type).forEach((list) => list.forEach((t) => {
         assert.ok(src.includes(`'${t}'`), 'default favorite type label exists in app.js: ' + t);
@@ -130,9 +131,9 @@ function testVisibleChips() {
         favorites: q.getEffectiveFavorites(undefined, 'component', '구조체', [], []),
         selected: ['철골보(B)']
     });
-    assert.deepStrictEqual(split.visible.slice(0, 9), ['기둥', '보(G)', '보(B)', '슬래브', '벽체', '옹벽', '파라펫', '계단', '기초']);
+    assert.deepStrictEqual(split.visible.slice(0, 9), ['기둥', '보(G)', '보(B)', '슬래브', '벽체', 'RC벽체', '계단', '옹벽', '철골보(B)']);
     assert.ok(split.visible.includes('철골보(B)'), 'selected value always visible');
-    assert.ok(split.hidden.includes('RC기둥') && !split.hidden.includes('철골보(B)'));
+    assert.ok(split.hidden.includes('철골보(G)') && !split.hidden.includes('철골보(B)'));
 
     // 사용 빈도: ★ 없으면 많이 쓴 것이 보이는 칸을 채움, 보이는 순서는 목록 순
     let usage = {};
