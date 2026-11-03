@@ -46294,7 +46294,7 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
         cx.drawImage(img, 0, 0, w, h);
         let data;
         try { data = cx.getImageData(0, 0, w, h).data; } catch (_e) { return null; }
-        const f = det.detectOuterFrame(det.toGray(data, w, h), w, h);
+        const f = (det.detectOuterFrameRobust || det.detectOuterFrame)(det.toGray(data, w, h), w, h);
         if (!f) return null;
         const dims = getFloorPlanDisplayDims();
         const sx = (dims.w || nw) / w, sy = (dims.h || nh) / h;

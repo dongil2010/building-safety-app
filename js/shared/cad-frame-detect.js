@@ -65,6 +65,62 @@
         };
     }
 
+    /** 어두운 쪽으로 r칸 번지게(3x3 최솟값, 분리형) — 축소로 흐려진 가는 선을 살린다 */
+    function darkenMin(gray, w, h, r) {
+        const tmp = new Uint8Array(w * h), out = new Uint8Array(w * h);
+        for (let y = 0; y < h; y++) {
+            for (let x = 0; x < w; x++) {
+                let m = 255;
+                for (let k = Math.max(0, x - r); k <= Math.min(w - 1, x + r); k++) { const v = gray[y * w + k]; if (v < m) m = v; }
+                tmp[y * w + x] = m;
+            }
+        }
+        for (let x = 0; x < w; x++) {
+            for (let y = 0; y < h; y++) {
+                let m = 255;
+                for (let k = Math.max(0, y - r); k <= Math.min(h - 1, y + r); k++) { const v = tmp[k * w + x]; if (v < m) m = v; }
+                out[y * w + x] = m;
+            }
+        }
+        return out;
+    }
+
+    /**
+     * 2026-11-03 테두리가 연하거나 가늘거나(축소하면 흐려짐) 끊겨 있어도 찾도록, 엄격한 기준부터 차례로 풀며 시도.
+     * 먼저 성공한 결과를 쓴다(엄격할수록 오인식이 적음). 번지게 한 단계는 바깥 가장자리를 되돌려 맞춘다.
+     */
+    function detectOuterFrameRobust(gray, w, h) {
+        const passes = [
+            { dark: 128, gap: 2, minFrac: 0.5, grow: 0 },
+            { dark: 190, gap: 4, minFrac: 0.5, grow: 1 },
+            { dark: 225, gap: 8, minFrac: 0.4, grow: 1 },
+            { dark: 235, gap: 12, minFrac: 0.3, grow: 2 }
+        ];
+        // 바깥 테두리가 연하고 안쪽 건물 외곽선이 진하면 엄격한 기준은 안쪽 박스를 테두리로 잘못 잡는다 →
+        // 모든 단계를 돌려 가장 큰(가장 바깥) 사각형을 쓴다. 넓이가 비슷하면(1% 이내) 더 엄격한 단계를 우선.
+        // 바탕이 연한 회색인 도면이면 종이 전체가 「어두운 선」으로 잡히지 않게, 바탕 밝기보다 확실히 어두운 것만 선으로 본다
+        const hist = new Uint32Array(256);
+        for (let i = 0; i < gray.length; i++) hist[gray[i]]++;
+        let acc = 0, bg = 255;
+        for (let v = 0; v < 256; v++) { acc += hist[v]; if (acc >= gray.length / 2) { bg = v; break; } }
+        let best = null, bestArea = 0;
+        for (let i = 0; i < passes.length; i++) {
+            const p = Object.assign({}, passes[i], { dark: Math.min(passes[i].dark, bg - 20) });
+            const g = p.grow ? darkenMin(gray, w, h, p.grow) : gray;
+            const f = detectOuterFrame(g, w, h, p);
+            if (!f) continue;
+            if (p.grow) {
+                f.left += p.grow; f.top += p.grow; f.right -= p.grow; f.bottom -= p.grow;
+                f.tl = { x: f.left, y: f.top }; f.br = { x: f.right, y: f.bottom };
+                f.tr = { x: f.right, y: f.top }; f.bl = { x: f.left, y: f.bottom };
+            }
+            f.pass = i;
+            const area = (f.right - f.left) * (f.bottom - f.top);
+            if (!best || area > bestArea * 1.01) { best = f; bestArea = area; }
+        }
+        return best;
+    }
+
     /** RGBA(ImageData.data) → 밝기. 투명은 흰색으로 */
     function toGray(rgba, w, h) {
         const g = new Uint8Array(w * h);
@@ -88,7 +144,7 @@
         return [pick(p1Left, p1Top), pick(!p1Left, !p1Top)];
     }
 
-    const api = { detectOuterFrame, toGray, matchCadRefsToFrame, longestRun };
+    const api = { detectOuterFrame, detectOuterFrameRobust, darkenMin, toGray, matchCadRefsToFrame, longestRun };
     if (typeof module !== 'undefined' && module.exports) module.exports = api;
     if (root) { root.BSA = root.BSA || {}; root.BSA.shared = root.BSA.shared || {}; root.BSA.shared.cadFrameDetect = api; }
 })(typeof window !== 'undefined' ? window : globalThis);

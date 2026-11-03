@@ -29,6 +29,40 @@ g = blank(W, H); rect(g, W, 50, 50, 150, 120, 2); rect(g, W, 200, 150, 260, 200,
 assert.strictEqual(D.detectOuterFrame(g, W, H), null, 'no frame');
 // 빈 그림
 assert.strictEqual(D.detectOuterFrame(blank(W, H), W, H), null);
+// 2026-11-03 보강: 연하거나(밝은 색 선)·가늘거나·끊긴 테두리도 찾는다
+const R = D.detectOuterFrameRobust;
+const paint = (g, w, x, y, v) => { g[y * w + x] = v; };
+function lightRect(v, brk) {
+    const gg = blank(W, H);
+    for (let x = 20; x <= 380; x++) { if (!(brk && x >= 100 && x <= 106)) { paint(gg, W, x, 15, v); paint(gg, W, x, 285, v); } }
+    for (let y = 15; y <= 285; y++) { paint(gg, W, 20, y, v); paint(gg, W, 380, y, v); }
+    rect(gg, W, 60, 50, 300, 240, 2);
+    return gg;
+}
+// 바깥 테두리가 연하고 안쪽 건물 박스가 진하면, 기존 기준은 안쪽 박스를 테두리로 잘못 잡았다
+g = lightRect(210, false);
+f = D.detectOuterFrame(g, W, H);
+assert.ok(f && f.left === 60 && f.right === 300, '(기존 동작: 안쪽 박스로 오인식)');
+f = R(g, W, H);
+assert.ok(f, '연한 선도 찾음');
+assert.deepStrictEqual([f.left, f.top, f.right, f.bottom], [20, 15, 380, 285], '번지게 한 보정 뒤에도 정확한 자리');
+// 중간이 끊긴 연한 선
+f = R(lightRect(200, true), W, H);
+assert.ok(f && f.left === 20 && f.right === 380 && f.top === 15 && f.bottom === 285, '끊겨도 찾음');
+// 엄격한 기준으로 보이는 도면은 예전과 같은 결과(첫 단계)
+g = blank(W, H); rect(g, W, 10, 10, 390, 290, 1); rect(g, W, 16, 16, 384, 284, 4);
+f = R(g, W, H);
+assert.ok(f && f.pass === 0 && [f.left, f.top, f.right, f.bottom].join() === '10,10,390,290');
+// 테두리가 없으면 풀어서 봐도 null
+g = blank(W, H); rect(g, W, 50, 50, 150, 120, 2); rect(g, W, 200, 150, 260, 200, 2);
+assert.strictEqual(R(g, W, H), null, '풀어도 방만 있으면 null');
+assert.strictEqual(R(blank(W, H), W, H), null);
+// 바탕이 연한 회색(230)인 도면: 종이 전체를 테두리로 잡지 않고 진짜 테두리(40..360)를 찾는다
+g = new Uint8Array(W * H).fill(230);
+rect(g, W, 40, 30, 360, 270, 2);
+f = R(g, W, H);
+assert.ok(f && f.left === 40 && f.top === 30 && f.right === 360 && f.bottom === 270, '회색 바탕에서도 정확');
+assert.ok(/detectOuterFrameRobust/.test(fs.readFileSync(path.join(__dirname, '..', 'app.js'), 'utf8')), '앱이 보강 함수를 씀');
 // 캐드 기준점 짝짓기: 캐드 y 위쪽 + / 그림 y 아래쪽 +
 const fr = { left: 10, top: 20, right: 300, bottom: 200 };
 assert.deepStrictEqual(D.matchCadRefsToFrame(fr, { x: 0, y: 1000 }, { x: 5000, y: 0 }), [{ x: 10, y: 20 }, { x: 300, y: 200 }], 'TL→BR');
