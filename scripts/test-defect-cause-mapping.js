@@ -84,7 +84,7 @@ function buildEnv() {
         'getCauseDisplayGroups', 'parseCauseList', 'getCurrentDefectCauseContext', 'getCauseOptionsForKey',
         'getDefaultFirstCauseFor', 'resetOptionManagerCurrent', 'refreshDefectTypeAfterComponentChange',
         'applyCauseAutoPickForType', 'applySavedOptionOrder'].forEach((f) => { code += extractFunction(f) + '\n'; });
-    code += 'return { DEFECT_COMPONENT_PRESET, defectCausePreset, getDefectTypePresetFor, getCauseDisplayGroups, ' +
+    code += 'return { DEFECT_COMPONENT_PRESET, DEFECT_JOINT_COMPONENT_PRESET, defectCausePreset, getDefectTypePresetFor, getCauseDisplayGroups, ' +
         'getDefaultCausePresetList, getAllDefaultCausesForKey, getEffectiveCauseOrder, parseCauseList, ' +
         'getCauseOptionsForKey, getDefaultFirstCauseFor, resetOptionManagerCurrent, refreshDefectTypeAfterComponentChange, ' +
         'getCauseMemberGroup, applySavedOptionOrder, categoryDefectPreset };';
@@ -143,7 +143,9 @@ function firstFor(category, component, type) {
 function testEveryTypeHasCause() {
     let n = 0;
     ['구조체', '비구조체', '마감재'].forEach((cat) => {
-        const comps = api.DEFECT_COMPONENT_PRESET[cat].concat(['']);
+        // 접합부 이름은 부재 칩 목록에서 빠졌지만(접합부 단추로만 입력) 결함·원인은 계속 나와야 함
+        const joints = cat === '구조체' ? api.DEFECT_JOINT_COMPONENT_PRESET : [];
+        const comps = api.DEFECT_COMPONENT_PRESET[cat].concat(joints, ['']);
         comps.forEach((comp) => {
             const compArg = comp === '기타' ? '' : comp;
             (api.getDefectTypePresetFor(cat, comp) || []).forEach((t) => {
