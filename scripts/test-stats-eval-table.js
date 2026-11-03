@@ -32,6 +32,7 @@ const code = [
     takeBlock('function classifyEvalKinds(', '{', '}'),
     takeBlock('function evalMembersFor(', '{', '}'),
     takeBlock('function evalMergeFloors(', '{', '}'),
+    takeBlock('function evalSumTotals(', '{', '}'),
     takeBlock('function evalRowFrom(', '{', '}'),
     takeBlock('function evalFloorRangeLabel(', '{', '}'),
     takeBlock('function buildEvalTableRows(', '{', '}'),
@@ -86,10 +87,36 @@ assert.ok(rows[2].isTotal);
 
 // 표 복사: 탭 구분, 층 이름은 첫 줄에만, 0은 빈칸
 const tsv = A.evalTableToTsv(rows).split('\n');
-assert.strictEqual(tsv[0], '위치\t부재\t0.2mm 미만\t0.3mm 미만\t0.5mm 미만\t0.5mm 이상\t콘크리트 박리\t콘크리트 박락\t누수·백태\t철근노출');
-assert.strictEqual(tsv[1], '지하2층\t기둥\t3\t2\t\t\t1\t\t\t');
-assert.strictEqual(tsv[2], '\t벽\t\t\t\t\t\t\t\t');
+assert.strictEqual(tsv[0], '위치\t부재(개소)\t0.2mm 미만\t0.3mm 미만\t0.5mm 미만\t0.5mm 이상\t콘크리트 박리\t콘크리트 박락\t누수·백태\t철근노출');
+assert.strictEqual(tsv[1], '지하2층\t기둥( )\t3\t2\t\t\t1\t\t\t', '구조 부재 안 그린 층은 괄호 빈칸');
+assert.strictEqual(tsv[2], '\t벽( )\t\t\t\t\t\t\t\t');
 assert.strictEqual(tsv.length, 1 + 5 + 6 + 6);
+
+// 2026-11-04 부재 옆 괄호 = 구조 부재 탭 개수: 층·평가단위는 그 층들 합, 합계는 결함 없는 층에 그린 것까지
+{
+    const T = (c, g, b, s) => ({ column: c, rcWall: 0, bigBeam: g, smallBeam: b, slab: s });
+    const bd = {
+        floorRows: [
+            { floorCode: 'B1F', floorLabel: '지하1층', rowCount: 1, componentEval: { column: { lt02: 1 } }, memberTotals: T(20, 31, 12, 24) },
+            { floorCode: '1F', floorLabel: '지상1층', rowCount: 1, componentEval: { slab: { leak: 1 } }, memberTotals: T(18, 27, 10, 20) },
+            { floorCode: '2F', floorLabel: '지상2층', rowCount: 0, componentEval: {}, memberTotals: T(18, 27, 10, 20) },
+            { floorCode: '3F', floorLabel: '지상3층', rowCount: 1, componentEval: { column: { lt02: 1 } }, memberTotals: null }
+        ]
+    };
+    const total = (row, member) => row.members.find((m) => m.label === member).total;
+    const fr = JSON.parse(JSON.stringify(A.buildEvalTableRows(bd)));
+    assert.deepStrictEqual(fr.map((r) => r.label), ['지하1층', '지상1층', '지상3층', '합계']);
+    assert.strictEqual(total(fr[0], '기둥'), 20);
+    assert.strictEqual(total(fr[0], '큰보'), 31, '큰보 = 거더');
+    assert.strictEqual(total(fr[0], '작은보'), 12, '작은보 = 빔');
+    assert.strictEqual(total(fr[0], '슬래브'), 24);
+    assert.strictEqual(total(fr[2], '기둥'), null, '구조 부재 안 그린 층');
+    assert.strictEqual(total(fr[3], '기둥'), 56, '합계: 결함 없는 지상2층에 그린 부재도 센다');
+    const ur = JSON.parse(JSON.stringify(A.buildEvalTableRows(bd, [['1F', '2F', '3F']])));
+    assert.strictEqual(ur[0].label, '지상1층~지상3층');
+    assert.strictEqual(total(ur[0], '슬래브'), 40, '평가단위 = 그린 층들의 합(안 그린 3층은 0)');
+    assert.strictEqual(A.evalTableToTsv(fr).split('\n')[1], '지하1층\t기둥(20)\t1\t\t\t\t\t\t\t');
+}
 
 // 평가단위: 사용자가 고른 층끼리 묶음. 지하·지상을 넘어도 되고 한 층이 두 단위에 들어가도 된다.
 {

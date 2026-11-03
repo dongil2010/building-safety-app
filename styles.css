@@ -18312,3 +18312,5 @@ html.bsa-kb-dock-follow body.defect-modal-open #tab-map #mobileMapDock.mobile-ca
 .stats-eval-floor-pick small { color: #94a3b8; font-weight: 400; }
 .stats-eval-editor-actions { display: flex; justify-content: flex-end; gap: 0.4rem; margin-top: 0.55rem; }
 .stats-eval-unit-name { font-size: 0.78rem; color: #2563eb; }
+/* 2026-11-04 평가 표 부재 옆 개수(구조 부재 탭) */
+.stats-eval-count { font-weight: 400; color: #475569; font-size: 0.85em; }

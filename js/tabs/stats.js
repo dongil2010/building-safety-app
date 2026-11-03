@@ -1246,6 +1246,29 @@
         { key: 'leak', label: '누수·백태' },
         { key: 'rebar', label: '철근노출' }
     ];
+    /**
+     * 2026-11-04 부재 옆 괄호 = 구조 부재 탭(js/core/struct-members.js)에서 그린 층의 부재 개수.
+     * 기둥=기둥, 큰보=거더, 작은보=빔, 벽=벽(옛 자료), 슬래브=거더·빔으로 사방이 막힌 칸 수(그리지 않아도 됨).
+     * 구조 부재를 안 그린 층은 null(괄호 빈칸). 슬래브 세기는 격자 칠하기라 부재 목록이 그대로면 다시 안 센다.
+     */
+    var structCountCache = {};
+    function structMemberTotals(floorKey) {
+        var api = window.BSA && window.BSA.structMembers;
+        if (!api || !window.state) return null;
+        var list = api.listFor(window.state, floorKey).filter(function (d) { return d.type !== api.GRID_TYPE; });
+        if (!list.length) return null;
+        var sig = list.map(function (d) { return d.id + ':' + d.updatedAt; }).join('|');
+        var hit = structCountCache[floorKey];
+        if (hit && hit.sig === sig) return hit.totals;
+        var c = api.countsByType(list);
+        var slabs = typeof api.countSlabPanels === 'function' ? api.countSlabPanels(list) : 0;
+        var totals = { column: c['기둥'] || 0, bigBeam: c['거더'] || 0, smallBeam: c['빔'] || 0, slab: slabs || c['슬래브'] || 0 };
+        // 벽은 구조 부재 탭에서 지금 못 그린다 — 그린 게 없으면 0 대신 빈 괄호
+        if (c['벽']) totals.rcWall = c['벽'];
+        structCountCache[floorKey] = { sig: sig, totals: totals };
+        return totals;
+    }
+
     function classifyEvalKinds(d) {
         var type = String(d && d.defectType != null ? d.defectType : '').replace(/\s+/g, '');
         var comp = String(d && d.component != null ? d.component : '').replace(/\s+/g, '');
@@ -1585,6 +1608,7 @@
                 componentCrackBinNos: floorComponentCrackBinNos,
                 componentKinds: floorComponentKinds,
                 componentEval: floorComponentEval,
+                memberTotals: structMemberTotals(prefix + floorCode),
                 componentEvalNos: floorComponentEvalNos,
                 coarseGroup: getCoarseFloorGroup(floorCode),
                 zoneInfo: classifyFloorGroup(floorCode)
@@ -1896,7 +1920,18 @@
         return { map: map, noMap: noMap };
     }
 
-    function evalRowFrom(merged, extra) {
+    /** 층들의 구조 부재 개수 합. 한 층도 안 그렸으면 null */
+    function evalSumTotals(chunk) {
+        var out = null;
+        chunk.forEach(function (fr) {
+            if (!fr.memberTotals) return;
+            out = out || {};
+            Object.keys(fr.memberTotals).forEach(function (k) { out[k] = (out[k] || 0) + (fr.memberTotals[k] || 0); });
+        });
+        return out;
+    }
+
+    function evalRowFrom(merged, extra, totals) {
         var row = {
             members: evalMembersFor(merged.map).map(function (m) {
                 var b = merged.map[m.key] || {};
@@ -1904,6 +1939,7 @@
                 return {
                     key: m.key,
                     label: m.label,
+                    total: totals && totals[m.key] != null ? totals[m.key] : null,
                     cells: EVAL_COLUMNS.map(function (c) { return { key: c.key, n: b[c.key] || 0, nos: nb[c.key] || [] }; })
                 };
             })
@@ -1945,7 +1981,7 @@
                 floorCodes: chunk.map(function (fr) { return fr.floorCode; }),
                 unitName: (i + 1) + '평가단위',
                 label: evalFloorRangeLabel(codes, floorRows)
-            }));
+            }, evalSumTotals(chunk)));
         });
         floorRows.forEach(function (fr) {
             if (used[fr.floorCode] || !(fr.rowCount > 0)) return;
@@ -1953,21 +1989,22 @@
                 floorCode: fr.floorCode,
                 floorCodes: [fr.floorCode],
                 label: fr.floorLabel
-            }));
+            }, evalSumTotals([fr])));
         });
         var withData = floorRows.filter(function (fr) { return fr.rowCount > 0; });
         if (out.length && withData.length) {
-            out.push(evalRowFrom(evalMergeFloors(withData), { floorCode: '', floorCodes: [], label: '합계', isTotal: true }));
+            // 합계 부재 수는 결함 없는 층에 그린 부재도 센다
+            out.push(evalRowFrom(evalMergeFloors(withData), { floorCode: '', floorCodes: [], label: '합계', isTotal: true }, evalSumTotals(floorRows)));
         }
         return out;
     }
 
     /** 한글·엑셀에 붙여 넣을 탭 구분 글자. 0은 빈칸(양식처럼) */
     function evalTableToTsv(rows) {
-        var lines = [['위치', '부재'].concat(EVAL_COLUMNS.map(function (c) { return c.label; })).join('\t')];
+        var lines = [['위치', '부재(개소)'].concat(EVAL_COLUMNS.map(function (c) { return c.label; })).join('\t')];
         rows.forEach(function (fl) {
             fl.members.forEach(function (m, i) {
-                lines.push([i === 0 ? fl.label : '', m.label].concat(m.cells.map(function (c) { return c.n ? String(c.n) : ''; })).join('\t'));
+                lines.push([i === 0 ? fl.label : '', m.label + '(' + (m.total != null ? m.total : ' ') + ')'].concat(m.cells.map(function (c) { return c.n ? String(c.n) : ''; })).join('\t'));
             });
         });
         return lines.join('\n');
@@ -2077,14 +2114,16 @@
                         return '<td class="stats-kind-col ' + (c.n ? 'stats-cell-hit stats-bin-nos' : 'stats-cell-zero') + '"'
                             + (c.n ? noAttr(c.nos, (fl.unitName ? fl.unitName + ' ' : '') + fl.label + ' · ' + m.label + ' · ' + label) : '') + '>' + (c.n || '') + '</td>';
                     }).join('');
-                    return '<tr' + (cls.length ? ' class="' + cls.join(' ') + '"' : '') + '>' + floorCell + '<th scope="row">' + esc(m.label) + '</th>' + cells + '</tr>';
+                    var cnt = '<span class="stats-eval-count">(' + (m.total != null ? m.total : '\u2003') + ')</span>';
+                    return '<tr' + (cls.length ? ' class="' + cls.join(' ') + '"' : '') + '>' + floorCell + '<th scope="row">' + esc(m.label) + ' ' + cnt + '</th>' + cells + '</tr>';
                 }).join('');
             }).join('');
-            var note = '구조체로 체크한 기둥·RC벽체·보·슬래브만 셉니다(구분 미기재는 구조체). 균열은 결함마다 가장 넓은 폭으로 한 칸에 들어갑니다. 숫자를 누르면 결함 번호가 보입니다.';
+            var note = '구조체로 체크한 기둥·RC벽체·보·슬래브만 셉니다(구분 미기재는 구조체). 균열은 결함마다 가장 넓은 폭으로 한 칸에 들어갑니다. 숫자를 누르면 결함 번호가 보입니다.'
+                + ' 괄호는 구조 부재 탭에서 그린 부재 수(큰보=거더, 작은보=빔, 슬래브=거더·빔으로 막힌 칸 수 자동)이고, 안 그린 층은 비어 있습니다.';
             if (mode === 'units') note += ' 평가단위에 안 넣은 층은 아래에 한 층씩 나오고, 합계는 층마다 한 번만 더합니다. 평가단위는 이 기기에 건물별로 저장됩니다.';
             if (noWidth) note += ' 폭을 적지 않은 균열 ' + noWidth + '건은 표에 없습니다.';
             tableHtml = '<div class="table-responsive stats-table-wrap"><table class="data-table stats-matrix-table stats-eval-table">'
-                + '<thead><tr><th>위치</th><th>부재</th>' + EVAL_COLUMNS.map(function (c) { return '<th class="stats-kind-col">' + esc(c.label) + '</th>'; }).join('') + '</tr></thead>'
+                + '<thead><tr><th>위치</th><th>부재(개소)</th>' + EVAL_COLUMNS.map(function (c) { return '<th class="stats-kind-col">' + esc(c.label) + '</th>'; }).join('') + '</tr></thead>'
                 + '<tbody>' + body + '</tbody></table></div>'
                 + '<p class="stats-hint">' + esc(note) + '</p>';
         }

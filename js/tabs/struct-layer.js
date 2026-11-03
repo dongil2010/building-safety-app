@@ -1021,7 +1021,11 @@
         if (bar.parentElement !== host) host.appendChild(bar);
         bar.hidden = false;
         var items = list(), c = api.countsByType(items);
-        var html = '<span class="map-count-title">구조 부재 <small>' + items.length + '</small></span>';
+        // 2026-11-04 슬래브는 안 그려도 거더·빔으로 막힌 칸 수로 자동(통계 평가 표 괄호와 같은 값). 부재가 그대로면 다시 안 센다
+        var slabSig = items.map(function (d) { return d.id + ':' + d.updatedAt; }).join('|');
+        if (ui.slabSig !== slabSig) { ui.slabSig = slabSig; ui.slabCount = api.countSlabPanels ? api.countSlabPanels(items) : 0; }
+        var html = '<span class="map-count-title">구조 부재 <small>' + items.length + '</small></span>'
+            + (ui.slabCount ? '<span class="map-struct-hint" title="거더·빔으로 사방이 막힌 칸 수 — 통계 평가 표의 슬래브 개수">슬래브(자동) <b>' + ui.slabCount + '</b></span>' : '');
         if (ui.calib) {
             html += '<button type="button" data-act="cancel">가져오기 취소</button>'
                 + '<span class="map-struct-hint">[' + (ui.calib.pts.length + 1) + '/2] 구조도에서 찍은 ' + (ui.calib.pts.length ? '두' : '첫') + ' 번째 기준점과 같은 곳을 도면에서 누르세요. (끌면 도면 이동, 휠로 확대)</span>';

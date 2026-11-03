@@ -416,5 +416,28 @@ assert.ok(layer.includes('api.barEnds(selD).map('), '비스듬한 보 끝 손잡
     assert.ok(layer.includes('if (ui.selId && !ui.addType) {'), '추가 중 종류 단추는 고른 부재를 바꾸지 않음');
 }
 
+// 2026-11-04 슬래브 수 자동: 거더·빔(+기둥)으로 사방이 막힌 칸 수
+{
+    const SP = 600, TH = 30, COL = 60;
+    const frame = (nx, ny, gap) => {
+        const out = [];
+        for (let i = 0; i <= nx; i++) for (let j = 0; j <= ny; j++) out.push({ type: '기둥', x: i * SP, y: j * SP, w: COL, h: COL });
+        for (let j = 0; j <= ny; j++) for (let i = 0; i < nx; i++) out.push({ type: '거더', x: i * SP + SP / 2, y: j * SP, w: SP - COL - (gap || 0), h: TH });
+        for (let i = 0; i <= nx; i++) for (let j = 0; j < ny; j++) out.push({ type: '거더', x: i * SP, y: j * SP + SP / 2, w: TH, h: SP - COL - (gap || 0) });
+        return out;
+    };
+    assert.strictEqual(S.countSlabPanels(frame(3, 2)), 6, '거더로 둘러싼 칸');
+    const split = frame(3, 2).concat([0, 1, 2].flatMap((i) => [0, 1].map((j) => ({ type: '빔', x: i * SP + SP / 2, y: j * SP + SP / 2, w: TH * 0.8, h: SP - TH }))));
+    assert.strictEqual(S.countSlabPanels(split), 12, '빔이 칸을 나눔');
+    assert.strictEqual(S.countSlabPanels(frame(3, 2, 20)), 6, '이음매가 조금 떠도 막힌 칸');
+    assert.strictEqual(S.countSlabPanels(frame(3, 2).filter((d) => d.type === '기둥')), 0, '보 없으면 0');
+    assert.strictEqual(S.countSlabPanels(frame(3, 2).filter((d) => !(d.type === '거더' && d.y === 0))), 3, '한 변이 열린 칸은 안 셈');
+    assert.strictEqual(S.countSlabPanels(frame(1, 1).concat([{ type: '빔', x: SP / 2, y: SP / 2, w: SP * 1.41 - COL, h: TH, ang: 45 }])), 2, '비스듬한 빔');
+    assert.strictEqual(S.countSlabPanels(frame(1, 1).concat([
+        { type: '빔', x: SP / 2, y: SP / 2 - TH, w: SP - COL, h: TH }, { type: '빔', x: SP / 2, y: SP / 2 + TH * 0.9, w: SP - COL, h: TH }
+    ])), 2, '나란한 보 사이 좁은 틈은 칸 아님');
+    assert.strictEqual(S.countSlabPanels(frame(20, 12)), 240, '큰 층');
+}
+
 console.log('test-struct-members: ok');
 

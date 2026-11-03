@@ -165,6 +165,73 @@
     }
 
     /**
+     * 슬래브 수 자동 세기(2026-11-04): 슬래브를 따로 그리지 않아도 거더·빔(+기둥)으로 사방이 막힌 칸 하나 = 슬래브 하나.
+     * 부재를 격자(긴 변 약 900칸)에 칠하고 바깥에서 물을 부어 안 닿는 빈칸 덩어리를 센다.
+     * 손으로 그려 이음매가 살짝 떠도 막히도록 거더·빔은 끝을 보 두께만큼 늘리고 두께도 조금 두껍게 칠한다.
+     * 보 두께보다 좁은 틈(나란한 보 사이 등)은 칸으로 안 센다. 한쪽이 열린 캔틸레버 슬래브는 못 센다.
+     */
+    function countSlabPanels(list) {
+        var items = (list || []).filter(function (d) { return d && (d.type === '기둥' || BEAM_TYPES.indexOf(d.type) >= 0); });
+        if (!items.some(function (d) { return BEAM_TYPES.indexOf(d.type) >= 0; })) return 0;
+        var th = median(items.filter(function (d) { return BEAM_TYPES.indexOf(d.type) >= 0; }).map(function (d) { return Math.min(d.w, d.h); })) || 1;
+        var minX = Infinity, minY = Infinity, maxX = -Infinity, maxY = -Infinity;
+        items.forEach(function (d) {
+            var r = Math.max(d.w, d.h) / 2 + th * 2;
+            minX = Math.min(minX, d.x - r); maxX = Math.max(maxX, d.x + r);
+            minY = Math.min(minY, d.y - r); maxY = Math.max(maxY, d.y + r);
+        });
+        var cell = Math.max((maxX - minX) / 900, (maxY - minY) / 900, th / 3, 0.5);
+        var W = Math.ceil((maxX - minX) / cell) + 3, H = Math.ceil((maxY - minY) / cell) + 3;
+        var grid = new Uint8Array(W * H);   // 0 빈칸, 1 부재, 2 바깥
+        items.forEach(function (d) {
+            var beam = BEAM_TYPES.indexOf(d.type) >= 0;
+            var a = (Number(d.ang) || 0) * Math.PI / 180;
+            // 막대는 길이 쪽 u, 두께 쪽 v(각도 없는 세로 막대는 w<h)
+            var len = a ? d.w : Math.max(d.w, d.h), thick = a ? d.h : Math.min(d.w, d.h);
+            if (!a && d.h > d.w) a = Math.PI / 2;
+            var hu = (beam ? len / 2 + th : len / 2 + th * 0.25) + cell;
+            var hv = (beam ? Math.max(thick, th) / 2 + th * 0.25 : thick / 2 + th * 0.25) + cell * 0.75;
+            if (!beam) { hu = Math.max(d.w, d.h) / 2 + th * 0.25 + cell; hv = hu; a = 0; }
+            var c = Math.cos(a), s = Math.sin(a);
+            var ext = Math.abs(hu * c) + Math.abs(hv * s), eyt = Math.abs(hu * s) + Math.abs(hv * c);
+            var i0 = Math.max(0, Math.floor((d.x - ext - minX) / cell) + 1), i1 = Math.min(W - 1, Math.ceil((d.x + ext - minX) / cell) + 1);
+            var j0 = Math.max(0, Math.floor((d.y - eyt - minY) / cell) + 1), j1 = Math.min(H - 1, Math.ceil((d.y + eyt - minY) / cell) + 1);
+            for (var j = j0; j <= j1; j++) {
+                for (var i = i0; i <= i1; i++) {
+                    var px = minX + (i - 1 + 0.5) * cell - d.x, py = minY + (j - 1 + 0.5) * cell - d.y;
+                    if (Math.abs(px * c + py * s) <= hu && Math.abs(-px * s + py * c) <= hv) grid[j * W + i] = 1;
+                }
+            }
+        });
+        var stack = [];
+        var fill = function (start, mark) {
+            var n = 0, bx0 = W, bx1 = -1, by0 = H, by1 = -1;
+            stack.length = 0;
+            stack.push(start);
+            grid[start] = mark;
+            while (stack.length) {
+                var k = stack.pop(), x = k % W, y = (k - x) / W;
+                n++;
+                if (x < bx0) bx0 = x; if (x > bx1) bx1 = x; if (y < by0) by0 = y; if (y > by1) by1 = y;
+                if (x > 0 && !grid[k - 1]) { grid[k - 1] = mark; stack.push(k - 1); }
+                if (x < W - 1 && !grid[k + 1]) { grid[k + 1] = mark; stack.push(k + 1); }
+                if (y > 0 && !grid[k - W]) { grid[k - W] = mark; stack.push(k - W); }
+                if (y < H - 1 && !grid[k + W]) { grid[k + W] = mark; stack.push(k + W); }
+            }
+            return { n: n, w: bx1 - bx0 + 1, h: by1 - by0 + 1 };
+        };
+        fill(0, 2);
+        var minSide = (th * 2) / cell, minArea = Math.pow((th * 3) / cell, 2);
+        var count = 0;
+        for (var k = 0; k < grid.length; k++) {
+            if (grid[k]) continue;
+            var r = fill(k, 3);
+            if (r.n >= minArea && Math.min(r.w, r.h) >= minSide) count++;
+        }
+        return count;
+    }
+
+    /**
      * 구조도 좌표 → 층 도면 좌표 맞춤(늘이기·돌리기·옮기기, 뒤집기는 없음).
      * 구조도에서 찍은 기준점 둘(s1, s2)이 층 도면의 두 점(a1, a2)에 오도록 한다.
      * → { a, b, tx, ty, scale, angle } : X = a·x − b·y + tx, Y = b·x + a·y + ty. 두 기준점이 너무 가까우면 null.
@@ -500,7 +567,7 @@
     function loadHandoff() { return handoffTx('readonly', function (s) { return s.get('latest'); }); }
 
     var api = { TYPES: TYPES, ACTIVE_TYPES: ACTIVE_TYPES, COLORS: COLORS, ensureMaps: ensureMaps, listFor: listFor, hasAny: hasAny, add: add, update: update, remove: remove,
-        applyRecord: applyRecord, clear: clear, beamThickness: beamThickness, unifyThickness: unifyThickness, countsByType: countsByType, fitTwoPoints: fitTwoPoints, applyFit: applyFit, importMembers: importMembers,
+        applyRecord: applyRecord, clear: clear, beamThickness: beamThickness, unifyThickness: unifyThickness, countsByType: countsByType, countSlabPanels: countSlabPanels, fitTwoPoints: fitTwoPoints, applyFit: applyFit, importMembers: importMembers,
         hitTest: hitTest, splitRun: splitRun, columnLines: columnLines, rotateAbout: rotateAbout,
         toLocal: toLocal, barEnds: barEnds, faceDist: faceDist, slantedRun: slantedRun,
         GRID_TYPE: GRID_TYPE, gridAxis: gridAxis, gridPos: gridPos, gridLabels: gridLabels, gridRecord: gridRecord, snapToGrid: snapToGrid, emptyGridCrossings: emptyGridCrossings, columnSize: columnSize, unifyColumns: unifyColumns, overlayFor: overlayFor, setOverlay: setOverlay, removeOverlay: removeOverlay,
