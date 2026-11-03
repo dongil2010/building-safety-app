@@ -1225,7 +1225,7 @@
 
     /**
      * 2026-11-03 「평가」 표: 보고서 양식(층 × 기둥·벽·큰보·작은보·슬래브)에 맞춘 열.
-     * 박리와 박락을 따로 센다(부재별 표의 「박리·박락·들뜸」과 다름). 들뜸·층분리는 박리 쪽.
+     * 박리와 박락을 따로 센다(부재별 표의 「박리·박락·들뜸」과 다름). 들뜸·층분리는 박락 쪽(사용자, 2026-11-03).
      * 벽은 RC벽체만 — 조적벽체는 비구조체라 뺀다. 보(G/B 미지정)는 그런 결함이 있는 층에만 줄을 더한다.
      */
     var EVAL_MEMBERS = [
@@ -1251,8 +1251,8 @@
         var comp = String(d && d.component != null ? d.component : '').replace(/\s+/g, '');
         var coating = /뿜칠|내화/.test(type + comp);
         return {
-            peel: !coating && /박리|들뜸|층분리/.test(type),
-            fall: !coating && /박락/.test(type),
+            peel: !coating && /박리/.test(type),
+            fall: !coating && /박락|들뜸|층분리/.test(type),
             leak: /누수|백태/.test(type),
             rebar: /철근노출/.test(type)
         };
@@ -1873,17 +1873,78 @@
         });
     }
 
-    /** 층 줄 + 맨 아래 합계. 칸 = { n, nos } */
-    function buildEvalTableRows(payload) {
+    /**
+     * 2026-11-03 평가 표 층 묶기 단위. 지하·지상은 각각 안에서만 묶고(지하1층과 지상1층은 안 섞음),
+     * 옥상·옥탑·외부·기타 층은 늘 한 층씩. 지하는 지상에 가까운 층부터(지하1층~지하2층, 지하3층…), 지상은 1층부터.
+     */
+    var EVAL_FLOOR_UNITS = [
+        { key: '1', label: '1개층', size: 1 },
+        { key: '2', label: '2개층', size: 2 },
+        { key: '3', label: '3개층', size: 3 },
+        { key: '4', label: '4개층', size: 4 },
+        { key: '5', label: '5개층', size: 5 },
+        { key: 'all', label: '지하·지상 전체', size: Infinity }
+    ];
+
+    /** 층 줄(낮은 층→높은 층)을 묶음 목록으로: [[fr, fr], [fr], ...] */
+    function groupEvalFloors(floorRows, size) {
+        var chunks = [];
+        var run = [];
+        var runKey = '';
+        var flush = function () {
+            if (!run.length) return;
+            var list = runKey === 'basement' ? run.slice().reverse() : run;
+            var parts = [];
+            for (var i = 0; i < list.length; i += size) parts.push(list.slice(i, i + size));
+            if (runKey === 'basement') {
+                parts = parts.map(function (c) { return c.reverse(); }).reverse();
+            }
+            chunks = chunks.concat(parts);
+            run = [];
+        };
+        (floorRows || []).forEach(function (fr) {
+            var zone = (fr.zoneInfo && fr.zoneInfo.key) || '';
+            var groupable = size > 1 && (zone === 'basement' || zone === 'ground');
+            if (!groupable || zone !== runKey) flush();
+            if (groupable) {
+                runKey = zone;
+                run.push(fr);
+            } else {
+                runKey = '';
+                chunks.push([fr]);
+            }
+        });
+        flush();
+        return chunks;
+    }
+
+    /** 층(또는 층 묶음) 줄 + 맨 아래 합계. 칸 = { n, nos } */
+    function buildEvalTableRows(payload, size) {
         var out = [];
         var total = {};
         var totalNos = {};
-        (payload.floorRows || []).filter(function (fr) { return fr.rowCount > 0; }).forEach(function (fr) {
-            var map = fr.componentEval || {};
-            var noMap = fr.componentEvalNos || {};
+        groupEvalFloors(payload.floorRows || [], size || 1).forEach(function (chunk) {
+            if (!chunk.some(function (fr) { return fr.rowCount > 0; })) return;
+            var map = {};
+            var noMap = {};
+            chunk.forEach(function (fr) {
+                Object.keys(fr.componentEval || {}).forEach(function (mk) {
+                    var src = fr.componentEval[mk] || {};
+                    var srcNos = (fr.componentEvalNos && fr.componentEvalNos[mk]) || {};
+                    var b = map[mk] || (map[mk] = {});
+                    var nb = noMap[mk] || (noMap[mk] = {});
+                    Object.keys(src).forEach(function (ck) {
+                        b[ck] = (b[ck] || 0) + src[ck];
+                        nb[ck] = (nb[ck] || []).concat(srcNos[ck] || []);
+                    });
+                });
+            });
+            var first = chunk[0];
+            var last = chunk[chunk.length - 1];
             out.push({
-                floorCode: fr.floorCode,
-                label: fr.floorLabel,
+                floorCode: first.floorCode,
+                floorCodes: chunk.map(function (fr) { return fr.floorCode; }),
+                label: chunk.length > 1 ? first.floorLabel + '~' + last.floorLabel : first.floorLabel,
                 members: evalMembersFor(map).map(function (m) {
                     var b = map[m.key] || {};
                     var nb = noMap[m.key] || {};
@@ -1905,6 +1966,7 @@
         if (out.length) {
             out.push({
                 floorCode: '',
+                floorCodes: [],
                 label: '합계',
                 isTotal: true,
                 members: evalMembersFor(total).map(function (m) {
@@ -1932,13 +1994,37 @@
         return lines.join('\n');
     }
 
+    var EVAL_UNIT_KEY = 'bsa_stats_eval_floor_unit';
+    function readEvalUnit() {
+        var v = '1';
+        try { v = localStorage.getItem(EVAL_UNIT_KEY) || '1'; } catch (e) {}
+        return EVAL_FLOOR_UNITS.some(function (u) { return u.key === v; }) ? v : '1';
+    }
+    var evalFloorUnit = readEvalUnit();
+
     function renderEvalTable(payload, root) {
         if (!root) return;
+        var unit = EVAL_FLOOR_UNITS.filter(function (u) { return u.key === evalFloorUnit; })[0] || EVAL_FLOOR_UNITS[0];
         var head = '<div class="stats-panel-head"><h3 class="stats-panel-title">층별·부재별 결함 현황 (평가)</h3>'
-            + '<button type="button" class="btn btn-secondary btn-sm" data-eval-copy>표 복사</button></div>';
-        var rows = payload ? buildEvalTableRows(payload) : [];
+            + '<button type="button" class="btn btn-secondary btn-sm" data-eval-copy>표 복사</button></div>'
+            + '<div class="chips-container stats-eval-units" role="group" aria-label="층 묶기"><span class="stats-eval-units-label">층 묶기</span>'
+            + EVAL_FLOOR_UNITS.map(function (u) {
+                var on = u.key === unit.key;
+                return '<button type="button" class="chip' + (on ? ' active' : '') + '" data-eval-unit="' + u.key + '" aria-pressed="' + (on ? 'true' : 'false') + '">' + esc(u.label) + '</button>';
+            }).join('') + '</div>';
+        var rows = payload ? buildEvalTableRows(payload, unit.size) : [];
+        var bindUnits = function () {
+            root.querySelectorAll('[data-eval-unit]').forEach(function (btn) {
+                btn.addEventListener('click', function () {
+                    evalFloorUnit = btn.getAttribute('data-eval-unit');
+                    try { localStorage.setItem(EVAL_UNIT_KEY, evalFloorUnit); } catch (e) {}
+                    renderEvalTable(payload, root);
+                });
+            });
+        };
         if (!rows.length) {
             root.innerHTML = head + '<p class="stats-empty">' + (payload ? '결함 데이터가 없습니다.' : '건물을 선택하면 평가 표를 볼 수 있습니다.') + '</p>';
+            bindUnits();
             return;
         }
         var noWidth = 0;
@@ -1954,7 +2040,7 @@
             return ' data-bin-nos="' + esc(list.join(',')) + '" data-bin-title="' + esc(title) + '" tabindex="0"';
         };
         var body = rows.map(function (fl) {
-            var current = !fl.isTotal && fl.floorCode === payload.currentFloor;
+            var current = !fl.isTotal && fl.floorCodes.indexOf(payload.currentFloor) >= 0;
             return fl.members.map(function (m, i) {
                 var cls = [];
                 if (current) cls.push('stats-row-current');
@@ -1971,13 +2057,14 @@
                 return '<tr' + (cls.length ? ' class="' + cls.join(' ') + '"' : '') + '>' + floorCell + '<th scope="row">' + esc(m.label) + '</th>' + cells + '</tr>';
             }).join('');
         }).join('');
-        var note = '구조체로 체크한 기둥·RC벽체·보·슬래브만 셉니다(구분 미기재는 구조체). 균열은 결함마다 가장 넓은 폭으로 한 칸에 들어갑니다. 숫자를 누르면 결함 번호가 보입니다.';
+        var note = '구조체로 체크한 기둥·RC벽체·보·슬래브만 셉니다(구분 미기재는 구조체). 균열은 결함마다 가장 넓은 폭으로 한 칸에 들어갑니다. 층 묶기는 지하·지상 안에서만 묶고 옥상·옥탑·외부는 따로 둡니다. 숫자를 누르면 결함 번호가 보입니다.';
         if (noWidth) note += ' 폭을 적지 않은 균열 ' + noWidth + '건은 표에 없습니다.';
         root.innerHTML = head
             + '<div class="table-responsive stats-table-wrap"><table class="data-table stats-matrix-table stats-eval-table">'
             + '<thead><tr><th>위치</th><th>부재</th>' + EVAL_COLUMNS.map(function (c) { return '<th class="stats-kind-col">' + esc(c.label) + '</th>'; }).join('') + '</tr></thead>'
             + '<tbody>' + body + '</tbody></table></div>'
             + '<p class="stats-hint">' + esc(note) + '</p>';
+        bindUnits();
         var copyBtn = root.querySelector('[data-eval-copy]');
         if (copyBtn) {
             copyBtn.addEventListener('click', function () {
@@ -2638,7 +2725,7 @@
         title: '통계',
         features: [
             '대분류: 상태조사 / 비파괴조사 / 평가',
-            '평가: 층 × 기둥·벽·큰보·작은보·슬래브, 균열폭 4구간 + 박리·박락·누수·철근노출 건수, 표 복사',
+            '평가: 층 × 기둥·벽·큰보·작은보·슬래브, 균열폭 4구간 + 박리·박락·누수·철근노출 건수, 층 묶기(1~5개층·지하/지상 전체), 표 복사',
             '건물 전체 결함 종류 집계',
             '층별 결함 종류 표 (현재 선택 층 강조)',
             '층묶음 보기: 지하·지상·옥상·부대 구역별 집계',

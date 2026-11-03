@@ -18271,3 +18271,17 @@ html.bsa-kb-dock-follow body.defect-modal-open #tab-map #mobileMapDock.mobile-ca
 .stats-eval-table td.stats-kind-col {
     min-width: 4.5rem;
 }
+/* 2026-11-03 평가 표 층 묶기 칩 */
+.stats-eval-units {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: 0.35rem;
+    padding: 0.5rem 0.85rem 0.25rem;
+}
+.stats-eval-units-label {
+    font-size: 0.85rem;
+    font-weight: 700;
+    color: #475569;
+    margin-right: 0.25rem;
+}

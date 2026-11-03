@@ -31,6 +31,7 @@ const code = [
     takeBlock('var EVAL_COLUMNS = ', '[', ']') + ';',
     takeBlock('function classifyEvalKinds(', '{', '}'),
     takeBlock('function evalMembersFor(', '{', '}'),
+    takeBlock('function groupEvalFloors(', '{', '}'),
     takeBlock('function buildEvalTableRows(', '{', '}'),
     takeBlock('function evalTableToTsv(', '{', '}')
 ].join('\n');
@@ -47,7 +48,8 @@ assert.deepStrictEqual(Array.from(A.EVAL_MEMBERS.filter((m) => !m.optional), (m)
 const k = (type, component) => JSON.parse(JSON.stringify(A.classifyEvalKinds({ defectType: type, component: component || '기둥' })));
 assert.deepStrictEqual(k('박리'), { peel: true, fall: false, leak: false, rebar: false });
 assert.deepStrictEqual(k('박락 및 철근노출'), { peel: false, fall: true, leak: false, rebar: true });
-assert.deepStrictEqual(k('들뜸'), { peel: true, fall: false, leak: false, rebar: false });
+assert.deepStrictEqual(k('들뜸'), { peel: false, fall: true, leak: false, rebar: false });
+assert.deepStrictEqual(k('층분리'), { peel: false, fall: true, leak: false, rebar: false });
 assert.deepStrictEqual(k('누수흔적, 백태'), { peel: false, fall: false, leak: true, rebar: false });
 assert.deepStrictEqual(k('뿜칠 박락'), { peel: false, fall: false, leak: false, rebar: false });
 assert.deepStrictEqual(k('박리', '철골보 내화피복'), { peel: false, fall: false, leak: false, rebar: false });
@@ -86,6 +88,33 @@ assert.strictEqual(tsv[0], '위치\t부재\t0.2mm 미만\t0.3mm 미만\t0.5mm �
 assert.strictEqual(tsv[1], '지하2층\t기둥\t3\t2\t\t\t1\t\t\t');
 assert.strictEqual(tsv[2], '\t벽\t\t\t\t\t\t\t\t');
 assert.strictEqual(tsv.length, 1 + 5 + 6 + 6);
+
+// 층 묶기: 지하·지상 각각 안에서만, 지하는 지상에 가까운 층부터, 지상은 1층부터, 옥상·외부는 따로
+{
+    const fl = (code, label, zone, n) => ({
+        floorCode: code, floorLabel: label, zoneInfo: { key: zone }, rowCount: n ? 1 : 0,
+        componentEval: n ? { column: { lt02: n } } : {}, componentEvalNos: n ? { column: { lt02: [code] } } : {}
+    });
+    const building = {
+        floorRows: [
+            fl('B3F', '지하3층', 'basement', 1), fl('B2F', '지하2층', 'basement', 2), fl('B1F', '지하1층', 'basement', 4),
+            fl('1F', '지상1층', 'ground', 1), fl('2F', '지상2층', 'ground', 0), fl('3F', '지상3층', 'ground', 1),
+            fl('4F', '지상4층', 'ground', 1), fl('5F', '지상5층', 'ground', 0),
+            fl('ROOF', '옥상층', 'roof', 1), fl('PH', '옥탑층', 'penthouse', 1)
+        ],
+        currentFloor: '3F'
+    };
+    const labels = (size) => JSON.parse(JSON.stringify(A.buildEvalTableRows(building, size))).map((r) => r.label);
+    assert.deepStrictEqual(labels(1), ['지하3층', '지하2층', '지하1층', '지상1층', '지상3층', '지상4층', '옥상층', '옥탑층', '합계'], '1개층: 결함 없는 층은 빠짐');
+    assert.deepStrictEqual(labels(2), ['지하3층', '지하2층~지하1층', '지상1층~지상2층', '지상3층~지상4층', '옥상층', '옥탑층', '합계'], '2개층');
+    assert.deepStrictEqual(labels(4), ['지하3층~지하1층', '지상1층~지상4층', '옥상층', '옥탑층', '합계'], '4개층: 지상5층은 결함 없어 빠짐');
+    assert.deepStrictEqual(labels(Infinity), ['지하3층~지하1층', '지상1층~지상5층', '옥상층', '옥탑층', '합계'], '지하·지상 전체');
+    const r2 = JSON.parse(JSON.stringify(A.buildEvalTableRows(building, 2)));
+    assert.strictEqual(col(r2[1], '기둥', 'lt02').n, 6, '지하2층 2 + 지하1층 4');
+    assert.deepStrictEqual(col(r2[1], '기둥', 'lt02').nos, ['B2F', 'B1F'], '결함 번호도 합침');
+    assert.deepStrictEqual(r2[3].floorCodes, ['3F', '4F'], '현재 층 강조용 층 목록');
+    assert.strictEqual(col(r2[r2.length - 1], '기둥', 'lt02').n, 12, '합계는 묶기와 무관');
+}
 
 // 집계 연결: 균열 구간은 구조체 부재만(구조체 아닌 부재는 기타로 빠짐), 결과가 층 줄에 실림
 assert.ok(/addEval\(bin\);/.test(src), '균열폭 구간을 평가 칸에도 더한다');
