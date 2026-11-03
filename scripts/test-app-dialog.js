@@ -70,6 +70,11 @@ const iApp = html.indexOf('src="app.js?v=');
 assert.ok(iDlg > 0 && iApp > 0 && iDlg < iApp, 'app-dialog.js 가 app.js 보다 먼저');
 assert.ok(/\.bsa-dialog-overlay \{[\s\S]*?z-index: 2147483200/.test(css), '키패드(2147483000)·모든 창보다 위');
 assert.ok(/\.bsa-dialog-message \{[\s\S]*?white-space: pre-line/.test(css), '줄바꿈 유지');
+// 2026-11-03 배경 흐림 없음 — 화면은 그대로 보이고, 창은 윤곽선·그림자로 구분
+const overlayCss = css.slice(css.indexOf('.bsa-dialog-overlay {'), css.indexOf('.bsa-dialog-overlay.open'));
+assert.ok(/backdrop-filter: none/.test(overlayCss) && !/blur\(/.test(overlayCss), '확인창 배경 흐림 없음');
+assert.ok(/\.bsa-dialog-card \{[\s\S]*?border: 2px solid #2563eb[\s\S]*?box-shadow:/.test(css), '창 윤곽선·그림자');
+assert.ok(/\.bsa-dialog-card\.is-danger \{[\s\S]*?border-color: #dc2626/.test(css), '삭제 확인은 빨간 윤곽선');
 const src = fs.readFileSync(path.join(ROOT, 'js/shared/app-dialog.js'), 'utf8');
 assert.ok(/window\.alert = function \(message\) \{ window\.appDialog\.alert\(message\); \};/.test(src));
 assert.ok(/e\.key === 'Escape'[\s\S]*?finish\(current\.o\.kind === 'alert'\)/.test(src), 'Esc = 취소');
