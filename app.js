@@ -2766,6 +2766,15 @@ document.addEventListener('DOMContentLoaded', () => {
                 persistPhotoUrlToIdb(key, p.dataUrl);
             });
         });
+        (buildings || []).forEach((b) => {
+            if (!b || !b.id || !Array.isArray(b.prevSummaryImages) || !window.BSA || !window.BSA.prevSummary) return;
+            b.prevSummaryImages.forEach((p) => {
+                if (!p || !p.id || !p.dataUrl) return;
+                const key = window.BSA.prevSummary.docId(b.id, p.id);
+                if (_idbPersistedPhotoKeys.has(key)) return;
+                persistPhotoUrlToIdb(key, p.dataUrl);
+            });
+        });
     }
 
     // ── 기기 저장 공간 가득 참 처리(2026-10-20) ─────────────────────────────
@@ -2882,6 +2891,10 @@ document.addEventListener('DOMContentLoaded', () => {
                         id: p.id,
                         caption: (p && p.caption != null) ? String(p.caption) : ''
                     })).filter((p) => p.id);
+                }
+                // 전차 종합결론 그림 본문은 IndexedDB·클라우드에만(목록에는 ID·이름만)
+                if (Array.isArray(rest.prevSummaryImages) && window.BSA && window.BSA.prevSummary) {
+                    rest.prevSummaryImages = window.BSA.prevSummary.sanitize(rest.prevSummaryImages);
                 }
                 return rest;
             });
@@ -3768,6 +3781,13 @@ document.addEventListener('DOMContentLoaded', () => {
             }
             stripDeletedDrawingFloorsFromBuilding(merged);
             merged.overviewPhotos = mergeOverviewPhotoLists(localMatch?.overviewPhotos, b.overviewPhotos);
+            // 전차 종합결론: 합집합 + 지운 표시(다른 기기의 옛 목록이 지운 그림을 되살리지 않게)
+            if (window.BSA && window.BSA.prevSummary && (localMatch?.prevSummaryImages || b.prevSummaryImages
+                || localMatch?.prevSummaryDeleted || b.prevSummaryDeleted)) {
+                const pvs = window.BSA.prevSummary.merge(localMatch, b);
+                merged.prevSummaryImages = pvs.images;
+                merged.prevSummaryDeleted = pvs.deleted;
+            }
             mergeBuildingTrashState(merged, localMatch, b);
             if (_buildingMetaMerge && typeof _buildingMetaMerge.overlay === 'function') {
                 _buildingMetaMerge.overlay(merged, localMatch, b);
@@ -3851,6 +3871,9 @@ document.addEventListener('DOMContentLoaded', () => {
                 id: p.id,
                 caption: (p && p.caption != null) ? String(p.caption) : ''
             })).filter((p) => p.id);
+        }
+        if (Array.isArray(rest.prevSummaryImages) && window.BSA && window.BSA.prevSummary) {
+            rest.prevSummaryImages = window.BSA.prevSummary.sanitize(rest.prevSummaryImages);
         }
         if (!rest.trashedAt) delete rest.trashedAt;
         return rest;
@@ -3992,6 +4015,11 @@ document.addEventListener('DOMContentLoaded', () => {
         releaseStrengthPhotosOfItems(bldg.id, removedNdtItems, { keepLocal: false });
         (bldg.overviewPhotos || []).forEach((p) => {
             if (p && p.id) photoDeleteJobs.push(deleteOverviewPhotoStorage(bldg.id, p.id));
+        });
+        (bldg.prevSummaryImages || []).forEach((p) => {
+            if (p && p.id && window.BSA && window.BSA.prevSummary) {
+                photoDeleteJobs.push(deletePrevSummaryStorage(window.BSA.prevSummary.docId(bldg.id, p.id)));
+            }
         });
         purgeLocalStateForDeletedBuilding(bldg.id);
 
@@ -5599,6 +5627,7 @@ document.addEventListener('DOMContentLoaded', () => {
                 && typeof closeOverviewPhotosModal === 'function') {
                 closeOverviewPhotosModal();
             }
+            if (window.bsaPrevSummary && window.bsaPrevSummary.isOpen()) window.bsaPrevSummary.close();
             if (typeof isNdtModalOpen === 'function' && isNdtModalOpen() && typeof closeNdtModal === 'function') {
                 closeNdtModal();
             }
@@ -5699,6 +5728,7 @@ document.addEventListener('DOMContentLoaded', () => {
                 closeDefectModal();
                 return true;
             }
+            if (window.bsaPrevSummary && window.bsaPrevSummary.closeTop()) return true;
             if (typeof isOverviewPhotosModalOpen === 'function' && isOverviewPhotosModalOpen()
                 && typeof closeOverviewPhotosModal === 'function') {
                 closeOverviewPhotosModal();
@@ -27109,7 +27139,7 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
     // 2026-11-03 기본 결함 종류 = 엑셀에서 쓰인 것만(+ 입력칸용 「기타」·「상태양호」). 부재별 목록(getDefectTypePresetFor)에서 이 밖의 이름은 뺀다.
     // 이름이 엑셀 표기와 다른 변형(들뜸/변형↔변형/들뜸 등)은 둘 다 둔다.
     const DEFECT_TYPE_ALLOW = ['상태양호', '기타',
-        '수직균열', '경사균열', '균열', '이격/파손', '수평균열', '들뜸/탈락', '들뜸/변형', '변형/들뜸', '백태', '백태/유출', '들뜸',
+        '수직균열', '경사균열', '균열', '이격/파손', '수평균열', '들뜸/탈락', '들뜸/변형', '변형/들뜸', '백태', '들뜸',
         '누수 흔적', '누수흔적', '파손/결손', '파손/천공', '패널 변형/파손', '변색/오염', '오염/변색', '볼트 이완/파손', '파손', '오염',
         '이격/흔들림', '이격', '이격/개방불량', '철근노출', '박락', 'U자형균열', '망상균열', '누수', '박리/탈락', '뿜칠 박락',
         '줄눈 손상/탈락', '탈락', '처짐', '용접부 균열/불량', '도장열화', '프레임 변형/부식', '변형·기울음', '변형/좌굴', '부식', '부식/녹',
@@ -31148,7 +31178,7 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
 
     // ── 비구조체: 부재별 결함 종류 ──
     const MASONRY_WALL_DEFECTS = [
-        '상태양호', ...WALL_CRACK_KINDS, '이격', '줄눈 손상/탈락', '배부름·전도 징후', '백태/유출', '누수', '오염', '들뜸', '파손/결손', '기타'
+        '상태양호', ...WALL_CRACK_KINDS, '이격', '줄눈 손상/탈락', '배부름·전도 징후', '백태', '누수', '오염', '들뜸', '파손/결손', '기타'
     ];
     const PARTITION_WALL_DEFECTS = [
         '상태양호', '균열', '이격/파손', '변형·기울음', '마감 손상', '기타'
@@ -31177,7 +31207,7 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
     ];
     // 비구조 벽체 접합부(조적·ALC·칸막이 등 이질재료 접합)
     const NONSTRUCT_WALL_JOINT_DEFECTS = [
-        '상태양호', ...WALL_CRACK_KINDS, '이격', '줄눈 손상/탈락', '파손/결손', '누수', '백태/유출', '기타'
+        '상태양호', ...WALL_CRACK_KINDS, '이격', '줄눈 손상/탈락', '파손/결손', '누수', '백태', '기타'
     ];
     // 중량물 — 회사 결함표: 조사내용 '창고 설치'·'물탱크 설치'·'실외기 설치'·'적치', 원인 '중량물 적치'·'중량물 설치'
     const HEAVY_LOAD_DEFECTS = ['상태양호', '중량물 적치', '중량물 설치', '기타'];
@@ -61605,7 +61635,7 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
             ["3. 첫 행(헤더)의 열 이름은 그대로 두는 것을 권장합니다. 이름을 바꿔도 앱에서 가져올 때 직접 매칭할 수 있지만, 그대로 두면 자동으로 인식됩니다."],
             ["4. '결함번호' 칸을 비워두면 앱에서 가져올 때 자동으로 순번(NO.01, NO.02…)을 매깁니다. 기존 번호 체계를 유지하려면 직접 입력하세요."],
             ["5. '구분' 칸은 반드시 '구조체' / '비구조체' / '마감재' 중 하나로 입력하세요. 비워두면 '구조체'로 처리됩니다."],
-            ["6. '조사내용'은 결함 종류입니다 (예: 균열, 누수, 백태/유출, 철근노출, 조적벽체 균열 등). 상태가 양호한 항목은 '상태양호'라고 입력하면 결함크기·균열폭·균열길이·결함원인추정 칸은 비워도 자동으로 무시됩니다."],
+            ["6. '조사내용'은 결함 종류입니다 (예: 균열, 누수, 백태, 철근노출, 조적벽체 균열 등). 상태가 양호한 항목은 '상태양호'라고 입력하면 결함크기·균열폭·균열길이·결함원인추정 칸은 비워도 자동으로 무시됩니다."],
             ["7. '결함크기'는 자유 텍스트입니다. 균열의 경우 균열폭/균열길이를 별도 칸에 나눠 적거나, 결함크기 칸에 '0.15/1.2'처럼 슬래시로 합쳐 적어도 자동으로 나뉘어 인식됩니다."],
             ["8. '진행여부' / '누수여부'는 해당되면 '진행중' / '누수중'처럼 아무 문자나 입력하고, 해당 없으면 '-' 또는 빈 칸으로 두세요."],
             ["9. 작성이 끝나면 이 파일을 저장한 뒤, 이 화면의 '📥 외부 엑셀 결함표 가져오기' 버튼으로 업로드하세요. 가져오기 화면에서 시트 ↔ 층 배정이 시트 이름으로 자동 추정되며, 다르면 직접 바꿀 수 있습니다."],
@@ -62074,6 +62104,7 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
         if (window._defectPhotoSaves && window._defectPhotoSaves.size > 0) return true;
         if (typeof isDefectModalOpen === 'function' && isDefectModalOpen()) return true;
         if (typeof isOverviewPhotosModalOpen === 'function' && isOverviewPhotosModalOpen()) return true;
+        if (window.bsaPrevSummary && window.bsaPrevSummary.isBusy()) return true;
         const ndtModalEl = document.getElementById('ndtModal');
         if (ndtModalEl && ndtModalEl.classList.contains('open')) return true;
         return false;
@@ -63254,6 +63285,498 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
         if (btnGal) btnGal.addEventListener('click', () => triggerOverviewPhotoPick('gallery'));
     })();
 
+    // ---------------------------------------------------------------------------
+    // 전차 종합결론 (2026-11-04 사용자 요청)
+    // 「회차별로 작업 들어가기 전에 기존 보고서 종합결과표만 삽입해서 확인할 수 있는 창」.
+    // 태블릿·모바일은 층 이름 바꾸기 버튼 자리(층 선택 바로 오른쪽)에 이 버튼, PC는 층 이름 바꾸기 → 전차 종합결론 → 전경사진 → 메모.
+    // 자료: 건물(=그 회차의 동) prevSummaryImages + 그림 본문은 사진 저장소 pvs_<건물ID>_<그림ID> (js/core/prev-summary.js).
+    // ---------------------------------------------------------------------------
+    const _pvsUi = { bldgId: null, busy: 0, viewIdx: -1, zoom: 1 };
+    function pvsApi() { return window.BSA && window.BSA.prevSummary; }
+    function pvsModal() { return document.getElementById('prevSummaryModal'); }
+    function pvsBldg() {
+        return (window.state.buildings || []).find((b) => b && b.id === _pvsUi.bldgId) || null;
+    }
+    function isPrevSummaryModalOpen() {
+        const m = pvsModal();
+        return !!(m && (m.classList.contains('open') || m.style.display === 'flex'));
+    }
+    function isPrevSummaryViewerOpen() {
+        const v = document.getElementById('prevSummaryViewer');
+        return !!(v && !v.hidden);
+    }
+
+    async function loadPrevSummaryDataUrl(key) {
+        if (!key) return null;
+        if (window._photoCache && window._photoCache[key]) return window._photoCache[key];
+        try {
+            const local = await idbGet('photos', key);
+            if (typeof local === 'string' && local.length > 32) {
+                if (!window._photoCache) window._photoCache = {};
+                window._photoCache[key] = local;
+                maybeScheduleMigrateFromLocal(key, local);
+                return local;
+            }
+        } catch (_) { /* ignore */ }
+        if (db && window.state.companyId) {
+            try {
+                const snap = await fetchPhotosDocIfAllowed(key);
+                if (!snap) return null;
+                const url = await photoUrlFromCloudSnap(snap, key);
+                if (typeof url === 'string' && url.length > 32) {
+                    if (!window._photoCache) window._photoCache = {};
+                    window._photoCache[key] = url;
+                    idbSetPhotoPreferDataUrl(key, url).then((ok) => { if (ok) _idbPersistedPhotoKeys.add(key); });
+                    return url;
+                }
+            } catch (e) {
+                console.warn('전차 종합결론 클라우드 조회 실패:', key, e);
+            }
+        }
+        return null;
+    }
+
+    async function deletePrevSummaryStorage(key) {
+        if (!key) return;
+        _idbPersistedPhotoKeys.delete(key);
+        if (window._photoCache) delete window._photoCache[key];
+        if (window._cloudSyncedPhotoIds) window._cloudSyncedPhotoIds.delete(key);
+        try { await idbDelete('photos', key); } catch (_) { /* ignore */ }
+        try { await deleteCloudPhoto(key); } catch (e) { console.warn('전차 종합결론 클라우드 삭제 실패:', key, e); }
+    }
+
+    function pvsSrcOf(bldg, p) {
+        const api = pvsApi();
+        if (!p) return '';
+        return p.dataUrl || (api && window._photoCache && window._photoCache[api.docId(bldg.id, p.id)]) || '';
+    }
+
+    async function hydratePrevSummary(bldg) {
+        const api = pvsApi();
+        if (!api || !bldg) return;
+        await Promise.all(api.list(bldg).map(async (p) => {
+            if (!p || !p.id) return;
+            const key = api.docId(bldg.id, p.id);
+            if (p.dataUrl) {
+                // 넣을 때 인터넷이 끊겨 못 올라간 그림은 창을 열 때마다 다시 올린다(이미 올라갔으면 건너뜀)
+                maybeScheduleMigrateFromLocal(key, p.dataUrl);
+                return;
+            }
+            const url = await loadPrevSummaryDataUrl(key);
+            if (url) p.dataUrl = url;
+        }));
+    }
+
+    function persistPrevSummaryMeta(bldg) {
+        if (!bldg) return;
+        if (typeof markBuildingMetaDirty === 'function') markBuildingMetaDirty(bldg);
+        else bldg._pendingCloudSync = true;
+        if (typeof saveStateToLocalStorage === 'function') saveStateToLocalStorage();
+        if (typeof syncStateToFirebase === 'function') syncStateToFirebase();
+    }
+
+    function renderPrevSummaryList() {
+        const listEl = document.getElementById('prevSummaryList');
+        const api = pvsApi();
+        if (!listEl || !api) return;
+        const bldg = pvsBldg();
+        const titleEl = document.getElementById('prevSummaryModalTitle');
+        if (titleEl) {
+            const name = bldg && bldg.name ? String(bldg.name).replace(/^🏢\s*/, '') : '';
+            titleEl.innerHTML = `<i class="fa-solid fa-clipboard-list"></i> 전차 종합결론${name ? ` · ${escapeHtml(name)}` : ''}`;
+        }
+        const list = bldg ? api.list(bldg) : [];
+        if (!list.length) {
+            listEl.innerHTML = '<div class="prev-summary-empty"><i class="fa-solid fa-clipboard-list" style="display:block;font-size:1.8rem;margin-bottom:0.5rem;color:#cbd5e1;"></i>'
+                + '넣어 둔 종합결과표가 없습니다.<br>지난 보고서의 종합결과표를 캡처·사진·PDF로 넣어 주세요.</div>';
+            return;
+        }
+        listEl.innerHTML = list.map((p, idx) => {
+            const src = pvsSrcOf(bldg, p);
+            const id = escapeHtml(p.id);
+            const name = escapeHtml(p.name || `종합결과표 ${idx + 1}`);
+            return `
+                <div class="prev-summary-item" data-pvs-id="${id}">
+                    <div class="prev-summary-item-head">
+                        <span class="prev-summary-item-name" title="${name}">${idx + 1}. ${name}</span>
+                        <button type="button" data-pvs-act="up" data-pvs-id="${id}" title="위로" ${idx === 0 ? 'disabled' : ''}><i class="fa-solid fa-arrow-up"></i></button>
+                        <button type="button" data-pvs-act="down" data-pvs-id="${id}" title="아래로" ${idx === list.length - 1 ? 'disabled' : ''}><i class="fa-solid fa-arrow-down"></i></button>
+                        <button type="button" class="danger" data-pvs-act="delete" data-pvs-id="${id}" title="삭제"><i class="fa-solid fa-trash"></i></button>
+                    </div>
+                    ${src
+                        ? `<button type="button" class="prev-summary-img-btn" data-pvs-act="view" data-pvs-idx="${idx}" title="크게 보기"><img src="${src}" alt="${name}"></button>`
+                        : '<div class="prev-summary-loading">불러오는 중… (인터넷 연결이 없으면 보이지 않을 수 있습니다)</div>'}
+                </div>`;
+        }).join('');
+    }
+
+    function openPrevSummaryModal(bldgOrId) {
+        let bldg = null;
+        if (typeof bldgOrId === 'string') bldg = (window.state.buildings || []).find((b) => b && b.id === bldgOrId);
+        else if (bldgOrId && typeof bldgOrId === 'object') bldg = bldgOrId;
+        else if (window.state.currentBuildingId) {
+            bldg = (window.state.buildings || []).find((b) => b && b.id === window.state.currentBuildingId)
+                || window.state.currentBuilding;
+        }
+        if (!bldg || !bldg.id) {
+            if (typeof window.showToast === 'function') window.showToast('먼저 건축물을 선택하세요.', 'info');
+            return;
+        }
+        const modal = pvsModal();
+        if (!modal || !pvsApi()) return;
+        _pvsUi.bldgId = bldg.id;
+        modal.style.display = 'flex';
+        modal.classList.add('open');
+        renderPrevSummaryList();
+        hydratePrevSummary(bldg).then(() => { if (isPrevSummaryModalOpen() && _pvsUi.bldgId === bldg.id) renderPrevSummaryList(); });
+    }
+
+    function closePrevSummaryModal() {
+        closePrevSummaryViewer();
+        const modal = pvsModal();
+        if (!modal) return;
+        modal.classList.remove('open');
+        modal.style.display = 'none';
+        _pvsUi.bldgId = null;
+    }
+
+    /** 그림 파일을 긴 변 2400px JPEG로 — 표 글씨가 읽히게 자르지 않고 비율 그대로 */
+    function pvsImageToDataUrl(blobOrUrl) {
+        return new Promise((resolve, reject) => {
+            const img = new Image();
+            let objUrl = null;
+            img.onload = () => {
+                try {
+                    const maxEdge = 2400;
+                    const w0 = img.naturalWidth || img.width;
+                    const h0 = img.naturalHeight || img.height;
+                    const k = Math.min(1, maxEdge / Math.max(w0, h0));
+                    const c = document.createElement('canvas');
+                    c.width = Math.max(1, Math.round(w0 * k));
+                    c.height = Math.max(1, Math.round(h0 * k));
+                    const ctx = c.getContext('2d');
+                    ctx.fillStyle = '#fff';
+                    ctx.fillRect(0, 0, c.width, c.height);
+                    ctx.drawImage(img, 0, 0, c.width, c.height);
+                    resolve(c.toDataURL('image/jpeg', 0.9));
+                } catch (e) { reject(e); } finally { if (objUrl) URL.revokeObjectURL(objUrl); }
+            };
+            img.onerror = () => { if (objUrl) URL.revokeObjectURL(objUrl); reject(new Error('그림을 읽지 못했습니다.')); };
+            if (typeof blobOrUrl === 'string') img.src = blobOrUrl;
+            else { objUrl = URL.createObjectURL(blobOrUrl); img.src = objUrl; }
+        });
+    }
+
+    /** 「3-4, 6」 → [3,4,6] (1부터, total 안쪽만). 빈칸이면 전체 */
+    function pvsParsePages(text, total) {
+        const t = String(text || '').trim();
+        if (!t) return Array.from({ length: total }, (_, i) => i + 1);
+        const out = new Set();
+        t.split(/[,\s]+/).forEach((part) => {
+            const m = part.match(/^(\d+)(?:\s*[-~]\s*(\d+))?$/);
+            if (!m) return;
+            let a = Number(m[1]);
+            let b = m[2] ? Number(m[2]) : a;
+            if (a > b) [a, b] = [b, a];
+            for (let i = Math.max(1, a); i <= Math.min(total, b); i++) out.add(i);
+        });
+        return Array.from(out).sort((x, y) => x - y);
+    }
+
+    async function pvsPdfToImages(file) {
+        if (typeof pdfjsLib === 'undefined') throw new Error('PDF를 읽는 기능을 불러오지 못했습니다(인터넷 연결 확인).');
+        const buf = new Uint8Array(await file.arrayBuffer());
+        const pdf = await pdfjsLib.getDocument({ data: buf, verbosity: 0 }).promise;
+        let pages = [1];
+        if (pdf.numPages > 1) {
+            const ans = await window.appPrompt(
+                `이 PDF는 ${pdf.numPages}쪽입니다. 종합결과표가 있는 쪽 번호를 적어 주세요.\n(예: 3 또는 3-4, 빈칸이면 전체)`,
+                '', { title: '넣을 쪽 고르기' });
+            if (ans == null) return [];
+            pages = pvsParsePages(ans, pdf.numPages);
+            if (!pages.length) {
+                if (typeof window.showToast === 'function') window.showToast('쪽 번호를 읽지 못했습니다.', 'warning');
+                return [];
+            }
+            if (pages.length > 20) pages = pages.slice(0, 20);
+        }
+        const out = [];
+        const base = String(file.name || 'PDF').replace(/\.pdf$/i, '');
+        for (const n of pages) {
+            const page = await pdf.getPage(n);
+            const vp1 = page.getViewport({ scale: 1 });
+            const scale = Math.min(4, 2200 / Math.max(vp1.width, vp1.height));
+            const vp = page.getViewport({ scale });
+            const c = document.createElement('canvas');
+            c.width = Math.round(vp.width);
+            c.height = Math.round(vp.height);
+            const ctx = c.getContext('2d');
+            ctx.fillStyle = '#fff';
+            ctx.fillRect(0, 0, c.width, c.height);
+            await page.render({ canvasContext: ctx, viewport: vp }).promise;
+            out.push({ dataUrl: c.toDataURL('image/jpeg', 0.9), name: pages.length > 1 || pdf.numPages > 1 ? `${base} ${n}쪽` : base });
+        }
+        try { pdf.destroy(); } catch (_) { /* ignore */ }
+        return out;
+    }
+
+    async function addPrevSummaryEntries(entries) {
+        const api = pvsApi();
+        const bldg = pvsBldg();
+        if (!api || !bldg || !entries || !entries.length) return 0;
+        const list = api.list(bldg);
+        if (!window._photoCache) window._photoCache = {};
+        const keys = [];
+        entries.forEach((e) => {
+            if (!e || !e.dataUrl) return;
+            const item = { id: api.createId(), name: String(e.name || '').slice(0, 120), addedAt: Date.now(), dataUrl: e.dataUrl };
+            list.push(item);
+            const key = api.docId(bldg.id, item.id);
+            window._photoCache[key] = e.dataUrl;
+            keys.push([key, e.dataUrl]);
+        });
+        if (!keys.length) return 0;
+        renderPrevSummaryList();
+        for (const [key, url] of keys) await persistPhotoUrlToIdb(key, url);
+        persistPrevSummaryMeta(bldg);
+        keys.forEach(([key, url]) => {
+            persistPhotoToCloud(key, url).catch((e) => console.warn('전차 종합결론 업로드 실패(다음 동기화 때 다시):', key, e));
+        });
+        return keys.length;
+    }
+
+    async function addPrevSummaryFiles(files) {
+        const arr = Array.from(files || []).filter(Boolean);
+        if (!arr.length) return;
+        if (!pvsBldg()) return;
+        _pvsUi.busy += 1;
+        const toast = (m, t) => { if (typeof window.showToast === 'function') window.showToast(m, t || 'info'); };
+        try {
+            const entries = [];
+            for (const f of arr) {
+                const isPdf = /pdf/i.test(f.type || '') || /\.pdf$/i.test(f.name || '');
+                try {
+                    if (isPdf) {
+                        toast('PDF를 그림으로 바꾸는 중…');
+                        entries.push(...await pvsPdfToImages(f));
+                    } else if (/^image\//i.test(f.type || '') || /\.(jpe?g|png|webp|gif|bmp|heic)$/i.test(f.name || '')) {
+                        const name = String(f.name || '').replace(/\.[^.]+$/, '');
+                        entries.push({ dataUrl: await pvsImageToDataUrl(f), name: /^(image|photo_\d+|blob)$/i.test(name) ? '' : name });
+                    } else {
+                        toast(`그림이나 PDF만 넣을 수 있습니다: ${f.name || ''}`, 'warning');
+                    }
+                } catch (e) {
+                    console.warn('전차 종합결론 파일 처리 실패:', f && f.name, e);
+                    toast(`넣지 못했습니다: ${(f && f.name) || ''} (${(e && e.message) || e})`, 'error');
+                }
+            }
+            const n = await addPrevSummaryEntries(entries);
+            if (n) toast(`종합결과표 ${n}장을 넣었습니다.`, 'success');
+        } finally {
+            _pvsUi.busy -= 1;
+        }
+    }
+
+    function pickPrevSummaryFiles() {
+        const input = document.createElement('input');
+        input.type = 'file';
+        input.accept = 'image/*,application/pdf,.pdf';
+        input.multiple = true;
+        input.style.cssText = 'position:fixed;left:-9999px;top:-9999px;width:1px;height:1px;opacity:0;';
+        input.addEventListener('change', () => {
+            const files = Array.from(input.files || []);
+            try { input.remove(); } catch (_) { /* ignore */ }
+            addPrevSummaryFiles(files);
+        }, { once: true });
+        document.body.appendChild(input);
+        input.click();
+    }
+
+    async function pastePrevSummaryFromClipboard() {
+        const toast = (m, t) => { if (typeof window.showToast === 'function') window.showToast(m, t || 'info'); };
+        if (!navigator.clipboard || typeof navigator.clipboard.read !== 'function') {
+            toast('표를 캡처한 뒤 이 창에서 Ctrl+V를 눌러 붙여 넣어 주세요.', 'info');
+            return;
+        }
+        try {
+            const items = await navigator.clipboard.read();
+            const files = [];
+            for (const it of items) {
+                const type = (it.types || []).find((t) => /^image\//i.test(t));
+                if (!type) continue;
+                const blob = await it.getType(type);
+                files.push(new File([blob], 'image', { type }));
+            }
+            if (!files.length) { toast('클립보드에 그림이 없습니다. 표를 캡처(Win+Shift+S)한 뒤 다시 눌러 주세요.', 'warning'); return; }
+            await addPrevSummaryFiles(files);
+        } catch (e) {
+            console.warn('클립보드 읽기 실패:', e);
+            toast('클립보드를 읽지 못했습니다. 이 창에서 Ctrl+V로 붙여 넣어 주세요.', 'warning');
+        }
+    }
+
+    // ---- 크게 보기 ----
+    function pvsViewerApplyZoom(keepCenter) {
+        const sc = document.getElementById('prevSummaryViewerScroll');
+        const img = document.getElementById('prevSummaryViewerImg');
+        if (!sc || !img) return;
+        const cx = keepCenter ? (sc.scrollLeft + sc.clientWidth / 2) / Math.max(1, sc.scrollWidth) : 0;
+        const cy = keepCenter ? (sc.scrollTop + sc.clientHeight / 2) / Math.max(1, sc.scrollHeight) : 0;
+        img.style.width = Math.round(Math.max(1, sc.clientWidth) * _pvsUi.zoom) + 'px';
+        img.style.height = 'auto';
+        if (keepCenter) {
+            sc.scrollLeft = cx * sc.scrollWidth - sc.clientWidth / 2;
+            sc.scrollTop = cy * sc.scrollHeight - sc.clientHeight / 2;
+        }
+    }
+    function pvsViewerSetZoom(z, keepCenter) {
+        _pvsUi.zoom = Math.min(6, Math.max(0.5, z));
+        pvsViewerApplyZoom(keepCenter !== false);
+    }
+    function showPrevSummaryAt(idx) {
+        const api = pvsApi();
+        const bldg = pvsBldg();
+        if (!api || !bldg) return;
+        const list = api.list(bldg);
+        if (!list.length) return;
+        const i = Math.max(0, Math.min(list.length - 1, idx));
+        const p = list[i];
+        const src = pvsSrcOf(bldg, p);
+        if (!src) return;
+        _pvsUi.viewIdx = i;
+        const v = document.getElementById('prevSummaryViewer');
+        const img = document.getElementById('prevSummaryViewerImg');
+        const title = document.getElementById('prevSummaryViewerTitle');
+        if (!v || !img) return;
+        if (title) title.textContent = `${i + 1}/${list.length} · ${p.name || '종합결과표 ' + (i + 1)}`;
+        const prev = document.getElementById('btnPrevSummaryViewerPrev');
+        const next = document.getElementById('btnPrevSummaryViewerNext');
+        if (prev) prev.disabled = i <= 0;
+        if (next) next.disabled = i >= list.length - 1;
+        img.src = src;
+        v.hidden = false;
+        v.setAttribute('aria-hidden', 'false');
+        _pvsUi.zoom = 1;
+        pvsViewerApplyZoom(false);
+        const sc = document.getElementById('prevSummaryViewerScroll');
+        if (sc) { sc.scrollTop = 0; sc.scrollLeft = 0; }
+    }
+    function closePrevSummaryViewer() {
+        const v = document.getElementById('prevSummaryViewer');
+        if (!v || v.hidden) return;
+        v.hidden = true;
+        v.setAttribute('aria-hidden', 'true');
+        const img = document.getElementById('prevSummaryViewerImg');
+        if (img) img.removeAttribute('src');
+        _pvsUi.viewIdx = -1;
+    }
+
+    window.bsaPrevSummary = {
+        open: openPrevSummaryModal,
+        close: closePrevSummaryModal,
+        isOpen: isPrevSummaryModalOpen,
+        isBusy: () => _pvsUi.busy > 0 || isPrevSummaryModalOpen(),
+        /** 뒤로 가기: 크게 보기 → 창 순서로 닫는다. 닫았으면 true */
+        closeTop: () => {
+            if (isPrevSummaryViewerOpen()) { closePrevSummaryViewer(); return true; }
+            if (isPrevSummaryModalOpen()) { closePrevSummaryModal(); return true; }
+            return false;
+        }
+    };
+
+    (function bindPrevSummaryUi() {
+        const on = (id, fn) => { const el = document.getElementById(id); if (el) el.addEventListener('click', fn); };
+        on('btnOpenPrevSummary', (e) => { e.preventDefault(); openPrevSummaryModal(); });
+        on('btnClosePrevSummaryModal', closePrevSummaryModal);
+        on('btnClosePrevSummaryModal2', closePrevSummaryModal);
+        on('btnPrevSummaryFile', pickPrevSummaryFiles);
+        on('btnPrevSummaryCamera', async () => {
+            const f = await pickImageFromDevice('camera');
+            if (f) await addPrevSummaryFiles([f]);
+        });
+        on('btnPrevSummaryPaste', pastePrevSummaryFromClipboard);
+        const modal = pvsModal();
+        if (modal) modal.addEventListener('click', (e) => { if (e.target === modal) closePrevSummaryModal(); });
+        const listEl = document.getElementById('prevSummaryList');
+        if (listEl) {
+            listEl.addEventListener('click', async (e) => {
+                const btn = e.target.closest('[data-pvs-act]');
+                if (!btn || !listEl.contains(btn)) return;
+                const api = pvsApi();
+                const bldg = pvsBldg();
+                if (!api || !bldg) return;
+                const act = btn.getAttribute('data-pvs-act');
+                const id = btn.getAttribute('data-pvs-id');
+                if (act === 'view') { showPrevSummaryAt(Number(btn.getAttribute('data-pvs-idx')) || 0); return; }
+                if (act === 'up' || act === 'down') {
+                    if (api.move(bldg, id, act === 'up' ? -1 : 1)) { renderPrevSummaryList(); persistPrevSummaryMeta(bldg); }
+                    return;
+                }
+                if (act === 'delete') {
+                    if (!await window.confirmDelete('이 종합결과표 그림을 삭제할까요?')) return;
+                    const live = pvsBldg();
+                    if (!live || !api.remove(live, id)) return;
+                    renderPrevSummaryList();
+                    persistPrevSummaryMeta(live);
+                    await deletePrevSummaryStorage(api.docId(live.id, id));
+                    if (typeof window.showToast === 'function') window.showToast('종합결과표 그림을 삭제했습니다.', 'info');
+                }
+            });
+        }
+        // PC: 창이 열려 있을 때 Ctrl+V로 캡처 그림 붙여넣기(입력칸에 붙여넣는 건 건드리지 않음)
+        document.addEventListener('paste', (e) => {
+            if (!isPrevSummaryModalOpen()) return;
+            const t = e.target;
+            if (t && (t.tagName === 'INPUT' || t.tagName === 'TEXTAREA' || t.isContentEditable)) return;
+            const files = [];
+            Array.from((e.clipboardData && e.clipboardData.items) || []).forEach((it) => {
+                if (it.kind === 'file') {
+                    const f = it.getAsFile();
+                    if (f && (/^image\//i.test(f.type) || /pdf/i.test(f.type))) files.push(f);
+                }
+            });
+            if (!files.length) return;
+            e.preventDefault();
+            addPrevSummaryFiles(files);
+        });
+        // 크게 보기
+        on('btnPrevSummaryViewerClose', closePrevSummaryViewer);
+        on('btnPrevSummaryViewerPrev', () => showPrevSummaryAt(_pvsUi.viewIdx - 1));
+        on('btnPrevSummaryViewerNext', () => showPrevSummaryAt(_pvsUi.viewIdx + 1));
+        on('btnPrevSummaryViewerZoomIn', () => pvsViewerSetZoom(_pvsUi.zoom * 1.4));
+        on('btnPrevSummaryViewerZoomOut', () => pvsViewerSetZoom(_pvsUi.zoom / 1.4));
+        on('btnPrevSummaryViewerFit', () => pvsViewerSetZoom(1, false));
+        on('prevSummaryViewerImg', () => pvsViewerSetZoom(_pvsUi.zoom > 1.05 ? 1 : 2.2));
+        const sc = document.getElementById('prevSummaryViewerScroll');
+        if (sc) {
+            // 두 손가락으로 벌리면 그림만 확대(화면 전체 확대 대신)
+            let pinch = null;
+            const dist = (t) => Math.hypot(t[0].clientX - t[1].clientX, t[0].clientY - t[1].clientY);
+            sc.addEventListener('touchstart', (e) => {
+                if (e.touches.length === 2) pinch = { d: dist(e.touches), z: _pvsUi.zoom };
+            }, { passive: true });
+            sc.addEventListener('touchmove', (e) => {
+                if (!pinch || e.touches.length !== 2) return;
+                e.preventDefault();
+                pvsViewerSetZoom(pinch.z * (dist(e.touches) / Math.max(1, pinch.d)));
+            }, { passive: false });
+            sc.addEventListener('touchend', (e) => { if (e.touches.length < 2) pinch = null; });
+            // PC: Ctrl+휠로 확대
+            sc.addEventListener('wheel', (e) => {
+                if (!e.ctrlKey) return;
+                e.preventDefault();
+                pvsViewerSetZoom(_pvsUi.zoom * (e.deltaY < 0 ? 1.15 : 1 / 1.15));
+            }, { passive: false });
+        }
+        window.addEventListener('resize', () => { if (isPrevSummaryViewerOpen()) pvsViewerApplyZoom(true); });
+        document.addEventListener('keydown', (e) => {
+            if (!isPrevSummaryViewerOpen()) return;
+            if (e.key === 'Escape') { e.preventDefault(); e.stopPropagation(); closePrevSummaryViewer(); }
+            else if (e.key === 'ArrowLeft') showPrevSummaryAt(_pvsUi.viewIdx - 1);
+            else if (e.key === 'ArrowRight') showPrevSummaryAt(_pvsUi.viewIdx + 1);
+        }, true);
+    })();
+
     async function writeFirestoreStorageMeta(docRef, uploaded, extraFields) {
         if (!docRef) return;
         const payload = {
@@ -63461,7 +63984,7 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
     function resolveBuildingIdFromPhotoId(photoId) {
         if (!photoId) return null;
         const buildings = window.state.buildings || [];
-        if (photoId.indexOf('ov_') === 0 || photoId.indexOf('str_') === 0 || photoId.indexOf('ndtimg_') === 0) {
+        if (photoId.indexOf('ov_') === 0 || photoId.indexOf('pvs_') === 0 || photoId.indexOf('str_') === 0 || photoId.indexOf('ndtimg_') === 0) {
             const rest = photoId.slice(photoId.indexOf('_') + 1);
             const match = buildings.find((b) => b && b.id && rest.startsWith(b.id + '_'));
             if (match) return match.id;
@@ -68780,6 +69303,12 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
                 if (!p || !p.id) return;
                 pushJob(getOverviewPhotoDocId(b.id, p.id), p.dataUrl);
             });
+            if (Array.isArray(b.prevSummaryImages) && window.BSA && window.BSA.prevSummary) {
+                b.prevSummaryImages.forEach((p) => {
+                    if (!p || !p.id) return;
+                    pushJob(window.BSA.prevSummary.docId(b.id, p.id), p.dataUrl);
+                });
+            }
             const prefix = b.id + '_';
             const ndt = window.state.ndtData || {};
             Object.keys(ndt).forEach((k) => {
