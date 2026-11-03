@@ -30753,6 +30753,7 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
             // 2026-10-19 접합부 모드에서 접합부를 골랐으면(=적용) 모드 끝
             if (jointMode && isJointComponentName(value)) window._defectComponentJointMode = false;
             refreshDefectTypeAfterComponentChange(currentCategory);
+            if (maybeReclassifyJointGapToNonStructural()) return;
             if (typeof scheduleDefectAutoApply === 'function') scheduleDefectAutoApply();
             refreshDefectQuickPickBar();
         };
@@ -30849,6 +30850,7 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
                 if (selectId === 'defectType' && typeof maybeReclassifyPlasterCrackToNonStructural === 'function') {
                     if (maybeReclassifyPlasterCrackToNonStructural()) return;
                 }
+                if (typeof maybeReclassifyJointGapToNonStructural === 'function' && maybeReclassifyJointGapToNonStructural()) return;
                 refreshDefectQuickPickBar();
                 if (typeof scheduleDefectAutoApply === 'function') scheduleDefectAutoApply();
             };
@@ -31793,6 +31795,40 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
     }
 
     /**
+     * 2026-11-03 구조체로 적은 「접합부 + 이격」(기둥-벽체 접합부 수직이격 등)은 현장에서 대부분 비구조체 결함 → 고르는 순간 비구조체로 옮긴다.
+     * 미장(항상 비구조체, 저장 때도 강제)과 달리 「대부분」이라서 강제하지 않는다: 사용자가 구조체를 다시 누르면 그대로 두고
+     * (같은 부재·종류인 동안) 다시 바꾸지 않는다. 이미 저장된 결함을 열 때·일괄 수정에서는 건드리지 않는다.
+     */
+    function isJointGapDefect(component, typeVal) {
+        const c = String(component || '');
+        if (!c.includes('접합')) return false;
+        return parseDefectTypeList(typeVal).some((t) => String(t || '').includes('이격'));
+    }
+    function maybeReclassifyJointGapToNonStructural() {
+        if (window._defectFormHydrating || isDefectBulkEditMode()) return false;
+        const catEl = document.getElementById('defectCategory');
+        if (!catEl || catEl.value !== '구조체') return false;
+        const compVal = getDefectComboValue(document.getElementById('defectComponent'), document.getElementById('defectComponentInput'));
+        const typeVal = getDefectComboValue(document.getElementById('defectType'), document.getElementById('defectTypeInput'));
+        if (!isJointGapDefect(compVal, typeVal)) { window._jointGapKeepStructural = false; return false; }
+        if (window._jointGapKeepStructural) return false; // 사용자가 일부러 구조체로 되돌림
+        window._preserveDefectTypeOnCategoryChange = typeVal;
+        window._preserveDefectComponentOnCategoryChange = compVal || '';
+        window._jointGapAutoSwitching = true;
+        try {
+            catEl.value = '비구조체';
+            catEl.dispatchEvent(new Event('change', { bubbles: true }));
+        } finally {
+            window._jointGapAutoSwitching = false;
+        }
+        if (typeof window.showToast === 'function') {
+            window.showToast('접합부 이격 결함은 대부분 비구조체라 비구조체로 옮겼어요. 구조체이면 구조체를 다시 눌러 주세요.', 'info', 3500);
+        }
+        return true;
+    }
+    window.isJointGapDefect = isJointGapDefect;
+
+    /**
      * 결함 종류를 사용자가 바꿨을 때 발생 원인 다시 맞추기(2026-09-28).
      * 직접 고른 원인은 유지, 비어 있으면 그 종류의 ★원인(없으면 맨 위 원인)을 자동 체크.
      * 결함을 열 때(기존 값 표시)나 일괄 수정에서는 쓰지 않는다 — 저장된 값을 몰래 바꾸지 않게.
@@ -31847,6 +31883,7 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
         applyCauseAutoPickForType(joined);
         toggleDefectSizeInputMode();
         if (maybeReclassifyPlasterCrackToNonStructural()) return;
+        if (maybeReclassifyJointGapToNonStructural()) return;
         if (typeof scheduleDefectAutoApply === 'function') scheduleDefectAutoApply();
         refreshDefectQuickPickBar();
     }
@@ -34572,6 +34609,12 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
             if (cat === '구조체' && typeof maybeReclassifyPlasterCrackToNonStructural === 'function') {
                 maybeReclassifyPlasterCrackToNonStructural();
             }
+            // 접합부 이격: 자동으로 옮긴 게 아니라 사용자가 구조체를 눌렀다면 그 선택을 존중(같은 부재·종류인 동안)
+            if (cat === '구조체' && !window._jointGapAutoSwitching && !window._defectFormHydrating) {
+                const jc = getDefectComboValue(document.getElementById('defectComponent'), document.getElementById('defectComponentInput'));
+                const jt = getDefectComboValue(document.getElementById('defectType'), document.getElementById('defectTypeInput'));
+                if (isJointGapDefect(jc, jt)) window._jointGapKeepStructural = true;
+            }
             if (typeof scheduleDefectAutoApply === 'function') scheduleDefectAutoApply();
             refreshDefectQuickPickBar();
         });
@@ -34606,6 +34649,7 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
                 );
                 const cat = document.getElementById('defectCategory')?.value || '구조체';
                 refreshDefectTypeAfterComponentChange(cat);
+                maybeReclassifyJointGapToNonStructural();
             }
         });
     }
@@ -34642,6 +34686,7 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
                 applyCauseAutoPickForType(e.target.value);
                 toggleDefectSizeInputMode();
                 if (maybeReclassifyPlasterCrackToNonStructural()) return;
+                if (maybeReclassifyJointGapToNonStructural()) return;
                 if (typeof scheduleDefectAutoApply === 'function') scheduleDefectAutoApply();
                 refreshDefectQuickPickBar();
             }
@@ -39136,6 +39181,7 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
         if (defects.length < 2) return;
 
         window._defectFormHydrating = true;
+        window._jointGapKeepStructural = false; // 새로 연 창이면 접합부 이격 자동 전환을 다시 켠다
         window.clearTimeout(window._defectAutoApplyTimer);
         window._defectAutoApplyTimer = null;
         window._defectBulkEditIds = ids.slice();
@@ -39268,6 +39314,7 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
         syncDefectBulkEditChrome(false);
         if (typeof bindDefectHandwriteTabOrder === 'function') bindDefectHandwriteTabOrder();
         window._defectFormHydrating = true;
+        window._jointGapKeepStructural = false; // 새로 연 창이면 접합부 이격 자동 전환을 다시 켠다
         { const _oc = document.getElementById('defectOpeningCrackCheck'); if (_oc) delete _oc.dataset.openingManualOff; } // 새 창마다 「직접 끔」 기억 초기화
         // 사진이 다 내려왔는지는 폼을 다 채운 뒤에 판단한다. 그 전에 사진을 바꾸면 시각을 안 찍는다.
         window._defectPhotosComplete = false;
