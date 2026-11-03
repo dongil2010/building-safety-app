@@ -145,9 +145,13 @@
         for (let i = 0; i < gray.length; i++) hist[gray[i]]++;
         let acc = 0, bg = 255;
         for (let v = 0; v < 256; v++) { acc += hist[v]; if (acc >= gray.length / 2) { bg = v; break; } }
+        // 그림이 클수록(원래 크기 도면) 같은 끊김이 픽셀로는 더 길다 — 허용 끊김을 해상도에 맞춰 늘린다
+        const rs = Math.max(1, Math.max(w, h) / 1600);
         let best = null, bestArea = 0;
         for (let i = 0; i < passes.length; i++) {
-            const p = Object.assign({}, passes[i], { dark: Math.min(passes[i].dark, bg - 20) });
+            // 이미 그림의 거의 전체를 차지하는 사각형을 찾았으면 더 큰 건 없다 → 나머지 단계는 건너뜀(큰 그림에서 시간 절약)
+            if (best && bestArea >= w * h * 0.9) break;
+            const p = Object.assign({}, passes[i], { dark: Math.min(passes[i].dark, bg - 20), gap: Math.round(passes[i].gap * rs) });
             const g = p.grow ? darkenMin(gray, w, h, p.grow) : gray;
             const f = detectOuterFrame(g, w, h, p);
             if (!f) continue;

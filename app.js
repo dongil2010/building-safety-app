@@ -46285,7 +46285,9 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
         if (!det || !img) return null;
         const nw = img.naturalWidth || img.width, nh = img.naturalHeight || img.height;
         if (!(nw > 0 && nh > 0)) return null;
-        const k = Math.min(1, 1600 / Math.max(nw, nh));
+        // 2026-11-03 테두리가 PDF의 아주 가는 선(두께 0)이라 1600px로 줄이면 선이 끊기거나 사라져 한쪽 모서리가 어긋났다 →
+        // 원래 크기에 가깝게(긴 변 4600px까지) 그대로 읽는다. 검출은 한 번만 하므로 느려도 괜찮다.
+        const k = Math.min(1, 4600 / Math.max(nw, nh));
         const w = Math.max(16, Math.round(nw * k)), h = Math.max(16, Math.round(nh * k));
         const cv = document.createElement('canvas');
         cv.width = w; cv.height = h;

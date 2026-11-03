@@ -65,6 +65,19 @@ f = D.detectOuterFrame(g, W, H);
 assert.ok(f && f.left === 20 && f.top === 15 && f.right === 380 && f.bottom === 285, '바깥 선에 끌려가지 않음: ' + JSON.stringify(f && [f.left, f.top, f.right, f.bottom]));
 f = R(g, W, H);
 assert.ok(f && f.right === 380 && f.bottom === 285, '보강 함수도 같음');
+// 큰 그림(원래 크기에 가까운 3200x2300)에서 1픽셀 가는 테두리도 정확히, 빠르게
+{
+    const BW = 3200, BH = 2300;
+    const big = blank(BW, BH);
+    rect(big, BW, 15, 10, 3185, 2290, 1);
+    hline(big, BW, 700, 300, 2900, 1);           // 안쪽 긴 선(방해)
+    const t0 = Date.now();
+    const fb = R(big, BW, BH);
+    assert.ok(fb && fb.left === 15 && fb.top === 10 && fb.right === 3185 && fb.bottom === 2290, '큰 그림 가는 테두리: ' + JSON.stringify(fb && [fb.left, fb.top, fb.right, fb.bottom]));
+    assert.ok(Date.now() - t0 < 3000, '큰 그림도 3초 안: ' + (Date.now() - t0) + 'ms');
+}
+// 앱은 검출용 그림을 1600이 아니라 원래 크기 가까이(4600)로 읽는다 — 가는 선이 줄이면서 사라지지 않게
+assert.ok(/const k = Math\.min\(1, 4600 \/ Math\.max\(nw, nh\)\);/.test(fs.readFileSync(path.join(__dirname, '..', 'app.js'), 'utf8')), '검출 해상도');
 // 바탕이 연한 회색(230)인 도면: 종이 전체를 테두리로 잡지 않고 진짜 테두리(40..360)를 찾는다
 g = new Uint8Array(W * H).fill(230);
 rect(g, W, 40, 30, 360, 270, 2);
