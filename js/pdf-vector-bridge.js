@@ -283,15 +283,8 @@
       const tw = font.widthOfTextAtSize(t, size);
       const tx = cx - tw / 2;
       const ty = cy - size * 0.32;
-      if (haloW > 0) {
-        // 같은 글자를 흰색으로 여덟 방향에 겹쳐 윤곽선처럼(글꼴 그대로, 선 모양이 글자와 어긋나지 않음)
-        const white = PDFLib.rgb(1, 1, 1);
-        const r = haloW / 2;
-        for (let a = 0; a < 8; a++) {
-          const ang = (Math.PI / 4) * a;
-          page.drawText(t, { x: tx + r * Math.cos(ang), y: ty + r * Math.sin(ang), size, font, color: white });
-        }
-      }
+      // 흰 윤곽선용으로 같은 글자를 흰색으로 겹쳐 찍지 않는다 — 캐드로 PDF를 다시 가져오면
+      // 글자가 여러 개로 박혀 버린다(2026-11-03). 글자는 항상 한 번만 쓴다.
       page.drawText(t, {
         x: tx,
         y: ty,

@@ -88,18 +88,13 @@ const reset = () => { calls.lines.length = 0; calls.texts.length = 0; };
     assert.ok(calls.lines.every((l) => l.color === 'red'));
     win.BSA_PDF_VECTOR.textAsPaths = false;
 
-    // Helvetica + 윤곽선: 흰 글자 여덟 방향 + 글자색 한 번(마지막)
+    // Helvetica 글자: 윤곽선을 달라고 해도 글자는 한 번만(캐드에서 겹쳐 박히지 않게)
     reset();
     await ST.drawCentered(page, null, font, 'NO.12', 100, 50, 16, 'red', { halo: true });
     assert.strictEqual(calls.lines.length, 0);
-    assert.strictEqual(calls.texts.length, 9);
-    assert.ok(calls.texts.slice(0, 8).every((t) => t[1].color === WHITE), '앞 여덟은 흰색');
-    assert.strictEqual(calls.texts[8][1].color, 'red', '마지막이 글자색(맨 위)');
-    const dx = calls.texts.slice(0, 8).map((t) => t[1].x - calls.texts[8][1].x);
-    const dy = calls.texts.slice(0, 8).map((t) => t[1].y - calls.texts[8][1].y);
-    assert.ok(dx.some((v) => v > 0) && dx.some((v) => v < 0) && dy.some((v) => v > 0) && dy.some((v) => v < 0), '사방으로 퍼짐');
-    assert.ok(Math.max(...dx.map(Math.abs), ...dy.map(Math.abs)) <= 16 * 0.1 + 1e-6, '반경은 글자 크기의 10% 이내');
-    assert.strictEqual(calls.texts[8][1].x, 100 - 15, '글자색 글자는 원래 자리(가운데)');
+    assert.strictEqual(calls.texts.length, 1, '글자 한 번만');
+    assert.strictEqual(calls.texts[0][1].color, 'red');
+    assert.strictEqual(calls.texts[0][1].x, 100 - 15, '원래 자리(가운데)');
 
     // 윤곽선을 안 부르면(박스 안이 흰색·색 채운 박스·범례 표) 한 번만
     reset();
