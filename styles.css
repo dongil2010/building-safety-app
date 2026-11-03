@@ -13096,6 +13096,151 @@ html.layout-desktop #tab-ndt .canvas-hint {
 }
 
 /* ============================================================
+   전차 종합결론 (지난 보고서 종합결과표 — 회차마다, 점검 전 확인)
+   층 이름 바꾸기(#btnRenameFloor)는 .pc-only-chrome → 모바일·태블릿에서 숨김, 그 자리에 이 버튼
+   ============================================================ */
+.prev-summary-card {
+    max-width: 960px;
+    width: 96%;
+    max-height: 92vh;
+    display: flex;
+    flex-direction: column;
+}
+.prev-summary-body {
+    display: flex;
+    flex-direction: column;
+    gap: 0.8rem;
+    overflow-y: auto;
+    max-height: min(76vh, 900px);
+}
+.prev-summary-hint {
+    margin: 0;
+    font-size: 0.86rem;
+    color: var(--text-secondary, #64748b);
+    line-height: 1.45;
+}
+.prev-summary-toolbar {
+    display: flex;
+    gap: 0.5rem;
+    flex-wrap: wrap;
+}
+.prev-summary-list {
+    display: flex;
+    flex-direction: column;
+    gap: 0.9rem;
+}
+.prev-summary-item {
+    border: 1px solid #e2e8f0;
+    border-radius: 10px;
+    background: #fafafa;
+    padding: 0.55rem;
+    display: flex;
+    flex-direction: column;
+    gap: 0.4rem;
+}
+.prev-summary-item-head {
+    display: flex;
+    align-items: center;
+    gap: 0.35rem;
+    font-size: 0.82rem;
+    color: #475569;
+    min-width: 0;
+}
+.prev-summary-item-name {
+    flex: 1 1 auto;
+    min-width: 0;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+    font-weight: 600;
+}
+.prev-summary-item-head button {
+    flex-shrink: 0;
+    border: 1px solid #cbd5e1;
+    background: #fff;
+    color: #334155;
+    border-radius: 6px;
+    min-width: 2rem;
+    height: 2rem;
+    cursor: pointer;
+}
+.prev-summary-item-head button.danger { color: #dc2626; border-color: #fecaca; }
+.prev-summary-item-head button:disabled { opacity: 0.35; cursor: default; }
+.prev-summary-img-btn {
+    display: block;
+    width: 100%;
+    padding: 0;
+    border: none;
+    background: #fff;
+    cursor: zoom-in;
+    border-radius: 6px;
+    overflow: hidden;
+}
+.prev-summary-img-btn img {
+    display: block;
+    width: 100%;
+    height: auto;
+}
+.prev-summary-loading {
+    padding: 2rem 1rem;
+    text-align: center;
+    color: #94a3b8;
+}
+.prev-summary-empty {
+    text-align: center;
+    color: #94a3b8;
+    padding: 2rem 1rem;
+    font-weight: 600;
+    line-height: 1.6;
+}
+.prev-summary-viewer {
+    position: fixed;
+    inset: 0;
+    z-index: 10050; /* 모달(.modal-overlay 10000)보다 위 */
+    background: rgba(15, 23, 42, 0.92);
+    display: flex;
+    flex-direction: column;
+}
+.prev-summary-viewer[hidden] { display: none; }
+.prev-summary-viewer-bar {
+    display: flex;
+    align-items: center;
+    gap: 0.35rem;
+    padding: 0.5rem 0.6rem;
+    padding-top: max(0.5rem, env(safe-area-inset-top));
+    background: #0f172a;
+    color: #f8fafc;
+}
+.prev-summary-viewer-bar .btn {
+    background: #1e293b;
+    color: #f8fafc;
+    border-color: #334155;
+    min-width: 2.2rem;
+}
+.prev-summary-viewer-title {
+    flex: 1 1 auto;
+    min-width: 0;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+    font-weight: 600;
+    font-size: 0.9rem;
+}
+.prev-summary-viewer-close { color: #f8fafc !important; }
+.prev-summary-viewer-scroll {
+    flex: 1 1 auto;
+    overflow: auto;
+    -webkit-overflow-scrolling: touch;
+    touch-action: pan-x pan-y pinch-zoom;
+}
+.prev-summary-viewer-scroll img {
+    display: block;
+    margin: 0 auto;
+    background: #fff;
+    max-width: none;
+}
+
+/* ============================================================
    태블릿 터치 UI (layout-tablet)
    - PC 강제 레이아웃 해제 → 모바일 현장 UI 기반
    - 상단 탭·우측 레일·하단 독은 폰과 같은 툴바 디자인
