@@ -29045,6 +29045,17 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
             if (typeof saveStateToLocalStorage === 'function') saveStateToLocalStorage();
             if (typeof scheduleSyncToFirebase === 'function') scheduleSyncToFirebase();
         },
+        // 2026-11-04 다른 층에 복사: 이 건물 층 목록(낮은 층부터)·층 키, 복사 전에 받는 층을 서버 최신으로 받기
+        floors: () => {
+            const bldg = state.currentBuilding;
+            let fl = bldg && typeof window.getBuildingAvailableFloors === 'function' ? window.getBuildingAvailableFloors(bldg) : [];
+            if (typeof window.sortFloorsLowToHigh === 'function') fl = window.sortFloorsLowToHigh(fl);
+            return (fl || []).filter((f) => f && f.floorCode).map((f) => ({ code: f.floorCode, label: f.floorLabel || f.floorCode }));
+        },
+        floorKeyOf: (code) => (state.currentBuildingId && code ? `${state.currentBuildingId}_${code}` : ''),
+        refreshFloors: () => (typeof refreshBuildingFloorsFromServer === 'function' && state.currentBuilding
+            ? refreshBuildingFloorsFromServer(state.currentBuilding, { force: true })
+            : Promise.resolve({ ok: false, skipped: 'nobuilding', failed: [] })),
         /** 구조도 그림(PNG)을 이 건물 회차 폴더의 floorDrawings 에 올린다 → { downloadURL, storagePath } */
         uploadOverlay: async (blob) => {
             const SA = window.BSA && window.BSA.storageAssets;

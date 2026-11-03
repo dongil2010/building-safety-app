@@ -115,6 +115,32 @@
         return !!add(st, floorKey, rec, { id: id, createdAt: rec.createdAt, now: now });
     }
 
+    /**
+     * 다른 층에 복사(2026-11-04): fromKey 층의 부재·통심선을 같은 도면 좌표로 toKey 층에 새 id로 넣는다.
+     * 층마다 기준점 두 개를 다시 찍지 않으려는 것 — 어긋나면 그 층에서 「전체 옮기기」로 맞춘다.
+     * 받는 층에 이미 그린 게 있으면 overwrite일 때만 지우고(묘비) 넣고, 아니면 건너뛴다.
+     * 구조도 그림(overlay)은 복사하지 않는다.
+     * → { skipped: true } 또는 { skipped: false, changes: [{ id, before, after }] } (받는 층 되돌리기용)
+     */
+    function copyFloor(st, fromKey, toKey, opts) {
+        var o = opts || {};
+        var src = listFor(st, fromKey);
+        if (!src.length || !toKey || toKey === fromKey) return { skipped: true, changes: [] };
+        var old = listFor(st, toKey);
+        if (old.length && !o.overwrite) return { skipped: true, existing: old.length, changes: [] };
+        var changes = [];
+        old.forEach(function (d) {
+            var rec = remove(st, toKey, d.id);
+            if (rec) changes.push({ id: rec.id, before: Object.assign({}, rec), after: null });
+        });
+        var now = Number(o.now) || Date.now();
+        src.forEach(function (d) {
+            var rec = add(st, toKey, { type: d.type, label: d.label, x: d.x, y: d.y, w: d.w, h: d.h, ang: d.ang }, { now: now });
+            if (rec) changes.push({ id: rec.id, before: null, after: Object.assign({}, rec) });
+        });
+        return { skipped: false, changes: changes };
+    }
+
     /** 이 층 부재를 모두 지운다(묘비를 남겨 다른 기기에도 지워진다) → 지운 개수 */
     function clear(st, floorKey) {
         var list = listFor(st, floorKey).slice();
@@ -567,7 +593,7 @@
     function loadHandoff() { return handoffTx('readonly', function (s) { return s.get('latest'); }); }
 
     var api = { TYPES: TYPES, ACTIVE_TYPES: ACTIVE_TYPES, COLORS: COLORS, ensureMaps: ensureMaps, listFor: listFor, hasAny: hasAny, add: add, update: update, remove: remove,
-        applyRecord: applyRecord, clear: clear, beamThickness: beamThickness, unifyThickness: unifyThickness, countsByType: countsByType, countSlabPanels: countSlabPanels, fitTwoPoints: fitTwoPoints, applyFit: applyFit, importMembers: importMembers,
+        applyRecord: applyRecord, clear: clear, copyFloor: copyFloor, beamThickness: beamThickness, unifyThickness: unifyThickness, countsByType: countsByType, countSlabPanels: countSlabPanels, fitTwoPoints: fitTwoPoints, applyFit: applyFit, importMembers: importMembers,
         hitTest: hitTest, splitRun: splitRun, columnLines: columnLines, rotateAbout: rotateAbout,
         toLocal: toLocal, barEnds: barEnds, faceDist: faceDist, slantedRun: slantedRun,
         GRID_TYPE: GRID_TYPE, gridAxis: gridAxis, gridPos: gridPos, gridLabels: gridLabels, gridRecord: gridRecord, snapToGrid: snapToGrid, emptyGridCrossings: emptyGridCrossings, columnSize: columnSize, unifyColumns: unifyColumns, overlayFor: overlayFor, setOverlay: setOverlay, removeOverlay: removeOverlay,

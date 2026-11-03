@@ -57,6 +57,15 @@
             + '.map-struct-overlay rect.is-selected{stroke-width:4;fill-opacity:.75;stroke-dasharray:6 3}'
             + '.map-struct-overlay text{font-weight:700;text-anchor:middle;dominant-baseline:central;pointer-events:none;paint-order:stroke;stroke:#fff;stroke-width:.18em}'
             + '.map-struct-bar .map-struct-hint{flex-basis:100%;font-size:.82rem;font-weight:700;color:#0369a1}'
+            + '.map-struct-bar .map-struct-slab{font-size:.8rem;color:#15803d;font-weight:700;white-space:nowrap}'
+            // 다른 층에 복사(2026-11-04)
+            + '.map-struct-bar .map-struct-copy{flex-basis:100%;display:flex;flex-direction:column;gap:6px;padding:8px;border:1px solid #93c5fd;border-radius:10px;background:#f8fbff}'
+            + '.map-struct-copy-head{font-weight:700;font-size:.85rem}'
+            + '.map-struct-copy-list{display:flex;flex-wrap:wrap;gap:4px;max-height:30vh;overflow:auto}'
+            + '.map-struct-copy-floor,.map-struct-copy-ow{display:inline-flex;align-items:center;gap:4px;padding:3px 8px;border:1px solid #cbd5e1;border-radius:999px;background:#fff;font-size:.8rem;cursor:pointer}'
+            + '.map-struct-copy-floor.active{border-color:#2563eb;background:#dbeafe;font-weight:700}'
+            + '.map-struct-copy-floor small{color:#b45309}'
+            + '.map-struct-copy-actions{display:flex;flex-wrap:wrap;gap:6px;align-items:center}'
             // 폰(2026-10-20): 편집 중엔 자주 안 쓰는 흐리게·진하게·이름을 숨겨 도면을 덜 가린다
             + '@media (max-width:700px){.map-struct-bar.is-editing [data-act=dim],.map-struct-bar.is-editing [data-act=bold],.map-struct-bar.is-editing [data-act=marks]{display:none}.map-struct-bar .map-struct-hint{font-size:.74rem}}';
         document.head.appendChild(s);
@@ -742,6 +751,12 @@
             // 손가락은 마우스보다 굵어서 잡는 범위를 넓힌다
             var padPx = isTouch ? 16 : 6;
             var pad = Math.hypot(B.screenToImg(padPx, 0).x - B.screenToImg(0, 0).x, B.screenToImg(padPx, 0).y - B.screenToImg(0, 0).y);
+            // 「전체 옮기기」 켜짐: 어디를 끌든 이 층 부재·통심선이 같이 옮겨진다
+            if (ui.allMode) {
+                ui.drag = { mode: 'all', start: p, origs: allOrigs(), pointerId: e.pointerId, moved: false };
+                try { ov.setPointerCapture(e.pointerId); } catch (_e) { /* ignore */ }
+                return;
+            }
             // 「통심선」 켜짐: 빈 곳을 끌면 새 통심선, 선을 잡고 끌면 선과 그 위 기둥을 같이 옮김
             if (ui.gridMode) {
                 ui.drag = startGridDrag(p, pad, e.pointerId);
@@ -804,6 +819,7 @@
                 return;
             }
             var p = local(e);
+            if (dr.mode === 'all') { shiftAll(dr.origs, p.x - dr.start.x, p.y - dr.start.y); dr.moved = true; ui.builtSig = ''; sync(); return; }
             if (dr.lineIdx != null) { dragLineTo(dr, p); dr.moved = true; ui.builtSig = ''; sync(); return; }
             if (dr.mode === 'gridNew' || dr.mode === 'gridMove') { moveGridDrag(dr, p); dr.moved = true; ui.builtSig = ''; sync(); return; }
             var d = list().find(function (x) { return x.id === dr.id; });
@@ -841,6 +857,7 @@
             var dr = ui.drag;
             if (!dr || e.pointerId !== dr.pointerId) return;
             ui.drag = null;
+            if (dr.mode === 'all') { saveAllMove(dr.origs, e.type === 'pointercancel' || !dr.moved); return; }
             if (dr.lineIdx != null) { finishLineDrag(dr, e.type === 'pointercancel'); return; }
             if (dr.mode === 'gridNew' || dr.mode === 'gridMove') { finishGridDrag(dr, e.type === 'pointercancel'); return; }
             var d = list().find(function (x) { return x.id === dr.id; });
@@ -899,9 +916,15 @@
             if (isZ && !e.shiftKey) undo(); else redo();
         }
         else if ((e.key === 'Delete' || e.key === 'Backspace') && ui.selId) { e.preventDefault(); e.stopPropagation(); deleteSelected(); }
+        else if (ui.allMode && /^Arrow(Left|Right|Up|Down)$/.test(e.key)) {
+            e.preventDefault(); e.stopPropagation();
+            nudgeAll({ ArrowLeft: 'L', ArrowRight: 'R', ArrowUp: 'U', ArrowDown: 'D' }[e.key], e.shiftKey);
+        }
         else if (e.key === 'Escape') {
             e.stopPropagation();
-            if (ui.pend) { ui.pend = null; ui.builtSig = ''; sync(); }          // 거더·빔 시작 점 취소
+            if (ui.copyOpen) { ui.copyOpen = false; syncBar(); }
+            else if (ui.allMode) { ui.allMode = false; ui.drag = null; ui.builtSig = ''; sync(); }   // 「전체 옮기기」 끄기
+            else if (ui.pend) { ui.pend = null; ui.builtSig = ''; sync(); }          // 거더·빔 시작 점 취소
             else if (ui.lineMode) { ui.lineMode = false; ui.drag = null; ui.builtSig = ''; sync(); }   // 「줄」 끄기
             else if (ui.gridMode && !ui.selId) { ui.gridMode = false; ui.drag = null; ui.builtSig = ''; sync(); }   // 「통심선」 끄기
             else if (ui.selId) { ui.selId = ''; sync(); } else setEditing(false);
@@ -909,7 +932,7 @@
     }, true);
     function setEditing(on) {
         ui.editing = !!on;
-        if (!on) { ui.selId = ''; ui.addType = ''; ui.drag = null; ui.pend = null; ui.lineMode = false; ui.gridMode = false; ui.builtSig = ''; }
+        if (!on) { ui.selId = ''; ui.addType = ''; ui.drag = null; ui.pend = null; ui.lineMode = false; ui.gridMode = false; ui.allMode = false; ui.copyOpen = false; ui.builtSig = ''; }
         sync();
     }
 
@@ -1016,6 +1039,16 @@
             bar.className = 'map-count-bar map-struct-bar';
             bar.setAttribute('data-html2canvas-ignore', 'true');
             bar.addEventListener('click', onBarClick);
+            // 다른 층에 복사: 고른 층·덮어쓰기는 ui에 들고 있어야 막대를 다시 그려도 안 풀린다
+            bar.addEventListener('change', function (e) {
+                var t = e.target;
+                if (!t || t.type !== 'checkbox') return;
+                if (t.dataset.copyFloor) {
+                    ui.copySel = (ui.copySel || []).filter(function (c) { return c !== t.dataset.copyFloor; });
+                    if (t.checked) ui.copySel.push(t.dataset.copyFloor);
+                } else if (t.dataset.copyOverwrite != null) ui.copyOverwrite = t.checked;
+                syncBar();
+            });
             ['mousedown', 'touchstart', 'pointerdown'].forEach(function (t) { bar.addEventListener(t, function (e) { e.stopPropagation(); }, { passive: true }); });
         }
         if (bar.parentElement !== host) host.appendChild(bar);
@@ -1025,7 +1058,7 @@
         var slabSig = items.map(function (d) { return d.id + ':' + d.updatedAt; }).join('|');
         if (ui.slabSig !== slabSig) { ui.slabSig = slabSig; ui.slabCount = api.countSlabPanels ? api.countSlabPanels(items) : 0; }
         var html = '<span class="map-count-title">구조 부재 <small>' + items.length + '</small></span>'
-            + (ui.slabCount ? '<span class="map-struct-hint" title="거더·빔으로 사방이 막힌 칸 수 — 통계 평가 표의 슬래브 개수">슬래브(자동) <b>' + ui.slabCount + '</b></span>' : '');
+            + (ui.slabCount ? '<span class="map-struct-slab" title="거더·빔으로 사방이 막힌 칸 수 — 통계 평가 표의 슬래브 개수">슬래브(자동) <b>' + ui.slabCount + '</b></span>' : '');
         if (ui.calib) {
             html += '<button type="button" data-act="cancel">가져오기 취소</button>'
                 + '<span class="map-struct-hint">[' + (ui.calib.pts.length + 1) + '/2] 구조도에서 찍은 ' + (ui.calib.pts.length ? '두' : '첫') + ' 번째 기준점과 같은 곳을 도면에서 누르세요. (끌면 도면 이동, 휠로 확대)</span>';
@@ -1037,6 +1070,8 @@
                 }).join('')
                     + '<button type="button" data-act="grid" class="' + (ui.gridMode ? 'active' : '') + '" title="통심선 긋기 — 빈 곳을 세로·가로로 끌면 도면 끝까지 한 줄. 기둥을 찍으면 교차점에 붙습니다">통심선 <b><small>' + gridList().length + '</small></b></button>'
                     + '<button type="button" data-act="lines" class="' + (ui.lineMode ? 'active' : '') + '" title="기둥 줄 보이기 — 끝 동그라미를 끌면 줄을 기울이고, 가운데 네모를 끌면 그 줄 기둥을 통째로 옮깁니다">줄</button>'
+                    + '<button type="button" data-act="all" class="' + (ui.allMode ? 'active' : '') + '" ' + (items.length || gridList().length ? '' : 'disabled') + ' title="이 층 부재·통심선을 한꺼번에 옮겨 도면에 맞추기 — 아무 곳이나 끌거나 화살표">전체 옮기기</button>'
+                    + '<button type="button" data-act="copy" class="' + (ui.copyOpen ? 'active' : '') + '" ' + (items.length ? '' : 'disabled') + ' title="이 층에 그린 부재·통심선을 같은 자리로 다른 층에 복사(기준점 다시 안 찍음)">다른 층에 복사</button>'
                     + '<button type="button" data-act="del" ' + (ui.selId ? '' : 'disabled') + ' title="고른 부재 지우기 (Delete)">지우기</button>'
                     + '<button type="button" data-act="undo" ' + (hist(B.floorKey()).undo.length ? '' : 'disabled') + ' title="되돌리기 (Ctrl+Z)">↶ 되돌리기</button>'
                     + '<button type="button" data-act="redo" ' + (hist(B.floorKey()).redo.length ? '' : 'disabled') + ' title="다시 하기 (Ctrl+Y)">↷ 다시</button>';
@@ -1051,6 +1086,13 @@
                 html += '<button type="button" data-act="fillcross" ' + (nEmpty ? '' : 'disabled') + ' title="세로·가로 통심선이 만나는 곳 중 기둥이 없는 곳마다 기둥을 넣습니다(마지막으로 고친 기둥 크기, 되돌리기 한 번에 빠짐)">교차점 기둥 넣기 <b><small>' + nEmpty + '</small></b></button>';
                 html += '<span class="map-struct-hint">통심선: 빈 곳을 세로로 끌면 세로선, 가로로 끌면 가로선(도면 끝까지) · 선을 잡고 끌면 선과 그 위 기둥이 같이 옮겨짐 · 선을 눌러 고르고 Delete·「지우기」 · 다 하면 「기둥」을 켜고 교차점을 누르세요</span>';
             }
+            if (ui.editing && ui.allMode) {
+                html += ['L', 'R', 'U', 'D'].map(function (k) {
+                    return '<button type="button" data-act="nudge" data-dir="' + k + '" title="조금씩 옮기기 (방향키, Shift는 크게)">' + { L: '◀', R: '▶', U: '▲', D: '▼' }[k] + '</button>';
+                }).join('')
+                    + '<span class="map-struct-hint">전체 옮기기: 도면 아무 곳이나 끌면 이 층 부재·통심선이 같이 옮겨집니다 · 화살표·방향키로 조금씩(Shift 크게) · Ctrl+Z 되돌리기 · 다 하면 「전체 옮기기」를 다시 눌러 끄기</span>';
+            }
+            if (ui.editing && ui.copyOpen) html += copyPanelHtml();
             if (ui.editing && ui.lineMode) {
                 html += '<span class="map-struct-hint">기둥 줄 ' + (ui.lines || []).length + '개: 끝 동그라미를 끌면 반대쪽 끝을 축으로 줄과 그 기둥들이 기울고, 가운데 네모를 끌면 그 줄 기둥이 통째로 옮겨집니다 · 다 하면 「줄」을 다시 눌러 끄기</span>';
             }
@@ -1087,13 +1129,25 @@
                 if (after) pushHist(B.floorKey(), [{ id: after.id, before: before, after: snap(after) }]);
                 ui.builtSig = ''; commit();
             }
-            else { ui.addType = ui.addType === t ? '' : t; ui.pend = null; ui.lineMode = false; ui.gridMode = false; ui.builtSig = ''; sync(); }
+            else { ui.addType = ui.addType === t ? '' : t; ui.pend = null; ui.lineMode = false; ui.gridMode = false; ui.allMode = false; ui.builtSig = ''; sync(); }
         } else if (a === 'lines') {
-            ui.lineMode = !ui.lineMode; ui.gridMode = false; ui.addType = ''; ui.pend = null; ui.selId = ''; ui.drag = null; ui.builtSig = ''; sync();
+            ui.lineMode = !ui.lineMode; ui.gridMode = false; ui.allMode = false; ui.addType = ''; ui.pend = null; ui.selId = ''; ui.drag = null; ui.builtSig = ''; sync();
         } else if (a === 'fillcross') {
             fillGridCrossings();
         } else if (a === 'grid') {
-            ui.gridMode = !ui.gridMode; ui.lineMode = false; ui.addType = ''; ui.pend = null; ui.selId = ''; ui.drag = null; ui.builtSig = ''; sync();
+            ui.gridMode = !ui.gridMode; ui.lineMode = false; ui.allMode = false; ui.addType = ''; ui.pend = null; ui.selId = ''; ui.drag = null; ui.builtSig = ''; sync();
+        } else if (a === 'all') {
+            ui.allMode = !ui.allMode; ui.lineMode = false; ui.gridMode = false; ui.addType = ''; ui.pend = null; ui.selId = ''; ui.drag = null; ui.builtSig = ''; sync();
+        } else if (a === 'nudge') {
+            nudgeAll(b.dataset.dir, false);
+        } else if (a === 'copy') {
+            ui.copyOpen = !ui.copyOpen; ui.copySel = []; ui.copyOverwrite = false; syncBar();
+        } else if (a === 'copyAll') {
+            var cur = B.floorKey();
+            ui.copySel = B.floors().map(function (f) { return f.code; }).filter(function (c) { return B.floorKeyOf(c) !== cur; });
+            syncBar();
+        } else if (a === 'copyGo') {
+            copyToFloors();
         } else if (a === 'del') deleteSelected();
         else if (a === 'undo') undo();
         else if (a === 'redo') redo();
@@ -1102,6 +1156,106 @@
         else if (a === 'marks') { setPref(MARKS_KEY, marksOn() ? '0' : '1'); ui.builtSig = ''; sync(); }
         else if (a === 'close') closeBar();
     }
+    // ---------- 다른 층에 복사(2026-11-04) — 층마다 기준점 두 개를 다시 찍지 않게 같은 도면 좌표로 넣고, 어긋나면 「전체 옮기기」 ----------
+    function copyPanelHtml() {
+        var cur = B.floorKey(), sel = ui.copySel || [];
+        var floors = B.floors().filter(function (f) { return B.floorKeyOf(f.code) !== cur; });
+        if (!floors.length) return '<div class="map-struct-copy"><span class="map-struct-hint">복사할 다른 층이 없습니다.</span></div>';
+        var boxes = floors.map(function (f) {
+            var n = api.listFor(state(), B.floorKeyOf(f.code)).length;
+            var on = sel.indexOf(f.code) >= 0;
+            return '<label class="map-struct-copy-floor' + (on ? ' active' : '') + '"><input type="checkbox" data-copy-floor="' + f.code + '"' + (on ? ' checked' : '') + '>'
+                + f.label + (n ? ' <small>(이미 ' + n + '개)</small>' : '') + '</label>';
+        }).join('');
+        var anyExisting = sel.some(function (c) { return api.listFor(state(), B.floorKeyOf(c)).length; });
+        return '<div class="map-struct-copy">'
+            + '<div class="map-struct-copy-head">이 층 부재·통심선 ' + api.listFor(state(), cur).length + '개를 같은 자리로 복사할 층</div>'
+            + '<div class="map-struct-copy-list">' + boxes + '</div>'
+            + '<div class="map-struct-copy-actions">'
+            + '<button type="button" data-act="copyAll">모두 고르기</button>'
+            + '<label class="map-struct-copy-ow"><input type="checkbox" data-copy-overwrite' + (ui.copyOverwrite ? ' checked' : '') + '>이미 그린 층은 지우고 덮어쓰기</label>'
+            + '<button type="button" data-act="copyGo" class="active" ' + (sel.length ? '' : 'disabled') + '>' + (ui.copyBusy ? '복사 중…' : sel.length + '개 층에 복사') + '</button>'
+            + '<button type="button" data-act="copy">취소</button></div>'
+            + (anyExisting && !ui.copyOverwrite ? '<span class="map-struct-hint">「이미 ○개」 층은 덮어쓰기를 켜지 않으면 건너뜁니다.</span>' : '')
+            + '</div>';
+    }
+    function copyToFloors() {
+        if (ui.copyBusy) return;
+        var from = B.floorKey(), codes = (ui.copySel || []).slice();
+        if (!codes.length) return;
+        ui.copyBusy = true; syncBar();
+        // 안 열어 본 층은 이 기기 자료가 옛것일 수 있다 — 받는 층을 서버에서 먼저 받아 합친 뒤 넣는다(다른 기기 수정을 덮지 않게)
+        Promise.resolve(B.refreshFloors()).catch(function () { return { ok: false, failed: codes }; }).then(function (res) {
+            res = res || {};
+            if (!res.ok && res.skipped !== 'nologin' && res.skipped !== 'nobuilding') {
+                var failed = res.failed || [];
+                var bad = res.skipped === 'offline' ? codes : codes.filter(function (c) { return failed.indexOf(c) >= 0; });
+                if (bad.length) {
+                    toast(res.skipped === 'offline' ? '오프라인이라 복사하지 않았습니다. 인터넷이 될 때 다시 해 주세요.'
+                        : '서버에서 받지 못한 층이 있어 복사하지 않았습니다: ' + bad.join(', '), 'error', 4500);
+                    return;
+                }
+            }
+            var done = [], skipped = [], now = Date.now();
+            codes.forEach(function (c) {
+                var fk = B.floorKeyOf(c);
+                var r = api.copyFloor(state(), from, fk, { overwrite: !!ui.copyOverwrite, now: now });
+                if (r.skipped) { skipped.push(c); return; }
+                pushHist(fk, r.changes);   // 그 층에 가서 Ctrl+Z 하면 복사 전으로
+                B.commit(fk);
+                done.push(c);
+            });
+            ui.copyOpen = false; ui.copySel = [];
+            var label = function (c) { var f = B.floors().find(function (x) { return x.code === c; }); return f ? f.label : c; };
+            toast((done.length ? done.length + '개 층에 복사했습니다(' + done.map(label).join(', ') + '). 어긋난 층은 「전체 옮기기」로 맞추세요.' : '복사한 층이 없습니다.')
+                + (skipped.length ? ' 이미 그린 층은 건너뜀: ' + skipped.map(label).join(', ') : ''), done.length ? 'success' : 'info', 6000);
+        }).then(function () { ui.copyBusy = false; syncBar(); });
+    }
+
+    // ---------- 전체 옮기기(2026-11-04) — 이 층 부재·통심선을 한꺼번에(복사한 층을 도면에 맞출 때) ----------
+    function allOrigs() {
+        var o = {};
+        list().concat(gridList()).forEach(function (d) { o[d.id] = { x: d.x, y: d.y }; });
+        return o;
+    }
+    /** 통심선은 도면 끝까지 긋는 선이라 가로지르는 방향으로만 옮긴다 */
+    function shiftAll(origs, dx, dy) {
+        list().concat(gridList()).forEach(function (d) {
+            var o = origs[d.id];
+            if (!o) return;
+            var grid = d.type === GRID, ax = grid ? api.gridAxis(d) : '';
+            if (!grid || ax === 'v') d.x = o.x + dx;
+            if (!grid || ax === 'h') d.y = o.y + dy;
+        });
+    }
+    /** 끌던 자리(또는 화살표로 옮긴 자리)를 저장 — 되돌리기 한 번에 */
+    function saveAllMove(origs, cancel) {
+        var fk = B.floorKey(), changes = [];
+        list().concat(gridList()).forEach(function (d) {
+            var o = origs[d.id];
+            if (!o) return;
+            var now = { x: d.x, y: d.y };
+            var before = snap(Object.assign({}, d, o));
+            d.x = o.x; d.y = o.y;
+            if (cancel || (Math.abs(now.x - o.x) < 1e-9 && Math.abs(now.y - o.y) < 1e-9)) return;
+            var after = api.update(state(), fk, d.id, now);
+            if (after) changes.push({ id: d.id, before: before, after: snap(after) });
+        });
+        if (changes.length) pushHist(fk, changes);
+        ui.builtSig = '';
+        if (changes.length) commit(); else sync();
+    }
+    function nudgeAll(dir, big) {
+        // 화면 2px(Shift 10px)만큼을 도면 좌표로
+        var px = big ? 10 : 2;
+        var step = Math.hypot(B.screenToImg(px, 0).x - B.screenToImg(0, 0).x, B.screenToImg(px, 0).y - B.screenToImg(0, 0).y);
+        var v = { L: [-1, 0], R: [1, 0], U: [0, -1], D: [0, 1] }[dir];
+        if (!v) return;
+        var origs = allOrigs();
+        shiftAll(origs, v[0] * step, v[1] * step);
+        saveAllMove(origs, false);
+    }
+
     function openBar() { ui.barOpen = true; sync(); }
     function closeBar() { stopCalib(); ui.barOpen = false; setEditing(false); }
     function toggleBar() { if (ui.barOpen) closeBar(); else openBar(); }

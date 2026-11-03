@@ -439,5 +439,34 @@ assert.ok(layer.includes('api.barEnds(selD).map('), '비스듬한 보 끝 손잡
     assert.strictEqual(S.countSlabPanels(frame(20, 12)), 240, '큰 층');
 }
 
+// 2026-11-04 다른 층에 복사: 같은 좌표·새 id, 이미 그린 층은 덮어쓰기일 때만(묘비), 구조도 그림은 안 옮김
+{
+    const cs = {};
+    const g1 = S.add(cs, 'b_1F', { type: '거더', label: 'G1', x: 100, y: 50, w: 200, h: 20, ang: 15 }, { now: 10 });
+    S.add(cs, 'b_1F', { type: '기둥', label: 'C1', x: 0, y: 50, w: 30, h: 30 }, { now: 10 });
+    S.add(cs, 'b_1F', S.gridRecord('v', 300, 1000, 800), { now: 10 });
+    const r = S.copyFloor(cs, 'b_1F', 'b_2F', { now: 20 });
+    assert.strictEqual(r.skipped, false);
+    const to = S.listFor(cs, 'b_2F');
+    assert.strictEqual(to.length, 3, '부재·통심선 모두');
+    const g2 = to.find((d) => d.type === '거더');
+    assert.ok(g2.id !== g1.id && g2.x === 100 && g2.y === 50 && g2.ang === 15 && g2.label === 'G1', '같은 자리·새 id');
+    assert.strictEqual(S.listFor(cs, 'b_1F').length, 3, '원래 층은 그대로');
+    assert.ok(r.changes.every((c) => c.before === null && c.after), '받는 층 되돌리기용 기록');
+    // 이미 그린 층: 덮어쓰기 아니면 건너뜀
+    const r2 = S.copyFloor(cs, 'b_1F', 'b_2F', { now: 30 });
+    assert.strictEqual(r2.skipped, true);
+    assert.strictEqual(r2.existing, 3);
+    assert.strictEqual(S.listFor(cs, 'b_2F').length, 3);
+    // 덮어쓰기: 옛것은 묘비, 새것으로
+    const oldIds = S.listFor(cs, 'b_2F').map((d) => d.id);
+    const r3 = S.copyFloor(cs, 'b_1F', 'b_2F', { overwrite: true, now: 40 });
+    assert.strictEqual(S.listFor(cs, 'b_2F').length, 3);
+    assert.ok(oldIds.every((id) => cs.deletedStructMemberIds.b_2F.indexOf(id) >= 0), '지운 것은 다른 기기에서도 빠지게 묘비');
+    assert.strictEqual(r3.changes.filter((c) => c.after === null).length, 3);
+    assert.strictEqual(S.copyFloor(cs, 'b_1F', 'b_1F', {}).skipped, true, '같은 층은 안 함');
+    assert.strictEqual(S.copyFloor(cs, 'b_9F', 'b_3F', {}).skipped, true, '빈 층에서는 안 함');
+}
+
 console.log('test-struct-members: ok');
 
