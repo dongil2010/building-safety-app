@@ -222,12 +222,8 @@
             if (isNdtDrawerPanel(state.panel) && state.keyboardH <= 72) {
                 // 화면 키보드가 없으면(태블릿 외장 키보드·PC) 칸이 가려질 때만 올린다 — 칸을 맨 위 메뉴 밑으로 밀어 넣지 않게
             } else if (isNdtDrawerPanel(state.panel)) {
-                // NDT 측정 입력: 키보드 올릴 때 도면이 가려져도 되도록 드로어를 크게 올림
-                lift = Math.max(lift, Math.round(state.keyboardH * 1.12));
-                var ndtTargetTop = box.top + Math.min(36, Math.max(12, box.height * 0.06));
-                if (rect.top > ndtTargetTop) {
-                    lift = Math.max(lift, Math.ceil(rect.top - ndtTargetTop));
-                }
+                // 2026-11-03 NDT 측정 입력: 예전엔 칸을 화면 맨 위(36px)까지 올려 붙였다.
+                // 이제는 가려지지 않을 만큼만 올리고(위 lift), 칸을 보이는 영역 한가운데로 두는 건 scrollFieldIntoView 가 부드럽게 맡는다.
             } else {
                 // 2026-11-02 결함핀 수정창: 창 아래 끝(버튼줄)이 키보드 바로 위에 오도록 실제 창 아래 끝으로 잰다.
                 // (예전 0.85배 고정 → 버튼줄이 키보드에 걸려 중간에 멈춘 것처럼 보였다)
@@ -245,36 +241,63 @@
                 }
             }
         } else if (!state.panel && state.keyboardH > 72) {
-            // 페이지 본문 입력: 화면 전체를 일부 밀어 올림
-            lift = Math.max(lift, Math.round(state.keyboardH * 0.45));
+            // 페이지 본문 입력: 칸이 키보드 위 보이는 영역의 한가운데 오도록만 밀어 올림(2026-11-03, 예전엔 키보드 높이의 0.45배 고정)
+            var pageMid = box.top + box.height / 2;
+            var pageCenter = (rect.top + rect.bottom) / 2;
+            lift = Math.max(lift, Math.min(state.keyboardH, Math.max(0, Math.ceil(pageCenter - pageMid))));
         }
         return Math.max(0, lift);
     }
 
+    /**
+     * 2026-11-03 입력칸을 「키보드에 가리고 남은 보이는 영역」의 위아래 가운데로 부드럽게 옮긴다.
+     * (예전: 가려질 때만 맨 아래/맨 위로 밀어 붙이거나 화면 맨 위로 올림)
+     * 스크롤 목록(창 본문)이면 그 목록이 보이는 부분 안에서, 페이지면 보이는 화면(visualViewport) 안에서 가운데를 잡는다.
+     * 돌려주는 값: 이 칸이 (움직인 뒤) 보이는 영역 안에 들어오면 true.
+     */
+    function smoothScrollTo(host, top) {
+        try {
+            host.scrollTo({ top: top, behavior: 'smooth' });
+        } catch (_e) {
+            host.scrollTop = top;
+        }
+    }
+
     function scrollFieldIntoView(field) {
-        if (!field) return;
+        if (!field) return false;
         var host = findScrollHost(field);
+        var isPage = !host || host === document.documentElement || host === document.body || host === document.scrollingElement;
         var box = getVisualViewportBox();
         var rect = field.getBoundingClientRect();
-        var safeBottom = box.top + box.height - 18;
-
-        if (rect.bottom <= safeBottom && rect.top >= box.top + 12) return;
-
-        if (host && host !== document.documentElement && host !== document.body) {
-            var hostRect = host.getBoundingClientRect();
-            if (rect.bottom > safeBottom) {
-                host.scrollTop += Math.ceil(rect.bottom - safeBottom + 12);
-            } else if (rect.top < hostRect.top + 12) {
-                host.scrollTop -= Math.ceil(hostRect.top + 12 - rect.top);
-            }
-            return;
+        var region = { top: box.top + 8, bottom: box.top + box.height - 12 };
+        if (!isPage) {
+            var hr = host.getBoundingClientRect();
+            region.top = Math.max(region.top, hr.top + 4);
+            region.bottom = Math.min(region.bottom, hr.bottom - 4);
         }
+        if (region.bottom - region.top < rect.height + 8) return false; // 보이는 영역이 칸보다 작음: 다른 로직(창 들어올림)에 맡김
 
-        try {
-            field.scrollIntoView({ block: 'center', inline: 'nearest', behavior: 'auto' });
-        } catch (_e) {
-            field.scrollIntoView(true);
+        var delta = (rect.top + rect.bottom) / 2 - (region.top + region.bottom) / 2;
+        if (Math.abs(delta) <= 10) return true; // 이미 가운데 근처
+
+        var moved = delta;
+        if (!isPage) {
+            var maxTop = host.scrollHeight - host.clientHeight;
+            maxTop = isFinite(maxTop) ? Math.max(0, maxTop) : Infinity;
+            var target = Math.max(0, Math.min(maxTop, host.scrollTop + delta));
+            moved = target - host.scrollTop;
+            if (Math.abs(moved) >= 2) smoothScrollTo(host, target);
+        } else {
+            var se = document.scrollingElement || document.documentElement;
+            var maxPage = se.scrollHeight - (window.innerHeight || se.clientHeight);
+            maxPage = isFinite(maxPage) ? Math.max(0, maxPage) : Infinity;
+            var pageTarget = Math.max(0, Math.min(maxPage, se.scrollTop + delta));
+            moved = pageTarget - se.scrollTop;
+            if (Math.abs(moved) >= 2) smoothScrollTo(window, pageTarget);
         }
+        var newTop = rect.top - moved;
+        var newBottom = rect.bottom - moved;
+        return newTop >= region.top - 2 && newBottom <= region.bottom + 2;
     }
 
     // ── 2026-11-02 결함핀 수정창: 입력칸이 키보드에 가리지 않게 ──
@@ -314,7 +337,7 @@
         var f = state.activeField;
         if (!isDefectEditField(f)) return;
         applyDefectBodyPad(f);
-        if (scroll && !fieldVisibleNow(f)) scrollFieldIntoView(f);
+        if (scroll) scrollFieldIntoView(f);
     }
 
     function totalLift() {
@@ -498,8 +521,7 @@
         // 같은 창에서 다음 칸으로 옮겨 갈 때: 창은 그 자리에 두고(사용자가 끌어 둔 위치 포함) 창 안 목록만 스크롤.
         // 그래도 칸이 안 보일 때만 창 높이를 다시 잡는다. (칸마다 창이 오르내리던 문제)
         if (forceScroll && state.keepLift && !kbChanged) {
-            scrollFieldIntoView(state.activeField);
-            if (fieldVisibleNow(state.activeField)) {
+            if (scrollFieldIntoView(state.activeField) || fieldVisibleNow(state.activeField)) {
                 updateHandle();
                 updateDefectEditAssist(false);
                 return;
@@ -562,6 +584,7 @@
         scheduleLayoutUpdate();
         setTimeout(function () { updateLayout(true); }, 280);
         setTimeout(function () { updateLayout(true); }, 520);
+        setTimeout(function () { updateLayout(true); }, 900); // 부드럽게 움직이는 동안 키보드 높이가 더 바뀐 경우 마지막 맞춤
     }
 
     function clearIfNoField() {
