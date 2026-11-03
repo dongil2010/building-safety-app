@@ -974,21 +974,27 @@
     // 통계 대분류 — 상태조사(결함)와 비파괴조사를 섞어 보면 표가 길어져 현장에서 못 읽는다.
     var STATS_CATEGORIES = [
         { key: 'defect', label: '상태조사' },
-        { key: 'ndt', label: '비파괴조사' }
+        { key: 'ndt', label: '비파괴조사' },
+        // 2026-11-03 보고서 평가용 층별·부재별 결함 현황표(균열폭 구간 + 박리·박락·누수·철근노출)
+        { key: 'eval', label: '평가' }
     ];
 
     function normalizeStatsCategory(key) {
-        return key === 'ndt' ? 'ndt' : 'defect';
+        return key === 'ndt' || key === 'eval' ? key : 'defect';
     }
 
     function getStatsSectionVisibility(category) {
-        var isNdt = normalizeStatsCategory(category) === 'ndt';
+        var cat = normalizeStatsCategory(category);
+        var isNdt = cat === 'ndt';
+        var isDefect = cat === 'defect';
         return {
-            summaryCards: !isNdt,
-            componentCrack: !isNdt,
-            defectMatrix: !isNdt,
+            summaryCards: isDefect,
+            componentCrack: isDefect,
+            defectMatrix: isDefect,
+            // 평가 표도 결함 데이터라 상태양호 제외·금회차만·개구부 제외 필터를 같이 쓴다
             defectFilters: !isNdt,
-            viewChips: !isNdt,
+            viewChips: isDefect,
+            evalTable: cat === 'eval',
             ndtMeasure: isNdt,
             ndtStrength: isNdt,
             ndtCarb: isNdt,
@@ -1136,9 +1142,21 @@
     function isFinishingSlabOrWall(component, category) {
         return category === '마감재' && /슬래브|벽체/.test(String(component || '').replace(/\s+/g, ''));
     }
+    /**
+     * 2026-11-03 기둥·보·슬래브·RC벽체인데 구분이 구조체가 아니면(비구조체·마감재) 부재 균열이 아니다 — 기둥 미장, 기둥-벽체 이격 등.
+     * 그 부재 칸과 균열 통계에서 빼고 기타 부재로 센다. 구분 미기재는 구조체로 본다. 조적벽체·벽체 접합부는 원래 비구조체라 그대로.
+     */
+    function isNonStructuralMember(component, category) {
+        if (isFinishingSlabOrWall(component, category)) return true;
+        if ((category || '구조체') === '구조체') return false;
+        return /^(column|bigBeam|smallBeam|upperBeam|slab|rcWall)$/.test(classifyMemberGroup(component, '구조체'));
+    }
     function classifyComponentGroup(component, category) {
+        return isNonStructuralMember(component, category) ? 'other' : classifyMemberGroup(component, category);
+    }
+    function classifyMemberGroup(component, category) {
         var key = String(component || '').replace(/\s+/g, '');
-        if (!key || isFinishingSlabOrWall(component, category)) return 'other';
+        if (!key) return 'other';
         // 2026-10-08: ALC·블록(블럭)·벽돌 벽체도 조적벽체로 묶는다. 바닥에 까는 블록(보도·점자·경계)은 벽체가 아니다.
         var isMasonry = /조적|ALC|블록|블럭|벽돌/i.test(key) && !/보도|점자|경계|포장|바닥/.test(key);
         if (key.indexOf('접합') >= 0) {
@@ -1201,6 +1219,41 @@
         return {
             leak: /누수|백태/.test(type),
             spall: !coating && /박리|박락|들뜸|층분리/.test(type),
+            rebar: /철근노출/.test(type)
+        };
+    }
+
+    /**
+     * 2026-11-03 「평가」 표: 보고서 양식(층 × 기둥·벽·큰보·작은보·슬래브)에 맞춘 열.
+     * 박리와 박락을 따로 센다(부재별 표의 「박리·박락·들뜸」과 다름). 들뜸·층분리는 박리 쪽.
+     * 벽은 RC벽체만 — 조적벽체는 비구조체라 뺀다. 보(G/B 미지정)는 그런 결함이 있는 층에만 줄을 더한다.
+     */
+    var EVAL_MEMBERS = [
+        { key: 'column', label: '기둥' },
+        { key: 'rcWall', label: '벽' },
+        { key: 'bigBeam', label: '큰보' },
+        { key: 'smallBeam', label: '작은보' },
+        { key: 'slab', label: '슬래브' },
+        { key: 'upperBeam', label: '보(G/B 미지정)', optional: true }
+    ];
+    var EVAL_COLUMNS = [
+        { key: 'lt02', label: '0.2mm 미만' },
+        { key: 'lt03', label: '0.3mm 미만' },
+        { key: 'lt05', label: '0.5mm 미만' },
+        { key: 'ge05', label: '0.5mm 이상' },
+        { key: 'peel', label: '콘크리트 박리' },
+        { key: 'fall', label: '콘크리트 박락' },
+        { key: 'leak', label: '누수·백태' },
+        { key: 'rebar', label: '철근노출' }
+    ];
+    function classifyEvalKinds(d) {
+        var type = String(d && d.defectType != null ? d.defectType : '').replace(/\s+/g, '');
+        var comp = String(d && d.component != null ? d.component : '').replace(/\s+/g, '');
+        var coating = /뿜칠|내화/.test(type + comp);
+        return {
+            peel: !coating && /박리|들뜸|층분리/.test(type),
+            fall: !coating && /박락/.test(type),
+            leak: /누수|백태/.test(type),
             rebar: /철근노출/.test(type)
         };
     }
@@ -1476,6 +1529,8 @@
             var floorComponentCrackBins = {};
             var floorComponentCrackBinNos = {};
             var floorComponentKinds = {};
+            var floorComponentEval = {};
+            var floorComponentEvalNos = {};
             rows.forEach(function (d) {
                 var cat = d.category || '구조체';
                 if (cat === '비구조체') categoryCounts.nonStructural += 1;
@@ -1485,9 +1540,17 @@
                 var compGroup = classifyComponentGroup(d.component, cat);
                 componentCounts[compGroup] = (componentCounts[compGroup] || 0) + 1;
                 floorComponentCounts[compGroup] = (floorComponentCounts[compGroup] || 0) + 1;
-                var finishingSlabOrWall = isFinishingSlabOrWall(d.component, cat);
+                var nonStructuralMember = isNonStructuralMember(d.component, cat);
+                var evalBucket = floorComponentEval[compGroup] || (floorComponentEval[compGroup] = {});
+                var evalNoBucket = floorComponentEvalNos[compGroup] || (floorComponentEvalNos[compGroup] = {});
+                var addEval = function (key) {
+                    evalBucket[key] = (evalBucket[key] || 0) + 1;
+                    (evalNoBucket[key] || (evalNoBucket[key] = [])).push(d.no || d.groupNo || '');
+                };
+                var evalKinds = classifyEvalKinds(d);
+                ['peel', 'fall', 'leak', 'rebar'].forEach(function (k) { if (evalKinds[k]) addEval(k); });
                 // 균열·이격 결함 수(최대 균열폭 보기의 건수). getCrackWidthNumbers와 같은 기준이다.
-                if (!finishingSlabOrWall && /균열|이격/.test(String(d.defectType != null ? d.defectType : ''))) {
+                if (!nonStructuralMember && /균열|이격/.test(String(d.defectType != null ? d.defectType : ''))) {
                     componentCrackCounts[compGroup] = (componentCrackCounts[compGroup] || 0) + 1;
                     floorComponentCrackCounts[compGroup] = (floorComponentCrackCounts[compGroup] || 0) + 1;
                     var bin = classifyCrackWidthBin(getCrackWidthNumbers(d));
@@ -1495,13 +1558,14 @@
                     binBucket[bin] = (binBucket[bin] || 0) + 1;
                     var noBucket = floorComponentCrackBinNos[compGroup] || (floorComponentCrackBinNos[compGroup] = {});
                     (noBucket[bin] || (noBucket[bin] = [])).push(d.no || d.groupNo || '');
+                    addEval(bin);
                 }
                 var kinds = classifyDefectKinds(d);
                 var kindBucket = floorComponentKinds[compGroup] || (floorComponentKinds[compGroup] = {});
                 DEFECT_KIND_COLUMNS.forEach(function (k) {
                     if (kinds[k.key]) kindBucket[k.key] = (kindBucket[k.key] || 0) + 1;
                 });
-                (finishingSlabOrWall ? [] : getCrackWidthNumbers(d)).forEach(function (w) {
+                (nonStructuralMember ? [] : getCrackWidthNumbers(d)).forEach(function (w) {
                     var cur = floorComponentCrackMax[compGroup];
                     if (!cur || w > cur.value) {
                         floorComponentCrackMax[compGroup] = { value: w, id: d.id || '', no: d.no || d.groupNo || '' };
@@ -1520,6 +1584,8 @@
                 componentCrackBins: floorComponentCrackBins,
                 componentCrackBinNos: floorComponentCrackBinNos,
                 componentKinds: floorComponentKinds,
+                componentEval: floorComponentEval,
+                componentEvalNos: floorComponentEvalNos,
                 coarseGroup: getCoarseFloorGroup(floorCode),
                 zoneInfo: classifyFloorGroup(floorCode)
             });
@@ -1784,6 +1850,149 @@
         bindBinNoPopup(root);
     }
 
+    /** 「평가」 표를 붙일 자리 (index.html은 그대로) */
+    function ensureEvalMount() {
+        var page = document.querySelector('#tab-stats .stats-page');
+        if (!page) return null;
+        var el = document.getElementById('statsEvalSection');
+        if (!el) {
+            el = document.createElement('div');
+            el.id = 'statsEvalSection';
+            el.className = 'stats-panel stats-eval-panel';
+            page.appendChild(el);
+        }
+        return el;
+    }
+
+    /** 층마다 보여 줄 부재 줄: 고정 5개 + 결함이 있을 때만 보(G/B 미지정) */
+    function evalMembersFor(bucketMap) {
+        return EVAL_MEMBERS.filter(function (m) {
+            if (!m.optional) return true;
+            var b = (bucketMap && bucketMap[m.key]) || {};
+            return EVAL_COLUMNS.some(function (c) { return b[c.key]; });
+        });
+    }
+
+    /** 층 줄 + 맨 아래 합계. 칸 = { n, nos } */
+    function buildEvalTableRows(payload) {
+        var out = [];
+        var total = {};
+        var totalNos = {};
+        (payload.floorRows || []).filter(function (fr) { return fr.rowCount > 0; }).forEach(function (fr) {
+            var map = fr.componentEval || {};
+            var noMap = fr.componentEvalNos || {};
+            out.push({
+                floorCode: fr.floorCode,
+                label: fr.floorLabel,
+                members: evalMembersFor(map).map(function (m) {
+                    var b = map[m.key] || {};
+                    var nb = noMap[m.key] || {};
+                    var tb = total[m.key] || (total[m.key] = {});
+                    var tnb = totalNos[m.key] || (totalNos[m.key] = {});
+                    return {
+                        key: m.key,
+                        label: m.label,
+                        cells: EVAL_COLUMNS.map(function (c) {
+                            var n = b[c.key] || 0;
+                            tb[c.key] = (tb[c.key] || 0) + n;
+                            tnb[c.key] = (tnb[c.key] || []).concat(nb[c.key] || []);
+                            return { key: c.key, n: n, nos: nb[c.key] || [] };
+                        })
+                    };
+                })
+            });
+        });
+        if (out.length) {
+            out.push({
+                floorCode: '',
+                label: '합계',
+                isTotal: true,
+                members: evalMembersFor(total).map(function (m) {
+                    var tb = total[m.key] || {};
+                    var tnb = totalNos[m.key] || {};
+                    return {
+                        key: m.key,
+                        label: m.label,
+                        cells: EVAL_COLUMNS.map(function (c) { return { key: c.key, n: tb[c.key] || 0, nos: tnb[c.key] || [] }; })
+                    };
+                })
+            });
+        }
+        return out;
+    }
+
+    /** 한글·엑셀에 붙여 넣을 탭 구분 글자. 0은 빈칸(양식처럼) */
+    function evalTableToTsv(rows) {
+        var lines = [['위치', '부재'].concat(EVAL_COLUMNS.map(function (c) { return c.label; })).join('\t')];
+        rows.forEach(function (fl) {
+            fl.members.forEach(function (m, i) {
+                lines.push([i === 0 ? fl.label : '', m.label].concat(m.cells.map(function (c) { return c.n ? String(c.n) : ''; })).join('\t'));
+            });
+        });
+        return lines.join('\n');
+    }
+
+    function renderEvalTable(payload, root) {
+        if (!root) return;
+        var head = '<div class="stats-panel-head"><h3 class="stats-panel-title">층별·부재별 결함 현황 (평가)</h3>'
+            + '<button type="button" class="btn btn-secondary btn-sm" data-eval-copy>표 복사</button></div>';
+        var rows = payload ? buildEvalTableRows(payload) : [];
+        if (!rows.length) {
+            root.innerHTML = head + '<p class="stats-empty">' + (payload ? '결함 데이터가 없습니다.' : '건물을 선택하면 평가 표를 볼 수 있습니다.') + '</p>';
+            return;
+        }
+        var noWidth = 0;
+        (payload.floorRows || []).forEach(function (fr) {
+            EVAL_MEMBERS.forEach(function (m) {
+                var b = (fr.componentCrackBins && fr.componentCrackBins[m.key]) || {};
+                noWidth += b.none || 0;
+            });
+        });
+        var noAttr = function (nos, title) {
+            var list = sortDefectNos(nos);
+            if (!list.length) return '';
+            return ' data-bin-nos="' + esc(list.join(',')) + '" data-bin-title="' + esc(title) + '" tabindex="0"';
+        };
+        var body = rows.map(function (fl) {
+            var current = !fl.isTotal && fl.floorCode === payload.currentFloor;
+            return fl.members.map(function (m, i) {
+                var cls = [];
+                if (current) cls.push('stats-row-current');
+                if (fl.isTotal) cls.push('stats-eval-total');
+                if (i === 0) cls.push('stats-eval-floor-start');
+                var floorCell = i === 0
+                    ? '<th scope="rowgroup" rowspan="' + fl.members.length + '" class="stats-eval-floor">' + esc(fl.label) + '</th>'
+                    : '';
+                var cells = m.cells.map(function (c) {
+                    var label = EVAL_COLUMNS.filter(function (x) { return x.key === c.key; })[0].label;
+                    return '<td class="stats-kind-col ' + (c.n ? 'stats-cell-hit stats-bin-nos' : 'stats-cell-zero') + '"'
+                        + (c.n ? noAttr(c.nos, fl.label + ' · ' + m.label + ' · ' + label) : '') + '>' + (c.n || '') + '</td>';
+                }).join('');
+                return '<tr' + (cls.length ? ' class="' + cls.join(' ') + '"' : '') + '>' + floorCell + '<th scope="row">' + esc(m.label) + '</th>' + cells + '</tr>';
+            }).join('');
+        }).join('');
+        var note = '구조체로 체크한 기둥·RC벽체·보·슬래브만 셉니다(구분 미기재는 구조체). 균열은 결함마다 가장 넓은 폭으로 한 칸에 들어갑니다. 숫자를 누르면 결함 번호가 보입니다.';
+        if (noWidth) note += ' 폭을 적지 않은 균열 ' + noWidth + '건은 표에 없습니다.';
+        root.innerHTML = head
+            + '<div class="table-responsive stats-table-wrap"><table class="data-table stats-matrix-table stats-eval-table">'
+            + '<thead><tr><th>위치</th><th>부재</th>' + EVAL_COLUMNS.map(function (c) { return '<th class="stats-kind-col">' + esc(c.label) + '</th>'; }).join('') + '</tr></thead>'
+            + '<tbody>' + body + '</tbody></table></div>'
+            + '<p class="stats-hint">' + esc(note) + '</p>';
+        var copyBtn = root.querySelector('[data-eval-copy]');
+        if (copyBtn) {
+            copyBtn.addEventListener('click', function () {
+                var text = evalTableToTsv(rows);
+                var done = function () { if (window.showToast) window.showToast('표를 복사했습니다. 한글·엑셀에 붙여 넣으세요.', 'success', 2000); };
+                if (navigator.clipboard && navigator.clipboard.writeText) {
+                    navigator.clipboard.writeText(text).then(done, function () {
+                        if (window.showToast) window.showToast('복사하지 못했습니다.', 'error', 2000);
+                    });
+                }
+            });
+        }
+        bindBinNoPopup(root);
+    }
+
     /** 2026-10-21 균열폭 분류 칸: 마우스를 올리거나(PC) 누르면(터치) 포함된 결함 번호를 띄운다 */
     var binPopupEl = null;
     var binPopupPinned = null;
@@ -1963,6 +2172,7 @@
         var toolbar = document.querySelector('#tab-stats .stats-toolbar');
         var toggles = [
             [document.getElementById('statsSummaryCards'), vis.summaryCards],
+            [document.getElementById('statsEvalSection'), vis.evalTable],
             [document.getElementById('statsComponentSection'), vis.componentCrack],
             [document.getElementById('statsLintSection'), vis.summaryCards],
             [defectPanel, vis.defectMatrix],
@@ -2395,6 +2605,7 @@
         renderLintPanel(payload, document.getElementById('statsLintSection'));
         renderMatrixTable(payload, statsView);
         renderNdtStatsPanels(bldg);
+        renderEvalTable(bldg ? payload : null, ensureEvalMount());
         updateHint(statsView, bldg);
         applyCategoryVisibility();
     };
@@ -2426,7 +2637,8 @@
         id: 'tab-stats',
         title: '통계',
         features: [
-            '대분류: 상태조사 / 비파괴조사',
+            '대분류: 상태조사 / 비파괴조사 / 평가',
+            '평가: 층 × 기둥·벽·큰보·작은보·슬래브, 균열폭 4구간 + 박리·박락·누수·철근노출 건수, 표 복사',
             '건물 전체 결함 종류 집계',
             '층별 결함 종류 표 (현재 선택 층 강조)',
             '층묶음 보기: 지하·지상·옥상·부대 구역별 집계',

@@ -32,7 +32,8 @@ function extractFunction(src, header) {
 }
 
 function loadClassify() {
-    const fnSrc = extractFunction(statsSrc, 'function isFinishingSlabOrWall(') + '\n' + extractFunction(statsSrc, 'function classifyComponentGroup(');
+    const fnSrc = ['isFinishingSlabOrWall', 'isNonStructuralMember', 'classifyComponentGroup', 'classifyMemberGroup']
+        .map((n) => extractFunction(statsSrc, 'function ' + n + '(')).join('\n');
     const sandbox = {};
     vm.createContext(sandbox);
     vm.runInContext(fnSrc + '\nthis.classifyComponentGroup = classifyComponentGroup;', sandbox);
@@ -49,13 +50,21 @@ function testWallCategoryRules() {
     assert.strictEqual(classify('슬래브', '마감재'), 'other', '슬래브(마감재)');
     assert.strictEqual(classify('조적벽체', '마감재'), 'other', '조적벽체(마감재)');
     assert.strictEqual(classify('슬래브', '구조체'), 'slab', '구조체는 그대로');
-    assert.strictEqual(classify('슬래브', '비구조체'), 'slab', '비구조체는 그대로');
+    // 2026-11-03 기둥·보·슬래브·RC벽체가 구조체가 아니면(기둥 미장, 기둥-벽체 이격 등) 부재 칸·균열 통계에서 뺀다
+    assert.strictEqual(classify('슬래브', '비구조체'), 'other', '슬래브(비구조체)');
+    [['기둥', 'column'], ['보(G)', 'bigBeam'], ['보(B)', 'smallBeam'], ['보', 'upperBeam'], ['슬래브', 'slab'], ['RC벽체', 'rcWall']].forEach(([name, g]) => {
+        assert.strictEqual(classify(name, '구조체'), g, name + ' 구조체는 그대로');
+        assert.strictEqual(classify(name, ''), g, name + ' 구분 미기재는 구조체로 본다');
+        assert.strictEqual(classify(name, '비구조체'), 'other', name + ' 비구조체는 기타 부재');
+        assert.strictEqual(classify(name, '마감재'), 'other', name + ' 마감재는 기타 부재');
+    });
+    assert.strictEqual(classify('기둥 미장', '마감재'), 'other', '기둥 미장');
     assert.strictEqual(classify('슬래브', ''), 'slab', '구분 미기재는 그대로');
     assert.strictEqual(classify('조적벽체', '비구조체'), 'masonryWall', '조적벽체 비구조체는 그대로');
-    assert.ok(/if \(!finishingSlabOrWall && \/균열\|이격\//.test(statsSrc), '균열 건수·폭 구간에서 뺀다');
-    assert.ok(statsSrc.indexOf('(finishingSlabOrWall ? [] : getCrackWidthNumbers(d)).forEach') >= 0, '최대 균열폭에서 뺀다');
-    assert.strictEqual(classify('RC벽체', '비구조체'), 'rcWall', 'RC벽체 표기는 카테고리와 무관하게 RC벽체');
-    assert.strictEqual(classify('내력벽', '비구조체'), 'rcWall', '내력벽 표기는 카테고리와 무관하게 RC벽체');
+    assert.ok(/if \(!nonStructuralMember && \/균열\|이격\//.test(statsSrc), '균열 건수·폭 구간에서 뺀다');
+    assert.ok(statsSrc.indexOf('(nonStructuralMember ? [] : getCrackWidthNumbers(d)).forEach') >= 0, '최대 균열폭에서 뺀다');
+    assert.strictEqual(classify('내력벽', '비구조체'), 'other', '내력벽도 구조체가 아니면 기타 부재');
+    assert.strictEqual(classify('내력벽', '구조체'), 'rcWall');
     assert.strictEqual(classify('조적벽체', '비구조체'), 'masonryWall', '조적벽체는 카테고리와 무관하게 조적벽체');
 
     // 2026-10-08: 이름에 '벽체'가 들어가고 구조체로 체크된 것은 RC벽체

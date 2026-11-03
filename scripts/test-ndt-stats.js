@@ -225,7 +225,12 @@ function testOverallParticle() {
 
 /** 대분류를 고르면 상태조사 표와 비파괴 표가 섞이지 않아야 한다 */
 function testCategoryVisibility() {
-    assert.deepStrictEqual(api.STATS_CATEGORIES.map((c) => c.key), ['defect', 'ndt']);
+    assert.deepStrictEqual(api.STATS_CATEGORIES.map((c) => c.key), ['defect', 'ndt', 'eval']);
+    assert.strictEqual(api.normalizeStatsCategory('eval'), 'eval');
+    const ev = api.getStatsSectionVisibility('eval');
+    assert.strictEqual(ev.evalTable, true);
+    assert.strictEqual(ev.defectFilters, true, '평가도 결함 필터를 쓴다');
+    ['summaryCards', 'componentCrack', 'defectMatrix', 'viewChips', 'ndtMeasure', 'ndtStrength'].forEach((k) => assert.strictEqual(ev[k], false, k));
     assert.strictEqual(api.normalizeStatsCategory(undefined), 'defect');
     assert.strictEqual(api.normalizeStatsCategory('ndt'), 'ndt');
     assert.strictEqual(api.normalizeStatsCategory('없는값'), 'defect');
@@ -237,6 +242,7 @@ function testCategoryVisibility() {
         defectMatrix: true,
         defectFilters: true,
         viewChips: true,
+        evalTable: false,
         ndtMeasure: false,
         ndtStrength: false,
         ndtCarb: false,
@@ -253,6 +259,7 @@ function testCategoryVisibility() {
         defectMatrix: false,
         defectFilters: false,
         viewChips: false,
+        evalTable: false,
         ndtMeasure: true,
         ndtStrength: true,
         ndtCarb: true,
@@ -262,7 +269,7 @@ function testCategoryVisibility() {
         ndtMemberDisp: true
     });
 
-    Object.keys(defect).forEach((key) => {
+    Object.keys(defect).filter((key) => key !== 'evalTable').forEach((key) => {
         assert.notStrictEqual(defect[key], ndt[key], key + '가 두 대분류에서 같이 보인다');
     });
 }

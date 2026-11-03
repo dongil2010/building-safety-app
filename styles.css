@@ -18237,3 +18237,37 @@ html.bsa-kb-dock-follow body.defect-modal-open #tab-map #mobileMapDock.mobile-ca
 .grid-lines-panel .grid-nudge-row { display: flex; flex-wrap: wrap; align-items: center; gap: 3px; }
 .grid-lines-panel .grid-nudge-row > b { flex: 0 0 100%; font-size: 0.74rem; }
 .grid-lines-panel .grid-nudge-row button { padding: 2px 6px; font-size: 0.72rem; min-width: 34px; }
+
+/* 2026-11-03 통계 「평가」 표: 보고서 양식처럼 격자·가운데 정렬, 층마다 굵은 구분선, 길어도 잘리지 않게 */
+.stats-eval-panel .stats-panel-head {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 0.5rem;
+}
+#tab-stats .stats-eval-panel .stats-table-wrap {
+    max-height: none;
+}
+.stats-eval-table th,
+.stats-eval-table td {
+    border: 1px solid #cbd5e1;
+    text-align: center;
+    padding: 0.35rem 0.6rem;
+}
+.stats-eval-table thead th {
+    background: #f1f5f9;
+}
+.stats-eval-table tr.stats-eval-floor-start > * {
+    border-top: 2px solid #64748b;
+}
+.stats-eval-table th.stats-eval-floor {
+    background: #fff;
+    vertical-align: middle;
+}
+.stats-eval-table tr.stats-eval-total > * {
+    background: #f8fafc;
+    font-weight: 700;
+}
+.stats-eval-table td.stats-kind-col {
+    min-width: 4.5rem;
+}
