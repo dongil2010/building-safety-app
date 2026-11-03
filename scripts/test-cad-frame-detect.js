@@ -57,6 +57,14 @@ assert.ok(f && f.pass === 0 && [f.left, f.top, f.right, f.bottom].join() === '10
 g = blank(W, H); rect(g, W, 50, 50, 150, 120, 2); rect(g, W, 200, 150, 260, 200, 2);
 assert.strictEqual(R(g, W, H), null, '풀어도 방만 있으면 null');
 assert.strictEqual(R(blank(W, H), W, H), null);
+// 2026-11-03 우하단 바깥에 다른 긴 선(표제란·여백선)이 있어도 진짜 테두리의 우하단을 잡는다
+g = blank(W, H); rect(g, W, 20, 15, 380, 285, 3);
+hline(g, W, 291, 28, 372, 1);          // 아래쪽 바깥의 짧은 긴 선
+vline(g, W, 389, 25, 283, 1);          // 오른쪽 바깥의 긴 선
+f = D.detectOuterFrame(g, W, H);
+assert.ok(f && f.left === 20 && f.top === 15 && f.right === 380 && f.bottom === 285, '바깥 선에 끌려가지 않음: ' + JSON.stringify(f && [f.left, f.top, f.right, f.bottom]));
+f = R(g, W, H);
+assert.ok(f && f.right === 380 && f.bottom === 285, '보강 함수도 같음');
 // 바탕이 연한 회색(230)인 도면: 종이 전체를 테두리로 잡지 않고 진짜 테두리(40..360)를 찾는다
 g = new Uint8Array(W * H).fill(230);
 rect(g, W, 40, 30, 360, 270, 2);

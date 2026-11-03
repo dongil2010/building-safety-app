@@ -45,24 +45,66 @@
             if (r.len >= h * minFrac) cols.push({ x: px, s: r.s, e: r.e, len: r.len });
         }
         if (rows.length < 2 || cols.length < 2) return null;
-        const top = rows[0], bottom = rows[rows.length - 1];
-        const left = cols[0], right = cols[cols.length - 1];
-        const W = right.x - left.x, H = bottom.y - top.y;
-        if (W <= 0 || H <= 0 || W * H < w * h * minAreaFrac) return null;
-        // 네 선이 서로 맞물리는지(가로선 끝 ≈ 세로선 위치, 세로선 끝 ≈ 가로선 위치)
         const tol = Math.max(4, Math.round(Math.min(w, h) * 0.02));
         const near = (a, b) => Math.abs(a - b) <= tol;
-        let score = 0;
-        [top, bottom].forEach((r) => { if (near(r.s, left.x)) score++; if (near(r.e, right.x)) score++; });
-        [left, right].forEach((c) => { if (near(c.s, top.y)) score++; if (near(c.e, bottom.y)) score++; });
-        const confidence = score / 8;
-        if (confidence < 0.5) return null;
+        const minArea = w * h * minAreaFrac;
         const pt = (px, py) => ({ x: px, y: py });
-        return {
-            left: left.x, top: top.y, right: right.x, bottom: bottom.y,
-            tl: pt(left.x, top.y), br: pt(right.x, bottom.y), tr: pt(right.x, top.y), bl: pt(left.x, bottom.y),
-            confidence, lines: { h: rows.length, v: cols.length }
+        const build = (left, top, right, bottom, score) => ({
+            left: left, top: top, right: right, bottom: bottom,
+            tl: pt(left, top), br: pt(right, bottom), tr: pt(right, top), bl: pt(left, bottom),
+            confidence: score / 8, lines: { h: rows.length, v: cols.length }
+        });
+
+        // (가) 가장 바깥 가로선 둘·세로선 둘. 네 선이 서로 맞물리는지(가로선 끝 ≈ 세로선 위치, 세로선 끝 ≈ 가로선 위치)
+        let outer = null;
+        {
+            const top = rows[0], bottom = rows[rows.length - 1];
+            const left = cols[0], right = cols[cols.length - 1];
+            const W = right.x - left.x, H = bottom.y - top.y;
+            if (W > 0 && H > 0 && W * H >= minArea) {
+                let score = 0;
+                [top, bottom].forEach((r) => { if (near(r.s, left.x)) score++; if (near(r.e, right.x)) score++; });
+                [left, right].forEach((c) => { if (near(c.s, top.y)) score++; if (near(c.e, bottom.y)) score++; });
+                if (score / 8 >= 0.5) outer = build(left.x, top.y, right.x, bottom.y, score);
+            }
+        }
+        // 네 모서리가 모두 깔끔하면 그대로(예전과 같은 결과)
+        if (outer && outer.confidence >= 0.875) return outer;
+
+        // (나) 2026-11-03 바깥에 다른 긴 선(표제란·바깥 여백선 등)이 있으면 (가)는 우하단 같은 한쪽이 틀어진다 →
+        // 가로·세로 선 후보에서 네 변이 실제로 이어진 사각형만 골라 그중 가장 큰 것
+        const band = (list, key) => {
+            const out = [];
+            list.forEach((it) => {
+                const last = out[out.length - 1];
+                if (last && it[key] - last.hi <= 1) { last.hi = it[key]; last.s = Math.min(last.s, it.s); last.e = Math.max(last.e, it.e); }
+                else out.push({ lo: it[key], hi: it[key], s: it.s, e: it.e });
+            });
+            return out;
         };
+        const hb = band(rows, 'y'), vb = band(cols, 'x');
+        const K = 6;
+        const tops = hb.slice(0, K), bottoms = hb.slice(-K);
+        const lefts = vb.slice(0, K), rights = vb.slice(-K);
+        let best = null, bestArea = 0, bestScore = 0;
+        tops.forEach((t) => bottoms.forEach((b) => lefts.forEach((l) => rights.forEach((r) => {
+            const x0 = l.lo, x1 = r.hi, y0 = t.lo, y1 = b.hi;
+            if (!(x1 > x0 && y1 > y0)) return;
+            const area = (x1 - x0) * (y1 - y0);
+            if (area < minArea) return;
+            // 네 변을 모두 덮는 선만(바깥으로 삐져나온 건 허용)
+            if (t.s > l.hi + tol || t.e < r.lo - tol || b.s > l.hi + tol || b.e < r.lo - tol) return;
+            if (l.s > t.hi + tol || l.e < b.lo - tol || r.s > t.hi + tol || r.e < b.lo - tol) return;
+            let score = 0;
+            [t, b].forEach((q) => { if (near(q.s, x0)) score++; if (near(q.e, x1)) score++; });
+            [l, r].forEach((q) => { if (near(q.s, y0)) score++; if (near(q.e, y1)) score++; });
+            if (score < 6) return;
+            // 모서리가 더 깔끔한 쪽 먼저, 같으면 더 큰(바깥) 사각형
+            if (score < bestScore || (score === bestScore && area <= bestArea)) return;
+            best = build(x0, y0, x1, y1, score); bestArea = area; bestScore = score;
+        }))));
+        if (best) return best;
+        return outer;
     }
 
     /** 어두운 쪽으로 r칸 번지게(3x3 최솟값, 분리형) — 축소로 흐려진 가는 선을 살린다 */
