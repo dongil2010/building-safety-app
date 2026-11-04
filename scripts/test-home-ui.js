@@ -134,7 +134,7 @@ const TODAY = '2026-10-28';
     assert.ok(html.includes('id="dashboardSummary"') && html.includes('id="dashboardTabs"'));
     assert.ok(html.indexOf('js/core/home-sites.js') > 0 && html.indexOf('js/core/home-sites.js') < html.indexOf('src="app.js'));
     assert.ok(app.includes('전체 현장 <b>${summary.total}') && app.includes('보고서 작성완료 <b>${summary.done}')
-        && app.includes('남은 보고서 <b>${summary.remaining}') && app.includes('결함위치도 남은 수 <b>${summary.mapRemaining}'), '요약 4개');
+        && app.includes('남은 보고서 <b>${summary.remaining}') && app.includes('보고서 작성 필요 <b>${summary.remaining}') && !app.includes('결함위치도 남은 수 <b>'), '요약 4개(결함위치도 남은 수 칩은 「보고서 작성 필요」로 바뀜)');
     assert.ok(app.includes("isMapDone: (b) => !!(RD && RD.isDone(b, 'defectMap'))"), '기존 결함위치도 작성완료 표시 사용');
     assert.ok(app.includes("data-dash-tab=\"active\"") && app.includes("data-dash-tab=\"done\""));
     assert.ok(app.includes('window.state.dashboardTab'));

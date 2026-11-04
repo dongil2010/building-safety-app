@@ -6469,7 +6469,7 @@ ${roundMobile ? '' : `<button type="button" class="icon-btn icon-btn-trash" titl
                     <div class="dashboard-summary-stats">
                         <span class="ds-chip ds-chip-total" title="삭제·휴지통 제외 전체 현장">전체 현장 <b>${summary.total}</b></span>
                         <span class="ds-chip ds-chip-done" title="최종 회차 보고서가 작성완료로 체크된 현장">보고서 작성완료 <b>${summary.done}</b></span>
-                        <span class="ds-chip ds-chip-unwritten ds-chip-map" title="다녀왔는데(점검일이 오늘 이전) 최종 회차 결함위치도가 아직 작성완료로 체크되지 않은 현장">결함위치도 남은 수 <b>${summary.mapRemaining}</b></span>
+                        <span class="ds-chip ds-chip-unwritten ds-chip-map" title="다녀왔는데(점검일이 오늘 이전) 최종 회차 보고서가 아직 작성완료로 체크되지 않은 현장">보고서 작성 필요 <b>${summary.remaining}</b></span>
                     </div>
                     <div class="dashboard-summary-remain" title="다녀왔는데(점검일이 오늘 이전) 최종 회차 보고서가 아직 작성완료로 체크되지 않은 현장 수">남은 보고서 <b>${summary.remaining}</b></div>`;
             }
