@@ -59,3 +59,22 @@ const m3 = mm.overlay(clone(mergedA), B, mergedA);
 assert.strictEqual(rd.isDone(m3, 'defectMap'), false, '해제가 동기화됨');
 assert.strictEqual(rd.isDone(m3, 'report'), true);
 console.log('test-round-done: ok');
+
+// 2026-11-04 「보고서 작성 중」: 작성완료와 같은 방식, 작성완료된 회차에서는 배지 숨김
+{
+    const w1 = { id: 'w1', inspectionYear: '2026년', inspectionPeriod: '하반기' };
+    const w2 = { id: 'w2', inspectionYear: '2026년', inspectionPeriod: '하반기' };
+    assert.ok(rd.KINDS.includes('reportWip'));
+    assert.strictEqual(rd.badgeText('reportWip', '2026년_하반기'), '2026년 하반기 보고서 작성 중');
+    rd.setDone(w1, 'reportWip', true, 'u', 1000);
+    assert.strictEqual(rd.latestBadges([w1, w2]).length, 0, '동 하나만 체크면 배지 없음');
+    rd.setDone(w2, 'reportWip', true, 'u', 1000);
+    assert.deepStrictEqual(rd.latestBadges([w1, w2]).map((x) => x.kind), ['reportWip']);
+    rd.setDone(w1, 'report', true, 'u', 2000); rd.setDone(w2, 'report', true, 'u', 2000);
+    assert.deepStrictEqual(rd.latestBadges([w1, w2]).map((x) => x.kind), ['report'], '작성완료면 작성 중 배지는 숨김');
+    const m = rd.merge({ reportWip: { done: true, at: 5 } }, { reportWip: { done: false, at: 9 } });
+    assert.strictEqual(m.reportWip.done, false, '더 나중 쪽이 이김');
+}
+const htmlRd = require('fs').readFileSync(require('path').join(__dirname, '..', 'index.html'), 'utf8');
+assert.ok(htmlRd.indexOf('id="editRoundDoneSection"') < htmlRd.indexOf('id="inputEditBuildingSiteName"'), '작성 상태 체크가 수정창 맨 위');
+console.log('test-round-done (wip) OK');

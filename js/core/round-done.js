@@ -8,7 +8,8 @@
 (function (root) {
     'use strict';
 
-    var KINDS = ['report', 'defectMap'];
+    // reportWip = 「보고서 작성 중」(2026-11-04) — 작성완료와 같은 방식으로 회차·동기화. 작성완료와는 동시에 체크되지 않는다(UI에서 서로 해제).
+    var KINDS = ['report', 'defectMap', 'reportWip'];
 
     function normEntry(v) {
         if (!v || typeof v !== 'object') return null;
@@ -83,6 +84,7 @@
 
     function badgeText(kind, roundKey) {
         if (kind === 'report') return roundLabel(roundKey) + ' 보고서 작성완료';
+        if (kind === 'reportWip') return roundLabel(roundKey) + ' 보고서 작성 중';
         return '결함위치도 작성완료';
     }
 
@@ -105,6 +107,8 @@
             Object.keys(byRound).forEach(function (rk) {
                 var members = byRound[rk];
                 if (!members.length || !members.every(function (b) { return isDone(b, kind); })) return;
+                // 보고서가 이미 작성완료된 회차면 「작성 중」 배지는 보이지 않는다
+                if (kind === 'reportWip' && members.every(function (b) { return isDone(b, 'report'); })) return;
                 var rank = roundRank(rk);
                 var doneAt = 0, by = '';
                 members.forEach(function (b) { var e = getEntry(b, kind); if (e.doneAt >= doneAt) { doneAt = e.doneAt; by = e.by; } });

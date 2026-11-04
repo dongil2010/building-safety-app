@@ -5878,8 +5878,10 @@ document.addEventListener('DOMContentLoaded', () => {
         const list = rd.latestBadges(buildings || [], getBuildingSurveyRoundKey);
         return list.map((x) => {
             const when = x.doneAt ? new Date(x.doneAt).toLocaleString('ko-KR') : '';
-            const tip = `${formatSurveyRoundLabel(x.roundKey)} · ${x.kind === 'report' ? '보고서' : '결함위치도'} 작성완료${when ? ' · ' + when : ''}${x.by ? ' · ' + x.by : ''}`;
-            return `<span class="round-done-badge round-done-badge-${x.kind === 'report' ? 'report' : 'map'}" title="${escapeHtml(tip)}">✔ ${escapeHtml(x.text)}</span>`;
+            const isWip = x.kind === 'reportWip';
+            const tip = `${formatSurveyRoundLabel(x.roundKey)} · ${x.kind === 'defectMap' ? '결함위치도' : '보고서'} ${isWip ? '작성 중' : '작성완료'}${when ? ' · ' + when : ''}${x.by ? ' · ' + x.by : ''}`;
+            const cls = x.kind === 'report' ? 'report' : (isWip ? 'wip' : 'map');
+            return `<span class="round-done-badge round-done-badge-${cls}" title="${escapeHtml(tip)}">${isWip ? '✎' : '✔'} ${escapeHtml(x.text)}</span>`;
         }).join('');
     }
     window.buildRoundDoneBadgesHtml = buildRoundDoneBadgesHtml;
@@ -5902,7 +5904,7 @@ document.addEventListener('DOMContentLoaded', () => {
             </label>`;
         };
         const list = host.querySelector('.round-done-edit-list');
-        list.innerHTML = row('report', rd.badgeText('report', rk)) + row('defectMap', '결함위치도 작성완료');
+        list.innerHTML = row('reportWip', rd.badgeText('reportWip', rk)) + row('report', rd.badgeText('report', rk)) + row('defectMap', '결함위치도 작성완료');
         list.querySelectorAll('input[type="checkbox"]').forEach((cb) => {
             cb.addEventListener('change', () => {
                 window.setSurveyRoundDone(site, rk, cb.getAttribute('data-kind'), cb.checked);
@@ -5920,14 +5922,19 @@ document.addEventListener('DOMContentLoaded', () => {
         const user = window.state.userName || '';
         const now = Date.now();
         let changed = 0;
+        // 보고서 「작성 중」과 「작성완료」는 동시에 체크되지 않는다 — 한쪽을 체크하면 다른 쪽은 해제
+        const opposite = done ? ({ report: 'reportWip', reportWip: 'report' })[kind] : null;
         targets.forEach((b) => {
-            if (rd.setDone(b, kind, done, user, now)) { markBuildingMetaDirty(b); changed += 1; }
+            let hit = false;
+            if (rd.setDone(b, kind, done, user, now)) hit = true;
+            if (opposite && rd.setDone(b, opposite, false, user, now)) hit = true;
+            if (hit) { markBuildingMetaDirty(b); changed += 1; }
         });
         if (!changed) return 0;
         saveStateToLocalStorage();
         if (typeof syncStateToFirebase === 'function') syncStateToFirebase();
         if (typeof window.showToast === 'function') {
-            window.showToast(`${formatSurveyRoundLabel(roundKey)} ${kind === 'report' ? '보고서' : '결함위치도'} 작성완료 ${done ? '체크' : '해제'}`, 'success', 2500);
+            window.showToast(`${formatSurveyRoundLabel(roundKey)} ${kind === 'defectMap' ? '결함위치도 작성완료' : (kind === 'reportWip' ? '보고서 작성 중' : '보고서 작성완료')} ${done ? '체크' : '해제'}`, 'success', 2500);
         }
         if (typeof window.renderDashboard === 'function') window.renderDashboard();
         if (typeof window.refreshNavRoundDoneBadges === 'function') window.refreshNavRoundDoneBadges();
