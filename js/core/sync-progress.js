@@ -13,7 +13,9 @@
 (function (root) {
     'use strict';
 
-    var KINDS = ['photo', 'move', 'edit', 'add', 'del', 'ndt', 'other'];
+    var KINDS = ['bldg', 'photo', 'move', 'edit', 'add', 'del', 'ndt', 'other'];
+    // 2026-11-04 bldg: 건물 정보(점검날짜·이름 등 건물 단위) ? 층이 아니라 건물마다 한 건. 앱이 「올릴 건물 정보 있음」(_pendingCloudSync) 목록을
+    //  ctx.pendingBuildingIds로 넘기고, 목록에서 빠지면(루트·건물 문서 쓰기 성공 뒤에만 지워짐) 올라감으로 센다.
     var LABELS = {
         photo: '사진',
         move: '마킹 이동',
@@ -21,11 +23,12 @@
         add: '새 마킹',
         del: '마킹 삭제',
         ndt: '비파괴 수정',
-        other: '기타 변경(메모·도면 등, 층 단위)'
+        other: '기타 변경(메모·도면 등, 층 단위)',
+        bldg: '건물 정보(점검날짜 등)'
     };
     var ICONS = {
         photo: 'fa-camera', move: 'fa-up-down-left-right', edit: 'fa-pen', add: 'fa-location-dot',
-        del: 'fa-trash-can', ndt: 'fa-hammer', other: 'fa-layer-group'
+        del: 'fa-trash-can', ndt: 'fa-hammer', other: 'fa-layer-group', bldg: 'fa-building'
     };
 
     function emptyCounts() {
@@ -90,7 +93,7 @@
 
         /** 이 기기에서 한 변경 하나. fk(층 키)는 사진이면 몰라도 된다. 반환: 순번 */
         function record(kind, id, fk) {
-            if (KINDS.indexOf(kind) < 0 || kind === 'other' || !id) return 0;
+            if (KINDS.indexOf(kind) < 0 || kind === 'other' || kind === 'bldg' || !id) return 0;
             load();
             // 끝난 진행 상황 위에 새 변경이 오면 새로 센다
             if (data.session && data.session.finishedAt) data.session = null;
@@ -298,6 +301,24 @@
                     });
                 }
             }
+            // 건물 정보: 올릴 건물 목록 그대로(일지 아님). 세션 중 목록에서 빠지면 올라감
+            var pb = (ctx.pendingBuildingIds || []).map(String);
+            pending.bldg = pb.length;
+            if (s) {
+                if (!s.bldgIds) s.bldgIds = {};
+                pb.forEach(function (id) {
+                    if (s.bldgIds[id] !== 0) { s.bldgIds[id] = 0; s.total.bldg = (s.total.bldg || 0) + 1; changed = true; }
+                });
+                if (ctx.pendingBuildingIds) {
+                    Object.keys(s.bldgIds).forEach(function (id) {
+                        if (s.bldgIds[id] === 0 && pb.indexOf(id) < 0) {
+                            s.bldgIds[id] = 1;
+                            s.done.bldg = (s.done.bldg || 0) + 1;
+                            changed = true;
+                        }
+                    });
+                }
+            }
             var rows = [];
             var tot = 0;
             var dn = 0;
@@ -360,8 +381,11 @@
                 if (!oldestAt || (e.at && e.at < oldestAt)) oldestAt = e.at || 0;
             });
             pending.other = dirty.filter(function (fk) { return inB(fk) && !hasFloorEntries(fk); }).length;
+            var bid = pre.replace(/_$/, '');
+            pending.bldg = ((ctx && ctx.pendingBuildingIds) || []).map(String).indexOf(bid) >= 0 ? 1 : 0;
             var s = data.session || null;
             var done = emptyCounts();
+            if (s && s.bldgIds && s.bldgIds[bid] === 1 && !pending.bldg) done.bldg = 1;
             if (s && s.doneFk) {
                 Object.keys(s.doneFk).forEach(function (fk) {
                     if (!inB(fk)) return;

@@ -919,8 +919,15 @@ document.addEventListener('DOMContentLoaded', () => {
             }));
             return used;
         };
+        // 2026-11-04 건물 정보(점검날짜 등) ? 서버 쓰기 성공 뒤에만 지워지는 표시(_pendingCloudSync)가 있는 건물
+        let pendingBuildingIds = [];
+        try {
+            pendingBuildingIds = ((window.state && window.state.buildings) || [])
+                .filter((b) => b && b.id && b._pendingCloudSync).map((b) => String(b.id));
+        } catch (_e) { /* ignore */ }
         return ({
             dirtyFloorKeys: dirty,
+            pendingBuildingIds,
             online: navigator.onLine !== false,
             syncing,
             photoState: (id) => {
@@ -933,7 +940,7 @@ document.addEventListener('DOMContentLoaded', () => {
     }
     window.bsaSyncProgressSummary = syncProgressSummary;
     function syncProgressFloorLabel(fk) {
-        if (fk === 'sync') return '동기화';
+        if (fk === 'sync') return '건물 정보·회사 동기화';
         try {
             const b = findBuildingForFloorKey(fk);
             const code = floorCodeFromFloorKey(fk, b);
