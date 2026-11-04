@@ -27114,8 +27114,10 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
 
     // --- Dynamic Defect Component(부재 명칭) — 분류별 플랫 프리셋 ---
     // 2026-09-28 접합부는 거더/빔 구분이 필요 없음 — 큰보·작은보 → 보, 철골거더·철골빔 → 철골보
-    const DEFECT_JOINT_LEFT = ['기둥', 'RC기둥', '철골기둥', 'SRC기둥', '보', '벽체', 'RC벽체', '내력벽', '슬래브', '기초'];
-    const DEFECT_JOINT_RIGHT = ['보', '철골보', '기둥', '슬래브', '데크슬래브', '벽체', '조적벽체', '기초']; // 조적벽체(2026-10-14): 예) 기둥-조적벽체 접합부 — 부재 수에는 안 셈
+    // 2026-11-04 보(G)·보(B) 다시 넣음(사용자) — 통계 평가 표가 접합부 결함을 맞닿은 부재 줄(큰보·작은보·슬래브…)에 같이 세서
+    //   보-슬래브 접합부가 큰보인지 작은보인지 알아야 한다. 그냥 '보'는 예전 자료·모를 때용으로 남긴다.
+    const DEFECT_JOINT_LEFT = ['기둥', 'RC기둥', '철골기둥', 'SRC기둥', '보(G)', '보(B)', '보', '벽체', 'RC벽체', '내력벽', '슬래브', '기초'];
+    const DEFECT_JOINT_RIGHT = ['보(G)', '보(B)', '보', '철골보', '기둥', '슬래브', '데크슬래브', '벽체', '조적벽체', '기초']; // 조적벽체(2026-10-14): 예) 기둥-조적벽체 접합부 — 부재 수에는 안 셈
     // 2026-11-03 기본 프리셋을 회사 엑셀(160건)에서 한 번이라도 쓰인 것만으로 정리 — 접합부 칩도 엑셀에 나온 두 가지만
     // (다른 접합부는 「접합부」 단추의 좌·우 선택으로 직접 만들 수 있다)
     const DEFECT_JOINT_COMPONENT_PRESET = [
@@ -30670,7 +30672,7 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
             if (list.includes(cur)) el.value = cur;
         };
         fill(left, DEFECT_JOINT_LEFT, '기둥');
-        fill(right, DEFECT_JOINT_RIGHT, '보');
+        fill(right, DEFECT_JOINT_RIGHT, '보(G)');
     }
 
     function buildJointComponentName(left, right) {

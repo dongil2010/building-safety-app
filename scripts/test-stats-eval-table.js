@@ -166,10 +166,45 @@ assert.ok(src.includes("var EVAL_UNITS_KEY = 'bsa_stats_eval_units';"), '평가�
 assert.ok(src.includes('data-eval-add>＋ 평가단위 추가</button>'), '평가단위 추가 버튼');
 assert.ok(src.includes('renderEvalTable(bldg ? payload : null, ensureEvalMount(), bldg);'));
 
+// 2026-11-04 접합부는 맞닿은 두 부재 줄에 같이(보(G)-슬래브 접합부 누수 = 큰보 + 슬래브), 채움벽 접합부는 제외
+{
+    const code2 = [
+        takeBlock('var EVAL_GROUP_KEYS = ', '[', ']') + ';',
+        takeBlock('function classifyMemberGroup(', '{', '}'),
+        takeBlock('function evalGroupsFor(', '{', '}')
+    ].join('\n');
+    const sb2 = {};
+    vm.createContext(sb2);
+    vm.runInContext(code2 + '\nthis.f = evalGroupsFor;', sb2);
+    const g = (name, cg) => JSON.parse(JSON.stringify(sb2.f(name, cg || 'other')));
+    assert.deepStrictEqual(g('보(G)-슬래브 접합부'), ['bigBeam', 'slab']);
+    assert.deepStrictEqual(g('보(B)-슬래브 접합부'), ['smallBeam', 'slab']);
+    assert.deepStrictEqual(g('RC벽체-슬래브 접합부'), ['rcWall', 'slab']);
+    assert.deepStrictEqual(g('내력벽 - 슬래브 접합부'), ['rcWall', 'slab']);
+    assert.deepStrictEqual(g('기둥-보(G) 접합부'), ['column', 'bigBeam']);
+    assert.deepStrictEqual(g('보-보 접합부'), ['upperBeam'], '같은 부재는 한 번');
+    assert.deepStrictEqual(g('기둥-벽체 접합부'), [], '채움벽 접합부(이격 등)는 제외');
+    assert.deepStrictEqual(g('조적벽체-슬래브 접합부'), []);
+    assert.deepStrictEqual(g('철골 보 볼트 접합부'), []);
+    assert.deepStrictEqual(g('기둥', 'column'), ['column'], '접합부가 아니면 그 부재 하나');
+    // 균열은 기둥-보 접합부면 보 줄만(G/B 미지정 보는 큰보로), 다른 접합부는 그대로
+    vm.runInContext(takeBlock('function evalCrackGroupsFor(', '{', '}') + '\nthis.c = evalCrackGroupsFor;', sb2);
+    const c = (name) => JSON.parse(JSON.stringify(sb2.c(sb2.f(name, 'other'))));
+    assert.deepStrictEqual(c('기둥-보 접합부'), ['bigBeam'], '기둥-보 접합부 균열 = 큰보');
+    assert.deepStrictEqual(c('기둥-보(G) 접합부'), ['bigBeam']);
+    assert.deepStrictEqual(c('기둥-보(B) 접합부'), ['smallBeam']);
+    assert.deepStrictEqual(c('보(G)-슬래브 접합부'), ['bigBeam', 'slab'], '보-슬래브 균열은 두 줄');
+    assert.deepStrictEqual(c('보(G)-보(B) 접합부'), ['bigBeam'], '거더-빔 접합부 균열 = 거더(큰보)');
+    assert.deepStrictEqual(g('보(G)-보(B) 접합부'), ['bigBeam', 'smallBeam'], '균열 말고는 두 줄');
+    assert.deepStrictEqual(g('기둥-보 접합부'), ['column', 'upperBeam'], '균열이 아닌 결함(누수 등)은 두 줄');
+}
+assert.ok(src.includes('var evalGroups = evalGroupsFor(d.component, compGroup);'), '집계에서 접합부 줄 나누기');
+assert.ok(src.includes('addEval(bin, evalCrackGroupsFor(evalGroups));'), '균열 구간은 접합부 균열 규칙으로');
+
 // 집계 연결: 균열 구간은 구조체 부재만(구조체 아닌 부재는 기타로 빠짐), 결과가 층 줄에 실림
-assert.ok(/addEval\(bin\);/.test(src), '균열폭 구간을 평가 칸에도 더한다');
+assert.ok(/addEval\(bin, /.test(src), '균열폭 구간을 평가 칸에도 더한다');
 assert.ok(src.includes("['peel', 'fall', 'leakTrace', 'efflo', 'leakNow', 'rebar'].forEach(function (k) { if (evalKinds[k]) addEval(k); });"));
-assert.ok(/var addEval = function \(key\) \{\s*\/\/[^\n]*\n\s*if \(cat !== '구조체'\) return;/.test(src), '평가 표는 구조체 결함만(마감재 누수흔적 제외)');
+assert.ok(/var addEval = function \(key, groups\) \{\s*\/\/[^\n]*\n\s*if \(cat !== '구조체'\) return;/.test(src), '평가 표는 구조체 결함만(마감재 누수흔적 제외)');
 assert.ok(src.includes('componentEval: floorComponentEval,') && src.includes('componentEvalNos: floorComponentEvalNos,'));
 assert.ok(src.includes("[document.getElementById('statsEvalSection'), vis.evalTable],"), '대분류 전환 때 보이기/숨기기');
 

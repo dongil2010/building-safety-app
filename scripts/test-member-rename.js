@@ -74,7 +74,8 @@ const structPreset = pick(/const DEFECT_COMPONENT_PRESET = \{\s*'구조체': \[(
 ["'큰보'", "'작은보'", "'철골거더'", "'철골빔'", "'보',"].forEach((v) => assert.ok(!structPreset.includes(v), 'preset lacks ' + v));
 const jl = pick(/const DEFECT_JOINT_LEFT = \[([^\]]*)\]/);
 const jr = pick(/const DEFECT_JOINT_RIGHT = \[([^\]]*)\]/);
-[jl, jr].forEach((l) => assert.ok(!/\((G|B)\)|큰보|작은보|철골거더|철골빔/.test(l), 'joint lists without G/B: ' + l));
+// 2026-11-04 접합부도 보(G)·보(B)를 고른다(통계 평가 표가 접합부를 큰보·작은보 줄에 셈). 옛 큰보·작은보 이름은 여전히 없음
+[jl, jr].forEach((l) => assert.ok(l.includes("'보(G)'") && l.includes("'보(B)'") && !/큰보|작은보|철골거더|철골빔/.test(l), 'joint lists with G/B: ' + l));
 const ndt = pick(/const NDT_COMPONENT_PRESET = \[([\s\S]*?)\];/);
 assert.ok(ndt.includes("'보(G)'") && ndt.includes("'철골보(B)'") && !ndt.includes("'큰보'"), 'ndt preset renamed');
 const html = fs.readFileSync(path.join(root, 'index.html'), 'utf8').replace(/\r\n/g, '\n');

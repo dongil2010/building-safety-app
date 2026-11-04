@@ -1272,6 +1272,40 @@
         return totals;
     }
 
+    /**
+     * 2026-11-04 평가 표에서 결함이 들어갈 부재 줄. 보통은 그 결함의 부재 하나(compGroup).
+     * 접합부(「보(G)-슬래브 접합부」, 「RC벽체-슬래브 접합부」, 「기둥-보 접합부」…)는 맞닿은 부재마다 한 번씩(사용자) —
+     * 이름을 「-·/,~」로 나눠 조각마다 부재를 찾는다. 같은 부재 두 번(보-보)은 한 번만.
+     * 조적·ALC·블록이나 그냥 「벽체」(채움벽)가 낀 접합부(기둥-벽체 이격 등)는 채움벽 결함이라 어느 줄에도 안 넣는다.
+     */
+    var EVAL_GROUP_KEYS = ['column', 'rcWall', 'bigBeam', 'smallBeam', 'slab', 'upperBeam'];
+    function evalGroupsFor(component, compGroup) {
+        var key = String(component || '').replace(/\s+/g, '');
+        if (key.indexOf('접합') < 0) return [compGroup];
+        var out = [], infill = false;
+        key.replace(/접합부?/g, '').split(/[-‐–—·/,~]/).forEach(function (p) {
+            if (!p) return;
+            if (/조적|ALC|블록|블럭|벽돌/i.test(p) || (p.indexOf('벽') >= 0 && !/RC벽|내력벽|옹벽|전단벽/i.test(p))) { infill = true; return; }
+            var g = classifyMemberGroup(p, '구조체');
+            if (EVAL_GROUP_KEYS.indexOf(g) >= 0 && out.indexOf(g) < 0) out.push(g);
+        });
+        return infill ? [] : out;
+    }
+    /**
+     * 균열 줄(사용자 2026-11-04): 기둥-보 접합부는 보 줄만(보(G/B 미지정)는 큰보로), 보(G)-보(B) 접합부는 큰보(거더) 줄만.
+     * 그 밖에는 evalGroupsFor 그대로(보(G)-슬래브 균열 = 큰보 + 슬래브).
+     */
+    function evalCrackGroupsFor(groups) {
+        var out = groups;
+        var beam = out.filter(function (g) { return g === 'bigBeam' || g === 'smallBeam' || g === 'upperBeam'; });
+        if (out.indexOf('column') >= 0 && beam.length) {
+            out = out.filter(function (g) { return g !== 'column'; }).map(function (g) { return g === 'upperBeam' ? 'bigBeam' : g; })
+                .filter(function (g, i, a) { return a.indexOf(g) === i; });
+        }
+        if (out.indexOf('bigBeam') >= 0 && out.indexOf('smallBeam') >= 0) out = out.filter(function (g) { return g !== 'smallBeam'; });
+        return out;
+    }
+
     function classifyEvalKinds(d) {
         var type = String(d && d.defectType != null ? d.defectType : '').replace(/\s+/g, '');
         var comp = String(d && d.component != null ? d.component : '').replace(/\s+/g, '');
@@ -1571,13 +1605,17 @@
                 componentCounts[compGroup] = (componentCounts[compGroup] || 0) + 1;
                 floorComponentCounts[compGroup] = (floorComponentCounts[compGroup] || 0) + 1;
                 var nonStructuralMember = isNonStructuralMember(d.component, cat);
-                var evalBucket = floorComponentEval[compGroup] || (floorComponentEval[compGroup] = {});
-                var evalNoBucket = floorComponentEvalNos[compGroup] || (floorComponentEvalNos[compGroup] = {});
-                var addEval = function (key) {
+                // 접합부는 맞닿은 두 부재 줄에 같이 센다(보(G)-슬래브 접합부 누수 = 큰보 누수 + 슬래브 누수)
+                var evalGroups = evalGroupsFor(d.component, compGroup);
+                var addEval = function (key, groups) {
                     // 평가 표는 구조체로 체크한 결함만(마감재 누수흔적 등 제외, 구분 미기재는 구조체) — 2026-11-04 사용자
                     if (cat !== '구조체') return;
-                    evalBucket[key] = (evalBucket[key] || 0) + 1;
-                    (evalNoBucket[key] || (evalNoBucket[key] = [])).push(d.no || d.groupNo || '');
+                    (groups || evalGroups).forEach(function (g) {
+                        var evalBucket = floorComponentEval[g] || (floorComponentEval[g] = {});
+                        var evalNoBucket = floorComponentEvalNos[g] || (floorComponentEvalNos[g] = {});
+                        evalBucket[key] = (evalBucket[key] || 0) + 1;
+                        (evalNoBucket[key] || (evalNoBucket[key] = [])).push(d.no || d.groupNo || '');
+                    });
                 };
                 var evalKinds = classifyEvalKinds(d);
                 ['peel', 'fall', 'leakTrace', 'efflo', 'leakNow', 'rebar'].forEach(function (k) { if (evalKinds[k]) addEval(k); });
@@ -1590,7 +1628,7 @@
                     binBucket[bin] = (binBucket[bin] || 0) + 1;
                     var noBucket = floorComponentCrackBinNos[compGroup] || (floorComponentCrackBinNos[compGroup] = {});
                     (noBucket[bin] || (noBucket[bin] = [])).push(d.no || d.groupNo || '');
-                    addEval(bin);
+                    addEval(bin, evalCrackGroupsFor(evalGroups));
                 }
                 var kinds = classifyDefectKinds(d);
                 var kindBucket = floorComponentKinds[compGroup] || (floorComponentKinds[compGroup] = {});
