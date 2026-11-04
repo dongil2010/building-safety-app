@@ -105,7 +105,7 @@ function makeCtx(opts) {
     }
 
     // 연결: 행·열 패널 버튼 · 클릭 처리 · 같은 대상 목록
-    assert.ok(/data-act="recalcGrid"[^\n]*\n\s*<button type="button" data-act="clearDetail" class="danger"[^>]*>상세위치 행·열 지우기<\/button>/.test(app), '다시 채우기 옆 버튼');
+    assert.ok(/<button type="button" data-act="clearDetail" class="danger"[^>]*>상세위치 행·열 지우기<\/button>/.test(app) && app.includes('data-act="recalcGrid"'), '「지우기」 묶음의 버튼(2026-11-04 패널 정리: 다시 계산은 「마킹 위치」 묶음)');
     assert.ok(/if \(act === 'clearDetail'\) \{\n\s*clearDetailLocationForCurrentFloor\(\);/.test(app));
     const reset = extractFunction(app, 'async function recalcGridLocationForCurrentFloor(');
     const clear = extractFunction(app, 'async function clearDetailLocationForCurrentFloor(');

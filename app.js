@@ -42025,6 +42025,13 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
         ['mousedown', 'touchstart', 'wheel', 'dblclick'].forEach((ev) => panel.addEventListener(ev, (e) => e.stopPropagation(), { passive: true }));
         panel.addEventListener('click', onGridPanelClick);
         panel.addEventListener('change', onGridPanelChange);
+        panel.addEventListener('toggle', (e) => {
+            const d = e.target;
+            const key = d && d.getAttribute && d.getAttribute('data-sec');
+            if (!key) return;
+            const ge = gridEditState();
+            ge.sections = Object.assign({}, ge.sections || {}, { [key]: !!d.open });
+        }, true);
         panel.addEventListener('keydown', (e) => {
             if (e.key === 'Enter' && e.target && e.target.tagName === 'INPUT') {
                 e.preventDefault();
@@ -42102,73 +42109,65 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
             const how = r.source === 'markers' ? ' · 번호 풍선·글자 기준' : ' · <b style="color:#b45309">번호 풍선·글자를 못 찾아 선 기준으로 찾음</b>';
             return `열 ${byAx.col.length}개 · 행 ${byAx.row.length}개 후보${how}${named}${seriesNote}${r.weak ? ' · <b style="color:#b45309">확실하지 않음(긴 실선만 찾음)</b>' : ''}`;
         })() : '';
-        const autoHtml = `
-                <div class="grid-panel-sec">
-                    <div class="grid-panel-row"><b>자동 잡기</b> <small class="grid-panel-muted">캐드 PDF의 번호 풍선·글자를 찾아 통심선 후보를 보여 줍니다</small></div>
-                    <div class="grid-panel-row">
-                        <label>민감도 <select data-f="autoSens" title="짧은 선도 후보에 넣으려면 「짧은 선도」, 벽선이 섞이면 「긴 선만」">
-                            <option value="normal"${autoSens === 'normal' ? ' selected' : ''}>보통</option>
-                            <option value="short"${autoSens === 'short' ? ' selected' : ''}>짧은 선도</option>
-                            <option value="long"${autoSens === 'long' ? ' selected' : ''}>긴 선만</option>
-                        </select></label>
-                        <button type="button" data-act="autoDetect">✨ 자동 잡기</button>
-                    </div>
-                    <div class="grid-panel-row">
-                        <label>번호 위치 <select data-f="autoOuter" title="기본은 건물 바깥(외곽)에 있는 번호만 — 주차칸·방 번호 같은 안쪽 번호는 무시합니다. 축 번호가 건물 안쪽에 있는 도면만 「안쪽도」">
-                            <option value="outer"${(ge.autoOuter || 'outer') === 'outer' ? ' selected' : ''}>외곽만 (기본)</option>
-                            <option value="all"${ge.autoOuter === 'all' ? ' selected' : ''}>안쪽도</option>
-                        </select></label>
-                    </div>
-                    <div class="grid-panel-row">
-                        <label>찾을 방향 <select data-f="autoAxes" title="입면도처럼 위쪽 번호(열)만 필요한 도면은 「열만」">
-                            <option value="both"${autoAxes === 'both' ? ' selected' : ''}>열 + 행</option>
-                            <option value="cols"${autoAxes === 'cols' ? ' selected' : ''}>열만 (입면도)</option>
-                            <option value="rows"${autoAxes === 'rows' ? ' selected' : ''}>행만</option>
-                        </select></label>
-                    </div>
-                    ${autoPrev ? `
-                    <div class="grid-panel-row">${autoSummary}</div>
-                    <div class="grid-panel-row">
-                        <button type="button" data-act="autoApply" class="active">적용</button>
-                        <button type="button" data-act="autoCancel">취소</button>
-                    </div>` : ''}
-                </div>`;
         const vi = ge.sel ? ge.sel.vertexIndex : null;
         const canDelVertex = !!(selF && vi != null && vi > 0 && vi < selF.line.pts.length - 1);
-        panel.classList.toggle('collapsed', !!ge.collapsed);
-        panel.innerHTML = `
-            <div class="grid-panel-head">
-                <b>행·열(통심) 선</b>
-                <span class="grid-panel-head-btns">
-                    <button type="button" data-act="collapse" title="접기/펴기">${ge.collapsed ? '▾' : '▴'}</button>
-                    <button type="button" data-act="close" title="행·열 편집 끝내기">✕</button>
-                </span>
-            </div>
-            <div class="grid-panel-body">
-                <div class="grid-panel-tools">
-                    <button type="button" data-tool="col" class="${ge.tool === 'col' ? 'active' : ''}">│ 열 추가</button>
-                    <button type="button" data-tool="row" class="${ge.tool === 'row' ? 'active' : ''}">─ 행 추가</button>
-                    <button type="button" data-tool="select" class="${ge.tool === 'select' ? 'active' : ''}">✥ 선택·이동</button>
-                    <button type="button" data-tool="zone" class="${ge.tool === 'zone' ? 'active' : ''}" title="한 도면에 여러 층이 있을 때 — 사각형 구역마다 번호를 따로">▭ 구역</button>
-                </div>
-                <div class="grid-panel-hint">${hint}</div>
-                ${autoHtml}
-                <div class="grid-panel-sec">
-                    <div class="grid-panel-row"><b>구역</b> <small class="grid-panel-muted">한 도면에 여러 층 — 구역마다 번호 따로</small></div>
-                    <div class="grid-panel-row">
-                        <select data-f="zone" title="선을 그으면 누른 자리의 구역에 들어갑니다">${zoneOpts}</select>
+        // 접었다 폈다 하는 묶음 — 패널을 다시 그려도 열림 상태를 기억한다(자동 잡기 후보가 있으면 항상 열림)
+        const secOpen = Object.assign({ group: true, loc: true, zone: !!zones.length, auto: false, danger: false }, ge.sections || {});
+        if (autoPrev) secOpen.auto = true;
+        const sec = (key, title, body, note) => `
+                <details class="grid-sec" data-sec="${key}"${secOpen[key] ? ' open' : ''}>
+                    <summary>${title}${note ? ` <small class="grid-panel-muted">${note}</small>` : ''}</summary>
+                    <div class="grid-sec-body">${body}</div>
+                </details>`;
+        const nudgeBtns = (act, axis) => [-50, -10, -1, 1, 10, 50].map((d) => `<button type="button" data-act="${act}" data-d="${d}">${axis === 'row' ? (d < 0 ? '▲' : '▼') : (d < 0 ? '◀' : '▶')}${Math.abs(d)}</button>`).join('');
+        // ---- 선택한 선: 항상 맨 위. 폭은 선마다 하나씩 조절(− / + 단추, 이전·다음 선으로 차례로) ----
+        let selOrder = [];
+        let selIdx = -1;
+        if (selF) {
+            selOrder = G.orderedLines(selF.group, gctx).items;
+            selIdx = selOrder.findIndex((x) => x.line.id === selF.line.id);
+        }
+        const selBandNow = selF ? G.lineBand(selF.line, selF.group, gctx) : 0;
+        const selBandOwn = !!(selF && selF.line.band != null && selF.line.band !== '' && Number.isFinite(Number(selF.line.band)));
+        const bandStep = (d) => `<button type="button" data-act="bandStep" data-d="${d}">${d < 0 ? '−' : '+'}${Math.abs(d)}</button>`;
+        const selHtml = selF ? `
+                <div class="grid-sel-card">
+                    <div class="grid-sel-head">
+                        <button type="button" data-act="selPrev" title="${selF.group.axis === 'row' ? '위쪽' : '왼쪽'} 이웃 선 고르기"${selIdx <= 0 ? ' disabled' : ''}>◀</button>
+                        <b class="grid-sel-title">${axisKo(selF.group.axis)} ${gridEsc(selName)} <small class="grid-panel-muted">${selIdx + 1}/${selOrder.length}</small></b>
+                        <button type="button" data-act="selNext" title="${selF.group.axis === 'row' ? '아래쪽' : '오른쪽'} 이웃 선 고르기"${selIdx >= selOrder.length - 1 ? ' disabled' : ''}>▶</button>
+                    </div>
+                    <div class="grid-panel-row grid-band-row">
+                        <b>폭</b>
+                        ${bandStep(-10)}${bandStep(-1)}
+                        <input type="number" data-f="lband" value="${selBandOwn ? selF.line.band : ''}" placeholder="${Math.round(selBandNow)}" min="0" step="1" title="이 선의 폭(도면 px). 비우면 그룹 기본 폭 ${Math.round(lineBandDefault)}">
+                        ${bandStep(1)}${bandStep(10)}
+                    </div>
+                    <div class="grid-panel-row grid-band-sub">
+                        <small class="grid-panel-muted">${selBandOwn ? '이 선만 직접 지정' : `그룹 기본 폭 ${Math.round(lineBandDefault)} 사용 중`}</small>
+                        ${selBandOwn ? '<button type="button" data-act="bandReset" title="이 선의 폭을 지우고 그룹 기본 폭으로">기본으로</button>' : ''}
+                        <button type="button" data-act="bandAll" title="이 선의 폭을 이 그룹의 모든 선과 기본 폭으로 맞춥니다(선마다 따로 준 폭은 지워짐)">그룹 전체에 이 폭</button>
                     </div>
                     <div class="grid-panel-row">
-                        <button type="button" data-act="zoneAdd">+ 구역 추가</button>
-                        ${ez ? '<button type="button" data-act="zoneRedraw">범위 다시 그리기</button><button type="button" data-act="zoneDel" class="danger">구역 삭제</button>' : ''}
+                        <label>이름 <input type="text" data-f="label" value="${gridEsc(selF.line.label || '')}" placeholder="자동 ${gridEsc(selAuto)}" maxlength="10" style="width:64px"></label>
+                        <label title="이 선의 번호만 직접 정합니다(예: 5 → ${gridEsc(selF.group.prefix || '')}5). 비우면 자동 번호. 이름 칸에 글자를 쓰면 그 이름이 우선">번호 <input type="text" data-f="lnum" value="${Number.isInteger(selF.line.num) ? gridEsc(G.normalizeNumbering(selF.group.numbering) === 'upper' && selF.line.num >= 1 ? G.seqToLetters(selF.line.num, false) : String(selF.line.num)) : ''}" placeholder="자동" maxlength="6" style="width:48px"></label>
+                        <label>각도 <input type="number" data-f="langle" value="${G.lineAngle(selF.line, selF.group.axis, gctx)}" step="0.5" style="width:52px">°</label>
                     </div>
-                    ${ez ? `
+                    <div class="grid-panel-row grid-nudge-row" title="화면 기준으로 ${selF.group.axis === 'row' ? '위·아래' : '왼쪽·오른쪽'}으로 옮깁니다(도면 px). 선을 끌어서 옮겨도 됩니다">
+                        <b>이 선 옮기기</b>${nudgeBtns('nudge', selF.group.axis)}
+                    </div>
+                    <div class="grid-panel-row grid-nudge-row" title="이 그룹의 모든 선을 같이 옮깁니다 — 자동으로 잡은 선이 통째로 조금 어긋났을 때">
+                        <b>그룹 전체 (${(selF.group.lines || []).length}개)</b>${nudgeBtns('nudgeGroup', selF.group.axis)}
+                    </div>
                     <div class="grid-panel-row">
-                        <label>이름 <input type="text" data-f="zname" value="${gridEsc(ez.name)}" maxlength="20" style="width:80px"></label>
-                        <label>층 <input type="text" data-f="zfloor" value="${gridEsc(ez.floorLabel || '')}" placeholder="예: 2F" maxlength="12" style="width:56px" title="이 구역이 어느 층인지(저장만 — 위치 글자는 아직 안 바뀜)"></label>
-                    </div>` : ''}
-                </div>
-                <div class="grid-panel-sec">
+                        <button type="button" data-act="bend" class="${ge.bendArmed ? 'active' : ''}">꺾기 추가</button>
+                        ${canDelVertex ? '<button type="button" data-act="delVertex">꺾인 점 삭제</button>' : ''}
+                        <button type="button" data-act="splitGroup" title="증축 등으로 번호 체계가 바뀔 때(A~D 다음 1~4, X1~ 다음 A1~): 이 선과 그 뒤쪽 선(열은 오른쪽, 행은 아래쪽)을 새 그룹으로 나눕니다. 새 그룹은 머리글·시작 번호·번호 방식을 따로 정할 수 있습니다">여기부터 새 그룹</button>
+                        <button type="button" data-act="delLine" class="danger">선 삭제</button>
+                    </div>
+                </div>` : '<div class="grid-panel-row grid-panel-muted grid-sel-empty">선을 누르면 폭·이름·각도·위치를 바꿀 수 있습니다. 폭은 선마다 하나씩 조절합니다.</div>';
+        // ---- 그룹 설정 ----
+        const groupBody = `
                     <div class="grid-panel-row">
                         <select data-f="group" ${groups.length ? '' : 'disabled'}>${groupOpts || '<option>그룹 없음 — 선을 그으면 생깁니다</option>'}</select>
                     </div>
@@ -42198,62 +42197,69 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
                     <div class="grid-panel-row">
                         <button type="button" data-act="reverseOrder" title="선 위치는 그대로 두고 이 그룹의 번호 순서만 거꾸로(1,2,3 → 3,2,1 / A,B,C → C,B,A). 개별 이름을 준 선은 그대로">⇅ 순서 뒤집기</button>
                         ${ge.orderUndo && ge.orderUndo.groupId === eg.id ? '<button type="button" data-act="undoOrder" title="방금 바꾼 순서를 되돌림 (Ctrl+Z)">↶ 되돌리기</button>' : ''}
+                        <button type="button" data-act="renumber" title="지금 보이는 위치 순서(열: 왼→오른, 행: 위→아래)로 번호를 한 번만 다시 매김. 그 뒤로 새로 긋는 선은 다시 맨 끝 번호">위치 순서로 다시 매기기</button>
                     </div>
                     <div class="grid-panel-row" title="글자가 선으로 그려져 못 읽은 도면용 — 이 그룹의 선 이름을 위치 순서(열: 왼→오른, 행: 위→아래)대로 한꺼번에 붙입니다. 빈칸이나 쉼표로 구분. 「-」는 자동 번호로 되돌림">
-                        <label>이름 한꺼번에 <input type="text" data-f="bulkNames" placeholder="예: Y'1 Y'2 Y'3 Y1 Y2 Y3" style="width:170px"></label>
+                        <label>이름 한꺼번에 <input type="text" data-f="bulkNames" placeholder="예: Y'1 Y'2 Y'3 Y1 Y2 Y3" style="width:150px"></label>
                         <button type="button" data-act="bulkNames">적용</button>
                     </div>
                     <div class="grid-panel-row">
-                        <button type="button" data-act="renumber" title="지금 보이는 위치 순서(열: 왼→오른, 행: 위→아래)로 번호를 한 번만 다시 매김. 그 뒤로 새로 긋는 선은 다시 맨 끝 번호">위치 순서로 다시 매기기</button>
-                    </div>
-                    <div class="grid-panel-row">
-                        <label>새 선 각도 <input type="number" data-f="gangle" value="${eg.angle}" step="0.5" style="width:60px">°</label>
+                        <label>새 선 각도 <input type="number" data-f="gangle" value="${eg.angle}" step="0.5" style="width:56px">°</label>
                         <button type="button" data-act="angleAll" title="이 그룹의 모든 선을 이 각도로">모든 선에 적용</button>
                     </div>
                     <div class="grid-panel-row">
-                        <label>기본 폭 <input type="number" data-f="gband" value="${Math.round(G.lineBand({}, eg, gctx) * 10) / 10}" min="0" step="1" style="width:64px"> <small>도면 px</small></label>
-                    </div>` : ''}
-                </div>
-                <div class="grid-panel-sec">
-                    ${selF ? `
-                    <div class="grid-panel-row"><b>선택한 선: ${gridEsc(selName)}</b></div>
+                        <label title="새로 긋는 선, 그리고 폭을 따로 안 준 선의 폭. 선마다 다른 폭은 위 「선택한 선」에서 하나씩 조절합니다">기본 폭 <input type="number" data-f="gband" value="${Math.round(G.lineBand({}, eg, gctx) * 10) / 10}" min="0" step="1" style="width:60px"> <small>도면 px</small></label>
+                    </div>` : ''}`;
+        const zoneBody = `
                     <div class="grid-panel-row">
-                        <label>이름 <input type="text" data-f="label" value="${gridEsc(selF.line.label || '')}" placeholder="자동 ${gridEsc(selAuto)}" maxlength="10" style="width:70px"></label>
-                        <label>각도 <input type="number" data-f="langle" value="${G.lineAngle(selF.line, selF.group.axis, gctx)}" step="0.5" style="width:60px">°</label>
+                        <select data-f="zone" title="선을 그으면 누른 자리의 구역에 들어갑니다">${zoneOpts}</select>
                     </div>
                     <div class="grid-panel-row">
-                        <label title="이 선의 번호만 직접 정합니다(예: 5 → ${gridEsc(selF.group.prefix || '')}5). 비우면 자동 번호. 이름 칸에 글자를 쓰면 그 이름이 우선">번호 <input type="text" data-f="lnum" value="${Number.isInteger(selF.line.num) ? gridEsc(G.normalizeNumbering(selF.group.numbering) === 'upper' && selF.line.num >= 1 ? G.seqToLetters(selF.line.num, false) : String(selF.line.num)) : ''}" placeholder="자동" maxlength="6" style="width:56px"></label>
+                        <button type="button" data-act="zoneAdd">+ 구역 추가</button>
+                        ${ez ? '<button type="button" data-act="zoneRedraw">범위 다시 그리기</button><button type="button" data-act="zoneDel" class="danger">구역 삭제</button>' : ''}
                     </div>
-                    <div class="grid-panel-row grid-nudge-row" title="화면 기준으로 ${selF.group.axis === 'row' ? '위·아래' : '왼쪽·오른쪽'}으로 옮깁니다(도면 px). 선을 끌어서 옮겨도 됩니다">
-                        <b>이 선 옮기기</b>
-                        ${[-50, -10, -1, 1, 10, 50].map((d) => `<button type="button" data-act="nudge" data-d="${d}">${selF.group.axis === 'row' ? (d < 0 ? '▲' : '▼') : (d < 0 ? '◀' : '▶')}${Math.abs(d)}</button>`).join('')}
-                    </div>
-                    <div class="grid-panel-row grid-nudge-row" title="이 그룹의 모든 선을 같이 옮깁니다 — 자동으로 잡은 선이 통째로 조금 어긋났을 때">
-                        <b>그룹 전체 (${(selF.group.lines || []).length}개)</b>
-                        ${[-50, -10, -1, 1, 10, 50].map((d) => `<button type="button" data-act="nudgeGroup" data-d="${d}">${selF.group.axis === 'row' ? (d < 0 ? '▲' : '▼') : (d < 0 ? '◀' : '▶')}${Math.abs(d)}</button>`).join('')}
-                    </div>
-                    <div class="grid-panel-row" title="증축 등으로 번호 체계가 바뀔 때(A~D 다음 1~4, X1~ 다음 A1~): 이 선과 그 뒤쪽 선(열은 오른쪽, 행은 아래쪽)을 새 그룹으로 나눕니다. 새 그룹은 머리글·시작 번호·번호 방식을 따로 정할 수 있습니다">
-                        <button type="button" data-act="splitGroup">여기부터 새 그룹으로 (번호 체계 바꾸기)</button>
+                    ${ez ? `
+                    <div class="grid-panel-row">
+                        <label>이름 <input type="text" data-f="zname" value="${gridEsc(ez.name)}" maxlength="20" style="width:80px"></label>
+                        <label>층 <input type="text" data-f="zfloor" value="${gridEsc(ez.floorLabel || '')}" placeholder="예: 2F" maxlength="12" style="width:56px" title="이 구역이 어느 층인지(저장만 — 위치 글자는 아직 안 바뀜)"></label>
+                    </div>` : ''}`;
+        const autoBody = `
+                    <div class="grid-panel-row">
+                        <label>민감도 <select data-f="autoSens" title="짧은 선도 후보에 넣으려면 「짧은 선도」, 벽선이 섞이면 「긴 선만」">
+                            <option value="normal"${autoSens === 'normal' ? ' selected' : ''}>보통</option>
+                            <option value="short"${autoSens === 'short' ? ' selected' : ''}>짧은 선도</option>
+                            <option value="long"${autoSens === 'long' ? ' selected' : ''}>긴 선만</option>
+                        </select></label>
+                        <label>번호 위치 <select data-f="autoOuter" title="기본은 건물 바깥(외곽)에 있는 번호만 — 주차칸·방 번호 같은 안쪽 번호는 무시합니다. 축 번호가 건물 안쪽에 있는 도면만 「안쪽도」">
+                            <option value="outer"${(ge.autoOuter || 'outer') === 'outer' ? ' selected' : ''}>외곽만</option>
+                            <option value="all"${ge.autoOuter === 'all' ? ' selected' : ''}>안쪽도</option>
+                        </select></label>
                     </div>
                     <div class="grid-panel-row">
-                        <label>폭 <input type="number" data-f="lband" value="${selF.line.band != null ? selF.line.band : ''}" placeholder="기본 ${Math.round(lineBandDefault)}" min="0" step="1" style="width:64px"></label>
+                        <label>찾을 방향 <select data-f="autoAxes" title="입면도처럼 위쪽 번호(열)만 필요한 도면은 「열만」">
+                            <option value="both"${autoAxes === 'both' ? ' selected' : ''}>열 + 행</option>
+                            <option value="cols"${autoAxes === 'cols' ? ' selected' : ''}>열만 (입면도)</option>
+                            <option value="rows"${autoAxes === 'rows' ? ' selected' : ''}>행만</option>
+                        </select></label>
+                        <button type="button" data-act="autoDetect" class="grid-primary">✨ 자동 잡기</button>
                     </div>
+                    ${autoPrev ? `
+                    <div class="grid-panel-row">${autoSummary}</div>
                     <div class="grid-panel-row">
-                        <button type="button" data-act="bend" class="${ge.bendArmed ? 'active' : ''}">꺾기 추가</button>
-                        ${canDelVertex ? '<button type="button" data-act="delVertex">꺾인 점 삭제</button>' : ''}
-                        <button type="button" data-act="delLine" class="danger">선 삭제</button>
-                    </div>` : '<div class="grid-panel-row grid-panel-muted">선을 누르면 이름·각도·폭을 바꿀 수 있습니다.</div>'}
-                </div>
-                <div class="grid-panel-sec">
-                    <div class="grid-panel-row">
-                        <button type="button" data-act="copyFloors" title="이 층의 행·열 선·그룹·머리글·시작 번호·이름·폭·자동 입력 설정을 같은 건물의 다른 층에 복사(이미 선이 있으면 덮어쓰기)">다른 층으로 복사</button>
-                    </div>
-                </div>
-                <div class="grid-panel-sec">
+                        <button type="button" data-act="autoApply" class="active">적용</button>
+                        <button type="button" data-act="autoCancel">취소</button>
+                    </div>` : ''}`;
+        const locBody = `
                     <label class="grid-panel-row"><input type="checkbox" data-f="auto" ${grid.autoLocation ? 'checked' : ''}> 마킹에 행·열 위치 자동 입력</label>
                     <div class="grid-panel-row">
                         <button type="button" data-act="fillExisting" title="행·열 위치가 없는 마킹만 채움(상세 위치·실 이름은 그대로)">이 층 마킹에 위치 채우기</button>
                         <button type="button" data-act="recalcGrid" title="이 층 마킹 전부의 행·열 위치를 지금 선 기준으로 다시 계산. 상세 위치·실 이름은 그대로. 되돌리기 한 번으로 취소">실 이름 두고 행·열만 다시 계산</button>
+                    </div>
+                    <div class="grid-panel-row">
+                        <button type="button" data-act="copyFloors" title="이 층의 행·열 선·그룹·머리글·시작 번호·이름·폭·자동 입력 설정을 같은 건물의 다른 층에 복사(이미 선이 있으면 덮어쓰기)">다른 층으로 복사</button>
+                    </div>`;
+        const dangerBody = `
+                    <div class="grid-panel-row">
                         <button type="button" data-act="clearDetail" class="danger" title="이 층 마킹의 상세 위치 글자에서 행·열 표기(X4~X5/Y1~Y2 등)만 지움. 실 이름·위치 글과 행·열 위치 칸은 그대로. 되돌리기 한 번으로 취소">상세위치 행·열 지우기</button>
                         <button type="button" data-act="wipeDetail" class="danger" title="이 층 마킹의 상세 위치 글자를 모두 지움(실 이름·위치 글·행·열 표기 전부). 행·열 위치 칸, 마킹 위치·번호·사진은 그대로. 3종은 층 이름만 남음. 되돌리기 한 번으로 취소">상세위치 전부 지우기</button>
                         <button type="button" data-act="clearAll" class="danger">이 층 선 모두 지우기</button>
@@ -42262,8 +42268,30 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
                         <button type="button" data-act="clearDetailAll" class="danger-all" title="이 건물 모든 층 마킹의 상세 위치 글자에서 행·열 표기만 지움(외부 입면 도면 포함). 실 이름·위치 글, 행·열 위치 칸, 마킹 위치·번호·사진은 그대로. 확인창에서 층·결함 수를 보여 주고, 이 층 화면에서 되돌리기 한 번으로 전체 취소">전체층 상세위치 행·열 지우기</button>
                         <button type="button" data-act="wipeDetailAll" class="danger-all" title="이 건물 모든 층 마킹의 상세 위치 글자를 모두 지움(외부 입면 도면 포함, 실 이름·위치 글·행·열 표기 전부). 행·열 위치 칸, 마킹 위치·번호·사진은 그대로. 확인창에서 층·결함 수를 보여 주고, 이 층 화면에서 되돌리기 한 번으로 전체 취소">전체층 상세위치 전부 지우기</button>
                         <span class="grid-panel-muted grid-panel-allnote">이 건물 모든 층 · 행·열 위치 칸은 그대로</span>
-                    </div>
+                    </div>`;
+        panel.classList.toggle('collapsed', !!ge.collapsed);
+        panel.innerHTML = `
+            <div class="grid-panel-head">
+                <b>행·열(통심) 선</b>
+                <span class="grid-panel-head-btns">
+                    <button type="button" data-act="collapse" title="접기/펴기">${ge.collapsed ? '▾' : '▴'}</button>
+                    <button type="button" data-act="close" title="행·열 편집 끝내기">✕</button>
+                </span>
+            </div>
+            <div class="grid-panel-body">
+                <div class="grid-panel-tools">
+                    <button type="button" data-tool="col" class="${ge.tool === 'col' ? 'active' : ''}">│ 열 추가</button>
+                    <button type="button" data-tool="row" class="${ge.tool === 'row' ? 'active' : ''}">─ 행 추가</button>
+                    <button type="button" data-tool="select" class="${ge.tool === 'select' ? 'active' : ''}">✥ 선택·이동</button>
+                    <button type="button" data-tool="zone" class="${ge.tool === 'zone' ? 'active' : ''}" title="한 도면에 여러 층이 있을 때 — 사각형 구역마다 번호를 따로">▭ 구역</button>
                 </div>
+                <div class="grid-panel-hint">${hint}</div>
+                ${selHtml}
+                ${sec('group', '그룹 설정', groupBody, eg ? `${axisKo(eg.axis)} ${eg.lines.length}개` : '')}
+                ${sec('zone', '구역', zoneBody, '한 도면에 여러 층 — 구역마다 번호 따로')}
+                ${sec('auto', '자동 잡기', autoBody, '캐드 PDF 번호 풍선·글자로 후보')}
+                ${sec('loc', '마킹 위치', locBody)}
+                ${sec('danger', '지우기', dangerBody)}
             </div>`;
     }
 
@@ -42407,6 +42435,34 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
         if (act === 'angleAll' && eg) {
             eg.lines.forEach((ln) => G.setLineAngle(ln, eg.axis, eg.angle, gctx));
             gridChanged();
+            return;
+        }
+        if ((act === 'selPrev' || act === 'selNext') && selF) {
+            // 같은 그룹의 위치 순서(열: 왼→오른, 행: 위→아래)로 이웃 선을 고른다 — 폭을 선마다 차례로 맞출 때
+            const items = G.orderedLines(selF.group, gctx).items;
+            const i = items.findIndex((x) => x.line.id === selF.line.id);
+            const next = items[i + (act === 'selNext' ? 1 : -1)];
+            if (next) { gridSelectLine(grid, next.line.id, null); renderGridPanel(); drawCanvas(); }
+            return;
+        }
+        if (act === 'bandStep' && selF) {
+            const d = Number(btn.getAttribute('data-d')) || 0;
+            if (!d) return;
+            selF.line.band = Math.max(0, Math.round(G.lineBand(selF.line, selF.group, gctx) + d));
+            gridChanged();
+            return;
+        }
+        if (act === 'bandReset' && selF) {
+            delete selF.line.band;
+            gridChanged();
+            return;
+        }
+        if (act === 'bandAll' && selF) {
+            // 이 선의 폭을 그룹 기본 폭으로 올리고, 선마다 따로 준 폭은 지운다
+            selF.group.band = Math.max(0, Math.round(G.lineBand(selF.line, selF.group, gctx)));
+            (selF.group.lines || []).forEach((ln) => { delete ln.band; });
+            gridChanged();
+            window.showToast?.(`이 그룹의 모든 선 폭을 ${selF.group.band}로 맞췄습니다.`, 'success', 2000);
             return;
         }
         if ((act === 'nudge' || act === 'nudgeGroup') && selF) {

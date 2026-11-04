@@ -350,7 +350,7 @@ if (fs.existsSync(appPath)) {
     {
         const panelFn = takeFnTop('renderGridPanel');
         const i = panelFn.indexOf('data-act="recalcGrid"');
-        const before = panelFn.slice(Math.max(0, panelFn.lastIndexOf('<div class="grid-panel-sec">', i)), i);
+        const before = panelFn.slice(Math.max(0, panelFn.lastIndexOf('const locBody = `', i)), i); // 2026-11-04 패널 정리: 「마킹 위치」 묶음 시작부터
         assert.ok(!/\$\{[^}]*\?\s*`/.test(before), '버튼이 조건부 블록(${... ? `...`})으로 숨지 않음');
     }
     assert.ok(app.includes("if (act === 'recalcGrid') {\n            recalcGridLocationForCurrentFloor();"), '버튼 연결');

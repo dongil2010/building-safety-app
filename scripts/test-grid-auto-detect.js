@@ -513,7 +513,7 @@ const app = fs.readFileSync(path.join(__dirname, '..', 'app.js'), 'utf8');
 assert.ok(app.includes('data-act="autoDetect"') && app.includes("act === 'autoDetect'") && app.includes("act === 'autoApply'"));
 // 15) 자동으로 잡은 뒤 옮길 수 있게: 적용하면 「선택·이동」 도구 + 옮기기 버튼(이 선·그룹 전체). 화면이 돌아 있어도 화면 기준 방향
 { const a = app.indexOf("ge.tool = 'select';"); const b = app.indexOf('gridSelectLine(grid, firstLine.line.id', a); assert.ok(a > 0 && b > a && b - a < 400, '적용 뒤 선택·이동 도구 + 첫 선 선택'); }
-assert.ok(app.includes('data-act="nudge"') && app.includes('data-act="nudgeGroup"'));
+assert.ok(app.includes("nudgeBtns('nudge'") && app.includes("nudgeBtns('nudgeGroup'") && app.includes('data-act="${act}" data-d="${d}"'), '선·그룹 옮기기 단추(2026-11-04 패널 정리 후 공용 생성 함수)');
 assert.ok(app.includes("(act === 'nudge' || act === 'nudgeGroup') && selF"));
 {
     // 옮기기 계산(화면 기준): 90° 돌린 화면에서 열(화면 세로선)을 오른쪽으로 10 → 이미지 좌표에서는 한 방향으로 정확히 10
