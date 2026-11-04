@@ -6016,6 +6016,9 @@ document.addEventListener('DOMContentLoaded', () => {
         if (typeof syncStateToFirebase === 'function') syncStateToFirebase();
         window.showToast(`${formatSurveyRoundLabel(roundKey)} 점검일 → ${date || '건물 공통 점검일'}`, 'success', 3000);
         if (typeof window.syncInspectionRoundDateInput === 'function') window.syncInspectionRoundDateInput();
+        // 2026-11-04 건축물 목록의 「📅 점검 날짜」 줄·회차 날짜 칸도 바로 새로 그린다 — 예전엔 서버 동기화가 돌려주는 스냅샷이
+        // 목록을 다시 그려 줬는데, 건물마다 문서로 나눈 뒤로는 내 쓰기 스냅샷이 일찍 끝나 목록이 옛 날짜로 남았다
+        if (typeof window.renderDashboard === 'function') window.renderDashboard();
         return changed;
     };
 
@@ -9931,7 +9934,9 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
             bldg.contactPhone = contactPhone;
             bldg.floors = floors;
             // 2026-10-20 회차별 점검일 — 이 칸은 고른 회차의 점검일. 다른 회차 날짜는 아래 목록에서 따로 저장.
-            applyEditRoundDates(bldg, `${inspectionYear}_${inspectionPeriod}`, date);
+            const editRoundDateKey = `${inspectionYear}_${inspectionPeriod}`;
+            const editRoundDatePrev = (typeof getBuildingInspectionDate === 'function') ? (getBuildingInspectionDate(bldg, editRoundDateKey) || '') : '';
+            applyEditRoundDates(bldg, editRoundDateKey, date);
             bldg.date = date;
             bldg.inspectionType = inspectionType;
             bldg.inspectionYear = inspectionYear;
@@ -9954,6 +9959,9 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
             }
             if (inArr && inArr !== bldg) {
                 inArr.latestSurveyRoundKey = bldg.latestSurveyRoundKey;
+                // 점검 날짜도 목록의 건물에 같이(수정 창 복사본이 따로일 때 목록이 옛 날짜로 남지 않게)
+                inArr.date = bldg.date;
+                inArr.roundDates = JSON.parse(JSON.stringify(bldg.roundDates || {}));
             }
             if (siteKey && prevRoundKey) {
                 filterActiveBuildings(window.state.buildings || [], window.state.deletedBuildingIds).forEach((sib) => {
@@ -9967,6 +9975,19 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
                         sib.latestSurveyRoundKey = newRoundKey;
                     }
                     markBuildingMetaDirty(sib);
+                });
+            }
+            // 2026-11-04 이 창에서 점검 날짜를 바꿨으면 같은 현장·같은 회차의 다른 동에도 같이 적용한다(회차 목록 점검일과 같은 규칙).
+            // 건축물 목록의 「📅 점검 날짜」는 최종 회차 동들 중 가장 이른 날짜라, 이 동만 바꾸면 다른 동의 옛 날짜가 그대로 보였다.
+            if (siteKey && date && date !== editRoundDatePrev && window.BSA && window.BSA.buildingMetaMerge) {
+                const mmEdit = window.BSA.buildingMetaMerge;
+                filterActiveBuildings(window.state.buildings || [], window.state.deletedBuildingIds).forEach((sib) => {
+                    if (!sib || sib.id === bldg.id || (inArr && sib.id === inArr.id)) return;
+                    if (getBuildingSiteName(sib) !== siteKey) return;
+                    if (getBuildingSurveyRoundKey(sib) !== newRoundKey) return;
+                    // 이 동에 원래 날짜가 없었으면(창이 오늘 날짜를 기본으로 채움) 이미 날짜가 있는 동은 건드리지 않는다
+                    if (!editRoundDatePrev && (getBuildingInspectionDate(sib, newRoundKey) || '')) return;
+                    if (mmEdit.setRoundDate(sib, newRoundKey, date)) markBuildingMetaDirty(sib);
                 });
             }
             if (siteKey && window.state.dashboardSiteKey === siteKey) {
