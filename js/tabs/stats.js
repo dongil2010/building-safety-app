@@ -1279,10 +1279,11 @@
         return {
             peel: !coating && /박리/.test(type),
             fall: !coating && /박락|들뜸|층분리/.test(type),
-            // 누수여부를 켰거나 「누수중·누수中」이면 누수중, 아니면 「누수·누수흔적」은 누수흔적(한 결함은 둘 중 하나만)
+            // 누수·백태는 한 결함이 한 칸만(사용자 2026-11-04): 누수중(누수여부 켬·「누수중·누수中」)이 무조건 이기고,
+            // 아니면 백태가 있으면 백태(「누수흔적 및 백태」·「누수, 백태」), 둘 다 아니면 누수흔적
             leakNow: !!(d && d.isLeak) || /누수(중|中)/.test(type),
-            leakTrace: !(d && d.isLeak) && !/누수(중|中)/.test(type) && /누수/.test(type),
-            efflo: /백태/.test(type),
+            leakTrace: !(d && d.isLeak) && !/누수(중|中)/.test(type) && !/백태/.test(type) && /누수/.test(type),
+            efflo: !(d && d.isLeak) && !/누수(중|中)/.test(type) && /백태/.test(type),
             rebar: /철근노출/.test(type)
         };
     }

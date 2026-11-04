@@ -55,7 +55,11 @@ assert.deepStrictEqual(k('박락 및 철근노출'), K({ fall: true, rebar: true
 assert.deepStrictEqual(k('들뜸'), K({ fall: true }));
 assert.deepStrictEqual(k('층분리'), K({ fall: true }));
 // 2026-11-04 누수 셋으로: 누수중(누수여부 켬·「누수중」) / 누수흔적(그 밖의 누수) / 백태
-assert.deepStrictEqual(k('누수흔적, 백태'), K({ leakTrace: true, efflo: true }));
+// 한 결함은 한 칸만: 누수중 > 백태 > 누수흔적
+assert.deepStrictEqual(k('누수흔적, 백태'), K({ efflo: true }), '누수흔적 및 백태 = 백태');
+assert.deepStrictEqual(k('누수, 백태'), K({ efflo: true }), '누수여부 끔이면 백태');
+assert.deepStrictEqual(k('누수, 백태', '슬래브', true), K({ leakNow: true }), '누수여부 켬이면 누수중');
+assert.deepStrictEqual(k('누수중 및 백태'), K({ leakNow: true }), '누수중이 들어 있으면 누수중');
 assert.deepStrictEqual(k('누수'), K({ leakTrace: true }), '그냥 누수 = 누수흔적');
 assert.deepStrictEqual(k('누수 흔적'), K({ leakTrace: true }));
 assert.deepStrictEqual(k('누수흔적', '슬래브', true), K({ leakNow: true }), '누수여부를 켜면 누수중(흔적과 겹쳐 세지 않음)');
