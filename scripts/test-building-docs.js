@@ -200,6 +200,26 @@ async function readView(db, root) {
     assert.strictEqual(B.shouldSplit({}, {}, { legacyOnly: true }), false);
     assert.strictEqual(B.expandView({ buildings: [1] }, {}).buildings[0], 1, '문서 없음 → 그대로');
 
+    // 9b) 2026-11-04 사고 재현: 한 건물이 루트 대부분(b ~650KB) + 그 건물 층 설정 ~300KB — b만 재면 통째로 써서 설정 옮길 때 1MB 초과
+    {
+        const idb = makeDb(); const ir = idb.ref('safety_app/inc');
+        const D = bld(500, { name: 'D동', notes: '보고서 작성 중 메모 '.repeat(25000) });   // ~650KB
+        const fgl = {}; const fat = {};
+        for (let k = 0; k < 120; k++) { fgl['b500_' + k + 'F'] = { xs: Array.from({ length: 120 }, (_, j) => j * 1.5), ys: Array.from({ length: 80 }, (_, j) => j * 2.5) }; fat['floorGridLines/b500_' + k + 'F'] = 7; }
+        await ir.set({ buildings: [D, bld(501)], floorGridLines: fgl, settingsAt: fat });
+        const r0 = fsize((await ir.get()).data());
+        assert.ok(r0 > 800 * 1024 && r0 < LIMIT, '루트 ~1MB ' + r0);
+        const docsI = {};
+        await syncOnce(ir, [D, bld(501)], [], docsI);   // 예전(b만 재기)이면 여기서 1MB 오류
+        assert.ok(idb.docs.get('safety_app/inc/buildingMeta/b500').chunk, '설정까지 합쳐 크면 조각');
+        const vi = await readView(idb, ir);
+        assert.deepStrictEqual(vi.buildings.find((b) => b.id === 'b500'), clone(D));
+        assert.deepStrictEqual(vi.floorGridLines, fgl);
+        // 이미 통째로 써 둔 큰 문서 + 옮길 설정 → 같은 해시여도 조각으로 다시 씀
+        const plan = B.planBuildingWrites([D], [], { b500: { v: 1, at: D.metaUpdatedAt, h: B.hashOf(D), b: D } }, { extraBytesFor: () => 300 * 1024 });
+        assert.ok(plan.length === 1 && plan[0].parts, '통째 문서 다시 조각');
+    }
+
     // 10) 앱 연결
     const app = fs.readFileSync(path.join(ROOT, 'app.js'), 'utf8');
     assert.ok(/bdApi\.shouldSplit\(rootGuardRaw \|\| \{\}, dataToSync, \{ force: _rootForceSplit \}\)/.test(app), '루트 쓰기 분기');

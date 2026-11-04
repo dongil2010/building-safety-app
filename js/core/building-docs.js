@@ -20,7 +20,8 @@
     var COLLECTION = 'buildingMeta';
     var FLOOR_SETTING_KEYS = ['grids', 'floorGridLines', 'floorPrintCrops', 'floorDrawingRotations',
         'floorDrawingDarken', 'floorMapStyleSettings', 'styleShapes'];
-    var DOC_MAX_BYTES = 900 * 1024;
+    // 2026-11-04 건물 정보(b)+그 건물 층 설정(settings)을 합쳐 1MB 아래로 — b만 재면 큰 건물+설정이 넘었다
+    var DOC_MAX_BYTES = 700 * 1024;
 
     function shardsApi() {
         if (root && root.BSA && root.BSA.rootDocShards) return root.BSA.rootDocShards;
@@ -130,11 +131,14 @@
             if (!b || !b.id || del[b.id]) return;
             var h = hashOf(b);
             var cur = sd[b.id];
-            if (cur && !cur.deleted && cur.h === h) return;                 // 같음
+            var extra = o.extraBytesFor ? (Number(o.extraBytesFor(b.id)) || 0) : 0;
+            var needChunk = !!S && S.jsonBytes({ v: 1, at: metaAt(b), h: h, b: b, deleted: false }) + extra > (o.docMaxBytes || DOC_MAX_BYTES);
+            // 같음 — 단, 예전에 통째로 쓴 문서가 이제 설정까지 합쳐 크면 조각으로 다시 쓴다
+            if (cur && !cur.deleted && cur.h === h && !(needChunk && !cur.chunk)) return;
             if (cur && !cur.deleted && (Number(cur.at) || 0) > metaAt(b)) return; // 서버가 더 최근 — 받아서 합친다
             var data = { v: 1, at: metaAt(b), h: h, b: b, deleted: false };
             var item = { id: b.id, kind: 'put', data: data, h: h, at: metaAt(b) };
-            if (S && S.jsonBytes(data) > (o.docMaxBytes || DOC_MAX_BYTES)) {
+            if (needChunk) {
                 var writeId = (o.writeIdFor ? o.writeIdFor(b.id) : ('w' + Date.now().toString(36) + Math.floor(Math.random() * 1e6).toString(36)));
                 var chunks = S.splitUtf8(JSON.stringify(b), o.partBytes || S.PART_BYTES);
                 item.parts = chunks.map(function (p, i) { return { id: S.shardDocId(writeId, i), data: { writeId: writeId, i: i, n: chunks.length, p: p } }; });
@@ -252,7 +256,16 @@
         var docs = c.docs || {};
         var col = rootRef.collection(COLLECTION);
         var buildings = Array.isArray(dataToSync.buildings) ? dataToSync.buildings : [];
-        var plan = planBuildingWrites(buildings, deletedIds, docs, { now: c.now, writeIdFor: c.writeIdFor, docMaxBytes: c.docMaxBytes, partBytes: c.partBytes });
+        // 루트에서 옮길 층 설정을 먼저 계산해, 건물 문서 크기(b + 설정)를 미리 잰다
+        var ids0 = buildings.map(function (b) { return b && b.id; }).filter(Boolean).concat(Object.keys(docs));
+        var mig0 = planRootSettingsMigration(serverRaw || {}, ids0);
+        function extraBytesFor(id) {
+            var d = docs[id] || {};
+            var n = S ? S.jsonBytes(d.settings || {}) + S.jsonBytes(d.settingsAt || {}) : 0;
+            (mig0.byBuilding[id] || []).forEach(function (w) { n += S ? S.jsonBytes(w.value) + S.utf8Bytes(String(w.path || '')) * 2 + 16 : 0; });
+            return n;
+        }
+        var plan = planBuildingWrites(buildings, deletedIds, docs, { now: c.now, writeIdFor: c.writeIdFor, docMaxBytes: c.docMaxBytes, partBytes: c.partBytes, extraBytesFor: extraBytesFor });
         var wrote = 0, skipped = 0;
         await runPool(plan, c.concurrency || 6, async function (item) {
             var ref = col.doc(item.id);
