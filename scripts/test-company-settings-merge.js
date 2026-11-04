@@ -176,7 +176,8 @@ const index = fs.readFileSync(path.join(root, 'index.html'), 'utf8');
 assert.ok(/js\/core\/company-settings-merge\.js\?v=/.test(index), 'index.html이 모듈을 부른다');
 assert.ok(index.indexOf('js/core/company-settings-merge.js') < index.indexOf('src="app.js'), 'app.js보다 먼저');
 assert.ok(/if \(csPerKey\) companySettingsApi\(\)\.KEYS\.forEach\(\(k\) => \{ delete dataToSync\[k\]; \}\);/.test(app), '설정은 통째로 쓰지 않음');
-assert.ok(/await docRef\.set\(dataToSync, \{ merge: true \}\);\n\s+if \(csPerKey\) await writeCompanySettingsPerKey\(docRef, rootGuardData\);/.test(app), '바뀐 칸만 경로 지정으로');
+// 2026-11-04 루트 쓰기는 건물 문서 나눠 쓰기 분기 뒤 — 설정은 여전히 바뀐 칸만 경로 지정으로
+assert.ok(/await docRef\.set\(dataToSync, \{ merge: true \}\);\n\s+\}\n\s+\}\n\s+if \(csPerKey\) await writeCompanySettingsPerKey\(docRef, rootGuardData\);/.test(app), '바뀐 칸만 경로 지정으로');
 assert.ok(/rootGuardData = guardData;/.test(app), '쓰기 직전 서버에서 읽은 문서로 칸 시각 비교');
 assert.ok(/await docRef\.update\(\.\.\.args\);/.test(app));
 assert.ok(/const inc = csApi\.applyIncoming\(csStore, window\.state, data, bsaSyncNow\(\)\);/.test(app), '받을 때 칸별');

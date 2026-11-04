@@ -60493,7 +60493,19 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
     }
     function isSyncParked() {
         const g = syncGate();
-        return !!(g && g.isParked());
+        if (!(g && g.isParked())) return false;
+        // 2026-11-04 예전 버전이 「문서 1MB 초과」로 멈춰 둔 것은 이제 나눠 쓰면 되므로 한 번 풀어 준다(기기 데이터 그대로)
+        try {
+            const st = g.state();
+            const api = rootDocShardsApi();
+            if (api && st && api.isDocTooLargeError(st.reason || '')) {
+                g.unpark();
+                _rootForceSplit = true;
+                console.info('[건물 문서] 1MB 초과로 멈췄던 자동 올리기를 다시 켭니다');
+                return false;
+            }
+        } catch (_e) { /* ignore */ }
+        return true;
     }
     window.bsaSyncParkedState = () => {
         const g = syncGate();
@@ -65990,7 +66002,8 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
                 if (_syncRetryTimer || isSyncParked() || _dirtyFloorKeys.size >= before) break;
                 await new Promise((r) => setTimeout(r, 400));
             }
-            if (hadPending && !_dirtyFloorKeys.size) window.showToast('오프라인에서 작업한 내용을 서버에 올렸습니다.', 'success', 3500);
+            // 2026-11-04 층은 올라갔어도 회사 문서(건물 목록) 쓰기가 실패해 멈춤·재시도 중이면 「올렸습니다」를 띄우지 않는다
+            if (hadPending && !_dirtyFloorKeys.size && !isSyncParked() && !_syncRetryTimer) window.showToast('오프라인에서 작업한 내용을 서버에 올렸습니다.', 'success', 3500);
             if (!statuses.length) {
                 if (_dirtyFloorKeys.size) window.showToast(`아직 서버에 못 올린 층이 ${_dirtyFloorKeys.size}개 있습니다. 인터넷을 확인해 주세요.`, 'warning', 6000);
                 // 2026-10-19 다 올렸으면 최근 연 건물의 모든 층을 서버 최신으로(읽기만) — 안 연 층도 다음 오프라인 때 최신에서 시작
@@ -68883,12 +68896,26 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
         }
         if (!plan.writes.length) return { writes: 0, adopted: plan.adopt.length };
         const FP = firebase.firestore.FieldPath;
+        // 2026-11-04 건물마다 문서로 나눈 회사: 「건물id_층」 칸은 그 건물 문서로, 나머지는 루트로
+        let rootWrites = plan.writes;
+        const bdApi = buildingDocsApi();
+        if (bdApi && rootSplitActive()) {
+            const ids = (window.state.buildings || []).map((b) => b && b.id).filter(Boolean).concat(Object.keys(_bldgDocs));
+            const routed = bdApi.routeSettingsWrites(plan.writes, ids);
+            rootWrites = routed.root;
+            for (const id of Object.keys(routed.byBuilding)) {
+                const patch = bdApi.settingsDocPatch(routed.byBuilding[id], () => firebase.firestore.FieldValue.delete());
+                await buildingMetaCol(docRef).doc(id).set(patch, { merge: true });
+            }
+        }
+        if (rootWrites.length) {
         const args = api.buildUpdateArgs(
-            plan.writes,
+            rootWrites,
             (a, b) => (b === undefined ? new FP(a) : new FP(a, b)),
             () => firebase.firestore.FieldValue.delete()
         );
         await docRef.update(...args);
+        }
         api.afterWrite(store, plan.writes);
         saveCompanySettingsStore();
         return { writes: plan.writes.length, adopted: plan.adopt.length };
@@ -69333,11 +69360,95 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
     }
     /** 동기화 쓰기에 쓸 서버 기준 루트 문서: 리스너가 서버에서 받은 것이 있으면 그것, 없으면 서버에서 직접 */
     async function serverRootDataForWrite(docRef) {
-        if (_lastRootSnapshotFromServer && _lastRootSnapshotData && Object.keys(_lastRootSnapshotData).length) {
+        // 2026-11-04 건물마다 문서로 나눈 회사: 건물 문서를 서버에서 아직 못 받았으면 캐시 말고 서버에서
+        const splitNotReady = _lastRootRaw && _lastRootRaw.rootSplit && !_bldgDocsFromServer;
+        if (!splitNotReady && _lastRootSnapshotFromServer && _lastRootSnapshotData && Object.keys(_lastRootSnapshotData).length) {
             return Object.assign({}, _lastRootSnapshotData);
         }
         const snap = await fetchCompanyDocSnapForWrite(docRef);
-        return snap.exists ? snap.data() : {};
+        return snap.exists ? await expandRootDocData(docRef, snap.data(), { strict: true }) : {};
+    }
+
+    // ---- 2026-11-04 회사 루트 문서 1MB 초과 대책: 건물마다 문서(buildingMeta/{id}) — js/core/building-docs.js ----
+    // 루트가 커지면(또는 1MB 초과 오류가 나면) 건물 정보와 그 건물의 층 설정을 건물 문서로 옮기고 루트엔 rootSplit 표시·공통 칸만.
+    // 읽는 곳(리스너·처음 받기·쓰기 전 확인)은 모두 「펼친 보기」(예전 루트 모양)를 받아 기존 병합 코드를 그대로 쓴다.
+    // var: 초기화 순서와 무관하게(먼저 불려도 TDZ 오류 없게)
+    var _bldgDocs = {};                 // 건물 id → 서버 문서(조각이면 _b 붙임)
+    var _bldgDocsFromServer = false;
+    var _bldgMetaUnsub = null;
+    var _lastRootRaw = {};
+    var _rootForceSplit = false;
+    var _rootSnapSeq = 0;
+    var _bldgChunkCache = {};
+    function buildingDocsApi() { return (window.BSA && window.BSA.buildingDocs) || null; }
+    function rootDocShardsApi() { return (window.BSA && window.BSA.rootDocShards) || null; }
+    function rootSplitActive() { return !!(_lastRootRaw && _lastRootRaw.rootSplit) || Object.keys(_bldgDocs).length > 0; }
+    function buildingMetaCol(docRef) { return docRef.collection(buildingDocsApi() ? buildingDocsApi().COLLECTION : 'buildingMeta'); }
+    function buildingDocsCtx() {
+        return {
+            docs: _bldgDocs, chunkCache: _bldgChunkCache,
+            del: () => firebase.firestore.FieldValue.delete(),
+            fieldPath: (x, y) => (y === undefined ? new firebase.firestore.FieldPath(x) : new firebase.firestore.FieldPath(x, y))
+        };
+    }
+    async function resolveBuildingDoc(col, id, d) {
+        const api = buildingDocsApi();
+        return api ? api.resolveDoc(col, id, d, buildingDocsCtx()) : d;
+    }
+    async function fetchAllBuildingDocs(docRef, getOpts) {
+        const r = await buildingDocsApi().loadAll(docRef, getOpts, buildingDocsCtx());
+        _bldgDocs = r.docs;
+        _bldgDocsFromServer = r.fromServer;
+    }
+    /**
+     * 루트 데이터 → 펼친 보기(건물 문서·조각 칸 붙임). opts.strict: 못 읽으면 예외(쓰기 전 — 모르고 덮어쓰지 않게)
+     */
+    async function expandRootDocData(docRef, raw, opts) {
+        const o = opts || {};
+        let data = raw || {};
+        const api = buildingDocsApi();
+        try {
+            const S = rootDocShardsApi();
+            if (S && data.rootShards) data = await S.expandRootData(docRef, data, o.strict ? { strict: true, getOpts: { source: 'server' } } : {});
+            if (!api) return data;
+            if (data.rootSplit && (!Object.keys(_bldgDocs).length || (o.strict && !_bldgDocsFromServer))) {
+                await fetchAllBuildingDocs(docRef, o.strict ? { source: 'server' } : undefined);
+            }
+            if (!data.rootSplit && !Object.keys(_bldgDocs).length) return data;
+            return api.expandView(data, _bldgDocs);
+        } catch (e) {
+            if (o.strict) throw e;
+            console.warn('[건물 문서] 펼치기 실패 — 루트 칸만 씀', e);
+            return data;
+        }
+    }
+    /** 건물 문서 리스너(나눈 회사만 문서가 있다 — 없으면 빈 목록) */
+    function listenBuildingMetaDocs(docId) {
+        if (!buildingDocsApi()) return;
+        const rootRef = db.collection('safety_app').doc(docId);
+        const col = buildingMetaCol(rootRef);
+        _bldgMetaUnsub = col.onSnapshot(async (qs) => {
+            const changes = qs.docChanges ? qs.docChanges() : [];
+            for (const ch of changes) {
+                if (ch.type === 'removed') { delete _bldgDocs[ch.doc.id]; continue; }
+                try {
+                    const d = await resolveBuildingDoc(col, ch.doc.id, ch.doc.data() || {});
+                    if (d) _bldgDocs[ch.doc.id] = d;
+                } catch (e) { console.warn('[건물 문서] 조각 읽기 실패', ch.doc.id, e); }
+            }
+            _bldgDocsFromServer = !(qs.metadata && qs.metadata.fromCache);
+            if (qs.metadata && qs.metadata.hasPendingWrites) return;   // 내가 방금 쓴 것 — 이미 기기에 있음
+            if (!changes.length) return;
+            const seq = ++_rootSnapSeq;
+            const next = await expandRootDocData(rootRef, _lastRootRaw);
+            if (seq !== _rootSnapSeq) return;
+            _lastRootSnapshotData = next;
+            await applyCombinedSnapshot();
+        }, (err) => console.warn('[건물 문서] 리스너 경고', err));
+    }
+    /** 나눠 쓰기(js/core/building-docs.js writeSplit) — 건물 문서 먼저, 루트는 부르는 쪽이 마지막에 */
+    async function writeBuildingDocsForSync(docRef, dataToSync, deletedIds, serverRaw) {
+        return buildingDocsApi().writeSplit(docRef, dataToSync, deletedIds, serverRaw, buildingDocsCtx());
     }
 
     // --- 옛 버전 앱의 동기화 차단 (2026-09-21) ---
@@ -69677,6 +69788,7 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
                 console.warn('[사진] 업로드 실패가 있어 다음 동기화에서 다시 올립니다:', Array.from(photoFailedFloors));
             }
             let rootGuardData = null;
+            let rootGuardRaw = null;
             const dataToSync = {
                 // 예전 버전에서 루트 문서에 직접 쓰던 필드들 — bulkData로 이전했으니 루트에서는 제거
                 // (merge:true는 필드를 지우지 않으므로 FieldValue.delete()로 명시적으로 삭제해야
@@ -69724,7 +69836,10 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
             {
                 const guardApi = window.BSA && window.BSA.floorSyncGuard;
                 const guardSnap = await docRef.get({ source: 'server' });
-                const guardData = (guardSnap && guardSnap.exists && guardSnap.data()) || {};
+                rootGuardRaw = (guardSnap && guardSnap.exists && guardSnap.data()) || {};
+                _lastRootRaw = rootGuardRaw;
+                // 2026-11-04 건물 문서로 나눈 회사도 「펼친 보기」로 확인(못 읽으면 이번엔 쓰지 않음 — 남의 건물을 모르고 덮지 않게)
+                const guardData = await expandRootDocData(docRef, rootGuardRaw, { strict: true });
                 rootGuardData = guardData;
                 const lostBldgs = guardApi && typeof guardApi.lostServerBuildings === 'function'
                     ? guardApi.lostServerBuildings(guardData.buildings, sanitizedBuildings, mergedDeletedBuildings)
@@ -69745,7 +69860,27 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
                     } catch (e) { console.warn('[동기화] 서버 건물 로컬 반영 실패:', e); }
                 }
             }
-            await docRef.set(dataToSync, { merge: true });
+            {
+                // 2026-11-04 루트가 1MB에 가까우면(또는 이미 나눴으면) 건물마다 문서로 나눠 쓴다(작으면 예전과 똑같이 한 번에)
+                const bdApi = buildingDocsApi();
+                if (bdApi && bdApi.shouldSplit(rootGuardRaw || {}, dataToSync, { force: _rootForceSplit })) {
+                    const r = await writeBuildingDocsForSync(docRef, dataToSync, mergedDeletedBuildings, rootGuardRaw || {});
+                    if (r.wrote || r.migrated) console.info('[건물 문서] 나눠 씀:', r);
+                    const S = rootDocShardsApi();
+                    // 남은 공통 칸(삭제 기록 등)이 그래도 크면 조각으로
+                    if (S) {
+                        await S.writeRootDoc(docRef, dataToSync, {
+                            fields: ['deletedBuildingIds'], serverRaw: rootGuardRaw || {},
+                            deleteSentinel: () => firebase.firestore.FieldValue.delete()
+                        });
+                    } else {
+                        await docRef.set(dataToSync, { merge: true });
+                    }
+                    _rootForceSplit = false;
+                } else {
+                    await docRef.set(dataToSync, { merge: true });
+                }
+            }
             if (csPerKey) await writeCompanySettingsPerKey(docRef, rootGuardData);
             clearSyncErrorRetryTimer();
             // 2026-10-20 일부가 실패한 회차는 성공으로 치지 않는다 — 예전엔 여기서 실패 수를 0으로 돌리고
@@ -69798,6 +69933,11 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
                 return;   // finally는 그대로 실행된다 — 잠금 해제·다음 회차 예약
             }
             console.warn('Firebase Sync Error:', e);
+            // 2026-11-04 문서 1MB 초과: 멈추지 않고 다음 시도에서 건물마다 문서로 나눠 쓴다
+            if (rootDocShardsApi() && rootDocShardsApi().isDocTooLargeError(e)) {
+                _rootForceSplit = true;
+                try { e.__kind = 'transient'; } catch (_e2) { /* ignore */ }
+            }
             if (typeof syncProgressFail === 'function') syncProgressFail('sync', isFirestorePermissionError(e) ? '서버 접근 권한 없음 — 관리자 확인 필요'
                 : (isFirestoreQuotaError(e) ? '서버 사용 한도 — 잠시 뒤 자동 재시도' : '서버 동기화 실패 — 잠시 뒤 자동 재시도'));
             _syncPending = false;
@@ -69907,6 +70047,10 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
             try { currentBulkUnsubscribe(); } catch (e) { /* ignore */ }
             currentBulkUnsubscribe = null;
         }
+        if (_bldgMetaUnsub) {
+            try { _bldgMetaUnsub(); } catch (e) { /* ignore */ }
+            _bldgMetaUnsub = null;
+        }
         stopFloorRealtimeListeners();
         if (typeof stopPhoneRelayListener === 'function') stopPhoneRelayListener();
         _listeningCompanyId = null;
@@ -69919,6 +70063,10 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
             _legacyBulkCache = null;
             _legacyBulkCacheTried = false;
             _floorsCheckedMigration.clear();
+            _bldgDocs = {};
+            _bldgDocsFromServer = false;
+            _lastRootRaw = {};
+            _bldgChunkCache = {};
         }
     }
 
@@ -69981,7 +70129,8 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
             }
             const docRef = db.collection('safety_app').doc(getCompanyDocId());
             const snap = await fetchCompanyDocSnap(docRef);
-            const rootData = snap.exists ? snap.data() : {};
+            if (snap.exists) _lastRootRaw = snap.data() || {};
+            const rootData = snap.exists ? await expandRootDocData(docRef, snap.data()) : {};
             await applyRemoteSnapshotFromListener(rootData);
         } catch (e) {
             console.warn('회사 데이터 초기 조회 실패:', e);
@@ -70000,6 +70149,9 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
         if (companyChanged) {
             _lastRootSnapshotData = {};
             _lastRootSnapshotFromServer = false;
+            _bldgDocs = {};
+            _bldgDocsFromServer = false;
+            _lastRootRaw = {};
             _lastBulkSnapshotData = {};
             _bulkHydratedOnce = false;
             _lastBulkPayloadIdentity = '';
@@ -70027,7 +70179,14 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
 
         // 회사 루트는 건물 목록·설정만. 마킹/NDT는 지금 층 문서만 구독한다.
         currentUnsubscribe = db.collection('safety_app').doc(docId).onSnapshot(async (doc) => {
-            const next = (doc && doc.exists && doc.data()) || {};
+            const rawNext = (doc && doc.exists && doc.data()) || {};
+            // 2026-11-04 건물 문서·조각을 붙인 「펼친 보기」로 — 늦게 끝난 옛 스냅샷이 새 것을 덮지 않게 순번 확인
+            _lastRootRaw = rawNext;
+            const seq = ++_rootSnapSeq;
+            const next = (rawNext.rootSplit || rawNext.rootShards || Object.keys(_bldgDocs).length)
+                ? await expandRootDocData(db.collection('safety_app').doc(docId), rawNext)
+                : rawNext;
+            if (seq !== _rootSnapSeq) return;
             if (doc && doc.metadata && doc.metadata.hasPendingWrites) {
                 _lastRootSnapshotData = next;
                 _lastRootSnapshotFromServer = false;   // 내 미전송 쓰기가 섞인 모습 — 서버 기준 아님
@@ -70040,6 +70199,7 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
             await applyCombinedSnapshot();
         }, onListenerErr);
 
+        listenBuildingMetaDocs(docId);
         subscribeCurrentFloorSync();
     }
 

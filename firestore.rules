@@ -18,6 +18,8 @@ rules_version = '2';
 //   safety_app/{companyId}/floorDrawings/{id}   → 층별 도면 이미지(dataUrl)
 //   safety_app/{companyId}/floorDrawingPdfs/{id} → 층별 PDF 원본(dataUrl 또는 parts 서브컬렉션)
 //   safety_app/{companyId}/siteDrawingVault/{siteKey}/floors/{floorCode} → 현장명 기준 PDF 보관함(건물 삭제 후에도 유지)
+//   safety_app/{companyId}/buildingMeta/{buildingId} → 루트가 커지면 건물마다 문서(건물 정보+층 설정, 큰 건 parts), 루트엔 rootSplit 표시
+//   safety_app/{companyId}/rootShards/{writeId_i} → 그래도 큰 공통 칸(삭제 기록 등) 조각, 루트엔 목차
 //   safety_app/{companyId}/syncLeases/{id}      → 동기화 잠금(heartbeat). 회사 루트/층 문서와 분리
 //   safety_app/{companyId}/buildingCheckpoints/{id} → 건물 백업 요약 (+ data/payload, parts)
 //
@@ -212,6 +214,19 @@ service cloud.firestore {
             allow read, write: if isCompanyMember(companyId);
           }
         }
+      }
+
+      // 2026-11-04 건물마다 문서(js/core/building-docs.js) — 건물 정보 + 그 건물 층 설정. 아주 큰 건물은 parts 조각
+      match /buildingMeta/{buildingId} {
+        allow read, write: if isCompanyMember(companyId);
+        match /parts/{partId} {
+          allow read, write: if isCompanyMember(companyId);
+        }
+      }
+
+      // 2026-11-04 루트에 남는 큰 공통 칸(삭제 기록 등) 조각(js/core/root-doc-shards.js). 루트엔 목차(rootShards)만
+      match /rootShards/{shardId} {
+        allow read, write: if isCompanyMember(companyId);
       }
 
       // 동기화 잠금 — 회사 루트/층 묶음과 분리 (heartbeat가 큰 문서를 다시 과금하지 않게)
