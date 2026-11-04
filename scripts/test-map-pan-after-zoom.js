@@ -36,7 +36,7 @@ function fn(name) {
     throw new Error(name);
 }
 const start = fn('handleDragStart');
-const fp = start.slice(start.indexOf('if (forcePan) {'), start.indexOf('if (isEvalMarkingLock())'));
+const fp = start.slice(start.indexOf('if (forcePan) {'), start.indexOf('const rect = elements.planCanvas.getBoundingClientRect();'));
 assert.ok(fp.includes('initialOffsetX = state.view.offsetX;') && fp.includes('isDragging = true;') && fp.includes('pendingDragHit = null;') && fp.includes('return;'));
 assert.ok(!fp.includes('findHitPinPart'), '팬 전용은 마킹 판정 없음');
 

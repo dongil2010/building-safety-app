@@ -57,7 +57,7 @@ function testAppResolve() {
 
 function testWiring() {
     const refresh = extractFunction(app, 'function refreshStrengthItemResults(');
-    assert.ok(/resolveStrengthAgeInfo\(item, bldg\)\.days/.test(refresh), '목록·통계·평가 탭·엑셀·한글이 쓰는 재계산이 직접 입력을 따른다');
+    assert.ok(/resolveStrengthAgeInfo\(item, bldg\)\.days/.test(refresh), '목록·통계·한글이 쓰는 재계산이 직접 입력을 따른다');
     assert.strictEqual((app.match(/resolveStrengthAgeInfo\(pt\.item, ndtBldgOf\(pt\.item\)\)\.days/g) || []).length, 2, '성능평가(한글 성과표) 2곳');
     assert.ok(/strengthAgeOverride: strengthAgeFormItem/.test(app) || /strengthAgeOverride:/.test(app), '항목에 저장');
     assert.ok(/id="ndtStrengthAgeBldg"/.test(app) && /id="ndtStrengthAgeItem"/.test(app), '입력칸 2개(건물 공통·이 항목)');
@@ -65,8 +65,6 @@ function testWiring() {
     const merge = fs.readFileSync(path.join(root, 'js', 'core', 'building-meta-merge.js'), 'utf8');
     assert.ok(/'strengthAgeOverride'/.test(merge), '건물 정보 병합 키');
     assert.ok(/'strengthAgeOverride'/.test(app), 'app.js 예비 키 목록');
-    const sm = fs.readFileSync(path.join(root, 'js', 'core', 'safetyman-export.js'), 'utf8');
-    assert.ok(/refreshStrengthItemResults/.test(sm), 'SafetyMan 엑셀은 같은 재계산 사용');
     const html = fs.readFileSync(path.join(root, 'index.html'), 'utf8');
     assert.ok(/js\/core\/strength-age\.js\?v=/.test(html));
     assert.ok(html.indexOf('js/core/strength-age.js') < html.indexOf('src="app.js'), 'app.js보다 먼저');

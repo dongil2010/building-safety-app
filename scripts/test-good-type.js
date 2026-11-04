@@ -10,9 +10,4 @@ no.forEach((t) => assert.strictEqual(G.isGoodDefectText(t), false, 'should NOT b
 assert.strictEqual(G.isGoodDefectList('상태양호, 보수됨'), true);
 assert.strictEqual(G.isGoodDefectList('균열, 보수완료'), false);
 // 부재 수 자동 집계도 같은 규칙
-const MC = require(path.join(__dirname, '..', 'js', 'core', 'member-count.js'));
-if (MC && typeof MC.isGoodType === 'function') {
-    assert.strictEqual(MC.isGoodType('보수 됨'), true);
-    assert.strictEqual(MC.isGoodType('보수요망'), false);
-}
 console.log('test-good-type: ok');

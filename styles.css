@@ -17150,74 +17150,7 @@ html.layout-mobile .home-update-btn { width: 2.5rem; padding: 0; justify-content
 }
 #ndtDispEditPointList .ndt-disp-row-transfer-form { width: 100%; }
 
-/* ---- 평가단위(2026-10-13): 도면 위 작은 바 + 건물 설정 창 ---- */
-.eval-unit-bar {
-    position: absolute; right: 0.6rem; bottom: 0.6rem; z-index: 21;
-    display: flex; flex-wrap: wrap; align-items: center; gap: 0.35rem;
-    max-width: calc(100% - 1.2rem); padding: 0.3rem 0.5rem;
-    background: rgba(255, 255, 255, 0.95); border: 1px solid #cbd5e1; border-radius: 10px;
-    color: #0f172a; font-size: 0.78rem; box-shadow: 0 2px 8px rgba(0, 0, 0, 0.12);
-}
-.eval-unit-bar[hidden] { display: none !important; }
-.eval-unit-bar-title { font-weight: 800; }
-.eval-unit-bar-chips { display: flex; flex-wrap: wrap; gap: 0.25rem; }
-.eval-unit-chip {
-    border: 2px solid var(--eu-color, #64748b); background: #fff; color: #0f172a;
-    border-radius: 999px; padding: 0.1rem 0.5rem; font-size: 0.76rem; font-weight: 700; cursor: pointer;
-}
-.eval-unit-chip.active { background: var(--eu-color, #64748b); color: #fff; }
-.eval-plan-overlay {
-    position: fixed; inset: 0; z-index: 10050; background: rgba(15, 23, 42, 0.45);
-    display: flex; align-items: center; justify-content: center; padding: 0.8rem;
-}
-.eval-plan-overlay[hidden] { display: none !important; }
-.eval-plan-card {
-    background: #fff; color: #0f172a; border-radius: 12px; width: min(720px, 100%);
-    max-height: 90vh; overflow: auto; padding: 0.9rem 1rem; box-shadow: 0 10px 30px rgba(0, 0, 0, 0.25);
-}
-.eval-plan-head { display: flex; align-items: center; gap: 0.5rem; flex-wrap: wrap; margin-bottom: 0.6rem; }
-.eval-plan-head .eval-plan-close { margin-left: auto; }
-.eval-plan-sub { font-size: 0.75rem; color: #64748b; }
-.eval-plan-count { display: flex; align-items: center; gap: 0.45rem; flex-wrap: wrap; margin-bottom: 0.6rem; font-weight: 700; }
-.eval-plan-count .eval-plan-n { width: 5rem; }
-.eval-plan-table { width: 100%; border-collapse: collapse; font-size: 0.82rem; }
-.eval-plan-table th, .eval-plan-table td { border-bottom: 1px solid #e2e8f0; padding: 0.35rem 0.3rem; text-align: left; vertical-align: middle; }
-.eval-plan-table select { min-width: 9rem; max-width: 100%; }
-.eval-plan-detail { color: #475569; font-size: 0.76rem; }
-.eval-plan-sum { margin-top: 0.7rem; font-size: 0.82rem; }
-.eval-plan-sum ul { margin: 0.3rem 0 0.3rem 1.1rem; padding: 0; }
-.eval-plan-warn { color: #b45309; font-weight: 700; }
-
-/* 평가단위 부분·층×부분 표 (2026-10-13) */
-.eval-plan-parts { margin: 0.6rem 0; }
-.eval-plan-parts .form-control { min-width: 6rem; }
-.eval-plan-scroll { overflow-x: auto; max-width: 100%; }
-.eval-plan-matrix th, .eval-plan-matrix td { white-space: nowrap; text-align: center; }
-.eval-plan-matrix td:first-child { text-align: left; font-weight: 700; }
-.eval-plan-cell label { display: inline-flex; align-items: center; gap: 0.25rem; cursor: pointer; }
-
-/* 평가 탭 (2026-10-13) */
-.eval-tab { padding: 0.8rem 1rem 3rem; max-width: 1400px; }
-.eval-tab h3 { margin: 1.1rem 0 0.4rem; font-size: 1.02rem; }
-.eval-tab-empty { padding: 2rem; color: #64748b; }
-.eval-tab .eval-plan-count .form-control { width: 4.5rem; display: inline-block; }
-.eval-in-unit { border: 1px solid #e2e8f0; border-radius: 10px; padding: 0.6rem; margin: 0.6rem 0; background: #fff; }
-.eval-in-head { display: flex; flex-wrap: wrap; gap: 0.8rem; align-items: center; margin-bottom: 0.4rem; }
-.eval-in-head .form-control { width: 8rem; display: inline-block; }
-.eval-in-head .eval-in-tilt { width: 5rem; }
-.eval-in-table th, .eval-in-table td { text-align: center; padding: 0.25rem; }
-.eval-in-table .form-control.eval-in { width: 4.6rem; min-width: 3.6rem; padding: 0.25rem; text-align: center; }
-.eval-in-cell { display: flex; gap: 0.2rem; align-items: center; justify-content: center; }
-.eval-in.is-auto { color: #64748b; background: #f1f5f9; }
-.eval-in.is-input { color: #0f172a; font-weight: 700; background: #fefce8; }
-.eval-grade-placeholder { margin-top: 1.2rem; padding: 0.8rem; border: 1px dashed #cbd5e1; border-radius: 8px; color: #94a3b8; }
-
-/* 부재 수 세기 (2026-10-13) — 화면 전용 점 */
-.map-count-overlay { position: absolute; pointer-events: none; overflow: hidden; z-index: 6; }
-.map-count-overlay:not(.is-active) .map-count-dot { opacity: 0.75; }
-.map-count-dot { position: absolute; left: 0; top: 0; min-width: 18px; height: 18px; padding: 0 4px; border-radius: 9px;
-  background: var(--mc-color, #334155); color: #fff; font: 800 10px/18px "Pretendard", "Malgun Gothic", sans-serif;
-  text-align: center; box-shadow: 0 0 0 2px #fff, 0 1px 3px rgba(0,0,0,.35); white-space: nowrap; }
+/* 도면 위 막대(구조 부재 막대가 씀 — 2026-11-04 부재 수 세기는 삭제했지만 막대 스타일은 남김) */
 .map-count-bar { position: absolute; left: 8px; top: 8px; right: 8px; z-index: 12; display: flex; flex-wrap: wrap; gap: 4px; align-items: center;
   background: rgba(255,255,255,.96); border: 1px solid #cbd5e1; border-radius: 10px; padding: 6px; box-shadow: 0 2px 10px rgba(0,0,0,.12); }
 .map-count-bar[hidden] { display: none; }
@@ -17229,75 +17162,6 @@ html.layout-mobile .home-update-btn { width: 2.5rem; padding: 0; justify-content
 .map-count-title, .map-count-sep { font-weight: 800; font-size: 0.85rem; color: #334155; padding: 0 4px; }
 .map-count-hint { font-size: 0.75rem; color: #64748b; }
 @media (max-width: 700px) { .map-count-hint { display: none; } .map-count-bar button { padding: 6px 8px; } }
-
-/* 2026-10-13 평가 부재 바(도면) — G/B 고르기와 같은 무지개 테두리 */
-.map-eval-member-bar { position: absolute; left: 8px; right: 8px; bottom: 56px; z-index: 12; display: flex; flex-wrap: wrap; gap: 4px; align-items: center;
-    background: rgba(255,255,255,0.96); border-radius: 10px; padding: 6px 8px; box-shadow: 0 2px 10px rgba(15,23,42,0.25); font-size: 0.85rem; }
-.map-eval-member-bar[hidden] { display: none; }
-.map-eval-member-title { font-weight: 800; margin-right: 4px; }
-.map-eval-member-btn { border: 2px solid transparent; border-radius: 8px; padding: 5px 9px; min-height: 36px; font-weight: 800; cursor: pointer; color: #0f172a;
-    background: linear-gradient(#fff, #fff) padding-box, linear-gradient(90deg, #ff0000, #ffff00, #00ff00, #00ffff, #0040ff, #ff00ff) border-box; }
-.map-eval-member-btn small { opacity: 0.55; font-weight: 700; }
-.map-eval-member-btn i { opacity: 0.5; font-style: normal; font-weight: 700; }
-.map-eval-member-btn.is-guess { opacity: 0.6; }
-.map-eval-member-btn.active { background: linear-gradient(var(--em-color, #0f172a), var(--em-color, #0f172a)) padding-box, linear-gradient(90deg, #ff0000, #ffff00, #00ff00, #00ffff, #0040ff, #ff00ff) border-box; color: #fff; opacity: 1; }
-.map-eval-member-clear { background: #f1f5f9; border-color: #cbd5e1; }
-.map-eval-member-warn { color: #b45309; font-weight: 800; }
-.map-eval-member-hint { color: #64748b; font-size: 0.75rem; }
-/* 평가 탭 안 도면(결함위치도 화면을 옮겨 씀) */
-#tab-eval { flex-direction: column; overflow: auto; }
-.eval-map-head { display: flex; flex-wrap: wrap; gap: 6px; align-items: center; padding: 0.6rem 1rem 0; }
-.eval-map-head .eval-map-floor { width: auto; min-width: 7rem; }
-.eval-map-slot { position: relative; display: flex; height: min(72vh, 760px); min-height: 380px; margin: 6px 1rem 0; flex: 0 0 auto; }
-.eval-map-slot[hidden] { display: none; }
-.eval-map-slot > #tab-map { display: flex !important; content-visibility: visible !important; flex: 1 1 auto; min-height: 0; height: 100%; width: 100%; }
-.eval-map-slot > #tab-map .inspect-layout { height: 100%; min-height: 0; flex: 1 1 auto; }
-@media (max-width: 900px) { .eval-map-slot > #tab-map .inspect-sidebar-left { display: none; } }
-.eval-s357-host { display: block; margin: 0 1rem 3rem; max-width: 1400px; }
-.eval-s357-host[hidden] { display: none; }
-
-/* 2026-10-13 부재 수: 구역 배지 · 구역 테두리 · 점 메뉴 */
-.map-count-zone-badge { display: inline-flex; align-items: center; gap: 4px; padding: 4px 12px; border-radius: 10px; background: var(--zone-color, #2563eb); color: #fff; font-weight: 800; font-size: 1rem; min-height: 36px; box-shadow: 0 0 0 2px #fff inset; }
-.map-count-zone-badge b { font-size: 1.35rem; line-height: 1; }
-.map-count-bar .map-count-zone { border: 2px solid var(--zone-color, #cbd5e1); min-width: 36px; }
-.map-count-bar .map-count-zone.active { background: var(--zone-color, #0f172a); border-color: var(--zone-color, #0f172a); color: #fff; }
-.map-count-bar .map-count-type b small { font-weight: 600; opacity: 0.7; font-size: 0.75em; }
-.map-count-warn { flex-basis: 100%; color: #b45309; background: #fffbeb; border: 1px solid #fcd34d; border-radius: 8px; padding: 4px 8px; font-weight: 700; font-size: 0.8rem; }
-.map-count-dot.has-zone { box-shadow: 0 0 0 3px var(--zone-color), 0 0 0 4px #fff; }
-.map-count-dot-menu { position: absolute; z-index: 40; display: flex; flex-wrap: wrap; gap: 4px; align-items: center; max-width: 280px; padding: 6px; background: #fff; border: 1px solid #cbd5e1; border-radius: 10px; box-shadow: 0 8px 24px rgba(15,23,42,.18); }
-.map-count-dot-menu button { border: 1px solid #cbd5e1; background: #fff; border-radius: 8px; padding: 6px 10px; font-weight: 700; font-size: 0.85rem; min-height: 36px; cursor: pointer; }
-.map-count-dot-menu button.is-danger { color: #b91c1c; border-color: #fca5a5; }
-.map-count-dot-menu .map-count-zone { border: 2px solid var(--zone-color); min-width: 36px; }
-.map-count-dot-menu .map-count-zone.active { background: var(--zone-color); color: #fff; }
-.map-count-dot-menu-title, .map-count-dot-menu-sep { font-weight: 800; font-size: 0.8rem; color: #334155; padding: 0 4px; }
-.map-count-dot-menu-sep { flex-basis: 100%; }
-
-/* 2026-10-13 부재 수 찍기·평가단위·평가 부재 UI는 평가 탭 안 도면에서만 (#id#id: 모바일 레일 !important보다 우선) */
-html body:not(.bsa-eval-map-on) #btnModeCount#btnModeCount,
-html body:not(.bsa-eval-map-on) #mobileBtnModeCount#mobileBtnModeCount,
-html body:not(.bsa-eval-map-on) #btnEvalUnits#btnEvalUnits,
-html body:not(.bsa-eval-map-on) #mobileBtnEvalUnits#mobileBtnEvalUnits,
-html body:not(.bsa-eval-map-on) #evalUnitBar#evalUnitBar,
-html body:not(.bsa-eval-map-on) #btnEvalUnitSelectedDefects#btnEvalUnitSelectedDefects,
-html body:not(.bsa-eval-map-on) #mobileBtnEvalUnitSelected#mobileBtnEvalUnitSelected,
-html body:not(.bsa-eval-map-on) #mapCountBar#mapCountBar,
-html body:not(.bsa-eval-map-on) #mapCountOverlay#mapCountOverlay,
-html body:not(.bsa-eval-map-on) #mapCountDotMenu#mapCountDotMenu,
-html body:not(.bsa-eval-map-on) #mapEvalMemberBar#mapEvalMemberBar { display: none !important; }
-
-/* 2026-10-13 평가 점수(평가단위 = 층 기록) */
-.eval-score-box { margin: 12px 0; padding: 12px; border: 1px solid #e2e8f0; border-radius: 12px; background: #fff; }
-.eval-score-box[hidden] { display: none; }
-.eval-score-box h3 { margin: 0 0 8px; font-size: 1rem; }
-.eval-score-total { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; padding: 8px 12px; border-radius: 10px; background: #f1f5f9; margin-bottom: 8px; }
-.eval-score-total > b { font-size: 1.5rem; }
-.eval-score-sub { color: #475569; font-size: 0.85rem; }
-.eval-score-table { width: 100%; border-collapse: collapse; font-size: 0.85rem; }
-.eval-score-table th, .eval-score-table td { border-bottom: 1px solid #e2e8f0; padding: 6px; text-align: left; vertical-align: middle; }
-.eval-sf-select { min-width: 72px; padding: 4px 6px; }
-.eval-grade { display: inline-block; min-width: 22px; text-align: center; border-radius: 6px; padding: 1px 6px; font-weight: 800; color: #fff; background: #64748b; }
-.eval-grade-A { background: #3da36e; } .eval-grade-B { background: #6aad4a; } .eval-grade-C { background: #d4a017; } .eval-grade-D { background: #d9763a; } .eval-grade-E { background: #c43d30; }
-.eval-score-note { margin: 8px 0 0; color: #64748b; font-size: 0.78rem; }
 
 /* 고급 필터: 열면 떠 있는 창(머리를 끌어 옮김, 화면 안에 붙잡음) */
 .advanced-filter-panel .adv-filter-grip { color: var(--text-secondary); opacity: .55; margin-right: .2rem; }
@@ -17344,26 +17208,14 @@ line.map-guide-shape { fill: none; stroke-width: 2.5; }
     max-height: none;
     flex-shrink: 0;
 }
-/* 2026-10-14 부재 수 자동 점(양호·구조 결함 마킹에서) — 점선 테두리·옅게 */
-.map-count-dot.is-auto { background: #fff; color: var(--mc-color); border: 2px dashed var(--mc-color); opacity: .85; }
-
-/* 2026-10-14 평가 탭 도면: 상태조사 마킹 지우기·일괄수정 단추 숨김(잠금) */
-html body.bsa-eval-map-on #btnDeleteSelectedDefects, html body.bsa-eval-map-on #btnBulkEditSelectedDefects,
-html body.bsa-eval-map-on #mobileBtnDeleteSelected, html body.bsa-eval-map-on #mobileBtnBulkEditSelected { display: none !important; }
-
-/* 2026-10-14 부재 수 지우개 */
-.map-count-erase-layer { position: absolute; z-index: 7; cursor: crosshair; touch-action: none; }
-.map-count-erase-box { position: absolute; border: 2px dashed #dc2626; background: rgba(220, 38, 38, 0.08); pointer-events: none; }
-
-.map-count-auto { display: inline-flex; align-items: center; gap: .25rem; font-size: .78rem; font-weight: 600; white-space: nowrap; cursor: pointer; }
 
 /* 2026-10-15 폰 세로: 상태조사 하단 도구줄을 화면 전체 폭으로, 왼쪽 목록·도면은 그 위에서 끝나게 */
 @media (max-width: 600px) and (orientation: portrait) {
-    html:not(.layout-desktop):not(.layout-tablet) body:not(.bsa-eval-map-on) #tab-map .inspect-layout {
+    html:not(.layout-desktop):not(.layout-tablet) body #tab-map .inspect-layout {
         padding-bottom: calc(var(--bsa-mdock-h, 52px) + env(safe-area-inset-bottom, 0px)) !important;
         box-sizing: border-box;
     }
-    html:not(.layout-desktop):not(.layout-tablet) body:not(.bsa-eval-map-on) #tab-map .mobile-canvas-dock {
+    html:not(.layout-desktop):not(.layout-tablet) body #tab-map .mobile-canvas-dock {
         position: fixed !important;
         left: 0 !important;
         right: 0 !important;
@@ -17381,7 +17233,7 @@ html body.bsa-eval-map-on #mobileBtnDeleteSelected, html body.bsa-eval-map-on #m
         z-index: 60 !important;
         box-sizing: border-box;
     }
-    html:not(.layout-desktop):not(.layout-tablet) body:not(.bsa-eval-map-on) #tab-map .mobile-canvas-dock .mobile-map-fab {
+    html:not(.layout-desktop):not(.layout-tablet) body #tab-map .mobile-canvas-dock .mobile-map-fab {
         width: 100% !important;
         max-width: none !important;
         display: flex !important;
@@ -17393,11 +17245,11 @@ html body.bsa-eval-map-on #mobileBtnDeleteSelected, html body.bsa-eval-map-on #m
         padding: 0 !important;
         border-radius: 0 !important;
     }
-    html:not(.layout-desktop):not(.layout-tablet) body:not(.bsa-eval-map-on) #tab-map .mobile-canvas-dock .mobile-fab-btn {
+    html:not(.layout-desktop):not(.layout-tablet) body #tab-map .mobile-canvas-dock .mobile-fab-btn {
         flex: 1 1 0 !important;
         min-width: 0 !important;
     }
-    html:not(.layout-desktop):not(.layout-tablet) body:not(.bsa-eval-map-on) #tab-map .mobile-canvas-dock .mobile-fab-btn span {
+    html:not(.layout-desktop):not(.layout-tablet) body #tab-map .mobile-canvas-dock .mobile-fab-btn span {
         white-space: nowrap;
         overflow: hidden;
         text-overflow: clip;

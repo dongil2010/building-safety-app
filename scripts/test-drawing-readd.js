@@ -6,8 +6,8 @@ const path = require('path');
 const T = require('../js/core/drawing-floor-tombstone.js');
 const R = require('../js/core/drawing-resize.js');
 global.window = global;
-require('../js/core/guide-shapes.js'); require('../js/core/member-count.js'); require('../js/core/drawing-memo.js');
-require('../js/core/struct-members.js'); require('../js/core/eval-units.js');
+require('../js/core/guide-shapes.js'); require('../js/core/drawing-memo.js');
+require('../js/core/struct-members.js');
 
 const clone = (o) => JSON.parse(JSON.stringify(o));
 // app.js 건물 메타 병합과 같은 규칙: 묘비 합집합 + 시각 최대 + 다시 넣은 시각(LWW)
@@ -67,16 +67,14 @@ const d = { x: 100, y: 50, points: [{ x: 10, y: 20 }] };
 R.scaleDefect(d, 2, 3);
 assert.deepStrictEqual([d.x, d.y, d.points[0].x, d.points[0].y], [200, 150, 20, 60]);
 
-// 층 삭제 때 가이드·개수 점·메모·평가 구역이 묘비와 함께 지워진다
+// 층 삭제 때 가이드·메모가 묘비와 함께 지워진다(부재 수 점·평가 구역은 2026-11-04 기능째 삭제)
 const B = global.BSA;
 const st = {
     guideShapes: { B1_3F: [{ id: 'g1', x1: 0, y1: 0, x2: 1, y2: 1, updatedAt: 5 }] },
-    memberCounts: { B1_3F: [{ id: 'c1', x: 1, y: 1, updatedAt: 5 }] },
-    drawingMemos: { B1_3F: [{ id: 'm1', x: 1, y: 1, text: 'a', updatedAt: 5 }] },
-    evalUnits: { B1_3F: [{ id: 'u1', updatedAt: 5 }] }
+    drawingMemos: { B1_3F: [{ id: 'm1', x: 1, y: 1, text: 'a', updatedAt: 5 }] }
 };
 const out = R.purgeFloorMarkings(st, 'B1_3F', B, 10);
-assert.deepStrictEqual([out.guides, out.counts, out.memos, out.evalUnits], [1, 1, 1, 1]);
+assert.deepStrictEqual([out.guides, out.memos], [1, 1]);
 assert(!st.guideShapes.B1_3F.length && st.deletedGuideShapeIds.B1_3F.includes('g1'));
-assert(st.deletedMemberCountIds.B1_3F.includes('c1') && st.deletedMemoIds.B1_3F.includes('m1') && st.deletedEvalUnitIds.B1_3F.includes('u1'));
+assert(st.deletedMemoIds.B1_3F.includes('m1'));
 console.log('test-drawing-readd: ok');

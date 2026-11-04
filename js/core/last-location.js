@@ -13,7 +13,8 @@
     var KEY_PREFIX = 'bsa_last_location_v1:';
     var VERSION = 1;
     // 홈이 아닌 작업 탭만 기억한다
-    var TABS = ['tab-map', 'tab-ndt', 'tab-survey', 'tab-eval', 'tab-stats'];
+    // 2026-11-04 평가 탭(tab-eval)은 삭제 — 예전에 평가 탭에서 끝냈던 기록은 복원하지 않는다
+    var TABS = ['tab-map', 'tab-ndt', 'tab-survey', 'tab-stats'];
     var lastWritten = {};
 
     function keyOf(uid, companyId) {

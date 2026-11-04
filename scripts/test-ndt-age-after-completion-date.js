@@ -95,18 +95,6 @@ assert.strictEqual((src.match(/filter\(item => item\.category === '탄산화'\)\
 // ndtBldgOf(item): 여러 동 한글 출력이면 그 항목의 동, 아니면 bldg(2026-10-23)
 assert.strictEqual((src.match(/filter\(item => item\.category === '강도'\)\n\s*\.map\(item => refreshStrengthItemResults\(item, ndtBldgOf\(item\)\)\)/g) || []).length, 2, '강도 한글 출력 2곳(기존)');
 
-// 평가 탭·SafetyMan 엑셀(safetyman-export.js)도 다시 계산한 강도
-global.window = { refreshStrengthItemResults: H.refreshStrengthItemResults };
-const smPath = path.join(root, 'js', 'core', 'safetyman-export.js');
-delete require.cache[smPath];
-const SM = require(smPath);
-assert.strictEqual(SM.strengthFinalOf(item, bldg), fresh.strengthFinal, '평가 탭 강도 = 다시 계산한 값');
-assert.strictEqual(SM.strengthFinalOf({ category: '강도', strengthFinal: 21.5 }, bldg), 21.5, 'R값 없는 옛 항목은 저장값');
-const smSrc = fs.readFileSync(smPath, 'utf8');
-assert.ok(!/parseFloat\(it\.strengthFinal\)|num\(it\.strengthFinal\)/.test(smSrc), '저장값 직접 사용 없음');
-assert.ok(smSrc.includes('sampleBlock(st, s, o.memberName, i + 1, o.bldg)'));
-delete global.window;
-
 // 건물 수정 저장 뒤 열린 입력창 다시 계산
 assert.ok(src.includes("if (typeof recalcAllStrengthSlots === 'function') recalcAllStrengthSlots();"));
 

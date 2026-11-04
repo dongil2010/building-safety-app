@@ -97,11 +97,6 @@
                     <span class="tab-label-long">비파괴조사</span>
                     <span class="tab-label-short">비파괴</span>
                 </button>
-                <button type="button" class="tab-btn" data-tab="tab-eval" onclick="window.switchTab('tab-eval')">
-                    <i class="fa-solid fa-scale-balanced"></i>
-                    <span class="tab-label-long">평가</span>
-                    <span class="tab-label-short">평가</span>
-                </button>
                 <!-- 탭이 아니라 별도 페이지(report-summary.html)를 새 창으로 연다. AI 키가 배포본에만 있어 배포 주소로 고정. PC 화면 전용. -->
                 <button type="button" class="tab-btn tab-btn-report-summary" title="보고서 본문 요약 — 상태조사표(.hwpx)로 보고서 본문 표를 만드는 사무실용 페이지 (새 창)" onclick="window.open('https://dongil2010.github.io/building-safety-app/report-summary.html', '_blank', 'noopener')">
                     <i class="fa-solid fa-file-lines"></i>
@@ -331,12 +326,6 @@
                                 <button type="button" id="btnModeMemo" class="mode-btn btn-memo-mode" title="도면 주석 — 도면을 클릭해 주석을 붙입니다(결함 아님, 조사표·번호에 안 들어감)">
                                     <i class="fa-solid fa-note-sticky"></i> 📝 주석
                                 </button>
-                                <button type="button" id="btnModeCount" class="mode-btn btn-count-mode" title="부재 수 세기 — 도면을 눌러 기둥·벽·거더·빔·슬래브 점을 찍습니다(결함 아님, 출력 안 됨). 단축키 C·W·G·B·S">
-                                    <i class="fa-solid fa-hashtag"></i> 🔢 부재 수
-                                </button>
-                                <button type="button" id="btnEvalUnits" class="mode-btn btn-eval-units" title="평가단위 — 한 층을 구역(A·B…)으로 나눠 결함을 따로 평가(정밀점검)">
-                                    <i class="fa-solid fa-layer-group"></i> 평가단위
-                                </button>
                                 <button type="button" id="btnSnapToCad" class="mode-btn btn-snap-toggle active" title="CAD 벡터 스냅 — 핀 마킹 시 근처 CAD 선/끝점/교차점에 자동으로 붙습니다 (PDF 벡터 도면에서만 동작)">
                                     <i class="fa-solid fa-magnet"></i> 스냅
                                 </button>
@@ -412,11 +401,6 @@
 
                         <div id="mapZoomOverlay" class="map-zoom-overlay" aria-hidden="true"></div>
                         <div id="mapSelectedDefectPopup" class="map-selected-defect-popup" hidden></div>
-                        <div class="eval-unit-bar" id="evalUnitBar" hidden role="toolbar" aria-label="평가단위">
-                            <span class="eval-unit-bar-title">평가단위</span>
-                            <div class="eval-unit-bar-chips" id="evalUnitBarChips"></div>
-                            <button type="button" class="btn btn-sm btn-outline" id="btnEvalUnitBarManage">관리</button>
-                        </div>
                         <div class="drawing-memo-bar" id="drawingMemoBar" hidden role="toolbar" aria-label="도면 주석">
                         <span class="drawing-memo-bar-text">📝 도면을 눌러 주석 추가 · 주석을 끌어 옮기기 · 눌러서 고치기/지우기</span>
                         <span class="drawing-memo-bar-text-short">📝 도면을 눌러 주석 추가 · 끌어 옮기기 · 눌러서 고치기</span>
@@ -470,18 +454,10 @@
                                 <i class="fa-solid fa-note-sticky"></i>
                                 <span>주석</span>
                             </button>
-                            <button type="button" class="mobile-rail-btn mobile-fab-count" id="mobileBtnModeCount" data-mode="COUNT" title="부재 수 세기">
-                                <i class="fa-solid fa-hashtag"></i>
-                                <span>부재수</span>
-                            </button>
                             <!-- 2026-10-20 현장(폰·태블릿)에서도 구조 부재 편집 — 오른쪽 패널이 숨는 화면용 입구 -->
                             <button type="button" class="mobile-rail-btn mobile-fab-struct" id="mobileBtnStructLayer" title="구조 부재 — 기둥·거더·빔 그리기·고치기(화면 전용)">
                                 <i class="fa-solid fa-border-all"></i>
                                 <span>구조</span>
-                            </button>
-                            <button type="button" class="mobile-rail-btn mobile-fab-eval-units" id="mobileBtnEvalUnits" title="평가단위">
-                                <i class="fa-solid fa-layer-group"></i>
-                                <span>평가단위</span>
                             </button>
                             <button type="button" class="mobile-rail-btn mobile-rail-more-toggle" id="mobileBtnRailMore" title="추가 도구 보이기/숨기기" aria-expanded="false" aria-controls="mobileMapRailSecondary">
                                 <i class="fa-solid fa-ellipsis"></i>
@@ -545,10 +521,6 @@
                                 <i class="fa-solid fa-object-ungroup"></i>
                                 <span>통합 해제</span>
                             </button>
-                            <button type="button" id="btnEvalUnitSelectedDefects" class="icon-pill-btn map-toolbar-eval-unit" title="선택한 결함을 평가단위로 분류" hidden disabled>
-                                <i class="fa-solid fa-layer-group"></i>
-                                <span id="mapEvalUnitToolbarLabel">평가단위</span>
-                            </button>
                             <button type="button" id="btnDeleteSelectedDefects" class="icon-pill-btn icon-pill-danger map-toolbar-delete-selected" title="선택한 결함 삭제" hidden disabled>
                                 <i class="fa-solid fa-trash-can"></i>
                                 <span id="mapSelectionToolbarLabel">선택 삭제</span>
@@ -582,10 +554,6 @@
                             <button type="button" class="mobile-fab-btn mobile-fab-merge" id="mobileBtnUnmergeSelected" title="통합한 마킹을 원래 번호·위치로 되돌림" hidden disabled>
                                 <i class="fa-solid fa-object-ungroup"></i>
                                 <span>통합해제</span>
-                            </button>
-                            <button type="button" class="mobile-fab-btn" id="mobileBtnEvalUnitSelected" title="선택한 결함을 평가단위로 분류" hidden disabled>
-                                <i class="fa-solid fa-layer-group"></i>
-                                <span id="mobileMapEvalUnitLabel">평가단위</span>
                             </button>
                             <button type="button" class="mobile-fab-btn mobile-fab-danger" id="mobileBtnDeleteSelected" title="선택한 결함 삭제" hidden disabled>
                                 <i class="fa-solid fa-trash-can"></i>
@@ -846,8 +814,6 @@
         </section>
 
         <!-- TAB 3: 🔬 비파괴 장비 조사 (NDT Field Inspection & Measurement) -->
-        <!-- TAB: 평가(평가단위·입력표·SafetyMan 엑셀) 2026-10-13 -->
-        <section id="tab-eval" class="tab-content"><div class="eval-map-head" id="evalMapHead"></div><div class="eval-map-slot" id="evalMapSlot" hidden></div><div id="evalTabRoot" class="eval-tab-root"></div><div id="evalS357Host" class="eval-s357-host" hidden></div></section>
 
         <section id="tab-ndt" class="tab-content">
             <div class="ndt-top-bar">
@@ -3649,13 +3615,8 @@
     <script src="js/core/drawing-memo.js?v=20261104_093905"></script>
     <script src="js/core/sketch-memo.js?v=20261104_093905"></script>
     <script src="js/core/memo-author-sync.js?v=20261104_093905"></script>
-    <script src="js/core/eval-units.js?v=20261104_093905"></script>
-    <script src="js/core/member-count.js?v=20261104_093905"></script>
     <script src="js/core/guide-shapes.js?v=20261104_093905"></script>
     <script src="js/core/struct-members.js?v=20261104_093905"></script>
-    <script src="js/core/safetyman-export.js?v=20261104_093905"></script>
-    <script src="js/core/eval-member.js?v=20261104_093905"></script>
-    <script src="js/core/s357-prefill.js?v=20261104_093905"></script>
     <script src="js/core/prev-round-photo-match.js?v=20261104_093905"></script>
     <script src="js/shared/defect-quick-presets.js?v=20261104_093905"></script>
     <script src="js/shared/grid-lines.js?v=20261104_093905"></script>

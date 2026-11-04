@@ -1281,12 +1281,6 @@ document.addEventListener('DOMContentLoaded', () => {
         window.state.sketchMemos = {};
         window.state.deletedSketchIds = {};
         window.state.deletedSketchAt = {};
-        window.state.evalUnits = {};
-        window.state.deletedEvalUnitIds = {};
-        window.state.deletedEvalUnitAt = {};
-        window.state.memberCounts = {};
-        window.state.deletedMemberCountIds = {};
-        window.state.deletedMemberCountAt = {};
         window.state.guideShapes = {};
         window.state.deletedGuideShapeIds = {};
         window.state.deletedGuideShapeAt = {};
@@ -2215,7 +2209,7 @@ document.addEventListener('DOMContentLoaded', () => {
     function updateFloorDrawingEmptyOverlay(message) {
         const el = elements.mapDrawingEmpty || document.getElementById('mapDrawingEmpty');
         if (!el) return;
-        const onMap = (state.currentTab === 'tab-map' || window.__bsaEvalMapOn === true);
+        const onMap = (state.currentTab === 'tab-map');
         const show = onMap && !!state.currentBuilding && !!state.currentFloor && !state.bgImage;
         if (!show) {
             el.style.display = 'none';
@@ -2338,7 +2332,7 @@ document.addEventListener('DOMContentLoaded', () => {
     async function syncViewportHiPatch() {
         const bldg = state.currentBuilding;
         const fc = state.currentFloor;
-        if (!bldg || !fc || (state.currentTab !== 'tab-map' && window.__bsaEvalMapOn !== true) || !state.bgImage) return;
+        if (!bldg || !fc || (state.currentTab !== 'tab-map') || !state.bgImage) return;
 
         const token = ++viewportHiPatchToken;
         viewportHiPatchInFlight = token;
@@ -2869,7 +2863,7 @@ document.addEventListener('DOMContentLoaded', () => {
 
     function saveStateToLocalStorage() {
         try {
-            if ((state.currentTab === 'tab-map' || window.__bsaEvalMapOn === true) && typeof captureFloorSnapshotNow === 'function') {
+            if ((state.currentTab === 'tab-map') && typeof captureFloorSnapshotNow === 'function') {
                 captureFloorSnapshotNow();
             }
             const rawBuildings = window.state.buildings || [];
@@ -2941,13 +2935,6 @@ document.addEventListener('DOMContentLoaded', () => {
                 sketchMemos: window.state.sketchMemos || {},
                 deletedSketchIds: window.state.deletedSketchIds || {},
                 deletedSketchAt: window.state.deletedSketchAt || {},
-                // 평가단위(상태평가용 층 나누기) + 묘비
-                evalUnits: window.state.evalUnits || {},
-                deletedEvalUnitIds: window.state.deletedEvalUnitIds || {},
-                deletedEvalUnitAt: window.state.deletedEvalUnitAt || {},
-                memberCounts: window.state.memberCounts || {},
-                deletedMemberCountIds: window.state.deletedMemberCountIds || {},
-                deletedMemberCountAt: window.state.deletedMemberCountAt || {},
                 guideShapes: window.state.guideShapes || {},
                 deletedGuideShapeIds: window.state.deletedGuideShapeIds || {},
                 deletedGuideShapeAt: window.state.deletedGuideShapeAt || {},
@@ -3156,12 +3143,6 @@ document.addEventListener('DOMContentLoaded', () => {
                 if (parsed.sketchMemos && typeof parsed.sketchMemos === 'object') window.state.sketchMemos = parsed.sketchMemos;
                 if (parsed.deletedSketchIds && typeof parsed.deletedSketchIds === 'object') window.state.deletedSketchIds = parsed.deletedSketchIds;
                 if (parsed.deletedSketchAt && typeof parsed.deletedSketchAt === 'object') window.state.deletedSketchAt = parsed.deletedSketchAt;
-                if (parsed.evalUnits && typeof parsed.evalUnits === 'object') window.state.evalUnits = parsed.evalUnits;
-                if (parsed.deletedEvalUnitIds && typeof parsed.deletedEvalUnitIds === 'object') window.state.deletedEvalUnitIds = parsed.deletedEvalUnitIds;
-                if (parsed.deletedEvalUnitAt && typeof parsed.deletedEvalUnitAt === 'object') window.state.deletedEvalUnitAt = parsed.deletedEvalUnitAt;
-                if (parsed.memberCounts && typeof parsed.memberCounts === 'object') window.state.memberCounts = parsed.memberCounts;
-                if (parsed.deletedMemberCountIds && typeof parsed.deletedMemberCountIds === 'object') window.state.deletedMemberCountIds = parsed.deletedMemberCountIds;
-                if (parsed.deletedMemberCountAt && typeof parsed.deletedMemberCountAt === 'object') window.state.deletedMemberCountAt = parsed.deletedMemberCountAt;
                 if (parsed.guideShapes && typeof parsed.guideShapes === 'object') window.state.guideShapes = parsed.guideShapes;
                 if (parsed.deletedGuideShapeIds && typeof parsed.deletedGuideShapeIds === 'object') window.state.deletedGuideShapeIds = parsed.deletedGuideShapeIds;
                 if (parsed.deletedGuideShapeAt && typeof parsed.deletedGuideShapeAt === 'object') window.state.deletedGuideShapeAt = parsed.deletedGuideShapeAt;
@@ -3486,7 +3467,7 @@ document.addEventListener('DOMContentLoaded', () => {
         'floorsOrderManual',
         'siteName', 'dong', 'multiDong', 'dongOrder', 'name', 'address', 'inspector', 'contactPhone',
         'floors', 'date', 'structureType', 'facilityGrade', 'completionDate', 'notes',
-        'enabledStrengthFormulas', 'strengthAnvilAvg', 'strengthAgeOverride', 'floorPdfRemovedAt', 'floorPdfUpdatedAt', 'evalUnitPlan', 'evalInputs', 'evalSafetyman', 'roundDone'
+        'enabledStrengthFormulas', 'strengthAnvilAvg', 'strengthAgeOverride', 'floorPdfRemovedAt', 'floorPdfUpdatedAt', 'roundDone'
     ];
 
     function buildingMetaUpdatedAt(bldg) {
@@ -5460,7 +5441,7 @@ document.addEventListener('DOMContentLoaded', () => {
             reportProgress(floorCode);
             if (window.state.currentBuildingId === bldg.id
                 && window.state.currentFloor === floorCode
-                && (window.state.currentTab === 'tab-map' || window.__bsaEvalMapOn === true)
+                && (window.state.currentTab === 'tab-map')
                 && !window.state.bgImage
                 && typeof loadFloorDrawing === 'function') {
                 loadFloorDrawing(floorCode);
@@ -10253,7 +10234,7 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
     function updateMapZoomOverlay() {
         const el = elements.mapZoomOverlay || document.getElementById('mapZoomOverlay');
         if (!el) return;
-        const onMap = (state.currentTab === 'tab-map' || window.__bsaEvalMapOn === true);
+        const onMap = (state.currentTab === 'tab-map');
         const mobile = isMobileDrawingContext();
         if (!onMap || !mobile) {
             el.style.display = 'none';
@@ -10846,7 +10827,7 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
     async function syncFloorDrawingTierForView() {
         const bldg = refreshCurrentBuildingFromState() || state.currentBuilding;
         const fc = state.currentFloor;
-        if (!bldg || !fc || (state.currentTab !== 'tab-map' && window.__bsaEvalMapOn !== true) || !state.bgImage) return;
+        if (!bldg || !fc || (state.currentTab !== 'tab-map') || !state.bgImage) return;
 
         if (hasActiveFloorHiPatch()) {
             applyFloorDrawingTarget(undefined, null, { immediate: true });
@@ -11730,10 +11711,8 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
         syncMemberGbOverlay(window._bsaMemberGbEntries || []);
         window._bsaMemberGbEntries = null;
         syncDrawingMemoOverlay();
-        syncMemberCountOverlay();
         syncGuideOverlay();
         syncStructLayer();
-        if (typeof syncEvalUnitBar === 'function') syncEvalUnitBar();
 
         // 결함 목록 DOM은 drawCanvas마다 재생성하지 않음 (선택 스크롤·하이라이트가 즉시 undo됨).
         // 목록 갱신은 updateMapSelectionBar / 필터 / 저장 등 명시적 호출에서만.
@@ -18602,7 +18581,7 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
 
     /**
      * 2026-10-19 강도 재령일 — 이 항목 직접 입력 > 건물 공통 직접 입력 > 준공일~점검일 자동(DAYS360).
-     * 직접 입력을 비우면 자동으로 돌아간다. 목록·통계·평가 탭·SafetyMan 엑셀·성능평가·한글 출력이 모두 이 값을 쓴다.
+     * 직접 입력을 비우면 자동으로 돌아간다. 목록·통계·성능평가·한글 출력이 모두 이 값을 쓴다.
      * 반환 { days, source: 'item'|'building'|'auto', autoDays }
      */
     function resolveStrengthAgeInfo(item, bldg) {
@@ -25070,7 +25049,6 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
     }
 
     function undoDefectChange() {
-        if (window.__bsaEvalMapOn === true) { window.showToast?.('평가 탭에서는 상태조사 마킹 되돌리기를 하지 않습니다.', 'info', 2500); return; }
         const key = getDefectHistoryKey();
         const h = defectHistory[key];
         if (!h || h.undo.length === 0) return;
@@ -25082,7 +25060,6 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
     }
 
     function redoDefectChange() {
-        if (window.__bsaEvalMapOn === true) return;
         const key = getDefectHistoryKey();
         const h = defectHistory[key];
         if (!h || h.redo.length === 0) return;
@@ -26921,11 +26898,7 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
     }
 
     function drawPin(ctx, defect, arrows) {
-        const dim = evalUnitDimFor(defect);
-        if (!dim) { drawPinBody(ctx, defect, arrows); return; }
-        ctx.save();
-        ctx.globalAlpha *= 0.22;
-        try { drawPinBody(ctx, defect, arrows); } finally { ctx.restore(); }
+        drawPinBody(ctx, defect, arrows);
     }
 
     function drawPinBody(ctx, defect, arrows) {
@@ -27107,7 +27080,6 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
 
         drawPinBoxLabel(ctx, pinLabel, getPinBoxTextColor(activeColor, shapeCfg, isBeingDragged), scale, shapeCfg);
         if (defectHasCornerMark(defect)) drawBookmarkChrome(ctx, w, h, scale);
-        drawEvalUnitTag(ctx, defect, w, h, scale); // 화면 전용(보고서 그림은 drawPinSafe)
 
         ctx.restore();
     }
@@ -27401,462 +27373,6 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
         try { localStorage.setItem(key, on ? '1' : '0'); } catch (_e) { /* 기기 저장 실패해도 화면은 바뀜 */ }
     }
     window.isDrawingMemoPrintOn = readMemoPrintPref;
-    // ---- 평가단위(2026-10-13, js/core/eval-units.js) ----
-    // 상태평가용으로 한 층의 결함을 A·B… 단위로 묶는다. 조사표·번호·출력은 지금처럼 층 단위 그대로.
-    // 단위를 안 만들면 아무것도 안 바뀐다(층 하나가 평가단위).
-    function evalUnitApi() { return window.BSA && window.BSA.evalUnits; }
-    function currentEvalUnitFloorKey() {
-        return (state.currentBuildingId && state.currentFloor) ? `${state.currentBuildingId}_${state.currentFloor}` : '';
-    }
-    let evalUnitHighlight = ''; // 바에서 누른 단위만 진하게(확인용) — '' 전체, '__none__' 미지정
-    function commitEvalUnitChange(floorKey) {
-        if (floorKey && typeof markFloorKeyDirty === 'function') markFloorKeyDirty(floorKey);
-        if (typeof saveStateToLocalStorage === 'function') saveStateToLocalStorage();
-        if (typeof scheduleSyncToFirebase === 'function') scheduleSyncToFirebase();
-        syncEvalUnitBar();
-        if (typeof drawCanvas === 'function') drawCanvas();
-    }
-    function evalUnitDisplayFloor() {
-        try {
-            const b = (state.buildings || []).find((x) => x && x.id === state.currentBuildingId);
-            const f = b && (b.floorsList || []).find((x) => x && x.floorCode === state.currentFloor);
-            return (f && f.floorLabel) || state.currentFloor || '';
-        } catch (_e) { return state.currentFloor || ''; }
-    }
-    /** 선택한 마킹(묶음이면 묶음 전체)의 실제 결함들 */
-    function selectedDefectsForEvalUnit(floorKey) {
-        const list = state.defects[floorKey] || [];
-        const ids = new Set(selectedDefectIds);
-        list.forEach((d) => {
-            if (d && d.groupId && ids.has(d.id)) {
-                getDefectMarkingGroupMembers(d.groupId).forEach((m) => { if (m && m.id) ids.add(m.id); });
-            }
-        });
-        return list.filter((d) => d && ids.has(d.id));
-    }
-    function currentEvalBuilding() {
-        return (state.buildings || []).find((b) => b && b.id === state.currentBuildingId) || state.currentBuilding || null;
-    }
-    function commitEvalPlanChange(bldg) {
-        if (bldg && typeof markBuildingMetaDirty === 'function') markBuildingMetaDirty(bldg);
-        if (typeof saveStateToLocalStorage === 'function') saveStateToLocalStorage();
-        if (typeof scheduleSyncToFirebase === 'function') scheduleSyncToFirebase();
-        syncEvalUnitBar();
-        if (typeof drawCanvas === 'function') drawCanvas();
-    }
-    function evalPlanFloors(bldg) {
-        return (bldg.floorsList || []).filter((f) => f && f.floorCode).map((f) => ({
-            floorCode: f.floorCode, floorLabel: f.floorLabel || f.floorCode, floorKey: `${bldg.id}_${f.floorCode}`
-        }));
-    }
-    /** 옛 1-1/1-2·이름 부분 → 번호 구역(1, 2, 3 …). 바뀐 층은 저장 대상으로 */
-    function migrateEvalUnitsLegacy(bldg) {
-        const api = evalUnitApi();
-        if (!api || !bldg || typeof api.normalize !== 'function') return false;
-        const r = api.normalize(bldg, state, evalPlanFloors(bldg), Date.now());
-        r.floorKeys.forEach((k) => { if (typeof markFloorKeyDirty === 'function') markFloorKeyDirty(k); });
-        if (r.planChanged || r.floorKeys.length) commitEvalPlanChange(bldg);
-        return r.planChanged || r.floorKeys.length > 0;
-    }
-    function ensureEvalZones(bldg, floorCode) {
-        const api = evalUnitApi();
-        const floorKey = `${bldg.id}_${floorCode}`;
-        if (api.ensureZones(state, floorKey, bldg, floorCode, Date.now()) > 0) commitEvalUnitChange(floorKey);
-    }
-    async function ensureFloorSplitForAssign(bldg) {
-        const api = evalUnitApi();
-        if (!api.hasPlan(bldg)) {
-            api.setUnitCount(bldg, 2, Date.now());
-            commitEvalPlanChange(bldg);
-        }
-        const fm = api.floorMode(bldg, state.currentFloor);
-        if (fm && fm.mode === 'split') return true;
-        if (fm && fm.mode === 'whole') {
-            const ok = await window.appConfirm(`이 층은 지금 통째로 「${api.unitTitle(api.planUnit(bldg, fm.unitId))}」입니다.\n층을 번호 구역(1, 2, 3 …)으로 나눌까요?`);
-            if (!ok) return false;
-        }
-        api.setFloorParts(bldg, state.currentFloor, [], Date.now());
-        commitEvalPlanChange(bldg);
-        return true;
-    }
-    /** 도면: 선택한 결함 → 구역 번호(같은 번호 = 같은 평가단위) */
-    async function assignSelectedDefectsToEvalUnit() {
-        const api = evalUnitApi();
-        const floorKey = currentEvalUnitFloorKey();
-        const bldg = currentEvalBuilding();
-        if (!api || !floorKey || !bldg) return;
-        const targets = selectedDefectsForEvalUnit(floorKey);
-        if (!targets.length) { window.showToast('도면에서 결함을 먼저 선택하세요(끌어서 여러 개 선택).', 'info', 2600); return; }
-        if (!await ensureFloorSplitForAssign(bldg)) return;
-        migrateEvalUnitsLegacy(bldg);
-        const units = api.planOf(bldg).units;
-        const counts = api.counts(state, floorKey, state.defects[floorKey] || []);
-        const choices = units.map((u) => {
-            const z = api.zoneForPart(state, floorKey, api.zoneId(u.no));
-            return { label: String(u.no), detail: `${u.label ? u.label + ' · ' : ''}이 층 ${z ? (counts.byId[z.id] || 0) : 0}건` };
-        });
-        choices.push({ label: `+ ${units.length + 1}번 새로` });
-        choices.push({ label: '번호 빼기', detail: '미지정으로' });
-        const pick = await window.appChoose(`선택한 결함 ${targets.length}건 → 구역 번호 (같은 번호 = 같은 평가단위)`, choices, { title: '평가 구역 번호' });
-        if (pick == null) return;
-        let zoneId = null;
-        let label = '미지정';
-        if (pick <= units.length) {
-            if (pick === units.length) { api.setUnitCount(bldg, units.length + 1, Date.now()); commitEvalPlanChange(bldg); }
-            const no = pick + 1;
-            const pid = api.zoneId(no);
-            if (!api.floorParts(bldg, state.currentFloor).includes(pid)) {
-                api.setFloorParts(bldg, state.currentFloor, api.floorParts(bldg, state.currentFloor).concat([pid]), Date.now());
-                commitEvalPlanChange(bldg);
-            }
-            ensureEvalZones(bldg, state.currentFloor);
-            const z = api.zoneForPart(state, floorKey, pid);
-            if (!z) return;
-            zoneId = z.id;
-            label = `${no}번`;
-        }
-        const zz = zoneId ? api.findUnit(state, floorKey, zoneId) : null;
-        const n = api.assign(targets, zoneId, Date.now(), { partId: zz && zz.partId });
-        commitEvalUnitChange(floorKey);
-        window.showToast(`${n}건을 ${label}(으)로 넣었습니다.`, 'success', 2600);
-    }
-    window.assignSelectedDefectsToEvalUnit = assignSelectedDefectsToEvalUnit;
-
-    /** 도면 바 「관리」: 이 층 번호 구역 색·빼기, 평가 탭 열기 */
-    async function openEvalUnitManager() {
-        const api = evalUnitApi();
-        const floorKey = currentEvalUnitFloorKey();
-        const bldg = currentEvalBuilding();
-        if (!api || !floorKey || !bldg) { window.showToast('건물·층을 먼저 고르세요.', 'info', 2200); return; }
-        const fm = api.floorMode(bldg, state.currentFloor);
-        if (!fm || fm.mode !== 'split') { openEvalUnitPlanModal(); return; }
-        migrateEvalUnitsLegacy(bldg);
-        ensureEvalZones(bldg, state.currentFloor);
-        const subs = api.listFor(state, floorKey);
-        const counts = api.counts(state, floorKey, state.defects[floorKey] || []);
-        const choices = subs.map((u) => ({ label: `${api.zoneLabel(bldg, u)}번 색·빼기`, detail: `${counts.byId[u.id] || 0}건` }));
-        choices.push({ label: '평가 탭 열기', detail: '층 × 번호 표·입력표·SafetyMan 엑셀' });
-        const pick = await window.appChoose(`${evalUnitDisplayFloor()} 구역 · 미지정 ${counts.none}건\n결함을 끌어 선택한 뒤 「평가단위」 버튼으로 번호를 넣습니다.`, choices, { title: '평가 구역' });
-        if (pick == null) return;
-        if (pick === subs.length) { openEvalUnitPlanModal(); return; }
-        const u = subs[pick];
-        const nm = api.zoneLabel(bldg, u) + '번';
-        const act = await window.appChoose(`${evalUnitDisplayFloor()} ${nm} (${counts.byId[u.id] || 0}건)`, [
-            { label: '색 바꾸기' }, { label: '이 층에서 빼기', detail: '결함은 지우지 않고 미지정으로 돌아감' }
-        ], { title: '구역' });
-        if (act === 0) {
-            const names = ['파랑', '빨강', '초록', '주황', '보라', '청록', '분홍', '회색'];
-            const c = await window.appChoose('색', api.PALETTE.map((hex, i) => ({ label: names[i] || hex, detail: hex })), { title: '구역 색' });
-            if (c == null) return;
-            if (api.updateUnit(state, floorKey, u.id, { color: api.PALETTE[c] })) commitEvalUnitChange(floorKey);
-        } else if (act === 1) {
-            if (!await window.appConfirm(`${evalUnitDisplayFloor()}에서 ${nm}을 뺄까요?\n결함 ${counts.byId[u.id] || 0}건은 미지정으로 돌아갑니다.`)) return;
-            if (u.partId) {
-                api.setFloorParts(bldg, state.currentFloor, api.floorParts(bldg, state.currentFloor).filter((id) => id !== u.partId), Date.now());
-                commitEvalPlanChange(bldg);
-            }
-            api.deleteUnit(state, floorKey, u.id, state.defects[floorKey] || [], Date.now());
-            if (evalUnitHighlight === u.id) evalUnitHighlight = '';
-            commitEvalUnitChange(floorKey);
-        }
-    }
-    window.openEvalUnitManager = openEvalUnitManager;
-
-    /** 예전 「평가단위 설정」 창 → 이제 「평가」 탭 */
-    function openEvalUnitPlanModal() {
-        if (!currentEvalBuilding()) { window.showToast('건물을 먼저 고르세요.', 'info', 2200); return; }
-        if (typeof window.switchTab === 'function') window.switchTab('tab-eval');
-    }
-    window.openEvalUnitPlanModal = openEvalUnitPlanModal;
-
-    /* ---------------- 「평가」 탭 (2026-10-13) ---------------- */
-    function renderEvalTab() {
-        const root = document.getElementById('evalTabRoot');
-        const api = evalUnitApi();
-        const sm = window.BSA && window.BSA.safetymanExport;
-        const bldg = currentEvalBuilding();
-        if (!root) return;
-        if (!api || !sm || !bldg) { root.innerHTML = '<div class="eval-tab-empty">건물을 먼저 고르세요.</div>'; return; }
-        migrateEvalUnitsLegacy(bldg);
-        const esc = (t) => String(t == null ? '' : t).replace(/[&<>"]/g, (ch) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' })[ch]);
-        const plan = api.planOf(bldg);
-        const floors = evalPlanFloors(bldg);
-        const mx = api.matrix(bldg, state, floors);
-        const sum = api.summarize(bldg, state, floors);
-        const units = plan.units;
-        const opt = (v, label, sel) => `<option value="${esc(v)}"${sel ? ' selected' : ''}>${esc(label)}</option>`;
-        // 1) 층 × 번호 표
-        const head = `<tr><th>층</th><th>설정</th>${units.map((u) => `<th>${u.no}${u.label ? `<div class="eval-plan-sub">${esc(u.label)}</div>` : ''}</th>`).join('')}<th>미지정</th></tr>`;
-        const rows = mx.map((r) => {
-            const cur = r.mode === 'split' ? 'split' : (r.mode === 'whole' ? 'whole:' + r.unitId : '');
-            const sel = `<select class="form-control eval-plan-floor" data-floor="${esc(r.floorCode)}">`
-                + opt('', '설정 안 함', !cur)
-                + units.map((u) => opt('whole:' + u.id, `층 전체 → ${u.no}`, cur === 'whole:' + u.id)).join('')
-                + opt('split', '번호로 나누기', cur === 'split') + '</select>';
-            let cells;
-            if (r.mode === 'split') {
-                cells = units.map((u) => {
-                    const c = r.cells[api.zoneId(u.no)] || {};
-                    return `<td class="eval-plan-cell"><label><input type="checkbox" class="eval-plan-part-on" data-floor="${esc(r.floorCode)}" data-part="${esc(api.zoneId(u.no))}"${c.on ? ' checked' : ''}> ${c.on ? `${c.count}건` : ''}</label></td>`;
-                }).join('') + `<td>${r.none ? `<b class="eval-plan-warn">${r.none}건</b>` : '0'}</td>`;
-            } else if (r.mode === 'whole') {
-                cells = units.map((u) => `<td>${u.id === r.unitId ? `<b>전체 ${r.total}건</b>` : ''}</td>`).join('') + '<td></td>';
-            } else {
-                cells = `<td colspan="${units.length + 1}" class="eval-plan-detail">결함 ${r.total}건 (평가 안 함)</td>`;
-            }
-            return `<tr><td>${esc(r.floorLabel)}</td><td>${sel}</td>${cells}</tr>`;
-        }).join('');
-        // 2) 평가단위별 목록
-        const listHtml = sum.units.map((r) => {
-            const parts = r.wholeFloors.map((w) => `${esc(w.floorLabel)} 전체(${w.count}건)`)
-                .concat(r.subUnits.map((s) => `${esc(s.floorLabel)}-${esc(s.label)}(${s.count}건)`));
-            return `<li><b>${esc(api.unitTitle(r.unit))}</b>: ${parts.length ? parts.join(', ') : '<span class="eval-plan-warn">비어 있음</span>'}</li>`;
-        }).join('');
-        const warn = [];
-        if (sum.unsetFloors.length && units.length) warn.push(`설정 안 한 층: ${sum.unsetFloors.map((f) => esc(f.floorLabel)).join(', ')}`);
-        try {
-            const calc = s357Calc(bldg);
-            if (calc) units.forEach((u) => {
-                const i = calc.issues[u.id];
-                if (!i) return;
-                const parts = [];
-                if (i.noMember) parts.push(`평가 부재 미지정 ${i.noMember}건`);
-                if (i.noWidth) parts.push(`균열폭 없음 ${i.noWidth}건`);
-                if (i.assumed) parts.push(`등급 b로 가정(면적율·깊이 없음) ${i.assumed}건`);
-                if (parts.length) warn.push(`${esc(api.unitTitle(u))}: ${parts.join(' · ')}`);
-            });
-            const P = window.BSA && window.BSA.s357Prefill;
-            const F = window.BSA && window.BSA.s357 && window.BSA.s357.factory;
-            if (calc && P && F && typeof P.check === 'function') {
-                const saved = bldg.evalSafetyman || {};
-                const pj = P.merge(saved.project, saved.auto, calc, F).project;
-                P.check(pj, [calc.building && calc.building.id]).forEach((w) => {
-                    const rec = calc.units.find((x) => x.id === w.floorId);
-                    warn.push(`${esc(rec ? rec.name : '')} ${esc(w.member)} ${esc(w.label)}: ${P.WARN_TEXT} (확인부재 ${w.total} · 결함 ${w.defects})`);
-                });
-            }
-        } catch (e) { console.warn('평가 확인', e); }
-        try {
-            const offs = floors.map((f) => ({ f, off: mcOffZoneDots(bldg, f.floorCode, f.floorKey) })).filter((x) => Object.keys(x.off).length);
-            offs.forEach((x) => warn.push(`${esc(x.f.floorLabel)} 부재 수 점: ${Object.keys(x.off).map((n) => `${Number(n) ? '구역 ' + n : '구역 없음'} ${x.off[n]}개`).join(', ')} — 이 층에 그 구역이 없어 집계 안 됨`));
-        } catch (e) { console.warn('부재 수 구역 확인', e); }
-        if (sum.unassigned.length) warn.push(`번호 없는 결함: ${sum.unassigned.map((f) => `${esc(f.floorLabel)} ${f.count}건`).join(', ')}`);
-        // 3) 입력표(평가단위 × 부재)
-        const comp = sm.unitComputed(bldg, state, floors, api, memberNameOut, window.BSA && window.BSA.memberCount);
-        const inputs = bldg.evalInputs || {};
-        const items = sm.INPUT_ITEMS;
-        const inputHtml = units.map((u) => {
-            const members = sm.unitMembers(inputs, comp, u.id);
-            const body = members.map((m) => `<tr><th>${esc(m)}</th>${items.map((it) => {
-                const c = sm.cellValue(inputs, comp, u.id, m, it.key);
-                const cls = c.source === 'input' ? ' is-input' : (c.source === 'auto' ? ' is-auto' : '');
-                return `<td><div class="eval-in-cell"><input type="text" inputmode="decimal" data-num-keypad class="form-control eval-in${cls}" data-unit="${esc(u.id)}" data-member="${esc(m)}" data-key="${it.key}" value="${esc(c.value)}" placeholder="${esc(c.hint)}" title="${c.source === 'auto' ? '도면 결함·비파괴값에서 자동(고치면 직접 입력)' : ''}"></div></td>`;
-            }).join('')}</tr>`).join('');
-            const tilt = (inputs[u.id] || {}).tilt;
-            return `<div class="eval-in-unit"><div class="eval-in-head"><b>${esc(api.unitTitle(u))}</b>
-                    <label class="eval-plan-sub">이름(선택) <input type="text" class="form-control eval-unit-label" data-unit="${esc(u.id)}" value="${esc(u.label || '')}" maxlength="20" placeholder="예: 기존부"></label>
-                    <label class="eval-plan-sub">건물 기울기 1/<input type="text" inputmode="decimal" data-num-keypad class="form-control eval-in-tilt" data-unit="${esc(u.id)}" value="${esc(tilt || '')}"></label></div>
-                <div class="eval-plan-scroll"><table class="eval-plan-table eval-in-table"><thead><tr><th>부재</th>${items.map((it) => `<th>${esc(it.label)}<div class="eval-plan-sub">${esc(it.unit)}</div></th>`).join('')}</tr></thead><tbody>${body}</tbody></table></div></div>`;
-        }).join('');
-        root.innerHTML = `<div class="eval-tab">
-            <div class="section-header"><h2>📐 평가 <span class="eval-plan-sub">상태평가용 묶음 · 조사표·번호·도면 출력은 층 그대로</span></h2>
-                <div class="eval-plan-count">평가단위(구역 번호) 개수 <input type="text" inputmode="numeric" data-num-keypad class="form-control eval-plan-n" value="${units.length}">
-                    <button type="button" class="btn btn-sm btn-primary eval-plan-apply-n">적용</button>
-                    </div></div>
-            ${units.length ? `<h3>층 × 구역 번호 <span class="eval-plan-sub">같은 번호 = 같은 평가단위. 나눈 층은 있는 번호에 체크 → 도면에서 결함을 골라 「평가단위」 버튼으로 번호를 넣습니다.</span></h3>
-            <div class="eval-plan-scroll"><table class="eval-plan-table eval-plan-matrix"><thead>${head}</thead><tbody>${rows}</tbody></table></div>
-            <h3>평가단위별 목록</h3><ul class="eval-plan-sum">${listHtml}</ul>${warn.length ? `<div class="eval-plan-warn">${warn.join('<br>')}</div>` : ''}
-            <h3>SAFETY357 입력 <span class="eval-plan-sub">건물 = 이 건물 하나, 평가단위 = 층 기록 하나(시작층~끝층·표본층). 확인부재 수(도면 점)·결함 등급별 부재 수(평가 부재 지정한 결함)는 자동 — 고친 칸은 그대로 둡니다. 엑셀은 SAFETY357 「보고서」에서.</span></h3>` : '<div class="eval-tab-empty">평가단위 개수를 정하면 시작합니다. 0이면 지금처럼 층마다 평가.</div>'}
-        </div>`;
-        const rerender = () => renderEvalTab();
-        try { syncEvalMapHead(); } catch (_e) { /* ignore */ }
-        mountS357();
-        const smBtn = root.querySelector('.eval-plan-safetyman');
-        if (smBtn) smBtn.onclick = () => downloadSafetyManExcel(bldg);
-        root.querySelector('.eval-plan-apply-n').onclick = async () => {
-            const n = parseInt(root.querySelector('.eval-plan-n').value, 10) || 0;
-            if (n < units.length) {
-                const ok = await window.appConfirm(`평가단위를 ${units.length}개 → ${n}개로 줄입니다.\n없어지는 번호를 쓰던 층·구역은 평가단위 없음이 됩니다.`);
-                if (!ok) return;
-            }
-            const dropped = api.setUnitCount(bldg, n, Date.now());
-            commitEvalPlanChange(bldg);
-            if (dropped > 0) window.showToast(`층 ${dropped}개가 「설정 안 함」이 됐습니다.`, 'info', 2600);
-            rerender();
-        };
-        root.querySelectorAll('.eval-plan-floor').forEach((sel) => {
-            sel.onchange = () => {
-                const v = sel.value;
-                const fc = sel.dataset.floor;
-                if (v === 'split') api.setFloorMode(bldg, fc, 'split', null, Date.now());
-                else if (v.startsWith('whole:')) api.setFloorMode(bldg, fc, 'whole', v.slice(6), Date.now());
-                else api.setFloorMode(bldg, fc, '', null, Date.now());
-                commitEvalPlanChange(bldg);
-                if (v === 'split') ensureEvalZones(bldg, fc);
-                rerender();
-            };
-        });
-        root.querySelectorAll('.eval-plan-part-on').forEach((cb) => {
-            cb.onchange = async () => {
-                const fc = cb.dataset.floor;
-                const pid = cb.dataset.part;
-                const cur = api.floorParts(bldg, fc);
-                if (cb.checked) {
-                    api.setFloorParts(bldg, fc, cur.concat([pid]), Date.now());
-                    commitEvalPlanChange(bldg);
-                    ensureEvalZones(bldg, fc);
-                } else {
-                    const floorKey = `${bldg.id}_${fc}`;
-                    const z = api.zoneForPart(state, floorKey, pid);
-                    const n = z ? (api.counts(state, floorKey, state.defects[floorKey] || []).byId[z.id] || 0) : 0;
-                    if (n && !await window.appConfirm(`이 층에서 ${pid.slice(1)}번을 빼면 결함 ${n}건이 미지정으로 돌아갑니다. 뺄까요?`)) { cb.checked = true; return; }
-                    api.setFloorParts(bldg, fc, cur.filter((id) => id !== pid), Date.now());
-                    commitEvalPlanChange(bldg);
-                    if (z) { api.deleteUnit(state, floorKey, z.id, state.defects[floorKey] || [], Date.now()); commitEvalUnitChange(floorKey); }
-                }
-                rerender();
-            };
-        });
-        // 입력표 저장: bldg.evalInputs[unitId].members[부재][key] (건물 정보와 같이 동기화)
-        const saveInput = (unitId, member, key, raw) => {
-            const all = Object.assign({}, bldg.evalInputs || {});
-            const u = Object.assign({ members: {} }, all[unitId] || {});
-            u.members = Object.assign({}, u.members);
-            const row = Object.assign({}, u.members[member] || {});
-            const v = String(raw == null ? '' : raw).trim();
-            const auto = sm.cellValue({}, comp, unitId, member, key);
-            const num = parseFloat(v);
-            if (!v || (auto.source === 'auto' && Number.isFinite(num) && num === Number(auto.value))) delete row[key];
-            else row[key] = Number.isFinite(num) && /^-?[0-9.]+$/.test(v) ? num : v;
-            if (Object.keys(row).length) u.members[member] = row; else delete u.members[member];
-            u.updatedAt = Date.now();
-            all[unitId] = u;
-            bldg.evalInputs = all;
-            commitEvalPlanChange(bldg);
-        };
-        root.querySelectorAll('.eval-in').forEach((inp) => {
-            inp.onchange = () => { saveInput(inp.dataset.unit, inp.dataset.member, inp.dataset.key, inp.value); rerender(); };
-        });
-        root.querySelectorAll('.eval-in-tilt').forEach((inp) => {
-            inp.onchange = () => {
-                const all = Object.assign({}, bldg.evalInputs || {});
-                const u = Object.assign({ members: {} }, all[inp.dataset.unit] || {});
-                const n = parseFloat(inp.value);
-                if (Number.isFinite(n) && n > 0) u.tilt = n; else delete u.tilt;
-                u.updatedAt = Date.now();
-                all[inp.dataset.unit] = u;
-                bldg.evalInputs = all;
-                commitEvalPlanChange(bldg);
-            };
-        });
-        root.querySelectorAll('.eval-unit-label').forEach((inp) => {
-            inp.onchange = () => { if (api.setUnitLabel(bldg, inp.dataset.unit, inp.value, Date.now())) { commitEvalPlanChange(bldg); rerender(); } };
-        });
-    }
-    window.renderEvalTab = renderEvalTab;
-    window.BSA = window.BSA || {};
-    window.BSA.tabs = window.BSA.tabs || {};
-    window.BSA.tabs['tab-eval'] = { id: 'tab-eval', enter: () => { try { enterEvalTabWithMap(); renderEvalTab(); } catch (e) { console.error('평가 탭', e); } } };
-
-    /** 평가단위 → SafetyMan 입력용 엑셀(표본층 시트 + 근거 + 참고). 등급 계산은 하지 않는다 */
-    function downloadSafetyManExcel(bldg) {
-        const api = evalUnitApi();
-        const sm = window.BSA && window.BSA.safetymanExport;
-        if (typeof XLSX === 'undefined' || !sm || !api) {
-            window.showToast('엑셀 라이브러리를 불러오지 못했습니다. 인터넷 연결을 확인 후 다시 시도해주세요.', 'error', 5000);
-            return;
-        }
-        migrateEvalUnitsLegacy(bldg);
-        const floors = evalPlanFloors(bldg);
-        const d = new Date();
-        const pad = (n) => String(n).padStart(2, '0');
-        const dateText = `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}`;
-        try {
-            const sheets = sm.buildSheets({ bldg, state, floors, evalUnits: api, memberName: memberNameOut, dateText, memberCount: window.BSA && window.BSA.memberCount });
-            const wb = XLSX.utils.book_new();
-            sheets.forEach((sh) => {
-                const ws = XLSX.utils.aoa_to_sheet(sh.aoa);
-                if (sh.cols) ws['!cols'] = sh.cols.map((w) => ({ wch: w }));
-                XLSX.utils.book_append_sheet(wb, ws, sh.name);
-            });
-            const name = String(bldg.name || bldg.buildingName || '건물').replace(/[\\/:*?"<>|]/g, '_');
-            XLSX.writeFile(wb, `${name}_SafetyMan용_${dateText}.xlsx`);
-            window.showToast(`SafetyMan용 엑셀을 만들었습니다 (평가단위 시트 ${sheets.length - 3}장).`, 'success', 2800);
-        } catch (e) {
-            console.error('SafetyMan 엑셀 실패', e);
-            window.showToast('SafetyMan용 엑셀을 만들지 못했습니다: ' + (e && e.message ? e.message : e), 'error', 5000);
-        }
-    }
-    window.downloadSafetyManExcel = downloadSafetyManExcel;
-
-    /** 도면 위 바: 단위별 건수(누르면 그 단위만 진하게 — 확인용) */
-    function syncEvalUnitBar() {
-        const bar = document.getElementById('evalUnitBar');
-        const chips = document.getElementById('evalUnitBarChips');
-        const api = evalUnitApi();
-        if (!bar || !chips || !api) return;
-        // drawCanvas마다 불리므로 바뀐 때만 DOM을 고친다(누르는 중 버튼이 바뀌지 않게)
-        const setHtml = (h) => { if (chips._euHtml !== h) { chips._euHtml = h; chips.innerHTML = h; } };
-        const setHidden = (v) => { if (bar.hidden !== v) bar.hidden = v; };
-        const floorKey = currentEvalUnitFloorKey();
-        const bldg = currentEvalBuilding();
-        if (window.__bsaEvalMapOn !== true) { setHidden(true); evalUnitHighlight = ''; return; } // 결함위치도 탭에는 평가단위 막대 없음
-        const fm = (bldg && floorKey) ? api.floorMode(bldg, state.currentFloor) : null;
-        const units = (fm && fm.mode === 'split') ? api.listFor(state, floorKey) : [];
-        const title = bar.querySelector('.eval-unit-bar-title');
-        if (fm && fm.mode === 'whole') {
-            if (title && title.textContent !== (title._t = `평가단위: 이 층 전체 → ${(api.planUnit(bldg, fm.unitId) || {}).name || '?'}`)) title.textContent = title._t;
-            setHtml('');
-            evalUnitHighlight = '';
-            setHidden(false);
-            return;
-        }
-        if (title && title.textContent !== '평가단위') title.textContent = '평가단위';
-        if (!fm || fm.mode !== 'split') { setHidden(true); setHtml(''); evalUnitHighlight = ''; return; }
-        if (evalUnitHighlight && evalUnitHighlight !== '__none__' && !units.some((u) => u.id === evalUnitHighlight)) evalUnitHighlight = '';
-        const c = api.counts(state, floorKey, state.defects[floorKey] || []);
-        const esc = (t) => String(t).replace(/[&<>"]/g, (ch) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' })[ch]);
-        const chip = (id, label, n, color) => `<button type="button" class="eval-unit-chip${evalUnitHighlight === id ? ' active' : ''}" data-eu="${esc(id)}"${color ? ` style="--eu-color:${esc(color)}"` : ''}>${esc(label)} <b>${n}</b></button>`;
-        setHtml(units.map((u) => chip(u.id, api.zoneLabel(bldg, u), c.byId[u.id] || 0, u.color)).join('')
-            + chip('__none__', '미지정', c.none, '#94a3b8'));
-        setHidden(false);
-    }
-    window.syncEvalUnitBar = syncEvalUnitBar;
-
-    /** 마킹을 흐리게 할지(바에서 다른 단위를 골랐을 때) */
-    function evalUnitDimFor(defect) {
-        if (!evalUnitHighlight || window.__bsaEvalMapOn !== true) return false;
-        const api = evalUnitApi();
-        return !!(api && !api.matchesFilter(state, currentEvalUnitFloorKey(), defect, evalUnitHighlight));
-    }
-    /** 번호칸 위에 단위 꼬리표(박스 기준 좌표계에서 부른다) */
-    function drawEvalUnitTag(ctx, defect, w, h, scale) {
-        if (window.__bsaEvalMapOn !== true) return; // 결함위치도 탭(과 그 출력)에는 평가단위 꼬리표 없음 — 평가 탭 도면에서만
-        const api = evalUnitApi();
-        const floorKey = currentEvalUnitFloorKey();
-        if (!api || !floorKey) return;
-        const fm = api.floorMode(currentEvalBuilding(), state.currentFloor);
-        if (!fm || fm.mode !== 'split') return;
-        const u = api.unitOf(state, floorKey, defect);
-        if (!u) return;
-        const tagText = api.zoneLabel(currentEvalBuilding(), u) || u.name;
-        const s = Math.max(0.6, Number(scale) || 1);
-        const fs = 11 * s;
-        ctx.save();
-        ctx.font = `800 ${fs}px "Pretendard", "Malgun Gothic", sans-serif`;
-        const tw = ctx.measureText(tagText).width + 8 * s;
-        const th = fs + 5 * s;
-        const x = -w / 2;
-        const y = -h / 2 - th - 2 * s;
-        ctx.fillStyle = u.color || '#2563eb';
-        ctx.fillRect(x, y, tw, th);
-        ctx.fillStyle = '#ffffff';
-        ctx.textAlign = 'left';
-        ctx.textBaseline = 'middle';
-        ctx.fillText(tagText, x + 4 * s, y + th / 2 + 0.5);
-        ctx.restore();
-    }
-
     function memoApi() { return window.BSA && window.BSA.drawingMemo; }
     function currentMemoFloorKey() {
         return (state.currentBuildingId && state.currentFloor) ? `${state.currentBuildingId}_${state.currentFloor}` : '';
@@ -28985,10 +28501,9 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
     function memoTapEnd() {
         const tap = memoTap;
         memoTap = null;
-        if (!tap || (state.mode !== 'MEMO' && state.mode !== 'COUNT') || !state.bgImage) return false;
+        if (!tap || state.mode !== 'MEMO' || !state.bgImage) return false;
         if (!isCleanTouchTap(tap, Date.now())) return false;
         const rect = elements.planCanvas.getBoundingClientRect();
-        if (state.mode === 'COUNT') { countTapAt(tap.clientX - rect.left, tap.clientY - rect.top); return true; }
         const p = memoScreenToImg(tap.clientX - rect.left, tap.clientY - rect.top);
         createDrawingMemoAt(p.x, p.y);
         return true;
@@ -29428,410 +28943,7 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
         else if (e.key === 'Escape') { if (gsSelectedId) { gsSelectedId = ''; syncGuideOverlay(); syncGuideBar(); } else setDrawMode('PAN'); e.stopPropagation(); }
     }, true);
 
-    /* ---------------- 부재 수 세기(2026-10-13) — 결함 아님, 화면 전용 점 ---------------- */
-    function mcApi() { return window.BSA && window.BSA.memberCount; }
-    /** 2026-10-14 손 점 + 양호·구조 결함 마킹에서 나온 자동 점(저장 안 함, 그때그때 계산) */
-    function mcListAll(floorKey) {
-        const api = mcApi();
-        if (!api || !floorKey) return [];
-        if (typeof api.listWithAuto !== 'function') return api.listFor(state, floorKey);
-        const E = evalUnitApi();
-        const bldg = currentEvalBuilding();
-        let zoneNoOf = null;
-        if (E && bldg && typeof E.unitOf === 'function') {
-            const units = E.planOf(bldg).units;
-            zoneNoOf = (d) => {
-                const z = E.unitOf(state, floorKey, d);
-                const uid = z ? E.zoneUnitId(bldg, z) : '';
-                const u = uid && units.find((x) => x.id === uid);
-                return u ? Number(u.no) : 0;
-            };
-        }
-        return api.listWithAuto(state, floorKey, { zoneNoOf });
-    }
-    const MC_TYPE_KEY = 'bsa_member_count_type';
-    const MC_SHOW_KEY = 'bsa_member_count_show';
-    let mcUndo = [];   // [{ op:'add'|'remove', floorKey, rec }]
-    let mcZoneNo = 0;
-    function mcType() {
-        const api = mcApi();
-        let t = '';
-        try { t = localStorage.getItem(MC_TYPE_KEY) || ''; } catch (_e) { /* ignore */ }
-        return api && api.TYPES.includes(t) ? t : '기둥';
-    }
-    function setMcType(t) {
-        try { localStorage.setItem(MC_TYPE_KEY, t); } catch (_e) { /* ignore */ }
-        syncMemberCountBar();
-    }
-    function readMcShowPref() {
-        try { return localStorage.getItem(MC_SHOW_KEY) !== '0'; } catch (_e) { return true; }
-    }
-    function setMcShow(on) {
-        try { localStorage.setItem(MC_SHOW_KEY, on ? '1' : '0'); } catch (_e) { /* ignore */ }
-        syncMemberCountOverlay();
-        syncMemberCountBar();
-    }
-    const MC_ZONE_COLORS = ['#2563eb', '#dc2626', '#16a34a', '#d97706', '#7c3aed', '#0891b2', '#db2777', '#4b5563', '#0d9488'];
-    function mcZoneColor(n) { return MC_ZONE_COLORS[(Math.max(1, Number(n) || 1) - 1) % MC_ZONE_COLORS.length]; }
-    /** 나눈 층에 실제로 있는 구역 번호(그 층 구역 목록 → 평가단위 번호). 층 전체·설정 안 함이면 []. */
-    function mcFloorZones(bldg, floorCode, floorKey) {
-        const api = evalUnitApi();
-        if (!api || !bldg) return [];
-        const fm = api.floorMode(bldg, floorCode);
-        if (!fm || fm.mode !== 'split') return [];
-        const units = api.planOf(bldg).units;
-        const noOf = {};
-        units.forEach((u) => { noOf[u.id] = Number(u.no); });
-        const set = new Set();
-        (api.listFor(state, floorKey) || []).forEach((z) => { const n = noOf[api.zoneUnitId(bldg, z)]; if (n) set.add(n); });
-        return Array.from(set).sort((a, b) => a - b);
-    }
-    /** 이 층이 번호로 나눈 층이면 고를 수 있는 번호들(그 층에 있는 구역만; 하나도 없으면 전체 번호) */
-    function mcZoneChoices() {
-        const api = evalUnitApi();
-        const bldg = currentEvalBuilding();
-        if (!api || !bldg) return [];
-        const fm = api.floorMode(bldg, state.currentFloor);
-        if (!fm || fm.mode !== 'split') return [];
-        const here = mcFloorZones(bldg, state.currentFloor, currentMemoFloorKey());
-        return here.length ? here : api.planOf(bldg).units.map((u) => Number(u.no));
-    }
-    /** 나눈 층에서 그 층에 없는 구역(또는 구역 없음)으로 찍힌 점 → { no: 개수 } (집계 안 됨) */
-    function mcOffZoneDots(bldg, floorCode, floorKey) {
-        const api = evalUnitApi();
-        const mc = mcApi();
-        if (!api || !mc || !bldg) return {};
-        const fm = api.floorMode(bldg, floorCode);
-        if (!fm || fm.mode !== 'split') return {};
-        const here = mcFloorZones(bldg, floorCode, floorKey);
-        const out = {};
-        mcListAll(floorKey).forEach((d) => {
-            const n = Number(d.zoneNo) || 0;
-            if (!n || !here.includes(n)) out[n] = (out[n] || 0) + 1;
-        });
-        return out;
-    }
-    window.mcOffZoneDots = mcOffZoneDots;
-    function setMcZone(n) {
-        mcZoneNo = Number(n) || 0;
-        syncMemberCountBar();
-    }
-    function commitMemberCountChange(floorKey) {
-        if (floorKey && typeof markFloorKeyDirty === 'function') markFloorKeyDirty(floorKey);
-        if (typeof saveStateToLocalStorage === 'function') saveStateToLocalStorage();
-        if (typeof scheduleSyncToFirebase === 'function') scheduleSyncToFirebase();
-        syncMemberCountOverlay();
-        syncMemberCountBar();
-        if (typeof scheduleEvalTabRefresh === 'function') scheduleEvalTabRefresh();
-    }
-    /** 도면 탭: 점 근처면 지우기, 아니면 지금 종류로 점 찍기 */
-    function countTapAt(sx, sy) {
-        const api = mcApi();
-        const floorKey = currentMemoFloorKey();
-        if (!api || !floorKey || !state.bgImage) return;
-        const hit = api.hitTest(api.listFor(state, floorKey), sx, sy, 14, memoImgToScreen);   // 손 점만(자동 점은 마킹을 지우면 사라짐)
-        if (hit) {
-            // 점을 누르면 바로 지우지 않고 작은 메뉴(지우기 / 구역 바꾸기)
-            openMcDotMenu(floorKey, hit.id);
-            return;
-        } else {
-            closeMcDotMenu();
-            const zones = mcZoneChoices();
-            if (zones.length && !zones.includes(mcZoneNo)) mcZoneNo = zones[0];
-            const p = memoScreenToImg(sx, sy);
-            const rec = api.add(state, floorKey, mcType(), p.x, p.y, { zoneNo: zones.length ? mcZoneNo : 0 });
-            if (rec) mcUndo.push({ op: 'add', floorKey, rec });
-        }
-        if (mcUndo.length > 200) mcUndo = mcUndo.slice(-200);
-        commitMemberCountChange(floorKey);
-    }
-    function undoMemberCount() {
-        const api = mcApi();
-        const last = mcUndo.pop();
-        if (!api || !last) { window.showToast('되돌릴 것이 없습니다.', 'info', 1600); return; }
-        if (last.op === 'batch') {
-            last.ops.slice().reverse().forEach((o) => {
-                if (o.op === 'add') api.remove(state, last.floorKey, o.rec.id);
-                else api.add(state, last.floorKey, o.rec.type, o.rec.x, o.rec.y, { id: o.rec.id, zoneNo: o.rec.zoneNo });
-            });
-        } else if (last.op === 'add') api.remove(state, last.floorKey, last.rec.id);
-        else if (last.op === 'zone') {
-            const d = api.listFor(state, last.floorKey).find((x) => x.id === last.id);
-            if (d) { if (last.prev) d.zoneNo = last.prev; else delete d.zoneNo; d.updatedAt = Date.now(); }
-        } else api.add(state, last.floorKey, last.rec.type, last.rec.x, last.rec.y, { id: last.rec.id, zoneNo: last.rec.zoneNo });
-        commitMemberCountChange(last.floorKey);
-    }
-    window.undoMemberCount = undoMemberCount;
-
-    /* 2026-10-14 부재 수 지우개: 켜면 끌어서 네모 안 점을 한꺼번에 지움(짧게 누르면 그 점 하나).
-     * 손 점은 지우고, 자동 점(마킹에서 센 것)은 「빼기 기록」을 남겨 다시 안 셈. 되돌리기(Ctrl+Z·단추)로 한 번에 복구.
-     * 지우개가 켜진 동안은 도면 이동·점 찍기 대신 지우기만 한다(끄면 원래대로). */
-    var mcEraser = false;
-    var mcEraseDrag = null;
-    function setMcEraser(on) {
-        mcEraser = !!on;
-        mcEraseDrag = null;
-        closeMcDotMenu();
-        syncMcEraseLayer();
-        syncMemberCountBar();
-    }
-    function syncMcEraseLayer() {
-        const canvas = state.canvas || document.getElementById('planCanvas');
-        const host = canvas && canvas.parentElement;
-        let layer = document.getElementById('mapCountEraseLayer');
-        const on = mcEraser && state.mode === 'COUNT' && window.__bsaEvalMapOn === true && !!host;
-        if (!on) { if (layer) layer.remove(); if (state.mode !== 'COUNT') mcEraser = false; return; }
-        if (!layer) {
-            layer = document.createElement('div');
-            layer.id = 'mapCountEraseLayer';
-            layer.className = 'map-count-erase-layer';
-            layer.setAttribute('data-html2canvas-ignore', 'true');
-            const box = document.createElement('div');
-            box.className = 'map-count-erase-box';
-            box.hidden = true;
-            layer.appendChild(box);
-            const local = (e) => { const r = layer.getBoundingClientRect(); return { x: e.clientX - r.left, y: e.clientY - r.top }; };
-            layer.addEventListener('pointerdown', (e) => {
-                if (e.button > 0) return;
-                if (mcEraseDrag && mcEraseDrag.pointerId !== e.pointerId) { mcEraseDrag = null; box.hidden = true; return; } // 두 손가락 → 취소
-                e.preventDefault(); e.stopPropagation();
-                const p = local(e);
-                mcEraseDrag = { pointerId: e.pointerId, x0: p.x, y0: p.y, x1: p.x, y1: p.y };
-                try { layer.setPointerCapture(e.pointerId); } catch (_e) { /* ignore */ }
-            });
-            layer.addEventListener('pointermove', (e) => {
-                if (!mcEraseDrag || e.pointerId !== mcEraseDrag.pointerId) return;
-                e.preventDefault();
-                const p = local(e);
-                mcEraseDrag.x1 = p.x; mcEraseDrag.y1 = p.y;
-                const d = mcEraseDrag;
-                box.hidden = false;
-                box.style.left = Math.min(d.x0, d.x1) + 'px'; box.style.top = Math.min(d.y0, d.y1) + 'px';
-                box.style.width = Math.abs(d.x1 - d.x0) + 'px'; box.style.height = Math.abs(d.y1 - d.y0) + 'px';
-            });
-            const end = (e) => {
-                if (!mcEraseDrag || e.pointerId !== mcEraseDrag.pointerId) return;
-                const d = mcEraseDrag;
-                mcEraseDrag = null;
-                box.hidden = true;
-                if (e.type !== 'pointercancel') mcEraseInRect(d.x0, d.y0, d.x1, d.y1);
-            };
-            layer.addEventListener('pointerup', end);
-            layer.addEventListener('pointercancel', end);
-            layer.addEventListener('wheel', (e) => { e.preventDefault(); canvas.dispatchEvent(new WheelEvent('wheel', e)); }, { passive: false });
-            host.appendChild(layer);
-        } else if (layer.parentElement !== host) host.appendChild(layer);
-        layer.style.left = `${canvas.offsetLeft}px`;
-        layer.style.top = `${canvas.offsetTop}px`;
-        layer.style.width = `${canvas.clientWidth}px`;
-        layer.style.height = `${canvas.clientHeight}px`;
-    }
-    /** 화면 좌표 네모(또는 짧게 누른 점) 안의 부재 수 점 지우기 → 지운 개수 */
-    function mcEraseInRect(x0, y0, x1, y1) {
-        const api = mcApi();
-        const floorKey = currentMemoFloorKey();
-        if (!api || !floorKey || !state.bgImage) return 0;
-        const all = mcListAll(floorKey);
-        const tap = Math.abs(x1 - x0) < 8 && Math.abs(y1 - y0) < 8;
-        let targets;
-        if (tap) {
-            const hit = api.hitTest(all, x1, y1, 16, memoImgToScreen);
-            targets = hit ? [hit] : [];
-        } else {
-            const L = Math.min(x0, x1), R = Math.max(x0, x1), T = Math.min(y0, y1), B = Math.max(y0, y1);
-            targets = all.filter((d) => { const p = memoImgToScreen(d); return p.sx >= L && p.sx <= R && p.sy >= T && p.sy <= B; });
-        }
-        if (!targets.length) return 0;
-        const ops = [];
-        targets.forEach((d) => {
-            if (d.auto) { const rec = api.addExclude(state, floorKey, d); if (rec) ops.push({ op: 'add', rec: Object.assign({}, rec) }); }
-            else { const rec = api.remove(state, floorKey, d.id); if (rec) ops.push({ op: 'remove', rec: Object.assign({}, rec) }); }
-        });
-        if (!ops.length) return 0;
-        mcUndo.push({ op: 'batch', floorKey, ops });
-        commitMemberCountChange(floorKey);
-        const nAuto = targets.filter((d) => d.auto).length;
-        window.showToast?.(`부재 수 점 ${ops.length}개 지움${nAuto ? ` (자동 ${nAuto}개는 다시 안 셈)` : ''} · 되돌리기 Ctrl+Z`, 'success', 2200);
-        return ops.length;
-    }
-    window.mcEraseInRect = mcEraseInRect;
-    function closeMcDotMenu() {
-        const m = document.getElementById('mapCountDotMenu');
-        if (m) m.remove();
-    }
-    /** 점 메뉴: 지우기 · 구역 바꾸기(그 층에 있는 구역 번호) */
-    function openMcDotMenu(floorKey, id) {
-        const api = mcApi();
-        const canvas = state.canvas || document.getElementById('planCanvas');
-        const host = canvas && canvas.parentElement;
-        if (!api || !host) return;
-        const d = api.listFor(state, floorKey).find((x) => x.id === id);
-        if (!d) return;
-        closeMcDotMenu();
-        const esc = (t) => String(t == null ? '' : t).replace(/[&<>"]/g, (ch) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' })[ch]);
-        const zones = mcZoneChoices();
-        const p = memoImgToScreen(d);
-        const m = document.createElement('div');
-        m.id = 'mapCountDotMenu';
-        m.className = 'map-count-dot-menu';
-        m.innerHTML = `<span class="map-count-dot-menu-title">${esc(d.type)}${d.zoneNo ? ' · 구역 ' + d.zoneNo : ''}</span>`
-            + `<button type="button" data-mc-menu="del" class="is-danger">지우기</button>`
-            + (zones.length ? `<span class="map-count-dot-menu-sep">구역 바꾸기</span>` + zones.map((n) => `<button type="button" data-mc-menu-zone="${n}" class="map-count-zone${n === Number(d.zoneNo) ? ' active' : ''}" style="--zone-color:${mcZoneColor(n)}">${n}</button>`).join('') : '')
-            + `<button type="button" data-mc-menu="close" aria-label="닫기">✕</button>`;
-        ['mousedown', 'touchstart', 'pointerdown'].forEach((t) => m.addEventListener(t, (e) => e.stopPropagation(), { passive: true }));
-        m.addEventListener('click', (e) => {
-            const b = e.target.closest('button');
-            if (!b) return;
-            e.preventDefault();
-            e.stopPropagation();
-            if (b.dataset.mcMenu === 'del') {
-                const rec = api.remove(state, floorKey, id);
-                if (rec) mcUndo.push({ op: 'remove', floorKey, rec });
-                closeMcDotMenu();
-                commitMemberCountChange(floorKey);
-            } else if (b.dataset.mcMenuZone) {
-                const n = Number(b.dataset.mcMenuZone);
-                const prev = Number(d.zoneNo) || 0;
-                if (n !== prev) {
-                    d.zoneNo = n;
-                    d.updatedAt = Date.now();
-                    mcUndo.push({ op: 'zone', floorKey, id, prev });
-                }
-                closeMcDotMenu();
-                commitMemberCountChange(floorKey);
-            } else closeMcDotMenu();
-        });
-        host.appendChild(m);
-        const hw = host.clientWidth || 0;
-        const left = Math.max(4, Math.min(canvas.offsetLeft + p.sx + 12, hw - m.offsetWidth - 4));
-        const hh = host.clientHeight || 0;
-        let top = canvas.offsetTop + p.sy + 12;
-        if (hh && top + m.offsetHeight > hh - 72) top = canvas.offsetTop + p.sy - m.offsetHeight - 12;
-        top = Math.max(4, top);
-        m.style.left = `${Math.round(left)}px`;
-        m.style.top = `${Math.round(top)}px`;
-    }
-    window.openMcDotMenu = openMcDotMenu;
-    function getMemberCountOverlay() {
-        const canvas = state.canvas || document.getElementById('planCanvas');
-        const host = canvas && canvas.parentElement;
-        if (!host) return null;
-        let ov = document.getElementById('mapCountOverlay');
-        if (!ov) {
-            ov = document.createElement('div');
-            ov.id = 'mapCountOverlay';
-            ov.className = 'map-count-overlay';
-            ov.setAttribute('aria-hidden', 'true');
-            host.appendChild(ov);
-        } else if (ov.parentElement !== host) host.appendChild(ov);
-        ov.style.left = `${canvas.offsetLeft}px`;
-        ov.style.top = `${canvas.offsetTop}px`;
-        ov.style.width = `${canvas.clientWidth}px`;
-        ov.style.height = `${canvas.clientHeight}px`;
-        return ov;
-    }
-    /** 점 그리기(DOM, 화면 전용 — 한글·PDF 출력 그림에는 안 들어감) */
-    function syncMemberCountOverlay() {
-        if (mcEraser) syncMcEraseLayer();
-        const api = mcApi();
-        const floorKey = currentMemoFloorKey();
-        const on = state.mode === 'COUNT' || readMcShowPref();
-        const list = (api && floorKey && state.bgImage && on && state.currentTab !== 'tab-ndt' && window.__bsaEvalMapOn === true) ? mcListAll(floorKey) : [];
-        let ov = document.getElementById('mapCountOverlay');
-        if (!list.length) { if (ov) ov.replaceChildren(); return; }
-        ov = getMemberCountOverlay();
-        if (!ov) return;
-        ov.classList.toggle('is-active', state.mode === 'COUNT');
-        const seq = api.seqNumbers(list);
-        const vw = ov.clientWidth || 0;
-        const vh = ov.clientHeight || 0;
-        const existing = new Map();
-        Array.from(ov.children).forEach((el) => existing.set(el.dataset.id, el));
-        const keep = new Set();
-        list.forEach((d) => {
-            const p = memoImgToScreen(d);
-            if (p.sx < -20 || p.sy < -20 || (vw && p.sx > vw + 20) || (vh && p.sy > vh + 20)) return;
-            let el = existing.get(d.id);
-            if (!el) {
-                el = document.createElement('div');
-                el.className = 'map-count-dot';
-                el.dataset.id = d.id;
-                ov.appendChild(el);
-            }
-            const label = `${api.SHORT[d.type] || ''}${seq[d.id] || ''}${d.zoneNo ? '·' + d.zoneNo : ''}`;
-            if (el.textContent !== label) el.textContent = label;
-            el.style.setProperty('--mc-color', api.COLORS[d.type] || '#334155');
-            el.classList.toggle('is-auto', !!d.auto);
-            el.title = d.auto ? '양호·결함 마킹에서 자동으로 센 부재(마킹을 지우면 빠짐)' : '';
-            if (d.zoneNo) { el.classList.add('has-zone'); el.style.setProperty('--zone-color', mcZoneColor(d.zoneNo)); } else el.classList.remove('has-zone');
-            el.style.transform = `translate(${Math.round(p.sx)}px, ${Math.round(p.sy)}px) translate(-50%, -50%)`;
-            keep.add(d.id);
-        });
-        existing.forEach((el, id) => { if (!keep.has(id)) el.remove(); });
-    }
-    window.syncMemberCountOverlay = syncMemberCountOverlay;
-    /** 부재 수 세기 막대: 종류 5개(개수) · 구역 번호 · 되돌리기 · 점 보이기 · 닫기 */
-    function syncMemberCountBar() {
-        const api = mcApi();
-        const canvas = state.canvas || document.getElementById('planCanvas');
-        const host = canvas && canvas.parentElement;
-        let bar = document.getElementById('mapCountBar');
-        syncMcEraseLayer();
-        if (state.mode !== 'COUNT' || !api || !host || window.__bsaEvalMapOn !== true) { if (bar) bar.hidden = true; closeMcDotMenu(); return; }
-        if (!bar) {
-            bar = document.createElement('div');
-            bar.id = 'mapCountBar';
-            bar.className = 'map-count-bar';
-            bar.addEventListener('click', (e) => {
-                const cb = e.target.closest('input[data-mc-auto]');
-                if (cb) {
-                    if (api.setAutoEnabled) api.setAutoEnabled(cb.checked);
-                    syncMemberCountOverlay();
-                    syncMemberCountBar();
-                    if (typeof scheduleEvalTabRefresh === 'function') scheduleEvalTabRefresh();
-                    return;
-                }
-                const b = e.target.closest('button');
-                if (!b) return;
-                e.preventDefault();
-                if (b.dataset.mcType) setMcType(b.dataset.mcType);
-                else if (b.dataset.mcZone) setMcZone(b.dataset.mcZone);
-                else if (b.dataset.mcAct === 'undo') undoMemberCount();
-                else if (b.dataset.mcAct === 'erase') setMcEraser(!mcEraser);
-                else if (b.dataset.mcAct === 'show') setMcShow(!readMcShowPref());
-                else if (b.dataset.mcAct === 'close') setDrawMode('PAN');
-            });
-            ['mousedown', 'touchstart', 'pointerdown'].forEach((t) => bar.addEventListener(t, (e) => e.stopPropagation(), { passive: true }));
-        }
-        if (bar.parentElement !== host) host.appendChild(bar);
-        bar.hidden = false;
-        const floorKey = currentMemoFloorKey();
-        const all = mcListAll(floorKey);
-        const counts = api.countsByType(all);
-        const autoN = all.filter((d) => d.auto).length;
-        const cur = mcType();
-        const zones = mcZoneChoices();
-        if (zones.length && !zones.includes(mcZoneNo)) mcZoneNo = zones[0];
-        const zc = zones.length ? api.countsByType(all.filter((d) => Number(d.zoneNo) === mcZoneNo)) : null;
-        const keyOf = {};
-        Object.keys(api.KEYS).forEach((k) => { keyOf[api.KEYS[k]] = k.toUpperCase(); });
-        const off = mcOffZoneDots(currentEvalBuilding(), state.currentFloor, floorKey);
-        const offTxt = Object.keys(off).map((n) => `${Number(n) ? '구역 ' + n : '구역 없음'} ${off[n]}개`).join(', ');
-        const html = (zones.length ? `<span class="map-count-zone-badge" style="--zone-color:${mcZoneColor(mcZoneNo)}" title="숫자키 1~9로 바꾸기">구역 <b>${mcZoneNo}</b></span>` : '')
-            + `<span class="map-count-title" title="손 점 + 양호·구조 결함 마킹 자동(점선 점)">부재 수${autoN ? ` <small>자동 ${autoN}</small>` : ""}</span>`
-            + api.TYPES.map((t) => `<button type="button" class="map-count-type${t === cur ? ' active' : ''}" data-mc-type="${t}" style="--mc-color:${api.COLORS[t]}" title="단축키 ${keyOf[t]}${zc ? ' · 지금 구역 / 층 전체' : ''}">${t} <b>${zc ? `${zc[t] || 0}<small>/${counts[t] || 0}</small>` : (counts[t] || 0)}</b><span class="map-count-key">${keyOf[t]}</span></button>`).join('')
-            + (zones.length > 1 ? `<span class="map-count-sep">구역</span>` + zones.map((n) => `<button type="button" class="map-count-zone${n === mcZoneNo ? ' active' : ''}" data-mc-zone="${n}" style="--zone-color:${mcZoneColor(n)}" title="숫자키 ${n}">${n}</button>`).join('') : '')
-            + (offTxt ? `<span class="map-count-warn">⚠ 이 층에 없는 구역의 점: ${offTxt} — 집계 안 됨(점을 눌러 구역 바꾸기)</span>` : '')
-            + `<label class="map-count-auto" title="양호·구조 결함 마킹을 부재 수에 자동으로 넣기(이 기기 설정)"><input type="checkbox" data-mc-auto ${api.autoEnabled && !api.autoEnabled() ? '' : 'checked'}> 자동 집계</label>`
-            + `<button type="button" data-mc-act="erase" class="${mcEraser ? 'active' : ''}" title="지우개 (E) — 끌어서 네모 안 점 지우기, 짧게 누르면 점 하나">🧽 지우개${mcEraser ? ' 켜짐' : ''}</button>`
-            + `<button type="button" data-mc-act="undo" title="되돌리기 (Ctrl+Z)">↶ 되돌리기</button>`
-            + `<button type="button" data-mc-act="show" class="${readMcShowPref() ? 'active' : ''}" title="세기 모드가 아닐 때도 점 보이기">점 보이기</button>`
-            + `<button type="button" data-mc-act="close">닫기</button>`
-            + `<span class="map-count-hint">도면을 누르면 점 · 점을 누르면 지우기/구역 바꾸기 · 숫자키로 구역 · 끌면 도면 이동</span>`;
-        if (bar._h !== html) { bar._h = html; bar.innerHTML = html; }
-        placeMemberCountBar(bar, host);
-    }
-    /** 부재 수 막대를 도면 위 도구 막대(상단)·세로 도구(모바일 오른쪽) 밖에 둔다 — 2026-10-13 */
+    /* 도면 오른쪽 위에 뜨는 막대 자리(구조 부재 막대가 씀). 2026-11-04 부재 수 세기·평가 탭을 지우면서 이 함수만 남김 */
     function placeMemberCountBar(bar, host) {
         if (!bar || !host || bar.hidden) return;
         const hr = host.getBoundingClientRect();
@@ -29845,7 +28957,7 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
         });
         bar.style.top = top + 'px';
         bar.style.right = right + 'px';
-        const rail = document.getElementById('mobileBtnModeCount');
+        const rail = document.getElementById('mobileBtnStructLayer');
         const railBox = rail && rail.parentElement;
         if (vis(railBox)) {
             const r = railBox.getBoundingClientRect();
@@ -29859,367 +28971,6 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
             bar._ro.observe(host);
         }
     }
-    window.syncMemberCountBar = syncMemberCountBar;
-    if (typeof document !== 'undefined' && typeof document.addEventListener === 'function') document.addEventListener('keydown', (e) => {
-        if (state.mode !== 'COUNT' || window.__bsaEvalMapOn !== true) return;
-        const t = e.target;
-        if (t && (t.isContentEditable || /^(INPUT|TEXTAREA|SELECT)$/.test(t.tagName))) return;
-        const api = mcApi();
-        if (!api) return;
-        const k = String(e.key || '').toLowerCase();
-        if ((e.ctrlKey || e.metaKey) && k === 'z') { e.preventDefault(); e.stopPropagation(); undoMemberCount(); return; }
-        if (e.ctrlKey || e.metaKey || e.altKey) return;
-        if (k === 'escape') { e.preventDefault(); if (document.getElementById('mapCountDotMenu')) closeMcDotMenu(); else if (mcEraser) setMcEraser(false); else setDrawMode('PAN'); return; }
-        if (k === 'e' || k === 'ㄷ') { e.preventDefault(); e.stopPropagation(); setMcEraser(!mcEraser); return; }
-        if (/^[1-9]$/.test(k)) {
-            const zs = mcZoneChoices();
-            if (zs.includes(Number(k))) { e.preventDefault(); e.stopPropagation(); setMcZone(Number(k)); }
-            return;
-        }
-        if (api.KEYS[k]) { e.preventDefault(); e.stopPropagation(); setMcType(api.KEYS[k]); }
-    }, true);
-
-    // ===== 2026-10-13 평가 부재 지정(도면) · 평가 탭 안 도면 =====
-    function emApi() { return (window.BSA && window.BSA.evalMember) || null; }
-    function emPlanReady(bldg) {
-        const api = evalUnitApi();
-        return !!(api && bldg && api.planOf(bldg).units.length);
-    }
-    /** 결함이 평가단위에 들어 있나(층 전체 → 예, 나눈 층 → 구역 번호가 있어야) */
-    function emDefectHasUnit(bldg, floorKey, d) {
-        const api = evalUnitApi();
-        if (!api || !bldg) return false;
-        const fm = api.floorMode(bldg, state.currentFloor);
-        if (fm && fm.mode === 'whole') return !!fm.unitId;
-        if (fm && fm.mode === 'split') return !!api.unitOf(state, floorKey, d);
-        return false;
-    }
-    async function assignEvalMemberToSelection(type) {
-        const em = emApi();
-        const floorKey = currentEvalUnitFloorKey();
-        const bldg = currentEvalBuilding();
-        if (!em || !floorKey || !bldg) return;
-        const targets = selectedDefectsForEvalUnit(floorKey);
-        if (!targets.length) { window.showToast('도면에서 결함을 먼저 선택하세요(끌어서 여러 개 선택).', 'info', 2400); return; }
-        if (!emPlanReady(bldg)) {
-            const ok = await window.appConfirm('평가단위를 먼저 정해야 합니다.\n평가 탭에서 평가단위 개수와 층 설정을 할까요?');
-            if (ok && typeof window.switchTab === 'function') window.switchTab('tab-eval');
-            return;
-        }
-        const noUnit = targets.filter((d) => !emDefectHasUnit(bldg, floorKey, d));
-        if (noUnit.length) {
-            const fm = evalUnitApi().floorMode(bldg, state.currentFloor);
-            const ok = await window.appConfirm(`평가단위가 없는 결함 ${noUnit.length}건이 있습니다.\n평가단위부터 정할까요?`);
-            if (!ok) return;
-            if (fm && fm.mode === 'split') await assignSelectedDefectsToEvalUnit();
-            else if (typeof window.switchTab === 'function') window.switchTab('tab-eval');
-            return;
-        }
-        const n = em.assign(targets, type, Date.now());
-        commitEvalUnitChange(floorKey);
-        syncEvalMemberBar();
-        scheduleEvalTabRefresh();
-        window.showToast(type ? `${targets.length}건 → 평가 부재 「${type}」${n ? '' : ' (이미 같음)'}` : `${n}건 평가 부재 지정 해제(부재 글로 추정)`, 'success', 2000);
-    }
-    window.assignEvalMemberToSelection = assignEvalMemberToSelection;
-    function syncEvalMemberBar() {
-        const em = emApi();
-        const canvas = state.canvas || document.getElementById('planCanvas');
-        const host = canvas && canvas.parentElement;
-        let bar = document.getElementById('mapEvalMemberBar');
-        const floorKey = currentEvalUnitFloorKey();
-        const bldg = currentEvalBuilding();
-        const sel = (typeof selectedDefectIds !== 'undefined' && selectedDefectIds) ? selectedDefectIds.size : 0;
-        const live = window.__bsaEvalMapOn === true; // 평가 부재 지정은 평가 탭 안 도면에서만
-        if (!em || !host || !live || !sel || state.mode === 'COUNT' || !floorKey || !bldg || !emPlanReady(bldg)) { if (bar) bar.hidden = true; return; }
-        if (!bar) {
-            bar = document.createElement('div');
-            bar.id = 'mapEvalMemberBar';
-            bar.className = 'map-eval-member-bar';
-            bar.setAttribute('role', 'toolbar');
-            bar.setAttribute('aria-label', '평가 부재');
-            bar.addEventListener('click', (e) => {
-                const b = e.target.closest('button');
-                if (!b) return;
-                e.preventDefault();
-                if (b.dataset.emType != null) assignEvalMemberToSelection(b.dataset.emType);
-            });
-            ['mousedown', 'touchstart', 'pointerdown'].forEach((t) => bar.addEventListener(t, (e) => e.stopPropagation(), { passive: true }));
-        }
-        if (bar.parentElement !== host) host.appendChild(bar);
-        const targets = selectedDefectsForEvalUnit(floorKey);
-        const s = em.summarize(targets, memberNameOut);
-        const esc = (t) => String(t).replace(/[&<>"]/g, (ch) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' })[ch]);
-        const noUnit = targets.filter((d) => !emDefectHasUnit(bldg, floorKey, d)).length;
-        const html = `<span class="map-eval-member-title">평가 부재 <b>${targets.length}</b>건</span>`
-            + em.TYPES.map((t) => {
-                const b = s.byType[t] || { confirmed: 0, guessed: 0 };
-                const all = b.confirmed === targets.length && targets.length > 0;
-                return `<button type="button" class="map-eval-member-btn${all ? ' active' : ''}${!b.confirmed && b.guessed ? ' is-guess' : ''}" data-em-type="${esc(t)}" style="--em-color:${em.COLORS[t]}" title="${esc(t)} (${em.SHORT[t]})">${esc(t)} <small>${em.SHORT[t]}</small>${b.confirmed ? ` <b>${b.confirmed}</b>` : ''}${b.guessed ? ` <i>${b.guessed}?</i>` : ''}</button>`;
-            }).join('')
-            + `<button type="button" class="map-eval-member-btn map-eval-member-clear" data-em-type="" title="지정 해제 → 부재 글로 추정">해제</button>`
-            + (s.none ? `<span class="map-eval-member-warn">부재 모름 ${s.none}</span>` : '')
-            + (noUnit ? `<span class="map-eval-member-warn">평가단위 없음 ${noUnit}</span>` : '')
-            + `<span class="map-eval-member-hint">흐린 숫자?는 부재 글로 추정 — 눌러서 확정</span>`;
-        if (bar._h !== html) { bar._h = html; bar.innerHTML = html; }
-        bar.hidden = false;
-    }
-    window.syncEvalMemberBar = syncEvalMemberBar;
-    if (typeof document !== 'undefined' && typeof document.addEventListener === 'function') document.addEventListener('keydown', (e) => {
-        if (e.ctrlKey || e.altKey || e.metaKey || e.repeat || e.isComposing) return;
-        if (state.mode === 'COUNT') return;
-        const bar = document.getElementById('mapEvalMemberBar');
-        if (!bar || bar.hidden) return;
-        const t = e.target;
-        if (t && (t.isContentEditable || /^(INPUT|TEXTAREA|SELECT)$/.test(t.tagName || ''))) return;
-        if (document.querySelector('.app-dialog-backdrop:not([hidden]), dialog[open]')) return;
-        const em = emApi();
-        const map = { c: 'c', 'ㅊ': 'c', w: 'w', 'ㅈ': 'w', g: 'g', 'ㅎ': 'g', b: 'b', 'ㅠ': 'b', s: 's', 'ㄴ': 's' };
-        const k = map[String(e.key || '').toLowerCase()] || (/^Key[CWGBS]$/.test(e.code || '') ? e.code.slice(3).toLowerCase() : '');
-        if (!em || !k || !em.KEYS[k]) return;
-        // G/B: 부재 글 거더/빔 고르기 칸이 떠 있으면 그쪽이 먼저
-        if (k === 'g' || k === 'b') {
-            const ov = document.getElementById('mapMemberGbOverlay');
-            if (ov && ov.offsetParent && ov.querySelector('.map-member-gb-pick')) return;
-        }
-        e.preventDefault();
-        e.stopPropagation();
-        assignEvalMemberToSelection(em.KEYS[k]);
-    }, true);
-
-    // --- 평가 탭 안 도면: 결함위치도 화면(#tab-map)을 그대로 옮겨 쓴다(복사 아님) ---
-    let evalMapHome = null;
-    function evalMapSection() { return document.getElementById('tab-map'); }
-    function refreshEmbeddedMap() {
-        try {
-            if (!state.bgImage && state.currentFloor && typeof loadFloorDrawing === 'function') loadFloorDrawing(state.currentFloor, { preserveView: true });
-        } catch (e) { console.warn('평가 탭 도면', e); }
-        const run = (fit) => {
-            if (typeof resizeCanvas === 'function') resizeCanvas();
-            if (fit && typeof fitToScreen === 'function' && (typeof shouldAutoFitMapView !== 'function' || shouldAutoFitMapView())) fitToScreen();
-            else if (typeof drawCanvas === 'function') drawCanvas({ immediate: true });
-        };
-        setTimeout(() => run(true), 50);
-        setTimeout(() => run(false), 240);
-    }
-    function embedEvalMap() {
-        const slot = document.getElementById('evalMapSlot');
-        const sec = evalMapSection();
-        if (!slot || !sec) return;
-        if (!evalMapHome) {
-            evalMapHome = document.createComment('tab-map-home');
-            sec.parentNode.insertBefore(evalMapHome, sec);
-        }
-        if (sec.parentNode !== slot) slot.appendChild(sec);
-        sec.style.display = 'flex';
-        sec.classList.add('is-eval-embedded');
-        window.__bsaEvalMapOn = true;
-        document.body.classList.add('bsa-eval-map-on');
-        syncEvalMapHead();
-        refreshEmbeddedMap();
-    }
-    function restoreEvalMap() {
-        const sec = evalMapSection();
-        const wasOn = window.__bsaEvalMapOn === true;
-        window.__bsaEvalMapOn = false;
-        document.body.classList.remove('bsa-eval-map-on');
-        // 부재 수 찍기·평가 부재·평가단위 UI는 평가 탭 안 도면 전용 → 결함위치도로 돌아가면 끈다(자료는 그대로)
-        if (wasOn) {
-            try {
-                if (state.mode === 'COUNT' && typeof setDrawMode === 'function') setDrawMode('PAN');
-                if (typeof syncMemberCountOverlay === 'function') syncMemberCountOverlay();
-                if (typeof syncMemberCountBar === 'function') syncMemberCountBar();
-                if (typeof syncEvalMemberBar === 'function') syncEvalMemberBar();
-                if (typeof syncEvalUnitBar === 'function') syncEvalUnitBar();
-                if (typeof updateMapSelectionBar === 'function') updateMapSelectionBar();
-            } catch (e) { console.warn('평가 도면 끄기', e); }
-        }
-        if (!sec || !evalMapHome || !evalMapHome.parentNode) return;
-        sec.classList.remove('is-eval-embedded');
-        if (sec.previousSibling !== evalMapHome) evalMapHome.parentNode.insertBefore(sec, evalMapHome.nextSibling);
-        sec.style.display = (state.currentTab === 'tab-map' || window.__bsaEvalMapOn === true) ? 'flex' : 'none';
-    }
-    function evalMapPrefOn() { try { return localStorage.getItem('bsa.evalMapOpen') !== '0'; } catch (_e) { return true; } }
-    function syncEvalMapHead() {
-        const head = document.getElementById('evalMapHead');
-        const bldg = currentEvalBuilding();
-        if (!head) return;
-        if (!bldg) { head.innerHTML = ''; return; }
-        const esc = (t) => String(t == null ? '' : t).replace(/[&<>"]/g, (ch) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' })[ch]);
-        const on = evalMapPrefOn();
-        const floors = (bldg.floorsList || []).filter((f) => f && f.floorCode);
-        const html = `<b>도면</b>
-            <select class="form-control eval-map-floor" aria-label="층">${floors.map((f) => `<option value="${esc(f.floorCode)}"${f.floorCode === state.currentFloor ? ' selected' : ''}>${esc(f.floorLabel || f.floorCode)}</option>`).join('')}</select>
-            <button type="button" class="btn btn-sm${state.mode === 'COUNT' ? ' btn-primary' : ' btn-outline'} eval-map-count">🔢 부재 수 찍기</button>
-            <button type="button" class="btn btn-sm btn-outline eval-map-toggle">${on ? '도면 접기' : '도면 펴기'}</button>
-            <span class="eval-plan-sub">결함을 끌어 고르면 「평가 부재」 바(C·W·G·B·S) · 확인한 부재는 「부재 수 찍기」로 점</span>`;
-        if (head._h !== html) {
-            head._h = html;
-            head.innerHTML = html;
-            head.querySelector('.eval-map-floor').onchange = (e) => {
-                const fs = document.getElementById('floorSelect');
-                if (fs) { fs.value = e.target.value; fs.dispatchEvent(new Event('change', { bubbles: true })); }
-                setTimeout(() => { refreshEmbeddedMap(); scheduleEvalTabRefresh(); }, 80);
-            };
-            head.querySelector('.eval-map-count').onclick = () => { if (typeof setDrawMode === 'function') setDrawMode(state.mode === 'COUNT' ? 'PAN' : 'COUNT'); syncEvalMapHead(); };
-            head.querySelector('.eval-map-toggle').onclick = () => {
-                try { localStorage.setItem('bsa.evalMapOpen', on ? '0' : '1'); } catch (_e) { /* ignore */ }
-                if (on) restoreEvalMap(); else embedEvalMap();
-                const slot = document.getElementById('evalMapSlot');
-                if (slot) slot.hidden = on;
-                syncEvalMapHead();
-            };
-        }
-    }
-    let evalTabRefreshTimer = 0;
-    function scheduleEvalTabRefresh() {
-        if (state.currentTab !== 'tab-eval') return;
-        clearTimeout(evalTabRefreshTimer);
-        evalTabRefreshTimer = setTimeout(() => { try { renderEvalTab(); } catch (e) { console.error(e); } }, 500);
-    }
-    window.scheduleEvalTabRefresh = scheduleEvalTabRefresh;
-    (function wrapSwitchTabForEvalMap() {
-        const orig = window.switchTab;
-        if (typeof orig !== 'function' || orig.__evalMapWrapped) return;
-        const w = function (id) {
-            if (id !== 'tab-eval') restoreEvalMap();
-            return orig.apply(this, arguments);
-        };
-        w.__evalMapWrapped = true;
-        window.switchTab = w;
-    })();
-    function enterEvalTabWithMap() {
-        const slot = document.getElementById('evalMapSlot');
-        const on = evalMapPrefOn() && !!currentEvalBuilding();
-        if (slot) slot.hidden = !on;
-        if (on) embedEvalMap(); else { restoreEvalMap(); syncEvalMapHead(); }
-    }
-
-    // --- 평가 탭: SAFETY357 화면(번들 그대로, 점수는 번들 안 safetymanExe 한 곳) ---
-    let s357Route = '/';
-    let s357Seq = 0;
-    let s357SaveTimer = 0;
-    function s357Ready() { return !!(window.BSA && window.BSA.s357 && typeof window.BSA.s357.mount === 'function'); }
-    function loadS357() {
-        if (s357Ready()) return Promise.resolve();
-        if (loadS357._p) return loadS357._p;
-        loadS357._p = new Promise((res, rej) => {
-            const s = document.createElement('script');
-            s.src = 'vendor/safety357/safety357.js?v=' + encodeURIComponent(window.BSA_APP_VERSION || '');
-            s.onload = () => res();
-            s.onerror = () => { loadS357._p = null; rej(new Error('SAFETY357 불러오기 실패')); };
-            document.head.appendChild(s);
-        });
-        return loadS357._p;
-    }
-    function s357Calc(bldg) {
-        const P = window.BSA && window.BSA.s357Prefill;
-        if (!P) return null;
-        return P.computeAuto({ bldg, state, floors: evalPlanFloors(bldg), E: evalUnitApi(), S: window.BSA.safetymanExport, MC: window.BSA.memberCount, EM: emApi(), memberName: memberNameOut });
-    }
-    window.s357Calc = s357Calc;
-    function s357Strip(project, bid) {
-        const strip = JSON.parse(JSON.stringify(project || {}));
-        (strip.buildings || []).forEach((x) => {
-            if (x && x.imageDataUrl) {
-                // 2026-10-20 그림은 IndexedDB에(예전엔 localStorage — 기기 저장 공간을 가득 채웠다)
-                const img = x.imageDataUrl;
-                localBackupPut('s357img:' + bid + '.' + x.id, img).catch((e) => console.warn('[SAFETY357] 그림 저장 실패', e));
-                delete x.imageDataUrl;
-            }
-        });
-        return strip;
-    }
-    async function mountS357() {
-        const host = document.getElementById('evalS357Host');
-        const bldg = currentEvalBuilding();
-        const P = window.BSA && window.BSA.s357Prefill;
-        if (!host) return;
-        if (!bldg || !emPlanReady(bldg) || !P) { host.hidden = true; return; }
-        host.hidden = false;
-        try { await loadS357(); } catch (_e) { host.textContent = 'SAFETY357 화면을 불러오지 못했습니다. 인터넷 연결 후 평가 탭을 다시 여세요.'; return; }
-        if (currentEvalBuilding() !== bldg) return;
-        const F = window.BSA.s357.factory;
-        const saved = bldg.evalSafetyman || {};
-        const r = P.merge(saved.project, saved.auto, s357Calc(bldg), F);
-        const bid = bldg.id;
-        for (const x of (r.project.buildings || [])) {
-            if (!x || x.imageDataUrl) continue;
-            let im = null;
-            try { im = await localBackupGet('s357img:' + bid + '.' + x.id); } catch (_e) { /* ignore */ }
-            // 옛 기기 저장(localStorage) — 시작 때 IndexedDB로 옮기지만, 그 전이면 여기서 읽는다
-            if (!im) { try { im = localStorage.getItem('bsa.s357img.' + bid + '.' + x.id); } catch (_e) { /* ignore */ } }
-            if (im) x.imageDataUrl = im;
-        }
-        if (currentEvalBuilding() !== bldg) return;
-        const persist = (project) => {
-            const b = currentEvalBuilding();
-            if (!b || b.id !== bid) return;
-            try { renderEvalScoreBox(b, project); } catch (e) { console.warn('평가 점수', e); }
-            const strip = s357Strip(project, bid);
-            const prev = b.evalSafetyman || {};
-            if (JSON.stringify(strip) === JSON.stringify(prev.project || null) && JSON.stringify(r.auto) === JSON.stringify(prev.auto || null)) return;
-            b.evalSafetyman = { project: strip, auto: r.auto, updatedAt: Date.now() };
-            clearTimeout(s357SaveTimer);
-            s357SaveTimer = setTimeout(() => {
-                if (typeof markBuildingMetaDirty === 'function') markBuildingMetaDirty(b);
-                if (typeof saveStateToLocalStorage === 'function') saveStateToLocalStorage();
-                if (typeof scheduleSyncToFirebase === 'function') scheduleSyncToFirebase();
-            }, 800);
-        };
-        renderEvalScoreBox(bldg, r.project);
-        s357Seq += 1;
-        window.BSA.s357.mount(host, { key: bid + ':' + s357Seq, start: s357Route, bridge: { load: () => r.project, save: persist, onRoute: (p) => { s357Route = p; } } });
-    }
-    window.mountS357 = mountS357;
-    /**
-     * 평가 점수: 평가단위 = SafetyMan 층 기록 하나(시작층~끝층·표본층). 표본층 하나로 층위치 가중치(EXE 0x40d34d),
-     * 건물 상태 = Choquet(단위 점수, 가중치), 종합 = SAFETY357 evaluateBuilding 그대로.
-     */
-    function renderEvalScoreBox(bldg, project) {
-        const host = document.getElementById('evalS357Host');
-        const P = window.BSA && window.BSA.s357Prefill;
-        const X = window.BSA && window.BSA.s357 && window.BSA.s357.score;
-        if (!host || !host.parentElement) return;
-        let box = document.getElementById('evalScoreBox');
-        if (!box) {
-            box = document.createElement('div');
-            box.id = 'evalScoreBox';
-            box.className = 'eval-score-box';
-            host.parentElement.insertBefore(box, host);
-            box.addEventListener('change', (e) => {
-                const sel = e.target.closest('select[data-sf-rec]');
-                if (!sel) return;
-                const b = currentEvalBuilding();
-                const sv = b && b.evalSafetyman;
-                if (!sv || !sv.project || !P.setSampleFloor(sv.project, sel.dataset.sfRec, Number(sel.value))) return;
-                b.evalSafetyman = { project: sv.project, auto: sv.auto, updatedAt: Date.now() };
-                if (typeof markBuildingMetaDirty === 'function') markBuildingMetaDirty(b);
-                if (typeof saveStateToLocalStorage === 'function') saveStateToLocalStorage();
-                if (typeof scheduleSyncToFirebase === 'function') scheduleSyncToFirebase();
-                mountS357();
-            });
-        }
-        if (!P || !X || typeof P.scoreSummary !== 'function' || !bldg || !project) { box.hidden = true; return; }
-        const sum = P.scoreSummary(project, s357Calc(bldg), X);
-        if (!sum || !sum.units.length) { box.hidden = true; return; }
-        box.hidden = false;
-        const esc = (t) => String(t == null ? '' : t).replace(/[&<>"]/g, (ch) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' })[ch]);
-        const f2 = (v) => (v == null || v === '' || !Number.isFinite(Number(v)) ? '—' : Number(v).toFixed(2));
-        const g = (x) => (x ? `<span class="eval-grade eval-grade-${esc(x)}">${esc(x)}</span>` : '');
-        const fl = (n) => (Number(n) < 0 ? `B${-Number(n)}` : `${n}F`);
-        const rows = sum.units.map((u) => {
-            const opts = (u.nos.length ? u.nos : [u.sampleFloor]).map((n) => `<option value="${n}"${Number(n) === Number(u.sampleFloor) ? ' selected' : ''}>${fl(n)}</option>`).join('');
-            return `<tr><th>${esc(u.name)}</th><td>${fl(u.startFloor)}~${fl(u.endFloor)}</td>`
-                + `<td><select class="form-control eval-sf-select" data-sf-rec="${esc(u.id)}" aria-label="표본층">${opts}</select></td>`
-                + `<td>${u.weight}</td><td>${f2(u.score)} ${g(u.grade)}</td></tr>`;
-        }).join('');
-        box.innerHTML = `<h3>평가 점수</h3>`
-            + `<div class="eval-score-total"><span>건물 종합</span><b>${f2(sum.overallScore)}</b>${g(sum.overallGrade)}<span class="eval-score-sub">상태 ${f2(sum.statusScore)} ${g(sum.statusGrade)}${sum.safetyScore != null ? ` · 안전성 ${f2(sum.safetyScore)} ${g(sum.safetyGrade)}` : ''} · 지상 ${sum.floorsAbove} / 지하 ${sum.floorsBelow}</span></div>`
-            + `<table class="eval-score-table"><thead><tr><th>평가단위</th><th>층</th><th>표본층</th><th>층위치 가중치</th><th>상태</th></tr></thead><tbody>${rows}</tbody></table>`
-            + `<p class="eval-score-note">평가단위 하나 = SafetyMan 층 기록 하나(시작층~끝층). 부재·결함은 단위의 모든 층을 더하고, 가중치는 고른 표본층으로 정합니다.</p>`;
-    }
-    window.renderEvalScoreBox = renderEvalScoreBox;
 
     function syncMemberGbOverlay(entries) {
         const list = Array.isArray(entries) ? entries : [];
@@ -30314,7 +29065,6 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
 
     /** 도면 「G」「B」 버튼: 부재 명칭만 바꿔 저장 (원인·종류는 그대로, 수정창은 안 연다) */
     function applyMemberGbChoice(defectIds, value) {
-        if (window.__bsaEvalMapOn === true) { window.showToast?.('평가 탭에서는 상태조사 마킹을 고칠 수 없습니다.', 'info', 2500); return 0; }
         const ids = (defectIds || []).filter(Boolean);
         if (!ids.length || !value) return 0;
         const editHistoryApi = window.BSA && window.BSA.editHistory;
@@ -35609,7 +34359,7 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
 
     function refreshCanvasAfterStylePanelToggle() {
         requestAnimationFrame(() => {
-            if ((state.currentTab === 'tab-map' || window.__bsaEvalMapOn === true) && typeof resizeCanvas === 'function') {
+            if ((state.currentTab === 'tab-map') && typeof resizeCanvas === 'function') {
                 resizeCanvas();
                 if (typeof drawCanvas === 'function') drawCanvas();
             }
@@ -36377,19 +35127,7 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
             bulkMobileBtn.disabled = n < 2;
             bulkMobileBtn.title = n > 1 ? `선택한 결함 ${n}건 일괄 수정` : '2개 이상 선택 시 일괄 수정';
         }
-        ['btnEvalUnitSelectedDefects', 'mobileBtnEvalUnitSelected'].forEach((id) => {
-            const b = document.getElementById(id);
-            if (!b) return;
-            b.hidden = n === 0 || window.__bsaEvalMapOn !== true;
-            b.disabled = b.hidden;
-        });
-        const euLabel = n > 0 ? `평가단위 (${n})` : '평가단위';
-        ['mapEvalUnitToolbarLabel', 'mobileMapEvalUnitLabel'].forEach((id) => {
-            const el = document.getElementById(id);
-            if (el) el.textContent = euLabel;
-        });
         syncDefectMergeButtons();
-        if (typeof syncEvalMemberBar === 'function') syncEvalMemberBar();
         // 결함목록: 선택됨은 바깥 고정 칸 — 본 목록 scrollTop은 선택 변경으로 움직이지 않음
         // scrollToSelection 플래그는 호환용(렌더러가 목록 점프에 쓰지 않음)
         if (typeof renderDefectListPanel === 'function') {
@@ -36598,7 +35336,6 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
     }
 
     async function deleteSelectedDefects() {
-        if (isEvalMarkingLock()) { notifyEvalMarkingLock(); return; }
         pruneHiddenDefectSelection();   // 숨긴 마킹은 지우지 않는다
         const ids = [...selectedDefectIds];
         if (!ids.length || !state.currentBuildingId) return;
@@ -37189,16 +35926,6 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
     }
 
 
-    /** 2026-10-14 평가 탭 도면: 상태조사 마킹 잠금(보기·고르기만 — 옮기기·크기·지우기·수정·새 마킹·되돌리기 없음) */
-    function isEvalMarkingLock() { return window.__bsaEvalMapOn === true; }
-    function notifyEvalMarkingLock() {
-        const now = Date.now();
-        if (now - (window._bsaEvalLockToastAt || 0) < 2500) return;
-        window._bsaEvalLockToastAt = now;
-        window.showToast?.('평가 탭에서는 상태조사 마킹을 고칠 수 없습니다(보기·고르기만). 결함위치도 탭에서 고쳐 주세요.', 'info', 3000);
-    }
-    window.isEvalMarkingLock = isEvalMarkingLock;
-
     function handleDragStart(clientX, clientY, isTouch = false, forcePan = false, mods = {}) {
         if (!elements.planCanvas) return;
         const additive = !!(mods.ctrlKey || mods.metaKey);
@@ -37221,35 +35948,6 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
             isAreaDrag = false;
             pendingDragHit = null;
             if (elements.planCanvas) elements.planCanvas.style.cursor = 'grabbing';
-            return;
-        }
-
-        if (isEvalMarkingLock()) {
-            // 평가 탭: 마킹을 누르면 고르기만(평가 부재·평가단위 지정용), 끌면 도면 이동. 범례·새 마킹·옮기기 없음
-            const r0 = elements.planCanvas.getBoundingClientRect();
-            const c0 = viewToImgCoords((clientX - r0.left - state.view.offsetX) / state.view.scale, (clientY - r0.top - state.view.offsetY) / state.view.scale);
-            const hit0 = findHitPinPart(c0.x, c0.y);
-            if (hit0 && hit0.defect && hit0.defect.id) {
-                const id0 = hit0.defect.id;
-                if (additive || mobileAddSelectEnabled) {
-                    if (selectedDefectIds.has(id0)) selectedDefectIds.delete(id0); else selectedDefectIds.add(id0);
-                } else selectedDefectIds = new Set([id0]);
-                updateMapSelectionBar();
-            } else if (!additive && !mobileAddSelectEnabled && selectedDefectIds.size) {
-                selectedDefectIds.clear();
-                updateMapSelectionBar();
-            }
-            startMouseX = clientX;
-            startMouseY = clientY;
-            initialOffsetX = state.view.offsetX;
-            initialOffsetY = state.view.offsetY;
-            isDragging = true;
-            isMarkingDrag = false;
-            markingHasMoved = false;
-            isAreaDrag = false;
-            pendingDragHit = null;
-            elements.planCanvas.style.cursor = 'grabbing';
-            drawCanvas();
             return;
         }
 
@@ -38500,7 +37198,6 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
     function getMapCanvasCursor() {
         if (state.mode === 'MARK' || state.mode === 'AREA' || state.areaInkTool) return 'crosshair';
         if (state.mode === 'MEMO') return 'copy';
-        if (state.mode === 'COUNT') return 'cell';
         return 'default';
     }
 
@@ -38536,7 +37233,7 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
                 handleDragStart(e.clientX, e.clientY, false, true);
                 return;
             }
-            if (e.button === 0 && (state.mode === 'MEMO' || state.mode === 'COUNT')) {
+            if (e.button === 0 && state.mode === 'MEMO') {
                 // 메모 모드: 끌면 도면 이동, 제자리 클릭이면 메모(놓을 때 판단)
                 memoTapStart(e.clientX, e.clientY);
                 handleDragStart(e.clientX, e.clientY, false, true);
@@ -38635,7 +37332,7 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
                     handleDragStart(e.touches[0].clientX, e.touches[0].clientY, true, true);
                     return;
                 }
-                if (state.mode === 'MEMO' || state.mode === 'COUNT') {
+                if (state.mode === 'MEMO') {
                     memoTapStart(e.touches[0].clientX, e.touches[0].clientY);
                     handleDragStart(e.touches[0].clientX, e.touches[0].clientY, true, true);
                     return;
@@ -38679,7 +37376,7 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
 
         window.addEventListener('touchmove', (e) => {
             // 결함위치도가 아니거나, 도면 밖에서 시작한 터치 → 스크롤 잠금 금지
-            if (window.state && (window.state.currentTab !== 'tab-map' && window.__bsaEvalMapOn !== true)) return;
+            if (window.state && (window.state.currentTab !== 'tab-map')) return;
             if (!mapTouchStartedOnCanvas) return;
             if (isPinching && e.touches.length >= 2) {
                 if (e.cancelable) e.preventDefault();
@@ -38752,7 +37449,7 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
         if (!document._mapOutsideScrollUnlockBound) {
             document._mapOutsideScrollUnlockBound = true;
             document.addEventListener('touchstart', (e) => {
-                if (window.state && (window.state.currentTab !== 'tab-map' && window.__bsaEvalMapOn !== true)) return;
+                if (window.state && (window.state.currentTab !== 'tab-map')) return;
                 const t = e.target;
                 if (t && typeof t.closest === 'function' && t.closest('#canvasContainer, #planCanvas')) return;
                 mapTouchStartedOnCanvas = false;
@@ -38824,7 +37521,7 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
         }
 
         const canvasArea = document.getElementById('canvasContainer');
-        const onMapTab = (window.state.currentTab === 'tab-map' || window.__bsaEvalMapOn === true);
+        const onMapTab = (window.state.currentTab === 'tab-map');
         if (onMapTab && canvasArea) {
             const rect = canvasArea.getBoundingClientRect();
             if (rect.width >= 40 && rect.height >= 40) {
@@ -39350,7 +38047,6 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
     }
 
     function openAddDefectModal(boxX, boxY, targetX, targetY, existingPin = null, areaRect = null, options = {}) {
-        if (window.__bsaEvalMapOn === true) { notifyEvalMarkingLock(); return; }
         window._bsaNewMarkingKeepSelId = null; // 새 창마다 "방금 만든 마킹 유지" 표시 초기화
         clearDefectBulkEditState();
         syncDefectBulkEditChrome(false);
@@ -42024,16 +40720,11 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
         const memoBtn = document.getElementById('btnModeMemo');
         if (memoBtn) memoBtn.classList.toggle('active', mode === 'MEMO');
         if (mode === 'MEMO' && !readMemoShowPref()) setMemoShow(true);
-        if (mode !== 'MEMO' && mode !== 'COUNT') memoTap = null;
-        ['btnModeCount', 'mobileBtnModeCount'].forEach((id) => { const b = document.getElementById(id); if (b) b.classList.toggle('active', mode === 'COUNT'); });
+        if (mode !== 'MEMO') memoTap = null;
         ['btnModeGuide', 'mobileBtnModeGuide'].forEach((id) => { const b = document.getElementById(id); if (b) b.classList.toggle('active', mode === 'GUIDE'); });
         if (mode !== 'GUIDE') gsDrag = null;
         syncGuideBar();
         syncGuideOverlay();
-        if (typeof syncEvalMemberBar === 'function') syncEvalMemberBar();
-        if (window.__bsaEvalMapOn === true && typeof syncEvalMapHead === 'function') syncEvalMapHead();
-        syncMemberCountBar();
-        syncMemberCountOverlay();
         syncDrawingMemoBar();
         document.querySelectorAll('#mobileMapSideRail .mobile-rail-btn[data-mode]').forEach(btn => {
             btn.classList.toggle('active', btn.dataset.mode === mode);
@@ -42606,32 +41297,12 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
         if (btnModeArea) btnModeArea.addEventListener('click', () => setDrawMode('AREA'));
     }
     // 도면 메모 도구·보이기·출력 설정
-    ['btnEvalUnits', 'mobileBtnEvalUnits'].forEach((id) => {
-        const b = document.getElementById(id);
-        if (b) b.addEventListener('click', (e) => { e.preventDefault(); openEvalUnitPlanModal(); });
-    });
-    const btnEvalUnitBarManage = document.getElementById('btnEvalUnitBarManage');
-    if (btnEvalUnitBarManage) btnEvalUnitBarManage.addEventListener('click', (e) => { e.preventDefault(); openEvalUnitManager(); });
-    const evalUnitChipsEl = document.getElementById('evalUnitBarChips');
-    if (evalUnitChipsEl) {
-        evalUnitChipsEl.addEventListener('click', (e) => {
-            const c = e.target && e.target.closest ? e.target.closest('.eval-unit-chip') : null;
-            if (!c) return;
-            evalUnitHighlight = evalUnitHighlight === c.dataset.eu ? '' : c.dataset.eu;
-            syncEvalUnitBar();
-            if (typeof drawCanvas === 'function') drawCanvas();
-        });
-    }
     const btnModeMemo = document.getElementById('btnModeMemo');
     if (btnModeMemo) btnModeMemo.addEventListener('click', () => setDrawMode(state.mode === 'MEMO' ? 'PAN' : 'MEMO'));
     const mobileBtnModeMemo = document.getElementById('mobileBtnModeMemo');
     // 2026-10-16 폰·태블릿 오른쪽 메모 버튼: 손글씨 팝업(팝업 안 「텍스트 메모」로 예전 메모 모드). 메모 모드 중이면 예전처럼 끈다.
     // 2026-10-16 사용자 요청: 손글씨도 메모 모드(메모 목록)에서 추가 — 버튼은 예전처럼 메모 모드 켜기/끄기
     if (mobileBtnModeMemo) mobileBtnModeMemo.addEventListener('click', () => setDrawMode(state.mode === 'MEMO' ? 'PAN' : 'MEMO'));
-    ['btnModeCount', 'mobileBtnModeCount'].forEach((id) => {
-        const b = document.getElementById(id);
-        if (b) b.addEventListener('click', (e) => { e.preventDefault(); setDrawMode(state.mode === 'COUNT' ? 'PAN' : 'COUNT'); });
-    });
     ['btnModeGuide', 'mobileBtnModeGuide'].forEach((id) => {
         const b = document.getElementById(id);
         if (b) b.addEventListener('click', (e) => { e.preventDefault(); setDrawMode(state.mode === 'GUIDE' ? 'PAN' : 'GUIDE'); });
@@ -45227,13 +43898,7 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
             }
             return;
         }
-        if ((window.state.currentTab !== 'tab-map' && window.__bsaEvalMapOn !== true)) return;
-        // 평가 탭: 상태조사 마킹 단축키(지우기·되돌리기·모드·G/B 등) 막음 — Esc는 고르기 해제만
-        if (window.__bsaEvalMapOn === true) {
-            if (k === 'escape' && selectedDefectIds.size) { selectedDefectIds.clear(); updateMapSelectionBar(); drawCanvas(); }
-            else if ((e.key === 'Delete' || e.key === 'Backspace') && !typing && selectedDefectIds.size) { e.preventDefault(); notifyEvalMarkingLock(); }
-            return;
-        }
+        if ((window.state.currentTab !== 'tab-map')) return;
         // 다각형·선을 찍는 중 Backspace: 마지막 점만 되돌린다(마킹 삭제 아님)
         if (e.key === 'Backspace' && !typing && pendingAreaPoly && pendingAreaPoly.length) {
             e.preventDefault();
@@ -45680,9 +44345,7 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
         ['btnMergeSelectedDefects', () => mergeSelectedDefects()],
         ['mobileBtnMergeSelected', () => mergeSelectedDefects()],
         ['btnUnmergeSelectedDefects', () => unmergeSelectedDefects()],
-        ['mobileBtnUnmergeSelected', () => unmergeSelectedDefects()],
-        ['btnEvalUnitSelectedDefects', () => assignSelectedDefectsToEvalUnit()],
-        ['mobileBtnEvalUnitSelected', () => assignSelectedDefectsToEvalUnit()]
+        ['mobileBtnUnmergeSelected', () => unmergeSelectedDefects()]
     ].forEach(([id, fn]) => {
         const b = document.getElementById(id);
         if (!b) return;
@@ -45710,7 +44373,7 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
     });
 
     // 2026-10-14 마우스 옆 단추: 뒤(3) = 되돌리기(Ctrl+Z), 앞(4) = 다시 실행(Ctrl+Y).
-    // 지금 화면의 Ctrl+Z/Ctrl+Y 처리(가이드·부재 수·결함·평가 탭 잠금 등)를 그대로 타도록 키 입력을 흉내 낸다.
+    // 지금 화면의 Ctrl+Z/Ctrl+Y 처리(가이드·결함 등)를 그대로 타도록 키 입력을 흉내 낸다.
     // 브라우저·앱의 뒤로/앞으로 가기는 막는다. 입력칸에 글을 쓰는 중이면 아무것도 안 한다.
     (function bindMouseSideButtonsUndoRedo() {
         if (typeof window === 'undefined' || window._bsaMouseSideBound) return;
@@ -46543,7 +45206,6 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
      * 칸 시각(fieldAt)·사진 기록(photoState)을 찍어 서버의 옛 내용이 동기화로 되돌아오지 않게 한다.
      */
     async function clearDefectContentsOnFloor() {
-        if (window.__bsaEvalMapOn === true) { window.showToast?.('평가 탭에서는 쓸 수 없습니다.', 'info', 2500); return; }
         if (!state.currentBuildingId || !state.currentFloor) {
             window.showToast?.('먼저 점검할 대상 건축물과 층을 선택해 주세요.', 'warning', 3500);
             return;
@@ -46682,7 +45344,6 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
 
     /** 「내용 비우기」 버튼: 범위(이 층만 / 전체 층 / 취소)를 묻고 그 동작을 한다 */
     async function clearDefectContentsChooseScope() {
-        if (window.__bsaEvalMapOn === true) { window.showToast?.('평가 탭에서는 쓸 수 없습니다.', 'info', 2500); return; }
         if (!state.currentBuildingId || !state.currentFloor) {
             window.showToast?.('먼저 점검할 대상 건축물과 층을 선택해 주세요.', 'warning', 3500);
             return;
@@ -59961,7 +58622,6 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
     })();
 
     window.deleteDefectById = async function(id, options) {
-        if (window.__bsaEvalMapOn === true) { notifyEvalMarkingLock(); return false; }
         if (!options?.skipConfirm && !await window.confirmDelete('이 결함을 삭제할까요?')) return false;
         if (!id || !state.currentBuildingId) return false;
         const located = (typeof findDefectFloorKeyById === 'function') ? findDefectFloorKeyById(id) : null;
@@ -60071,7 +58731,7 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
             const next = window.BSA.performance.cycleMode();
             const label = window.BSA.performance.getModeLabel(next);
             window.showToast?.('성능 모드: ' + label, 'info');
-            if ((state.currentTab === 'tab-map' || window.__bsaEvalMapOn === true)) {
+            if ((state.currentTab === 'tab-map')) {
                 if (typeof resizeCanvas === 'function') resizeCanvas();
                 drawCanvas({ immediate: true });
             } else if (state.currentTab === 'tab-ndt') {
@@ -60099,7 +58759,7 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
                     n > 0 ? `PDF 캐시 ${n}건을 지웠습니다.` : '지울 PDF 캐시가 없습니다.',
                     n > 0 ? 'success' : 'info'
                 );
-                if ((window.state.currentTab === 'tab-map' || window.__bsaEvalMapOn === true) && window.state.currentFloor && typeof loadFloorDrawing === 'function') {
+                if ((window.state.currentTab === 'tab-map') && window.state.currentFloor && typeof loadFloorDrawing === 'function') {
                     loadFloorDrawing(window.state.currentFloor, { preserveView: true });
                 }
             } catch (e) {
@@ -60134,7 +58794,7 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
                     r.cleared > 0 ? 'success' : 'info',
                     4500
                 );
-                if ((window.state.currentTab === 'tab-map' || window.__bsaEvalMapOn === true) && window.state.currentFloor && typeof loadFloorDrawing === 'function') {
+                if ((window.state.currentTab === 'tab-map') && window.state.currentFloor && typeof loadFloorDrawing === 'function') {
                     loadFloorDrawing(window.state.currentFloor, { forceClear: true });
                 }
             } catch (e) {
@@ -65783,8 +64443,6 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
         if (drawing.rasterUrl || drawing.pdfUrl) return true;
         if (window.BSA && window.BSA.drawingMemo && window.BSA.drawingMemo.packHasContent(bundle.memos)) return true;
         if (window.BSA && window.BSA.sketchMemo && window.BSA.sketchMemo.packHasContent(bundle.sketches)) return true;
-        if (window.BSA && window.BSA.evalUnits && window.BSA.evalUnits.packHasContent(bundle.evalUnits)) return true;
-        if (window.BSA && window.BSA.memberCount && window.BSA.memberCount.packHasContent(bundle.memberCounts)) return true;
         if (window.BSA && window.BSA.guideShapes && window.BSA.guideShapes.packHasContent(bundle.guideShapes)) return true;
         if (window.BSA && window.BSA.structMembers && window.BSA.structMembers.packHasContent(bundle.structMembers)) return true;
         if (drawing.tiers && typeof drawing.tiers === 'object'
@@ -65803,8 +64461,6 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
             memos: (obj.memos && typeof obj.memos === 'object') ? obj.memos : null,
             // 2026-10-16 손글씨 메모 + (예전엔 여기서 빠져 서버 값이 병합되지 않던) 평가단위·부재 수·가이드·구조 부재도 넘긴다
             sketches: (obj.sketches && typeof obj.sketches === 'object') ? obj.sketches : null,
-            evalUnits: (obj.evalUnits && typeof obj.evalUnits === 'object') ? obj.evalUnits : undefined,
-            memberCounts: (obj.memberCounts && typeof obj.memberCounts === 'object') ? obj.memberCounts : undefined,
             guideShapes: (obj.guideShapes && typeof obj.guideShapes === 'object') ? obj.guideShapes : undefined,
             structMembers: (obj.structMembers && typeof obj.structMembers === 'object') ? obj.structMembers : undefined
         };
@@ -65991,10 +64647,6 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
             memos: (window.BSA && window.BSA.drawingMemo) ? window.BSA.drawingMemo.packFor(window.state, floorKey) : undefined,
             // 손글씨 메모(벡터 선) — 텍스트 메모와 같은 규칙
             sketches: (window.BSA && window.BSA.sketchMemo) ? window.BSA.sketchMemo.packFor(window.state, floorKey) : undefined,
-            // 평가단위 정의(결함 쪽은 defect.evalUnitId로 markings에 실림)
-            evalUnits: (window.BSA && window.BSA.evalUnits) ? window.BSA.evalUnits.packFor(window.state, floorKey) : undefined,
-            // 부재 수 세기 점(결함 아님)
-            memberCounts: (window.BSA && window.BSA.memberCount) ? window.BSA.memberCount.packFor(window.state, floorKey) : undefined,
             // 도면 가이드(사각형·직선, 화면 전용)
             guideShapes: (window.BSA && window.BSA.guideShapes) ? window.BSA.guideShapes.packFor(window.state, floorKey) : undefined,
             // 구조 부재 레이어(구조도에서 가져온 부재 기호, 화면 전용)
@@ -66109,14 +64761,6 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
         }
         if (bundle.sketches && window.BSA && window.BSA.sketchMemo) {
             window.BSA.sketchMemo.mergePackIntoState(window.state, floorKey, bundle.sketches, window.BSA.syncMerge.mergeNdtDataMaps);
-        }
-        if (bundle.evalUnits && window.BSA && window.BSA.evalUnits) {
-            window.BSA.evalUnits.mergePackIntoState(window.state, floorKey, bundle.evalUnits, window.BSA.syncMerge.mergeNdtDataMaps);
-            if (floorKey === currentEvalUnitFloorKey()) syncEvalUnitBar();
-        }
-        if (bundle.memberCounts && window.BSA && window.BSA.memberCount) {
-            window.BSA.memberCount.mergePackIntoState(window.state, floorKey, bundle.memberCounts, window.BSA.syncMerge.mergeNdtDataMaps);
-            if (floorKey === currentMemoFloorKey()) { syncMemberCountOverlay(); syncMemberCountBar(); }
         }
         if (bundle.guideShapes && window.BSA && window.BSA.guideShapes) {
             window.BSA.guideShapes.mergePackIntoState(window.state, floorKey, bundle.guideShapes, window.BSA.syncMerge.mergeNdtDataMaps);
@@ -67675,7 +66319,7 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
             window.showToast(r && r.ok ? (prepared ? '오프라인 준비 완료 — 서버 최신으로 다시 받았습니다.' : '서버 최신 층 데이터를 받았습니다.')
                 : `다시 받기가 끝나지 않았습니다${r && r.error ? ` (${(r.error && r.error.message) || r.error})` : ''}.`, r && r.ok ? 'success' : 'warning', 5000);
             if (wrap._opRefreshRounds) wrap._opRefreshRounds();
-            if ((state.currentTab === 'tab-map' || window.__bsaEvalMapOn === true) && typeof drawCanvas === 'function') drawCanvas();
+            if ((state.currentTab === 'tab-map') && typeof drawCanvas === 'function') drawCanvas();
         });
         wrap.addEventListener('click', (e) => {
             if (_offlinePrepRunning) return;   // 받는 중엔 닫지 않음(멈추기 버튼 사용)
@@ -67863,7 +66507,7 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
                 window.showToast(allOk ? '오프라인 준비 완료'
                     : `일부만 받았습니다${errMsg ? ` (${errMsg})` : ''}. 인터넷 확인 후 새로 받기를 눌러 주세요.`,
                 allOk ? 'success' : 'warning', 5000);
-                if ((state.currentTab === 'tab-map' || window.__bsaEvalMapOn === true) && typeof drawCanvas === 'function') drawCanvas();
+                if ((state.currentTab === 'tab-map') && typeof drawCanvas === 'function') drawCanvas();
             } finally {
                 setBusy(false);
                 refresh();
@@ -71118,7 +69762,7 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
                 saveStateToLocalStorage();
                 _suppressSyncOnSave = false;
             }
-            if ((state.currentTab === 'tab-map' || window.__bsaEvalMapOn === true) && state.currentBuildingId && state.currentFloor) {
+            if ((state.currentTab === 'tab-map') && state.currentBuildingId && state.currentFloor) {
                 refreshCurrentBuildingFromState();
                 if (typeof applyBuildingLocationMapLegend === 'function' && state.currentBuilding) {
                     applyBuildingLocationMapLegend(state.currentBuilding);
@@ -73553,7 +72197,7 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
         const mapBox = document.getElementById('canvasContainer');
         if (mapBox) {
             const ro = new ResizeObserver(() => {
-                if (window.state && (window.state.currentTab === 'tab-map' || window.__bsaEvalMapOn === true)) resizeCanvas();
+                if (window.state && (window.state.currentTab === 'tab-map')) resizeCanvas();
             });
             ro.observe(mapBox);
         }
@@ -73577,7 +72221,7 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
             if (typeof window.closeAllMobileCanvasSheets === 'function') window.closeAllMobileCanvasSheets();
             resizeCanvas();
             if (typeof resizeNdtCanvas === 'function') resizeNdtCanvas();
-            if ((window.state.currentTab === 'tab-map' || window.__bsaEvalMapOn === true) && typeof shouldAutoFitMapView === 'function' && shouldAutoFitMapView()) {
+            if ((window.state.currentTab === 'tab-map') && typeof shouldAutoFitMapView === 'function' && shouldAutoFitMapView()) {
                 fitToScreen();
             } else if (window.state.currentTab === 'tab-ndt' && typeof shouldAutoFitNdtView === 'function' && shouldAutoFitNdtView()) {
                 window.fitNdtCanvas();

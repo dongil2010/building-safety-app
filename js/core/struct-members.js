@@ -1,7 +1,7 @@
 /**
  * 구조 부재 레이어(2026-10-14) — 구조도에서 가져온 기둥·벽·거더·빔·슬래브 기호를 층 도면 위에 둔다.
  * 결함이 아니다: 화면 전용. 한글·PDF·그림 내보내기·엑셀에 안 들어간다(DOM 위에만 그림).
- * 부재 수 점(member-count)·가이드(guide-shapes)와는 따로 둔 별도 자료다.
+ * 가이드(guide-shapes)와는 따로 둔 별도 자료다.
  *
  * state.structMembers[층키] = [{ id, type, label, x, y, w, h, createdAt, updatedAt }]
  *   - x,y = 기호 가운데, w,h = 기호 크기. 도면 원본 픽셀 좌표(결함 x/y와 같은 좌표계).

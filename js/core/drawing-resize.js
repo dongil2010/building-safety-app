@@ -69,21 +69,19 @@
     }
 
     /**
-     * 층 도면 삭제 때 그 층의 도면 위 표시(가이드·개수 점·메모·부재·평가 구역)를 묘비와 함께 지운다.
+     * 층 도면 삭제 때 그 층의 도면 위 표시(가이드·메모·구조 부재)를 묘비와 함께 지운다(2026-11-04 부재 수 점·평가 구역은 기능째 삭제).
      * 안 지우면 같은 층 코드로 새 도면을 넣었을 때 옛 표시가 엉뚱한 자리에 되살아났다(2026-10-13).
      */
     function purgeFloorMarkings(st, floorKey, B, now) {
-        var out = { guides: 0, counts: 0, memos: 0, members: 0, evalUnits: 0 };
+        var out = { guides: 0, memos: 0, members: 0 };
         if (!st || !floorKey || !B) return out;
         function ids(map) { return ((st[map] || {})[floorKey] || []).map(function (r) { return r && r.id; }).filter(Boolean); }
         if (B.guideShapes) ids('guideShapes').forEach(function (id) { if (B.guideShapes.remove(st, floorKey, id)) out.guides++; });
-        if (B.memberCount) ids('memberCounts').forEach(function (id) { if (B.memberCount.remove(st, floorKey, id)) out.counts++; });
         if (B.drawingMemo) ids('drawingMemos').forEach(function (id) { if (B.drawingMemo.deleteMemo(st, floorKey, id)) out.memos++; });
         if (B.structMembers) {
             ids('structMembers').forEach(function (id) { if (B.structMembers.remove(st, floorKey, id)) out.members++; });
             if (B.structMembers.removeOverlay && (st.structOverlays || {})[floorKey]) B.structMembers.removeOverlay(st, floorKey, now);
         }
-        if (B.evalUnits) ids('evalUnits').forEach(function (id) { if (B.evalUnits.deleteUnit(st, floorKey, id, [], now) >= 0) out.evalUnits++; });
         return out;
     }
 

@@ -39,11 +39,11 @@ const widths = [];
 const ctx = { save() {}, restore() {}, beginPath() {}, moveTo() {}, lineTo() {}, stroke() { widths.push(this.lineWidth); }, arc() {}, fill() {} };
 S.drawStroke(ctx, { c: '#000', w: 10, e: 0, p: [0, 0, 10, 10, 0, 10, 20, 0, 100, 30, 0, 100] }, 1);
 assert.ok(widths[0] < widths[2], 'pressure → width');
-// app.js 연결: 층 묶음 쓰기·읽기·병합에 sketches가 있고, 예전에 빠지던 evalUnits 등도 넘긴다
+// app.js 연결: 층 묶음 쓰기·읽기·병합에 sketches가 있다(평가단위 evalUnits는 2026-11-04 평가 탭과 함께 삭제)
 const src = fs.readFileSync(path.join(__dirname, '..', 'app.js'), 'utf8');
 assert.ok(/sketches: \(window\.BSA && window\.BSA\.sketchMemo\) \? window\.BSA\.sketchMemo\.packFor/.test(src));
 assert.ok(/sketches: \(obj\.sketches && typeof obj\.sketches === 'object'\)/.test(src));
-assert.ok(/evalUnits: \(obj\.evalUnits && typeof obj\.evalUnits === 'object'\)/.test(src));
+assert.ok(!/evalUnits:/.test(src), '평가단위는 층 묶음에서 빠짐');
 assert.ok(/window\.BSA\.sketchMemo\.mergePackIntoState\(window\.state, floorKey, bundle\.sketches/.test(src));
 assert.ok(/touch-action: none/.test(fs.readFileSync(path.join(__dirname, '..', 'styles.css'), 'utf8')) || true);
 // 2026-10-16 두 사람이 같은 메모에 이어 쓰면 두 사람 획이 모두 남음(획 합집합)

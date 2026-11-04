@@ -25,7 +25,7 @@ FILES = [
     "struct-plan.html",
     "web-version.json",
 ]
-DIRS = ["js", "templates", "vendor"]  # vendor: SAFETY357 번들·평가 엑셀 양식(2026-10-13 빠져서 평가 탭 404)
+DIRS = ["js", "templates", "vendor"]  # vendor: 밖에서 만든 번들 자리(2026-11-04 평가 탭·SAFETY357 삭제로 지금은 비어 있음 — 없으면 건너뜀)
 
 
 def retoken(text: str, pattern: str, repl: str, label: str) -> str:
