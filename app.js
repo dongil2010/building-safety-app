@@ -42112,7 +42112,7 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
         const vi = ge.sel ? ge.sel.vertexIndex : null;
         const canDelVertex = !!(selF && vi != null && vi > 0 && vi < selF.line.pts.length - 1);
         // 접었다 폈다 하는 묶음 — 패널을 다시 그려도 열림 상태를 기억한다(자동 잡기 후보가 있으면 항상 열림)
-        const secOpen = Object.assign({ group: true, loc: true, zone: !!zones.length, auto: false, danger: false }, ge.sections || {});
+        const secOpen = Object.assign({ group: true, space: true, loc: true, zone: !!zones.length, auto: false, danger: false }, ge.sections || {});
         if (autoPrev) secOpen.auto = true;
         const sec = (key, title, body, note) => `
                 <details class="grid-sec" data-sec="${key}"${secOpen[key] ? ' open' : ''}>
@@ -42166,6 +42166,35 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
                         <button type="button" data-act="delLine" class="danger">선 삭제</button>
                     </div>
                 </div>` : '<div class="grid-panel-row grid-panel-muted grid-sel-empty">선을 누르면 폭·이름·각도·위치를 바꿀 수 있습니다. 폭은 선마다 하나씩 조절합니다.</div>';
+        // ---- 간격 비율(2026-11-04): 선 사이 간격을 전체 비율로 늘리거나 줄임 ----
+        const spaceAxis = (selF ? selF.group.axis : (eg ? eg.axis : 'col'));
+        const spacePct = Number.isFinite(Number(ge.spacePct)) && Number(ge.spacePct) > 0 ? Number(ge.spacePct) : 100;
+        const spaceAnchor = ge.spaceAnchor || (selF ? 'selected' : 'first');
+        const spaceScope = ge.spaceScope === 'axis' ? 'axis' : 'group';
+        const spaceBody = `
+                    <div class="grid-panel-row">
+                        <label title="100% = 그대로, 110% = 간격 10% 넓게, 90% = 10% 좁게. 선은 통째로 평행하게 옮겨지고 폭·각도·꺾임은 그대로입니다">비율 <input type="number" data-f="spacePct" value="${spacePct}" min="10" max="500" step="1" style="width:64px">%</label>
+                        <button type="button" data-act="spaceApply" class="grid-primary">적용</button>
+                        ${ge.spacingUndo ? '<button type="button" data-act="undoSpace" title="방금 바꾼 간격을 되돌림 (Ctrl+Z)">↶ 되돌리기</button>' : ''}
+                    </div>
+                    <div class="grid-panel-row grid-space-quick">
+                        <small class="grid-panel-muted">바로 적용</small>
+                        ${[90, 95, 105, 110].map((v) => `<button type="button" data-act="spaceQuick" data-pct="${v}">${v}%</button>`).join('')}
+                    </div>
+                    <div class="grid-panel-row">
+                        <label title="이 선(위치)은 그대로 두고 나머지가 벌어지거나 모입니다">기준 <select data-f="spaceAnchor">
+                            <option value="selected"${spaceAnchor === 'selected' ? ' selected' : ''}${selF ? '' : ' disabled'}>선택한 선</option>
+                            <option value="first"${spaceAnchor === 'first' ? ' selected' : ''}>${spaceAxis === 'row' ? '맨 위 선' : '맨 왼쪽 선'}</option>
+                            <option value="last"${spaceAnchor === 'last' ? ' selected' : ''}>${spaceAxis === 'row' ? '맨 아래 선' : '맨 오른쪽 선'}</option>
+                            <option value="center"${spaceAnchor === 'center' ? ' selected' : ''}>가운데(양쪽으로)</option>
+                        </select></label>
+                    </div>
+                    <div class="grid-panel-row">
+                        <label>대상 <select data-f="spaceScope">
+                            <option value="group"${spaceScope === 'group' ? ' selected' : ''}>이 그룹만</option>
+                            <option value="axis"${spaceScope === 'axis' ? ' selected' : ''}>이 층 ${axisKo(spaceAxis)} 전체 그룹</option>
+                        </select></label>
+                    </div>`;
         // ---- 그룹 설정 ----
         const groupBody = `
                     <div class="grid-panel-row">
@@ -42287,6 +42316,7 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
                 </div>
                 <div class="grid-panel-hint">${hint}</div>
                 ${selHtml}
+                ${sec('space', '간격 비율', spaceBody, '선 사이 간격을 전체 비율로')}
                 ${sec('group', '그룹 설정', groupBody, eg ? `${axisKo(eg.axis)} ${eg.lines.length}개` : '')}
                 ${sec('zone', '구역', zoneBody, '한 도면에 여러 층 — 구역마다 번호 따로')}
                 ${sec('auto', '자동 잡기', autoBody, '캐드 PDF 번호 풍선·글자로 후보')}
@@ -42424,6 +42454,7 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
         if (act === 'reverseOrder' && eg) {
             if (eg.lines.length < 2) { window.showToast?.('선이 2개 이상일 때 뒤집을 수 있습니다.', 'info', 2000); return; }
             ge.orderUndo = { groupId: eg.id, seqs: G.reverseLineOrder(eg) };
+            ge.spacingUndo = null;
             gridChanged();
             window.showToast?.('번호 순서를 뒤집었습니다. (되돌리기: ↶ 버튼 또는 Ctrl+Z) 이미 넣은 마킹 위치는 「이 층 마킹에 위치 채우기」로 맞춥니다.', 'success', 3500);
             return;
@@ -42445,6 +42476,12 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
             if (next) { gridSelectLine(grid, next.line.id, null); renderGridPanel(); drawCanvas(); }
             return;
         }
+        if (act === 'spaceApply' || act === 'spaceQuick') {
+            const pct = act === 'spaceQuick' ? Number(btn.getAttribute('data-pct')) : Number(ge.spacePct || 100);
+            applyGridSpacingPercent(pct);
+            return;
+        }
+        if (act === 'undoSpace') { undoGridSpacingChange(); return; }
         if (act === 'bandStep' && selF) {
             const d = Number(btn.getAttribute('data-d')) || 0;
             if (!d) return;
@@ -42517,6 +42554,56 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
             wipeDetailLocationForAllFloors();
         }
     }
+
+    /**
+     * 2026-11-04 행·열 간격을 전체 비율(%)로 늘리거나 줄임 — 기준 선은 그대로, 나머지는 평행 이동(폭·각도·꺾임 그대로).
+     * 대상: 이 그룹만 / 이 층 같은 방향 전체 그룹. 한 단계 되돌리기(↶ 또는 Ctrl+Z).
+     */
+    function applyGridSpacingPercent(pct) {
+        const ge = gridEditState();
+        const G = gridLib();
+        if (!G) return false;
+        const grid = getCurrentFloorGrid(true);
+        const gctx = getGridCtx();
+        const selF = ge.sel ? G.findLine(grid, ge.sel.lineId) : null;
+        const eg = (selF && selF.group) || gridFindGroup(grid, ge.editGroupId);
+        const p = Number(pct);
+        if (!eg || !Number.isFinite(p) || p <= 0) { window.showToast?.('비율을 확인해 주세요(10~500%).', 'warning', 2200); return false; }
+        if (Math.abs(p - 100) < 1e-9) { window.showToast?.('100%는 그대로입니다. 110%(넓게)나 90%(좁게)처럼 입력하세요.', 'info', 2200); return false; }
+        const factor = Math.max(10, Math.min(500, p)) / 100;
+        const groups = ge.spaceScope === 'axis' ? grid.groups.filter((g) => g.axis === eg.axis) : [eg];
+        const mode = ge.spaceAnchor || (selF ? 'selected' : 'first');
+        const snaps = [];
+        groups.forEach((g) => {
+            const anchor = (mode === 'selected' && selF && selF.group.id === g.id) ? { lineId: selF.line.id } : (mode === 'selected' ? 'first' : mode);
+            const prev = G.scaleSpacing(g, factor, gctx, anchor);
+            if (prev.length) snaps.push({ groupId: g.id, prev });
+        });
+        if (!snaps.length) { window.showToast?.('간격을 바꾸려면 선이 2개 이상 필요합니다.', 'info', 2200); return false; }
+        ge.spacingUndo = { snaps };
+        ge.orderUndo = null;
+        gridChanged();
+        window.showToast?.(`${eg.axis === 'row' ? '행' : '열'} 간격을 ${Math.round(p * 10) / 10}%로 ${factor > 1 ? '넓혔' : '좁혔'}습니다. (되돌리기: ↶ 버튼 또는 Ctrl+Z)`, 'success', 3200);
+        return true;
+    }
+
+    function undoGridSpacingChange() {
+        const ge = gridEditState();
+        const G = gridLib();
+        const u = ge && ge.spacingUndo;
+        if (!u || !G) return false;
+        const grid = getCurrentFloorGrid(false);
+        ge.spacingUndo = null;
+        if (!grid) { renderGridPanel(); return false; }
+        u.snaps.forEach((s) => {
+            const g = gridFindGroup(grid, s.groupId);
+            if (g) G.restoreLinePts(g, s.prev);
+        });
+        gridChanged();
+        window.showToast?.('간격을 되돌렸습니다.', 'info', 1800);
+        return true;
+    }
+    window.undoGridSpacingChange = undoGridSpacingChange;
 
     /** 2026-10-21 행·열 번호 순서(뒤집기·오름/내림) 되돌리기 — 한 단계. 되돌렸으면 true */
     function undoGridOrderChange() {
@@ -42604,7 +42691,7 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
                 const wasRev = eg.reverse === true;
                 const toRev = el.value === 'desc';
                 if (wasRev === toRev) return;
-                ge.orderUndo = { groupId: eg.id, reverse: wasRev };
+                ge.orderUndo = { groupId: eg.id, reverse: wasRev }; ge.spacingUndo = null;
                 if (toRev) eg.reverse = true; else delete eg.reverse;
                 break;
             }
@@ -42628,6 +42715,19 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
                     if (n != null) selF.line.num = n; else delete selF.line.num; // 비우거나 읽을 수 없으면 자동 번호
                 }
                 break;
+            case 'spacePct': {
+                const v = Number(el.value);
+                ge.spacePct = Number.isFinite(v) && v > 0 ? Math.max(10, Math.min(500, v)) : 100;
+                if (String(ge.spacePct) !== String(el.value)) el.value = ge.spacePct;
+                return;
+            }
+            case 'spaceAnchor':
+                ge.spaceAnchor = ['selected', 'first', 'last', 'center'].includes(el.value) ? el.value : 'first';
+                return;
+            case 'spaceScope':
+                ge.spaceScope = el.value === 'axis' ? 'axis' : 'group';
+                renderGridPanel();
+                return;
             case 'autoOuter':
                 ge.autoOuter = el.value === 'all' ? 'all' : 'outer';
                 return;
@@ -42869,11 +42969,11 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
         const tag = t && t.tagName;
         if (tag === 'INPUT' || tag === 'TEXTAREA' || tag === 'SELECT' || (t && t.isContentEditable)) return;
         if (document.querySelector('.modal-overlay.open')) return;
-        if ((e.ctrlKey || e.metaKey) && !e.shiftKey && (e.key === 'z' || e.key === 'Z') && ge.orderUndo) {
-            // 행·열 번호 순서(뒤집기·오름/내림) 되돌리기
+        if ((e.ctrlKey || e.metaKey) && !e.shiftKey && (e.key === 'z' || e.key === 'Z') && (ge.orderUndo || ge.spacingUndo)) {
+            // 행·열 번호 순서(뒤집기·오름/내림) 또는 간격 비율 되돌리기 — 가장 최근 것 하나
             e.preventDefault();
             e.stopImmediatePropagation();
-            undoGridOrderChange();
+            if (ge.spacingUndo) undoGridSpacingChange(); else undoGridOrderChange();
         } else if ((e.key === 'Delete' || e.key === 'Backspace') && ge.sel) {
             e.preventDefault();
             e.stopImmediatePropagation();

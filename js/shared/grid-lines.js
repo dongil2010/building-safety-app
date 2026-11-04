@@ -954,6 +954,51 @@
         return true;
     }
 
+    /**
+     * 2026-11-04 행·열 간격을 전체 비율로 늘리거나 줄임.
+     * 선마다 「그룹 방향에 수직인 위치(offset)」를 기준 선에서 factor배로 — 선은 통째로(각도·꺾임 그대로) 평행 이동한다.
+     * anchor: { lineId } 그 선 고정 / 'first' 첫 선(열: 맨 왼쪽, 행: 맨 위) / 'last' 끝 선 / 'center' 가운데(양쪽으로 벌어짐). 못 찾으면 첫 선.
+     * factor는 0.1~5로 제한. 반환: 되돌리기용 이전 좌표 [{ id, pts }] (옮길 선이 없으면 빈 배열)
+     */
+    function scaleSpacing(group, factor, ctx, anchor) {
+        if (!group || !Array.isArray(group.lines)) return [];
+        const k = Math.max(0.1, Math.min(5, num(factor, 1)));
+        if (!(k > 0) || Math.abs(k - 1) < 1e-9) return [];
+        const od = orderedLines(group, ctx);
+        const items = od.items;
+        if (items.length < 2) return [];
+        let aOff = items[0].offset;
+        const mode = anchor && typeof anchor === 'object' ? 'line' : anchor;
+        if (mode === 'last') aOff = items[items.length - 1].offset;
+        else if (mode === 'center') aOff = (items[0].offset + items[items.length - 1].offset) / 2;
+        else if (mode === 'line') {
+            const hit = items.find((it) => it.line.id === anchor.lineId);
+            if (hit) aOff = hit.offset;
+        }
+        const prev = [];
+        items.forEach((it) => {
+            const shift = (it.offset - aOff) * (k - 1);
+            if (Math.abs(shift) < 1e-9) return;
+            prev.push({ id: it.line.id, pts: it.line.pts.map((p) => ({ x: p.x, y: p.y })) });
+            it.line.pts = it.ptsDisp.map((p) => {
+                const v = { x: p.x + od.N.x * shift, y: p.y + od.N.y * shift };
+                const q = toImage(v, ctx.rot, ctx.w, ctx.h);
+                return { x: roundTo(q.x, 2), y: roundTo(q.y, 2) };
+            });
+        });
+        return prev;
+    }
+
+    /** scaleSpacing 되돌리기: [{ id, pts }]를 그룹의 같은 선에 되돌림 */
+    function restoreLinePts(group, prev) {
+        if (!group || !Array.isArray(prev)) return false;
+        const m = new Map(prev.map((p) => [p.id, p.pts]));
+        (group.lines || []).forEach((ln) => {
+            if (m.has(ln.id)) ln.pts = m.get(ln.id).map((p) => ({ x: p.x, y: p.y }));
+        });
+        return true;
+    }
+
     /** 한 번만: 지금 화면 기준 위치 순서(왼→오른 / 위→아래)로 번호를 다시 매김 */
     function renumberBySpatialOrder(group, ctx) {
         const od = orderedLines(group, ctx);
@@ -1210,6 +1255,8 @@
         renumberBySpatialOrder,
         reverseLineOrder,
         restoreLineSeqs,
+        scaleSpacing,
+        restoreLinePts,
         lineAngle,
         setLineAngle,
         hitTest,

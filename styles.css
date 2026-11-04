@@ -16550,6 +16550,8 @@ html:not(.layout-desktop) .crack-monitor-photo-slots {
 .grid-lines-panel .grid-sec[open] > summary::before { transform: rotate(90deg); }
 .grid-lines-panel .grid-sec > summary small { font-weight: 400; }
 .grid-lines-panel .grid-sec-body { padding: 0 0 4px 2px; }
+.grid-lines-panel .grid-space-quick { gap: 4px; }
+.grid-lines-panel .grid-space-quick button { min-width: 42px; }
 .grid-lines-panel .grid-panel-row {
     display: flex;
     align-items: center;
