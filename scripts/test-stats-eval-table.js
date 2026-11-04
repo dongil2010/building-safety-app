@@ -44,18 +44,26 @@ vm.runInContext(code + '\nthis.api = { evalFloorRangeLabel, EVAL_MEMBERS, EVAL_C
 const A = sb.api;
 
 // 열은 양식 순서
-assert.deepStrictEqual(Array.from(A.EVAL_COLUMNS, (c) => c.key), ['lt02', 'lt03', 'lt05', 'ge05', 'peel', 'fall', 'leak', 'rebar']);
+assert.deepStrictEqual(Array.from(A.EVAL_COLUMNS, (c) => c.key), ['lt02', 'lt03', 'lt05', 'ge05', 'peel', 'fall', 'leakTrace', 'efflo', 'leakNow', 'rebar']);
 assert.deepStrictEqual(Array.from(A.EVAL_MEMBERS.filter((m) => !m.optional), (m) => m.label), ['기둥', '벽', '큰보', '작은보', '슬래브']);
 
 // 박리·박락은 따로, 뿜칠·내화피복 탈락은 콘크리트 결함이 아니다
-const k = (type, component) => JSON.parse(JSON.stringify(A.classifyEvalKinds({ defectType: type, component: component || '기둥' })));
-assert.deepStrictEqual(k('박리'), { peel: true, fall: false, leak: false, rebar: false });
-assert.deepStrictEqual(k('박락 및 철근노출'), { peel: false, fall: true, leak: false, rebar: true });
-assert.deepStrictEqual(k('들뜸'), { peel: false, fall: true, leak: false, rebar: false });
-assert.deepStrictEqual(k('층분리'), { peel: false, fall: true, leak: false, rebar: false });
-assert.deepStrictEqual(k('누수흔적, 백태'), { peel: false, fall: false, leak: true, rebar: false });
-assert.deepStrictEqual(k('뿜칠 박락'), { peel: false, fall: false, leak: false, rebar: false });
-assert.deepStrictEqual(k('박리', '철골보 내화피복'), { peel: false, fall: false, leak: false, rebar: false });
+const k = (type, component, isLeak) => JSON.parse(JSON.stringify(A.classifyEvalKinds({ defectType: type, component: component || '기둥', isLeak })));
+const K = (o) => Object.assign({ peel: false, fall: false, leakNow: false, leakTrace: false, efflo: false, rebar: false }, o);
+assert.deepStrictEqual(k('박리'), K({ peel: true }));
+assert.deepStrictEqual(k('박락 및 철근노출'), K({ fall: true, rebar: true }));
+assert.deepStrictEqual(k('들뜸'), K({ fall: true }));
+assert.deepStrictEqual(k('층분리'), K({ fall: true }));
+// 2026-11-04 누수 셋으로: 누수중(누수여부 켬·「누수중」) / 누수흔적(그 밖의 누수) / 백태
+assert.deepStrictEqual(k('누수흔적, 백태'), K({ leakTrace: true, efflo: true }));
+assert.deepStrictEqual(k('누수'), K({ leakTrace: true }), '그냥 누수 = 누수흔적');
+assert.deepStrictEqual(k('누수 흔적'), K({ leakTrace: true }));
+assert.deepStrictEqual(k('누수흔적', '슬래브', true), K({ leakNow: true }), '누수여부를 켜면 누수중(흔적과 겹쳐 세지 않음)');
+assert.deepStrictEqual(k('누수中'), K({ leakNow: true }));
+assert.deepStrictEqual(k('백태'), K({ efflo: true }));
+assert.deepStrictEqual(k('균열', '슬래브', true), K({ leakNow: true }), '균열이어도 누수여부 켬이면 누수중');
+assert.deepStrictEqual(k('뿜칠 박락'), K({}));
+assert.deepStrictEqual(k('박리', '철골보 내화피복'), K({}));
 
 // 표 줄: 결함 있는 층만, 층마다 기본 5부재 + G/B 미지정 보는 있을 때만, 맨 아래 합계
 const payload = {
@@ -87,9 +95,9 @@ assert.ok(rows[2].isTotal);
 
 // 표 복사: 탭 구분, 층 이름은 첫 줄에만, 0은 빈칸
 const tsv = A.evalTableToTsv(rows).split('\n');
-assert.strictEqual(tsv[0], '위치\t부재(개소)\t0.2mm 미만\t0.3mm 미만\t0.5mm 미만\t0.5mm 이상\t콘크리트 박리\t콘크리트 박락\t누수·백태\t철근노출');
-assert.strictEqual(tsv[1], '지하2층\t기둥( )\t3\t2\t\t\t1\t\t\t', '구조 부재 안 그린 층은 괄호 빈칸');
-assert.strictEqual(tsv[2], '\t벽( )\t\t\t\t\t\t\t\t');
+assert.strictEqual(tsv[0], '위치\t부재(개소)\t0.2mm 미만\t0.3mm 미만\t0.5mm 미만\t0.5mm 이상\t콘크리트 박리\t콘크리트 박락\t누수흔적\t백태\t누수중\t철근노출');
+assert.strictEqual(tsv[1], '지하2층\t기둥( )\t3\t2\t\t\t1\t\t\t\t\t', '구조 부재 안 그린 층은 괄호 빈칸');
+assert.strictEqual(tsv[2], '\t벽( )\t\t\t\t\t\t\t\t\t\t');
 assert.strictEqual(tsv.length, 1 + 5 + 6 + 6);
 
 // 2026-11-04 부재 옆 괄호 = 구조 부재 탭 개수: 층·평가단위는 그 층들 합, 합계는 결함 없는 층에 그린 것까지
@@ -115,7 +123,7 @@ assert.strictEqual(tsv.length, 1 + 5 + 6 + 6);
     const ur = JSON.parse(JSON.stringify(A.buildEvalTableRows(bd, [['1F', '2F', '3F']])));
     assert.strictEqual(ur[0].label, '지상1층~지상3층');
     assert.strictEqual(total(ur[0], '슬래브'), 40, '평가단위 = 그린 층들의 합(안 그린 3층은 0)');
-    assert.strictEqual(A.evalTableToTsv(fr).split('\n')[1], '지하1층\t기둥(20)\t1\t\t\t\t\t\t\t');
+    assert.strictEqual(A.evalTableToTsv(fr).split('\n')[1], '지하1층\t기둥(20)\t1\t\t\t\t\t\t\t\t\t');
 }
 
 // 평가단위: 사용자가 고른 층끼리 묶음. 지하·지상을 넘어도 되고 한 층이 두 단위에 들어가도 된다.
@@ -156,7 +164,8 @@ assert.ok(src.includes('renderEvalTable(bldg ? payload : null, ensureEvalMount()
 
 // 집계 연결: 균열 구간은 구조체 부재만(구조체 아닌 부재는 기타로 빠짐), 결과가 층 줄에 실림
 assert.ok(/addEval\(bin\);/.test(src), '균열폭 구간을 평가 칸에도 더한다');
-assert.ok(src.includes("['peel', 'fall', 'leak', 'rebar'].forEach(function (k) { if (evalKinds[k]) addEval(k); });"));
+assert.ok(src.includes("['peel', 'fall', 'leakTrace', 'efflo', 'leakNow', 'rebar'].forEach(function (k) { if (evalKinds[k]) addEval(k); });"));
+assert.ok(/var addEval = function \(key\) \{\s*\/\/[^\n]*\n\s*if \(cat !== '구조체'\) return;/.test(src), '평가 표는 구조체 결함만(마감재 누수흔적 제외)');
 assert.ok(src.includes('componentEval: floorComponentEval,') && src.includes('componentEvalNos: floorComponentEvalNos,'));
 assert.ok(src.includes("[document.getElementById('statsEvalSection'), vis.evalTable],"), '대분류 전환 때 보이기/숨기기');
 

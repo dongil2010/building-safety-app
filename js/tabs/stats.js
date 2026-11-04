@@ -1243,7 +1243,10 @@
         { key: 'ge05', label: '0.5mm 이상' },
         { key: 'peel', label: '콘크리트 박리' },
         { key: 'fall', label: '콘크리트 박락' },
-        { key: 'leak', label: '누수·백태' },
+        // 2026-11-04 누수를 셋으로(사용자): 누수중 = 누수여부 켬(isLeak)·「누수중」, 누수흔적 = 그 밖의 누수, 백태 따로
+        { key: 'leakTrace', label: '누수흔적' },
+        { key: 'efflo', label: '백태' },
+        { key: 'leakNow', label: '누수중' },
         { key: 'rebar', label: '철근노출' }
     ];
     /**
@@ -1276,7 +1279,10 @@
         return {
             peel: !coating && /박리/.test(type),
             fall: !coating && /박락|들뜸|층분리/.test(type),
-            leak: /누수|백태/.test(type),
+            // 누수여부를 켰거나 「누수중·누수中」이면 누수중, 아니면 「누수·누수흔적」은 누수흔적(한 결함은 둘 중 하나만)
+            leakNow: !!(d && d.isLeak) || /누수(중|中)/.test(type),
+            leakTrace: !(d && d.isLeak) && !/누수(중|中)/.test(type) && /누수/.test(type),
+            efflo: /백태/.test(type),
             rebar: /철근노출/.test(type)
         };
     }
@@ -1567,11 +1573,13 @@
                 var evalBucket = floorComponentEval[compGroup] || (floorComponentEval[compGroup] = {});
                 var evalNoBucket = floorComponentEvalNos[compGroup] || (floorComponentEvalNos[compGroup] = {});
                 var addEval = function (key) {
+                    // 평가 표는 구조체로 체크한 결함만(마감재 누수흔적 등 제외, 구분 미기재는 구조체) — 2026-11-04 사용자
+                    if (cat !== '구조체') return;
                     evalBucket[key] = (evalBucket[key] || 0) + 1;
                     (evalNoBucket[key] || (evalNoBucket[key] = [])).push(d.no || d.groupNo || '');
                 };
                 var evalKinds = classifyEvalKinds(d);
-                ['peel', 'fall', 'leak', 'rebar'].forEach(function (k) { if (evalKinds[k]) addEval(k); });
+                ['peel', 'fall', 'leakTrace', 'efflo', 'leakNow', 'rebar'].forEach(function (k) { if (evalKinds[k]) addEval(k); });
                 // 균열·이격 결함 수(최대 균열폭 보기의 건수). getCrackWidthNumbers와 같은 기준이다.
                 if (!nonStructuralMember && /균열|이격/.test(String(d.defectType != null ? d.defectType : ''))) {
                     componentCrackCounts[compGroup] = (componentCrackCounts[compGroup] || 0) + 1;
