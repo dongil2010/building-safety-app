@@ -42284,9 +42284,7 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
                         <button type="button" data-act="fillExisting" title="행·열 위치가 없는 마킹만 채움(상세 위치·실 이름은 그대로)">이 층 마킹에 위치 채우기</button>
                         <button type="button" data-act="recalcGrid" title="이 층 마킹 전부의 행·열 위치를 지금 선 기준으로 다시 계산. 상세 위치·실 이름은 그대로. 되돌리기 한 번으로 취소">실 이름 두고 행·열만 다시 계산</button>
                     </div>
-                    <div class="grid-panel-row">
-                        <button type="button" data-act="copyFloors" title="이 층의 행·열 선·그룹·머리글·시작 번호·이름·폭·자동 입력 설정을 같은 건물의 다른 층에 복사(이미 선이 있으면 덮어쓰기)">다른 층으로 복사</button>
-                    </div>`;
+`;
         const dangerBody = `
                     <div class="grid-panel-row">
                         <button type="button" data-act="clearDetail" class="danger" title="이 층 마킹의 상세 위치 글자에서 행·열 표기(X4~X5/Y1~Y2 등)만 지움. 실 이름·위치 글과 행·열 위치 칸은 그대로. 되돌리기 한 번으로 취소">상세위치 행·열 지우기</button>
@@ -42313,6 +42311,9 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
                     <button type="button" data-tool="row" class="${ge.tool === 'row' ? 'active' : ''}">─ 행 추가</button>
                     <button type="button" data-tool="select" class="${ge.tool === 'select' ? 'active' : ''}">✥ 선택·이동</button>
                     <button type="button" data-tool="zone" class="${ge.tool === 'zone' ? 'active' : ''}" title="한 도면에 여러 층이 있을 때 — 사각형 구역마다 번호를 따로">▭ 구역</button>
+                </div>
+                <div class="grid-panel-row grid-copyfloors-row">
+                    <button type="button" data-act="copyFloors" title="이 층의 행·열 선·그룹·머리글·시작 번호·이름·폭·자동 입력 설정을 같은 건물의 다른 층에 복사(이미 선이 있으면 덮어쓰기)">다른 층으로 복사</button>
                 </div>
                 <div class="grid-panel-hint">${hint}</div>
                 ${selHtml}

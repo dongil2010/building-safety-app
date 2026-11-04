@@ -9,7 +9,7 @@ const st = app.indexOf('function renderGridPanel()');
 const fn = app.slice(st, app.indexOf('async function onGridPanelClick(e)'));
 
 // 패널 순서: 도구 → 힌트 → 선택한 선 카드 → 접는 묶음들
-const order = ['grid-panel-tools', '${hint}', '${selHtml}', "sec('group'", "sec('zone'", "sec('auto'", "sec('loc'", "sec('danger'"].map((k) => fn.lastIndexOf(k));
+const order = ['grid-panel-tools', 'data-act="copyFloors"', '${hint}', '${selHtml}', "sec('group'", "sec('zone'", "sec('auto'", "sec('loc'", "sec('danger'"].map((k) => fn.lastIndexOf(k));
 order.forEach((v, i) => assert.ok(v > 0, `패널 구성 요소 ${i}`));
 for (let i = 1; i < order.length; i++) assert.ok(order[i] > order[i - 1], `패널 순서 ${i}`);
 
