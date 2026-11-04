@@ -323,6 +323,8 @@
     }
 
     var api = {
+        // 2026-11-04 상수 내보내기 ? 이 줄이 빠져 app.js가 collection(undefined)를 불러 「empty path」 오류로 멈췄다
+        COLLECTION: COLLECTION, FLOOR_SETTING_KEYS: FLOOR_SETTING_KEYS, DOC_MAX_BYTES: DOC_MAX_BYTES,
         hashOf: hashOf, buildingIdForSub: buildingIdForSub, expandView: expandView, shouldSplit: shouldSplit,
         planBuildingWrites: planBuildingWrites, routeSettingsWrites: routeSettingsWrites, settingsDocPatch: settingsDocPatch,
         planRootSettingsMigration: planRootSettingsMigration, attachChunk: attachChunk, docBuilding: docBuilding,

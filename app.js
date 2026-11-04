@@ -60505,7 +60505,8 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
         try {
             const st = g.state();
             const api = rootDocShardsApi();
-            if (api && st && api.isDocTooLargeError(st.reason || '')) {
+            // 2026-11-04 v20261104_175106~183221의 「collection() … empty path」(건물 문서 경로 상수 누락 버그)로 멈춘 것도 한 번 풀어 준다
+            if (api && st && (api.isDocTooLargeError(st.reason || '') || /DocumentReference\.collection\(\) cannot be called with an empty path/i.test(st.reason || ''))) {
                 g.unpark();
                 _rootForceSplit = true;
                 console.info('[건물 문서] 1MB 초과로 멈췄던 자동 올리기를 다시 켭니다');
@@ -69390,7 +69391,7 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
     function buildingDocsApi() { return (window.BSA && window.BSA.buildingDocs) || null; }
     function rootDocShardsApi() { return (window.BSA && window.BSA.rootDocShards) || null; }
     function rootSplitActive() { return !!(_lastRootRaw && _lastRootRaw.rootSplit) || Object.keys(_bldgDocs).length > 0; }
-    function buildingMetaCol(docRef) { return docRef.collection(buildingDocsApi() ? buildingDocsApi().COLLECTION : 'buildingMeta'); }
+    function buildingMetaCol(docRef) { const api = buildingDocsApi(); return docRef.collection((api && api.COLLECTION) || 'buildingMeta'); }
     function buildingDocsCtx() {
         return {
             docs: _bldgDocs, chunkCache: _bldgChunkCache,

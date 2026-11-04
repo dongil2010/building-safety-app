@@ -38,7 +38,8 @@ function makeDb() {
     function ref(p) {
         return {
             path: p, id: p.split('/').pop(),
-            collection: (c) => col(p + '/' + c),
+            // 실제 Firestore처럼 빈 경로·undefined는 거부(2026-11-04 COLLECTION 내보내기 누락을 mock이 못 잡았다)
+            collection: (c) => { if (typeof c !== 'string' || !c || c.includes('/')) throw new Error('Function DocumentReference.collection() cannot be called with an empty path.'); return col(p + '/' + c); },
             async get() { stats.gets++; return { exists: docs.has(p), id: p.split('/').pop(), data: () => clone(docs.get(p)) }; },
             async set(data, opt) {
                 const next = (opt && opt.merge && docs.has(p)) ? clone(docs.get(p)) : {};
@@ -59,7 +60,7 @@ function makeDb() {
     }
     function col(cp) {
         return {
-            doc: (id) => ref(cp + '/' + id),
+            doc: (id) => { if (typeof id !== 'string' || !id || id.includes('/')) throw new Error('Function CollectionReference.doc() cannot be called with an empty path.'); return ref(cp + '/' + id); },
             async get() {
                 const list = [...docs.keys()].filter((k) => k.startsWith(cp + '/') && !k.slice(cp.length + 1).includes('/'))
                     .map((k) => ({ id: k.split('/').pop(), data: () => clone(docs.get(k)) }));
@@ -220,8 +221,23 @@ async function readView(db, root) {
         assert.ok(plan.length === 1 && plan[0].parts, '통째 문서 다시 조각');
     }
 
+    // 9c) 앱이 쓰는 상수 내보내기 + 앱과 같은 방식으로 건물 문서 모음 만들기(엄격한 mock)
+    assert.strictEqual(B.COLLECTION, 'buildingMeta', 'COLLECTION 내보냄');
+    assert.ok(Array.isArray(B.FLOOR_SETTING_KEYS) && B.FLOOR_SETTING_KEYS.includes('floorGridLines'));
+    assert.ok(B.DOC_MAX_BYTES > 0);
+    {
+        const appCol = (docRef) => docRef.collection((B && B.COLLECTION) || 'buildingMeta');
+        const sdb = makeDb(); const sr = sdb.ref('safety_app/strict');
+        await syncOnce(sr, [bld(1)], [], {});
+        await appCol(sr).doc('b1').set({ settings: { floorGridLines: { b1_9F: 1 } }, settingsAt: { 'floorGridLines/b1_9F': 9 } }, { merge: true });
+        assert.strictEqual((await readView(sdb, sr)).floorGridLines.b1_9F, 1, '앱 경로로 층 설정 쓰기');
+        assert.throws(() => sr.collection(undefined), /empty path/);
+    }
+
     // 10) 앱 연결
     const app = fs.readFileSync(path.join(ROOT, 'app.js'), 'utf8');
+    assert.ok(app.includes("return docRef.collection((api && api.COLLECTION) || 'buildingMeta');"), '상수가 없어도 빈 경로 안 씀');
+    assert.ok(/cannot be called with an empty path\/i\.test\(st\.reason/.test(app), '이 버그로 멈춘 기기는 한 번 풀어 줌');
     assert.ok(/bdApi\.shouldSplit\(rootGuardRaw \|\| \{\}, dataToSync, \{ force: _rootForceSplit \}\)/.test(app), '루트 쓰기 분기');
     assert.ok(/writeBuildingDocsForSync\(docRef, dataToSync, mergedDeletedBuildings, rootGuardRaw \|\| \{\}\)/.test(app));
     assert.ok(/buildingDocsApi\(\)\.writeSplit\(docRef, dataToSync, deletedIds, serverRaw, buildingDocsCtx\(\)\)/.test(app));
