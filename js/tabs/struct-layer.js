@@ -794,6 +794,11 @@
                 return;
             }
             var hit = api.hitTest(list(), p.x, p.y, pad);
+            // 2026-11-05 손가락으로 기둥 추가 중: 있는 부재 위에서 끌어도 도면 이동(부재가 빽빽하면 도면이 안 움직이던 것). 그냥 떼면 그 부재 고르기
+            if (hit && isTouch && ui.addType) {
+                startTap(e, function () { ui.selId = hit.id; sync(); });
+                return;
+            }
             if (hit) {
                 ui.selId = hit.id;
                 ui.drag = { id: hit.id, start: p, orig: { x: hit.x, y: hit.y }, pointerId: e.pointerId, moved: false };
