@@ -53,7 +53,14 @@
     function extractProgressLeakMarkers(content) {
         let progress = false;
         let leak = false;
-        const text = String(content || '').replace(/(^|\s)(진행|누수)\s*(?:中|중)(?=\s|$)/g, (m, pre, word) => {
+        // 2026-11-05 점검내용이 「…누수」로 끝나면 출력은 「…누수 中」(中만 붙임) — 中만 떼고 「누수」 글자는 남긴다.
+        //  (예전 표기 「…누수 누수中」·「…균열 누수中」은 아래에서 그대로 「누수中」을 뗀다)
+        let src = String(content || '');
+        src = src.replace(/(^|\s)누수 +中(?=\s|$)/g, (m, pre) => {
+            leak = true;
+            return pre + '누수';
+        });
+        const text = src.replace(/(^|\s)(진행|누수)\s*(?:中|중)(?=\s|$)/g, (m, pre, word) => {
             if (word === '진행') progress = true;
             else leak = true;
             return pre;

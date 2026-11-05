@@ -106,6 +106,26 @@ assert.strictEqual(osb.f('벽체 백태', {}), '벽체 백태');
 assert.strictEqual(osb.f('벽체 누수흔적', { isLeak: true }), '벽체 누수흔적 누수中');
 assert.strictEqual(osb.f('기둥 균열 0.3/1.2', { isProgress: true }), '기둥 균열 0.3/1.2 진행中');
 assert.strictEqual(osb.f('벽체 누수흔적 누수中', { isLeak: true }), '벽체 누수흔적 누수中', '두 번 붙이지 않음');
+// 2026-11-05 점검내용 마지막 말이 「누수」면 中만 붙인다(「누수 누수中」 금지)
+assert.strictEqual(osb.f('천장 누수', { isLeak: true }), '천장 누수 中', '끝이 누수면 中만');
+assert.strictEqual(osb.f('누수', { isLeak: true }), '누수 中');
+assert.strictEqual(osb.f('천장 누수', { isLeak: true, isProgress: true }), '천장 누수 中 진행中');
+assert.strictEqual(osb.f('천장 누수', { isLeak: false }), '천장 누수', '누수여부 꺼지면 그대로');
+assert.strictEqual(osb.f('천장 누수흔적', { isLeak: true }), '천장 누수흔적 누수中', '누수흔적은 마지막 말이 누수가 아님');
+assert.strictEqual(osb.f('균열', { isLeak: true }), '균열 누수中', '다른 결함은 예전처럼');
+// 가져오기: 「…누수 中」은 누수여부 켬 + 「누수」 글자 남김, 예전 「…균열 누수中」은 그대로 뗌
+{
+    const r = h.extractProgressLeakMarkers('천장 누수 中');
+    assert.strictEqual(r.leak, true);
+    assert.strictEqual(r.text, '천장 누수');
+    const r2 = h.extractProgressLeakMarkers('천장 누수 中 진행中');
+    assert.strictEqual(r2.leak, true);
+    assert.strictEqual(r2.progress, true);
+    assert.strictEqual(r2.text, '천장 누수');
+    const r3 = h.extractProgressLeakMarkers('기둥 균열 누수中');
+    assert.strictEqual(r3.leak, true);
+    assert.strictEqual(r3.text, '기둥 균열');
+}
 assert.ok(app.includes("const progress = d.isProgress ? '진행\\n中' : '-';"), '1·2종 표 진행 칸은 isProgress만');
 assert.ok(app.includes("case 'progress': return d.isProgress ? getSurveyProgressLabel(isGrade3Building()) : '-';"));
 

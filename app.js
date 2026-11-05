@@ -45886,11 +45886,19 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
         const base = String(content == null ? '' : content).trim();
         // 여부는 저장된 값(체크)만 따른다. 조사내용 글자에 같은 표기가 이미 있으면 두 번 붙이지 않음
         const hasMarker = (word) => new RegExp(`(^|\\s)${word}\\s*中(?=\\s|$)`).test(base);
+        // 2026-11-05 점검내용 마지막 말이 「누수」면 「누수 누수中」이 아니라 「누수 中」(中만 붙임).
+        //  가져오기(js/shared/hwpx-import.js)는 끝의 「누수 中」을 누수여부 켬 + 글자 「누수」는 남김으로 읽는다.
+        const endsWithLeakWord = /(^|\s)누수$/.test(base);
+        let leakTail = false;
         if (d && d.isProgress && !hasMarker('진행')) flags.push('진행中');
-        if (d && d.isLeak && !hasMarker('누수')) flags.push('누수中');
-        if (!flags.length) return content;
-        if (!base || base === '-') return flags.join(' ');
-        return `${base} ${flags.join(' ')}`;
+        if (d && d.isLeak && !hasMarker('누수')) {
+            if (endsWithLeakWord) leakTail = true;
+            else flags.push('누수中');
+        }
+        if (!flags.length && !leakTail) return content;
+        const head = leakTail ? `${base} 中` : base;
+        if (!head || head === '-') return flags.join(' ');
+        return flags.length ? `${head} ${flags.join(' ')}` : head;
     }
 
     function isGrade3Building(bldg) {
