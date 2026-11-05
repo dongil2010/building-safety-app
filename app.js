@@ -171,12 +171,8 @@ document.addEventListener('DOMContentLoaded', () => {
         window._bsaSelectTarget = selectEl;
         window._bsaSelectIgnoreUntil = Date.now() + 320;
         if (titleEl) titleEl.textContent = getBsaSelectSheetTitle(selectEl);
-        const optCount = selectEl.options ? selectEl.options.length : 0;
-        // 도면 층 선택은 검색 칸 없이 드래그(스크롤)로만 찾음 — 키보드가 올라와 목록을 가리지 않게
-        // 2026-11-05 접합부 좌·우 부재 칸도 검색 칸 없이(키보드 강제로 뜨지 않게)
-        const noSearch = selectEl.id === 'floorSelect'
-            || selectEl.id === 'defectJointLeft' || selectEl.id === 'defectJointRight';
-        if (searchWrap) searchWrap.hidden = noSearch || optCount < 10;
+        // 2026-11-05 모든 선택 시트는 검색 칸 없이 드래그(스크롤)로만 고른다 — 키보드가 강제로 올라와 목록을 가리지 않게
+        if (searchWrap) searchWrap.hidden = true;
         if (search) search.value = '';
         renderBsaSelectSheetList('');
         sheet.classList.add('open');
