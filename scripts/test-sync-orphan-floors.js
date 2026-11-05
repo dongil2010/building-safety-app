@@ -33,7 +33,7 @@ const at = appSrc.indexOf('floorSyncGuard.orphanDirtyFloorKeys(');
 assert.ok(at > 0, 'app.js 동기화에서 고아 층 정리를 부른다');
 const before = appSrc.slice(at - 600, at);
 assert.ok(/Array\.isArray\(serverData\.buildings\) && serverData\.buildings\.length/.test(before), '서버 건물 목록을 받았을 때만');
-assert.ok(at < appSrc.indexOf('pickDirtyFloorsForSyncBatch(SYNC_DIRTY_FLOOR_BATCH_MAX)', at), '배치 고르기 전에 정리');
+assert.ok(at < appSrc.indexOf('pickDirtyFloorsForSyncBatch(SYNC_DIRTY_FLOOR_BATCH_MAX * 4)', at), '배치 고르기 전에 정리');
 
 // --- 2) 진행률: dirty에서 빠졌지만 확인 없던 층 ---
 function memStorage() {

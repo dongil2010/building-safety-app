@@ -64265,7 +64265,8 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
         } catch (_e) { /* ignore */ }
     }
     /** 한 번의 sync에서 올릴 층 수. 나머지는 dirty에 남겨 원격 덮어쓰기를 막고 다음 디바운스에서 이어서 올린다. */
-    const SYNC_DIRTY_FLOOR_BATCH_MAX = 3;
+    // 2026-11-05 3 → 5: 층별 잠금으로 기기끼리 동시에 올리게 되면서 한 번에 조금 더 올린다
+    const SYNC_DIRTY_FLOOR_BATCH_MAX = 5;
     function pickDirtyFloorsForSyncBatch(maxN) {
         const MAX = Math.max(1, maxN || SYNC_DIRTY_FLOOR_BATCH_MAX);
         const keep = new Set();
@@ -69296,6 +69297,9 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
     const SYNC_LEASE_WAIT_MS = 45000;   // 타인 업로드 최대 대기 (초과 시 강제 점유)
     const SYNC_LEASE_POLL_MS = 600;
     const SYNC_LEASE_HEARTBEAT_MS = 20000;
+    /** 남은 층이 전부 다른 기기가 올리는 중일 때 다시 볼 간격 (2026-11-05 층별 잠금) */
+    const SYNC_FLOOR_BUSY_RETRY_MS = 8000;
+    let _floorBusyRetryTimer = null;
     let _syncLeaseWaitToastAt = 0;
 
     function sleepMs(ms) {
@@ -69515,6 +69519,38 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
                 await docRef.set({ syncLease: firebase.firestore.FieldValue.delete() }, { merge: true });
             } catch (_e2) { /* ignore */ }
         }
+    }
+
+    /**
+     * 2026-11-05 층별 잠금 — 기다리지 않고 한 번만 잡아 본다.
+     * 다른 기기가 그 층(현장·회차·동·층)을 올리는 중이면 null → 이번엔 그 층만 건너뛰고 다른 층을 올린다.
+     * (예전엔 홈 화면 기기들이 회사 잠금 하나를 같이 써서 회사 전체가 한 기기씩 줄을 섰다)
+     */
+    async function tryAcquireSyncLease(docRef) {
+        if (!docRef) return null;
+        const ownerId = getSyncLeaseOwnerId();
+        const token = `${Date.now().toString(36)}_${Math.random().toString(36).slice(2, 10)}`;
+        const deviceId = getSyncLeaseDeviceId();
+        let acquired = false;
+        try {
+            await db.runTransaction(async (tx) => {
+                const snap = await tx.get(docRef);
+                const data = snap.exists ? (snap.data() || {}) : {};
+                const lease = data.syncLease || null;
+                if (isForeignSyncLease(lease, token, ownerId, deviceId, Date.now())) return;
+                const now = Date.now();
+                tx.set(docRef, {
+                    syncLease: { ownerId, ownerName: window.state.userName || '', deviceId, token, startedAt: now, heartbeatAt: now }
+                }, { merge: true });
+                acquired = true;
+            });
+        } catch (e) {
+            if (e && e.code === 'resource-exhausted') throw e;
+            if (isFirestorePermissionError(e)) throw e;
+            console.warn('층 잠금 확인 실패 — 이번엔 이 층을 건너뜀:', docRef.path, e && e.message);
+            return null;
+        }
+        return acquired ? { ownerId, token, deviceId } : null;
     }
 
     async function fetchCompanyDocSnap(docRef) {
@@ -69771,31 +69807,25 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
         let cycleFailReason = '';
         if (typeof syncProgressBegin === 'function') syncProgressBegin();
         ensureSyncMetaState();
-        let leaseInfo = null;
+        // 2026-11-05 잠금을 둘로 나눔:
+        //  ① 층 잠금(현장·회차·동·층) — 층을 읽고·사진 올리고·층 문서를 쓰는 동안. 다른 층을 올리는 기기와는 동시에 진행.
+        //  ② 회사 잠금(syncLeases/company) — 건물 목록·회사 설정(루트 문서)을 다시 읽고 쓰는 짧은 순간에만.
+        // 예전엔 홈 화면 기기들이 ②를 사진 업로드까지 통째로 쥐어서 회사 전체가 한 기기씩 줄을 섰다.
+        let leaseInfo = null;            // ② 회사 잠금
+        const floorLeases = new Map();   // ① floorKey → { ref, info }
+        const busyFloorKeys = new Set(); // 다른 기기가 올리는 중이라 이번에 건너뛴 층
         let leaseHeartbeatTimer = null;
         const docId = getCompanyDocId();
         const docRef = db.collection('safety_app').doc(docId);
-        const inspectBldg = window.state.currentBuilding
-            || (window.state.buildings || []).find((b) => b && b.id === window.state.currentBuildingId);
-        const inspectFloor = window.state.currentFloor;
-        const inspectFloorRef = (inspectBldg && inspectFloor && window.state.currentTab !== 'tab-home')
-            ? getFloorScopeRef(inspectBldg, inspectFloor)
-            : null;
-        const leaseRef = getSyncLeaseDocRef(inspectFloorRef || docRef);
+        const leaseRef = getSyncLeaseDocRef(docRef);
         try {
-            // 드래그 중이면 잠금을 잡기 전에 먼저 기다림 (잠금을 오래 쥐고 있지 않게)
+            // 드래그 중이면 먼저 기다림 (잠금을 오래 쥐고 있지 않게)
             await waitForUiGestureIdle();
 
-            // 다른 작업자가 올리는 중이면 잠금이 풀릴 때까지 대기 → 완료본을 받은 뒤 동기화
-            leaseInfo = await acquireCompanySyncLease(leaseRef);
-            if (leaseInfo) {
-                leaseHeartbeatTimer = setInterval(() => {
-                    heartbeatCompanySyncLease(leaseRef, leaseInfo);
-                }, SYNC_LEASE_HEARTBEAT_MS);
-            }
-
-            // 잠금 대기 중 사용자가 드래그를 시작했을 수 있음 — 상태 교체 전 다시 확인
-            await waitForUiGestureIdle();
+            leaseHeartbeatTimer = setInterval(() => {
+                floorLeases.forEach((fl) => { heartbeatCompanySyncLease(fl.ref, fl.info); });
+                if (leaseInfo) heartbeatCompanySyncLease(leaseRef, leaseInfo);
+            }, SYNC_LEASE_HEARTBEAT_MS);
 
             // 잠금 문서는 더 이상 회사/층 페이로드가 아니다. 서버에서 받은 리스너 문서 → 없으면 서버에서 직접(캐시로 넘어가지 않음)
             let serverData = await serverRootDataForWrite(docRef);
@@ -69834,12 +69864,32 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
             window.state.confirmedDeletedIds = {};
 
             // 배치 상한: 한 번에 전 dirty를 읽지 않되, 미선택 층은 dirty에 남겨 원격 적용을 계속 차단
-            const floorsToSync = pickDirtyFloorsForSyncBatch(SYNC_DIRTY_FLOOR_BATCH_MAX);
+            // 2026-11-05 후보를 넉넉히 뽑고, 층 잠금을 잡은 층만 이번에 올린다(다른 기기가 올리는 층은 건너뜀)
+            const floorCandidates = Array.from(pickDirtyFloorsForSyncBatch(SYNC_DIRTY_FLOOR_BATCH_MAX * 4));
             const floorsSkipWrite = new Set();
             const floorReadRev = new Map();
             const floorServerItems = new Map();
             const currentKey = currentInspectionFloorKey();
-            if (currentKey) floorsToSync.add(currentKey);
+            if (currentKey && !floorCandidates.includes(currentKey)) floorCandidates.unshift(currentKey);
+            const floorsToSync = new Set();
+            for (const floorKey of floorCandidates) {
+                if (floorsToSync.size >= SYNC_DIRTY_FLOOR_BATCH_MAX && floorKey !== currentKey) continue;
+                const fb = findBuildingForFloorKey(floorKey);
+                const fc = floorCodeFromFloorKey(floorKey, fb);
+                const fRef = (fb && fc) ? getFloorScopeRef(fb, fc) : null;
+                const fLeaseRef = fRef ? getSyncLeaseDocRef(fRef) : null;
+                if (!fLeaseRef) continue;
+                const info = await tryAcquireSyncLease(fLeaseRef);
+                if (!info) {
+                    busyFloorKeys.add(floorKey);
+                    continue;
+                }
+                floorLeases.set(floorKey, { ref: fLeaseRef, info });
+                floorsToSync.add(floorKey);
+            }
+            if (busyFloorKeys.size) {
+                console.info('[동기화] 다른 기기가 올리는 중인 층은 이번에 건너뜀(잠시 뒤 다시):', Array.from(busyFloorKeys));
+            }
             for (const floorKey of floorsToSync) {
                 const floorBldg = findBuildingForFloorKey(floorKey);
                 const code = floorCodeFromFloorKey(floorKey, floorBldg);
@@ -69900,10 +69950,11 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
             // 사진/도면 업로드 동안 드래그가 시작됐으면 재병합·다시 그리기 전에 대기
             await waitForUiGestureIdle();
 
-            // 잠금을 쥐고 있으면 다른 기기가 끼어들지 못하므로, 업로드 직후 같은 문서를
-            // source:'server'로 다시 읽는 2차 조회·재병합은 생략한다.
-            // (로컬 변경은 window.state에 있고, 다시 합치면 업로드 중 편집을 되돌릴 수 있다)
-            if (!leaseInfo) {
+            // 2026-11-05 회사 잠금은 여기서부터(건물 목록 다시 읽기 → 층 문서·루트 문서 쓰기)만 쥔다.
+            // 사진 올리는 동안엔 회사 잠금이 없었으니 다른 기기가 건물 정보를 바꿨을 수 있다 → 서버 것을 다시 읽어 합친다.
+            leaseInfo = await acquireCompanySyncLease(leaseRef);
+            await waitForUiGestureIdle();
+            {
                 serverData = await serverRootDataForWrite(docRef);
                 mergedDeletedBuildings = mergeDeletedBuildingIds(
                     serverData.deletedBuildingIds,
@@ -70166,6 +70217,10 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
                 await releaseCompanySyncLease(leaseRef, leaseInfo);
                 leaseInfo = null;
             }
+            for (const fl of floorLeases.values()) {
+                await releaseCompanySyncLease(fl.ref, fl.info);
+            }
+            floorLeases.clear();
             setTimeout(() => { isRemoteSyncing = false; }, 400);
             _syncInFlight = false;
             try { _tabLockRelease(); } catch (_e) { /* ignore */ }
@@ -70180,8 +70235,18 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
             if (_blockRemoteApplyUntilLocalFlush) {
                 _blockRemoteApplyUntilLocalFlush = false;
             }
+            const onlyBusyFloorsLeft = busyFloorKeys.size > 0 && _dirtyFloorKeys.size > 0
+                && Array.from(_dirtyFloorKeys).every((k) => busyFloorKeys.has(k));
             if (_dirtyFloorKeys.size === 0) {
                 clearOfflinePendingFlush();
+            } else if (onlyBusyFloorsLeft) {
+                // 남은 층이 전부 다른 기기가 올리는 중 — 바로 다시 돌면 잠금만 두드리므로 잠시 뒤 한 번
+                if (!_floorBusyRetryTimer && navigator.onLine !== false && !isSyncParked()) {
+                    _floorBusyRetryTimer = setTimeout(() => {
+                        _floorBusyRetryTimer = null;
+                        if (typeof scheduleSyncToFirebase === 'function') scheduleSyncToFirebase({ skipMarkCurrent: true });
+                    }, SYNC_FLOOR_BUSY_RETRY_MS);
+                }
             } else if (!_syncPending && !_syncRetryTimer && navigator.onLine !== false && !isSyncParked()) {
                 // 배치에 못 들어간 overflow dirty를 이어서 flush
                 _syncPending = true;

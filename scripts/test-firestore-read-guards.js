@@ -41,11 +41,23 @@ assert.match(app, /function startSingleTabHeartbeat/);
 assert.match(app, /window\._bsaSingleTabHeartbeatStarted/);
 assert.match(app, /failed-precondition/);
 
-assert.match(app, /const SYNC_DIRTY_FLOOR_BATCH_MAX = 3;/);
-assert.match(app, /pickDirtyFloorsForSyncBatch\(SYNC_DIRTY_FLOOR_BATCH_MAX\)/);
+assert.match(app, /const SYNC_DIRTY_FLOOR_BATCH_MAX = 5;/);
+assert.match(app, /pickDirtyFloorsForSyncBatch\(SYNC_DIRTY_FLOOR_BATCH_MAX \* 4\)/);
 assert.match(app, /function getSyncLeaseDocRef/);
 assert.match(app, /collection\('syncLeases'\)\.doc\(/);
-assert.match(app, /const leaseRef = getSyncLeaseDocRef\(inspectFloorRef \|\| docRef\);/);
+// 2026-11-05 층별 잠금: 층(현장·회차·동·층)마다 잠금, 회사 잠금은 루트 다시 읽기·쓰기 구간에서만
+assert.match(app, /const leaseRef = getSyncLeaseDocRef\(docRef\);/);
+assert.match(app, /async function tryAcquireSyncLease\(docRef\)/);
+assert.match(app, /const fLeaseRef = fRef \? getSyncLeaseDocRef\(fRef\) : null;/);
+{
+    const s = app.indexOf('async function syncStateToFirebase(');
+    const photo = app.indexOf('uploadInlineDefectPhotosForSync(', s);
+    const companyLease = app.indexOf('leaseInfo = await acquireCompanySyncLease(leaseRef);', s);
+    const floorWrite = app.indexOf('await writeFloorSyncBundle(floorBldg, code);', s);
+    assert.ok(s > 0 && photo > s && companyLease > photo, '회사 잠금은 사진 업로드 뒤에 잡는다');
+    assert.ok(floorWrite > companyLease, '층 문서 쓰기는 회사 잠금 안에서');
+    assert.ok(app.indexOf('floorLeases.set(floorKey', s) < photo, '층 잠금은 층을 읽기 전에');
+}
 assert.doesNotMatch(app, /leaseInfo\.serverData/);
 assert.match(rules, /match \/syncLeases\/\{leaseId\} \{[\s\S]*allow read, write: if isCompanyMember\(companyId\);/);
 
