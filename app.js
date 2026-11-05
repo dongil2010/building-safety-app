@@ -173,7 +173,9 @@ document.addEventListener('DOMContentLoaded', () => {
         if (titleEl) titleEl.textContent = getBsaSelectSheetTitle(selectEl);
         const optCount = selectEl.options ? selectEl.options.length : 0;
         // 도면 층 선택은 검색 칸 없이 드래그(스크롤)로만 찾음 — 키보드가 올라와 목록을 가리지 않게
-        const noSearch = selectEl.id === 'floorSelect';
+        // 2026-11-05 접합부 좌·우 부재 칸도 검색 칸 없이(키보드 강제로 뜨지 않게)
+        const noSearch = selectEl.id === 'floorSelect'
+            || selectEl.id === 'defectJointLeft' || selectEl.id === 'defectJointRight';
         if (searchWrap) searchWrap.hidden = noSearch || optCount < 10;
         if (search) search.value = '';
         renderBsaSelectSheetList('');
@@ -29542,8 +29544,6 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
         if (jointToolbar) jointToolbar.style.display = (currentCategory === '구조체') ? '' : 'none';
         if (jointModeBtn) jointModeBtn.classList.toggle('active', jointMode);
         if (jointComposer) jointComposer.style.display = jointMode ? 'flex' : 'none';
-        // 2026-11-05 접합부 고르는 동안은 「부재 명칭 직접 입력」 칸을 숨긴다(좌·우 선택만)
-        if (componentInput) componentInput.style.display = jointMode ? 'none' : '';
 
         // 칩은 select의 임시 타이핑 옵션이 아니라 프리셋+커스텀만 사용 (글자마다 버튼 생성 방지)
         migrateDefectComponentStateShape();
