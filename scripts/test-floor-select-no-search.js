@@ -46,8 +46,9 @@ assert.strictEqual(floor.searchHidden, true, '층 선택은 40개여도 검색 �
 assert.strictEqual(floor.focus, 0, '검색 칸 포커스(키보드) 없음');
 assert.ok(floor.scrolled, '현재 선택 층으로 자동 스크롤');
 assert.strictEqual(floor.scrolled.top, 1200 - 270, '선택 층이 목록 가운데 오게');
+// 2026-11-05 선택 시트 검색칸 전부 제거(c11277a) — 항목 수와 상관없이 검색 칸·키보드 없음
 const other = run('defectType', 12);
-assert.strictEqual(other.searchHidden, false, '다른 select는 10개 이상이면 검색 칸 유지');
-assert.strictEqual(other.focus, 1);
-assert.strictEqual(run('defectType', 5).searchHidden, true, '10개 미만은 검색 칸 없음');
+assert.strictEqual(other.searchHidden, true, '다른 select도 10개 이상이어도 검색 칸 없음');
+assert.strictEqual(other.focus, 0, '검색 칸 포커스(키보드) 없음');
+assert.strictEqual(run('defectType', 5).searchHidden, true, '10개 미만도 검색 칸 없음');
 console.log('test-floor-select-no-search: ok');
