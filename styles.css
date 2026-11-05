@@ -18351,3 +18351,68 @@ html.bsa-kb-dock-follow body.defect-modal-open #tab-map #mobileMapDock.mobile-ca
 .stats-eval-unit-name { font-size: 0.78rem; color: #2563eb; }
 /* 2026-11-04 평가 표 부재 옆 개수(구조 부재 탭) */
 .stats-eval-count { font-weight: 400; color: #475569; font-size: 0.85em; }
+
+/* 2026-11-05 결함 핀 수정창 직접 입력칸 → 화면 가운데 입력 팝업 (js/shared/typing-popup.js)
+   덮개가 화면 전체를 받아서 팝업이 떠 있는 동안 뒤쪽 도면·수정창은 터치되지 않는다. */
+.bsa-typing-overlay {
+    position: fixed;
+    inset: 0;
+    z-index: 2147483300;
+    background: rgba(15, 23, 42, 0.55);
+    touch-action: none;
+    overscroll-behavior: contain;
+}
+.bsa-typing-card {
+    position: absolute;
+    left: 50%;
+    top: 20%;
+    transform: translateX(-50%);
+    width: min(560px, calc(100vw - 32px));
+    box-sizing: border-box;
+    background: var(--bg-card, #ffffff);
+    color: var(--text-primary, #0f172a);
+    border-radius: 14px;
+    box-shadow: 0 12px 40px rgba(15, 23, 42, 0.35);
+    padding: 14px 16px 12px;
+    touch-action: manipulation;
+}
+.bsa-typing-title {
+    font-size: 0.95rem;
+    font-weight: 800;
+    color: var(--text-secondary, #334155);
+    margin-bottom: 8px;
+}
+.bsa-typing-input {
+    width: 100%;
+    box-sizing: border-box;
+    font-size: 20px;
+    font-weight: 700;
+    padding: 12px 12px;
+    border: 2px solid var(--accent-blue, #2563eb);
+    border-radius: 10px;
+    background: #ffffff;
+    color: #0f172a;
+    outline: none;
+}
+.bsa-typing-actions {
+    display: flex;
+    justify-content: flex-end;
+    gap: 8px;
+    margin-top: 10px;
+}
+.bsa-typing-btn {
+    min-width: 88px;
+    min-height: 44px;
+    font-size: 1rem;
+    font-weight: 800;
+    border-radius: 10px;
+    border: 1px solid var(--border-highlight, #cbd5e1);
+    background: var(--bg-secondary, #f8fafc);
+    color: var(--text-primary, #0f172a);
+    cursor: pointer;
+}
+.bsa-typing-btn.bsa-typing-done {
+    background: var(--accent-blue, #2563eb);
+    border-color: var(--accent-blue, #2563eb);
+    color: #ffffff;
+}
