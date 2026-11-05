@@ -36511,10 +36511,13 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
         return viewToImgCoords(vx, vy);
     }
 
+    const SNAP_MARKING_DISABLED = true;
     const SNAP_SCREEN_RADIUS_PX = 16; // 화면상 이 반경 안에 CAD 선이 있으면 달라붙는다
 
     /** 결함 마킹 중일 때만, 근처 CAD 벡터 선/끝점/교차점에 좌표를 스냅한다 (없으면 원래 좌표 그대로) */
     function snapImgCoordsForMarking(x, y) {
+        // 2026-11-05 결함 마킹은 CAD 선에 달라붙지 않게(사용자: 「스냅 걸려서 너무 불편」) — 찍은 자리 그대로. 통심선 스냅(gridSnap)은 그대로 둔다
+        if (SNAP_MARKING_DISABLED) return { x, y, snapped: false };
         if (state.snapToCad === false && !isTouchToolbarUi()) return { x, y, snapped: false };
         if (state.mode !== 'MARK') return { x, y, snapped: false };
         const bldg = state.currentBuilding;
