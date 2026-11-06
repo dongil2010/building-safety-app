@@ -17,9 +17,9 @@
 
     var FIELDS = {
         defectLocation: { label: '상세 위치', commit: 'blur' },
-        defectComponentInput: { label: '부재 명칭', commit: 'blur' },
-        defectTypeInput: { label: '결함 종류', commit: 'blur' },
-        defectCauseInput: { label: '발생 원인 (이번 결함)', commit: 'enter' },
+        defectComponentInput: { label: '부재 명칭', commit: 'blur', presetMode: true },
+        defectTypeInput: { label: '결함 종류', commit: 'blur', presetMode: true },
+        defectCauseInput: { label: '발생 원인', commit: 'enter', presetMode: true },
         ndtLocation: { label: '측정 위치', commit: 'blur' },
         ndtComponentInput: { label: '부재 구분', commit: 'enter' },
         ndtFinishStateInput: { label: '마감상태', commit: 'enter' }
@@ -135,6 +135,17 @@
         });
     }
 
+    function syncPresetModeButtons(rootEl) {
+        if (!rootEl) return;
+        var TPM = root.BSA && root.BSA.typedPresetMode;
+        var mode = TPM && typeof TPM.getMode === 'function' ? TPM.getMode() : 'once';
+        rootEl.querySelectorAll('[data-typed-preset-mode]').forEach(function (btn) {
+            var on = btn.getAttribute('data-typed-preset-mode') === mode;
+            btn.classList.toggle('is-active', on);
+            btn.setAttribute('aria-pressed', on ? 'true' : 'false');
+        });
+    }
+
     function applyCommit(a, mode) {
         if (mode === 'cancel') {
             if (a.input.value !== a.initial) {
@@ -206,12 +217,31 @@
         overlay.innerHTML =
             '<div class="bsa-typing-card">' +
             '<div class="bsa-typing-title"></div>' +
+            (cfg.presetMode
+                ? '<div class="bsa-typing-preset-mode" role="group" aria-label="직접 입력 저장 방식">' +
+                    '<button type="button" class="defect-typed-preset-mode-btn" data-typed-preset-mode="save">프리셋에 저장</button>' +
+                    '<button type="button" class="defect-typed-preset-mode-btn" data-typed-preset-mode="once">이번만 사용</button>' +
+                    '</div>'
+                : '') +
             '<input type="text" class="bsa-typing-input" autocomplete="off" enterkeyhint="done">' +
             '<div class="bsa-typing-actions">' +
             '<button type="button" class="bsa-typing-btn bsa-typing-cancel">취소</button>' +
             '<button type="button" class="bsa-typing-btn bsa-typing-done">완료</button>' +
             '</div></div>';
         overlay.querySelector('.bsa-typing-title').textContent = cfg.label;
+        if (cfg.presetMode) {
+            syncPresetModeButtons(overlay);
+            overlay.querySelectorAll('[data-typed-preset-mode]').forEach(function (btn) {
+                btn.addEventListener('click', function (e) {
+                    if (e.preventDefault) e.preventDefault();
+                    if (e.stopPropagation) e.stopPropagation();
+                    var TPM = root.BSA && root.BSA.typedPresetMode;
+                    if (TPM && typeof TPM.setMode === 'function') TPM.setMode(btn.getAttribute('data-typed-preset-mode'));
+                    syncPresetModeButtons(overlay);
+                    if (typeof root.syncTypedPresetModeUi === 'function') root.syncTypedPresetModeUi();
+                });
+            });
+        }
         var proxy = overlay.querySelector('.bsa-typing-input');
         proxy.value = input.value;
         proxy.placeholder = input.placeholder || '';

@@ -29668,6 +29668,82 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
         }
     }
 
+    function shouldPersistTypedPreset() {
+        const TPM = window.BSA && window.BSA.typedPresetMode;
+        return !!(TPM && typeof TPM.shouldPersist === 'function' && TPM.shouldPersist());
+    }
+
+    function knownDefectCategoryOrEmpty(raw) {
+        const cat = String(raw || '').trim();
+        return (cat === '구조체' || cat === '비구조체' || cat === '마감재') ? cat : '';
+    }
+
+    function persistTypedDefectComponent(value) {
+        const trimmed = String(value || '').trim();
+        const cat = knownDefectCategoryOrEmpty(document.getElementById('defectCategory')?.value);
+        if (!trimmed || !cat) return false;
+        migrateDefectComponentStateShape();
+        if (!window.state.customDefectComponents) window.state.customDefectComponents = { '구조체': [], '비구조체': [], '마감재': [] };
+        if (!window.state.customDefectComponents[cat]) window.state.customDefectComponents[cat] = [];
+        const preset = DEFECT_COMPONENT_PRESET[cat] || [];
+        if (preset.includes(trimmed) || window.state.customDefectComponents[cat].includes(trimmed)) return false;
+        window.state.customDefectComponents[cat].push(trimmed);
+        const order = ensureOptionOrderEntry('defectComponentOrder', cat);
+        if (!order.includes(trimmed)) order.push(trimmed);
+        if (typeof saveStateToLocalStorage === 'function') saveStateToLocalStorage();
+        return true;
+    }
+
+    function persistTypedDefectType(value) {
+        const trimmed = String(value || '').trim();
+        const cat = knownDefectCategoryOrEmpty(document.getElementById('defectCategory')?.value);
+        if (!trimmed || !cat || (typeof isTransientDefectTypeValue === 'function' && isTransientDefectTypeValue(trimmed))) return false;
+        if (!window.state.customDefectTypes) window.state.customDefectTypes = { '구조체': [], '비구조체': [], '마감재': [] };
+        if (!window.state.customDefectTypes[cat]) window.state.customDefectTypes[cat] = [];
+        const component = getDefectComboValue(
+            document.getElementById('defectComponent'),
+            document.getElementById('defectComponentInput')
+        );
+        const preset = (typeof getDefectTypePresetFor === 'function' ? getDefectTypePresetFor(cat, component) : []) || [];
+        if (preset.includes(trimmed) || window.state.customDefectTypes[cat].includes(trimmed)) return false;
+        window.state.customDefectTypes[cat].push(trimmed);
+        const order = ensureOptionOrderEntry('defectTypeOrder', cat);
+        if (!order.includes(trimmed)) order.push(trimmed);
+        if (typeof saveStateToLocalStorage === 'function') saveStateToLocalStorage();
+        return true;
+    }
+
+    function syncTypedPresetModeUi() {
+        const TPM = window.BSA && window.BSA.typedPresetMode;
+        const mode = TPM && typeof TPM.getMode === 'function' ? TPM.getMode() : 'once';
+        document.querySelectorAll('#defectTypedPresetMode [data-typed-preset-mode]').forEach((btn) => {
+            const on = btn.getAttribute('data-typed-preset-mode') === mode;
+            btn.classList.toggle('is-active', on);
+            btn.setAttribute('aria-pressed', on ? 'true' : 'false');
+        });
+        const causeInput = document.getElementById('defectCauseInput');
+        if (causeInput) {
+            causeInput.placeholder = mode === 'save'
+                ? '발생 원인 직접 입력 후 Enter (프리셋에 저장)'
+                : '발생 원인 직접 입력 후 Enter (이번 결함만)';
+        }
+    }
+    window.syncTypedPresetModeUi = syncTypedPresetModeUi;
+
+    function bindTypedPresetModeToggle() {
+        const host = document.getElementById('defectTypedPresetMode');
+        if (!host || host.dataset.bound) return;
+        host.dataset.bound = '1';
+        host.addEventListener('click', (e) => {
+            const btn = e.target.closest('[data-typed-preset-mode]');
+            if (!btn) return;
+            const TPM = window.BSA && window.BSA.typedPresetMode;
+            if (TPM && typeof TPM.setMode === 'function') TPM.setMode(btn.getAttribute('data-typed-preset-mode'));
+            syncTypedPresetModeUi();
+        });
+        syncTypedPresetModeUi();
+    }
+
     function bindDefectComboInputs() {
         const pairs = [
             {
@@ -29701,16 +29777,22 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
                     return;
                 }
                 if (selectId === 'defectComponent') {
-                    // 부재는 '직접 추가'로만 목록/칩에 반영. 입력칸 타이핑만으로는 select/커스텀/칩에 넣지 않음.
+                    // 기본(이번만 사용): 입력칸 타이핑만으로는 커스텀/칩에 넣지 않음.
+                    // 「프리셋에 저장」이면 기존 회사 공통 부재 목록에 중복 없이 넣는다.
                     const cat = document.getElementById('defectCategory')?.value || '구조체';
                     const preset = DEFECT_COMPONENT_PRESET[cat] || [];
                     const customs = (window.state.customDefectComponents && window.state.customDefectComponents[cat]) || [];
-                    if (preset.includes(v) || customs.includes(v)) {
+                    if (shouldPersistTypedPreset() && !preset.includes(v) && !customs.includes(v)) {
+                        persistTypedDefectComponent(v);
+                    }
+                    const nextCustoms = (window.state.customDefectComponents && window.state.customDefectComponents[cat]) || [];
+                    if (preset.includes(v) || nextCustoms.includes(v)) {
                         populateDefectComponentDropdown(cat, v);
                     } else if (select) {
                         if (!isDefectComboCustomToken(select.value)) select.selectedIndex = -1;
                     }
                 } else {
+                    if (selectId === 'defectType' && shouldPersistTypedPreset()) persistTypedDefectType(v);
                     ensureDefectComboOption(select, v);
                 }
                 if (onChange) onChange(v);
@@ -29761,6 +29843,7 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
             });
         });
         bindDefectCauseDirectInput();
+        bindTypedPresetModeToggle();
     }
 
     function isDefectHandwriteTabStopVisible(el) {
@@ -29924,8 +30007,11 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
             input.addEventListener('keydown', (e) => {
                 if (e.key === 'Enter') {
                     e.preventDefault();
-                    // Enter = 이번 결함에만 반영. 원인 목록/칩에는 넣지 않는다.
-                    commitDefectCauseDirectInput(false);
+                    // 토글 「프리셋에 저장」이면 목록에도 넣고, 기본·「이번만 사용」은 이번 결함만.
+                    const persistTyped = !!(window.BSA && window.BSA.typedPresetMode
+                        && typeof window.BSA.typedPresetMode.shouldPersist === 'function'
+                        && window.BSA.typedPresetMode.shouldPersist());
+                    commitDefectCauseDirectInput(persistTyped);
                 }
             });
         }
