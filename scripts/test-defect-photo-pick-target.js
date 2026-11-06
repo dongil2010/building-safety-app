@@ -240,10 +240,9 @@ const FILE = { name: 'p.jpg' };
     {
         const at = app.indexOf('async function checkRemoteWebVersion(');
         const body = app.slice(at, app.indexOf("document.addEventListener('visibilitychange'", at));
-        const gate = body.indexOf('if (isAutoReloadUnsafeNow()) return;');
-        assert.ok(gate > 0, '자동 새로고침 전에 입력 중인지 봐야 한다');
-        assert.ok(gate < body.indexOf('sessionStorage.setItem(KEY, sha);\n                    window.reloadWebAppFromServer();'),
-            '미룰 때는 기록을 바꾸지 않아야 다음에 다시 판단한다');
+        // 2026-11-06 스르륵 업데이트: 쓰는 중엔 새로고침하지 않고, 바꾸는 순간에 입력 중인지 본다
+        assert.ok(body.indexOf('silentUpdate.noteNewVersion(sha)') > 0, '새 버전은 받아만 둔다');
+        assert.ok(app.includes('function isSilentUpdateBusy() {\n            if (isAutoReloadUnsafeNow()) return true;'), '바꾸기 전에 입력 중인지 본다');
         const reload = app.slice(app.indexOf('window.reloadWebAppFromServer = function'), app.indexOf('function isAutoReloadUnsafeNow('));
         assert.ok(/_defectPhotoSaves/.test(reload), '수동 새로고침도 저장 중인 사진을 기다린다');
     }

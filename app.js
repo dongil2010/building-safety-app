@@ -5630,6 +5630,44 @@ document.addEventListener('DOMContentLoaded', () => {
         if (!LL) return;
         try { LL.clear(localStorage, uid || (window.state && window.state.uid), companyId || (window.state && window.state.companyId)); } catch (_e) { /* ignore */ }
     }
+    const SILENT_RESUME_KEY = 'bsa_silent_resume_view';
+    function saveSilentResumeView() {
+        try {
+            const v = window.state && window.state.view;
+            sessionStorage.setItem(SILENT_RESUME_KEY, JSON.stringify({
+                buildingId: window.state.currentBuildingId || '',
+                floor: window.state.currentFloor || '',
+                view: v ? { scale: v.scale, offsetX: v.offsetX, offsetY: v.offsetY } : null
+            }));
+        } catch (_e) { /* 위치 복원은 부가 기능 */ }
+    }
+    /** 업데이트로 다시 열린 경우면 true. 도면이 뜨면 보던 확대·위치로 되돌린다 */
+    function restoreSilentResumeView(buildingId) {
+        let saved = null;
+        try {
+            saved = JSON.parse(sessionStorage.getItem(SILENT_RESUME_KEY) || 'null');
+            sessionStorage.removeItem(SILENT_RESUME_KEY);
+        } catch (_e) { saved = null; }
+        if (!saved) return false;
+        const v = saved.view;
+        if (saved.buildingId === buildingId && v && Number(v.scale) > 0 && saved.floor === window.state.currentFloor) {
+            let tries = 0;
+            const timer = setInterval(() => {
+                tries += 1;
+                if (window.state.bgImage && window.state.view && window.state.currentFloor === saved.floor) {
+                    clearInterval(timer);
+                    // 도면이 뜬 직후 맞춤 계산이 끝난 뒤에 넣는다
+                    setTimeout(() => {
+                        Object.assign(window.state.view, { scale: v.scale, offsetX: v.offsetX, offsetY: v.offsetY });
+                        if (typeof drawCanvas === 'function') drawCanvas();
+                    }, 150);
+                } else if (tries > 40) {
+                    clearInterval(timer);
+                }
+            }, 250);
+        }
+        return true;
+    }
     /** 로그인 직후 1회: 저장된 위치로 들어간다. 들어갔으면 true, 아니면 false(홈 유지) */
     async function tryRestoreLastLocation(profile) {
         const LL = lastLocApi();
@@ -5653,6 +5691,8 @@ document.addEventListener('DOMContentLoaded', () => {
             if (window.state.currentBuildingId !== r.buildingId) return false;
             if (r.tab && r.tab !== 'tab-map') window.switchTab(r.tab);
             const bldg = (window.state.buildings || []).find((b) => b && b.id === r.buildingId);
+            // 2026-11-06 스르륵 업데이트로 다시 열린 것이면 도면 위치까지 되돌리고 안내도 안 띄운다
+            if (restoreSilentResumeView(r.buildingId)) return true;
             if (typeof window.showToast === 'function') {
                 window.showToast('마지막 작업 위치로 이동했습니다' + (bldg && bldg.name ? ' · ' + String(bldg.name).replace(/^🏢\s*/, '') : '')
                     + (window.state.currentFloor ? ' · ' + window.state.currentFloor : ''), 'info', 2600);
@@ -61946,17 +61986,40 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
                 if (!sha || sha === 'local') return;
                 const prev = sessionStorage.getItem(KEY);
                 if (prev && prev !== sha) {
-                    // 입력 중이면 미룬다 — 기록(KEY)을 안 바꿔 두므로 다음에 창으로 돌아올 때 다시 판단한다
-                    if (isAutoReloadUnsafeNow()) return;
-                    sessionStorage.setItem(KEY, sha);
-                    window.reloadWebAppFromServer();
+                    // 2026-11-06 스르륵 업데이트: 쓰는 화면을 새로고침하지 않는다. 뒤에서 받아 두고 앱을 내릴 때 바꾼다.
+                    if (silentUpdate) await silentUpdate.noteNewVersion(sha);
+                    else if (!isSilentUpdateBusy() && document.visibilityState === 'hidden') window.reloadWebAppFromServer();
                     return;
                 }
                 if (!prev) sessionStorage.setItem(KEY, sha);
             } catch (_) { /* offline */ }
         }
+        /** 입력 중이면 미룬다 + 올리기·받기 중에도 끊지 않는다 */
+        function isSilentUpdateBusy() {
+            if (isAutoReloadUnsafeNow()) return true;
+            if (window.BsaTypingPopup && window.BsaTypingPopup.isOpen()) return true;
+            return !!(_syncInFlight || _offlineReturnRunning || _offlinePrepRunning);
+        }
+        const silentApi = window.BSA && window.BSA.silentUpdate;
+        const silentUpdate = silentApi ? silentApi.createController({
+            prefetch: () => {
+                const P = window.BsaOfflinePrecache;
+                return P ? P.prefetchApp() : true;
+            },
+            isBusy: isSilentUpdateBusy,
+            isOnline: () => navigator.onLine !== false,
+            apply: () => {
+                saveSilentResumeView();
+                window.reloadWebAppFromServer();
+            }
+        }) : null;
         document.addEventListener('visibilitychange', () => {
-            if (document.visibilityState === 'visible') checkRemoteWebVersion();
+            if (document.visibilityState === 'visible') {
+                if (silentUpdate) silentUpdate.onVisible();
+                checkRemoteWebVersion();
+            } else if (silentUpdate) {
+                silentUpdate.onHidden();
+            }
         });
         window.addEventListener('focus', checkRemoteWebVersion);
         window.addEventListener('pageshow', (e) => {

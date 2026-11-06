@@ -80,8 +80,30 @@
         }).catch(function () { /* 다음 시작 때 */ });
     }
 
-    var api = { FILES: FILES, PAGES: PAGES, localAssetsOf: localAssetsOf, run: run };
+    /** 2026-11-06 스르륵 업데이트: 앱 본체(index.html과 그 파일들)를 뒤에서 미리 받는다. 현장 앱만 — 웹은 다음 열 때 받는다 */
+    async function prefetchApp(fetchFn) {
+        if (!fetchFn && !isNative()) return true;
+        var get = fetchFn || root.fetch.bind(root);
+        var res = await get('index.html', { cache: 'no-store' });
+        if (!res.ok) return false;
+        var queue = localAssetsOf(await res.text());
+        var ok = true;
+        await Promise.all([0, 1, 2].map(async function () {
+            while (queue.length) {
+                var f = queue.shift();
+                try {
+                    var r = await get(f, { cache: 'no-store' });
+                    if (!r.ok) ok = false;
+                    await r.arrayBuffer();
+                } catch (_e) { ok = false; }
+            }
+        }));
+        return ok;
+    }
+
+    var api = { FILES: FILES, PAGES: PAGES, localAssetsOf: localAssetsOf, run: run, prefetchApp: prefetchApp };
     if (typeof module !== 'undefined' && module.exports) module.exports = api;
+    if (root) root.BsaOfflinePrecache = api;
     if (root && root.addEventListener) {
         root.addEventListener('load', function () { setTimeout(start, 8000); });
     }
