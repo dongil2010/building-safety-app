@@ -230,6 +230,10 @@
             '</div></div>';
         overlay.querySelector('.bsa-typing-title').textContent = cfg.label;
         if (cfg.presetMode) {
+            // 새 입력은 항상 「이번만 사용」에서 시작. 프리셋 저장은 이번에 직접 눌렀을 때만.
+            var TPM0 = root.BSA && root.BSA.typedPresetMode;
+            if (TPM0 && typeof TPM0.reset === 'function') TPM0.reset();
+            if (typeof root.syncTypedPresetModeUi === 'function') root.syncTypedPresetModeUi();
             syncPresetModeButtons(overlay);
             overlay.querySelectorAll('[data-typed-preset-mode]').forEach(function (btn) {
                 btn.addEventListener('click', function (e) {

@@ -36,23 +36,23 @@ function extractFunction(name) {
 }
 
 (function moduleDefaults() {
-    const mem = {};
+    const mem = { bsa_typed_preset_mode_v1: 'save' };
     const prev = global.localStorage;
     global.localStorage = {
         getItem: (k) => (k in mem ? mem[k] : null),
-        setItem: (k, v) => { mem[k] = String(v); }
+        setItem: (k, v) => { mem[k] = String(v); },
+        removeItem: (k) => { delete mem[k]; }
     };
+    delete require.cache[require.resolve(path.join(root, 'js', 'shared', 'typed-preset-mode.js'))];
     const fresh = require(path.join(root, 'js', 'shared', 'typed-preset-mode.js'));
-    assert.strictEqual(fresh.getMode(), 'once', '선호 없으면 이번만 사용');
+    assert.ok(!(fresh.KEY in mem), '예전 기기 저장값은 지움');
+    assert.strictEqual(fresh.getMode(), 'once', '기본은 이번만 사용');
     assert.strictEqual(fresh.shouldPersist(), false);
-    assert.strictEqual(fresh.hasStoredPreference(), false);
     fresh.setMode('save');
-    assert.strictEqual(fresh.getMode(), 'save');
     assert.strictEqual(fresh.shouldPersist(), true);
-    assert.strictEqual(mem[fresh.KEY], 'save');
-    fresh.setMode('once');
-    assert.strictEqual(fresh.shouldPersist(), false);
-    assert.strictEqual(mem[fresh.KEY], 'once');
+    assert.ok(!(fresh.KEY in mem), '기기에 저장하지 않음');
+    fresh.reset();
+    assert.strictEqual(fresh.getMode(), 'once', '다음 입력은 다시 이번만');
     global.localStorage = prev;
 })();
 
@@ -66,6 +66,9 @@ function extractFunction(name) {
     assert.ok(app.includes('persistTypedDefectType') && app.includes('persistTypedDefectComponent'));
     assert.ok(app.includes('shouldPersistTypedPreset()'));
     assert.ok(app.includes('bindTypedPresetModeToggle'));
+    assert.ok(/resetTypedPresetMode\(\)/.test(extractFunction('bindTypedPresetModeToggle')), '입력칸 포커스 때 이번만으로 초기화');
+    assert.ok(/shouldPersistTypedPreset\(\)\) resetTypedPresetMode\(\)/.test(app), '저장 후 다시 이번만');
+    assert.ok(/TPM0\.reset\(\)/.test(popup), '입력 팝업 열 때 이번만으로 초기화');
     assert.ok(popup.includes('presetMode: true') && popup.includes('프리셋에 저장'));
     assert.ok(css.includes('.defect-typed-preset-mode') && css.includes('.bsa-typing-preset-mode'));
     const combo = extractFunction('bindDefectComboInputs');
