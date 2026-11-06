@@ -5829,6 +5829,22 @@ document.addEventListener('DOMContentLoaded', () => {
                 window.BsaFinishMemberChooser.close('cancel');
                 return true;
             }
+            // 선택 목록 시트·숫자 키패드·변위 그래프도 수정창(비파괴 포함) 위에 뜬다 — 그것만 닫고 아래 창은 유지
+            const selectSheetEl = document.getElementById('bsaSelectSheet');
+            if (selectSheetEl && selectSheetEl.classList.contains('open') && typeof closeBsaSelectSheet === 'function') {
+                closeBsaSelectSheet();
+                return true;
+            }
+            if (window.BsaMeasureKeypad && window.BsaMeasureKeypad.isOpen()) {
+                window.BsaMeasureKeypad.close();
+                return true;
+            }
+            const dispChartEl = document.getElementById('ndtDisplacementChartModal');
+            if (isModalElOpen(dispChartEl)) {
+                dispChartEl.classList.remove('open');
+                dispChartEl.style.display = 'none';
+                return true;
+            }
             // 톱니바퀴 프리셋 세팅 창은 수정창 위에 뜬다 — 그것만 닫고 수정창은 유지
             const optionManagerEl = document.getElementById('optionManagerModal');
             if (isModalElOpen(optionManagerEl)) {
@@ -5857,8 +5873,7 @@ document.addEventListener('DOMContentLoaded', () => {
             }
             const named = [
                 ['ndtDisplacementModal', 'closeNdtDisplacementModal'],
-                ['ndtDisplacementGroupEditModal', 'closeNdtDisplacementGroupEditModal'],
-                ['ndtDisplacementChartModal', 'closeNdtDisplacementChartModal']
+                ['ndtDisplacementGroupEditModal', 'closeNdtDisplacementGroupEditModal']
             ];
             for (let i = 0; i < named.length; i++) {
                 const el = document.getElementById(named[i][0]);
