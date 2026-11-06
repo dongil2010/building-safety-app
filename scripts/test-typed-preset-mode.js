@@ -105,6 +105,7 @@ function extractFunction(name) {
         'document', 'window', 'migrateDefectComponentStateShape', 'DEFECT_COMPONENT_PRESET',
         'ensureOptionOrderEntry', 'saveStateToLocalStorage', 'isTransientDefectTypeValue',
         'getDefectComboValue', 'getDefectTypePresetFor', 'getDefectComponentPresetForCategory',
+        'shouldLearnDefectComponentForCategory',
         fns
     )(
         document, window, () => {},
@@ -118,7 +119,8 @@ function extractFunction(name) {
         (v) => /[,]/.test(v),
         () => '벽체',
         (cat) => (cat === '구조체' ? ['균열'] : []),
-        (cat) => (presetMap[cat] || []).slice()
+        (cat) => (presetMap[cat] || []).slice(),
+        () => true
     );
 
     assert.strictEqual(api.knownDefectCategoryOrEmpty(''), '');

@@ -27221,6 +27221,12 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
         if (cat === '구조체') return (DEFECT_COMPONENT_PRESET['구조체'] || []).slice();
         return (DEFECT_COMPONENT_PRESET[cat] || DEFECT_COMPONENT_PRESET['구조체'] || []).slice();
     }
+    /** 비구조체·마감재 재사용 목록(커스텀/직접추가)에 맨몸 구조 부재를 넣지 않음. 이 결함 값·화면 표시는 그대로. */
+    function shouldLearnDefectComponentForCategory(category, name) {
+        const cat = String(category || '').trim();
+        if (cat !== '비구조체' && cat !== '마감재') return true;
+        return !isBareStructuralMemberChipName(name);
+    }
 
     // 2026-11-03 기본 결함 종류 = 엑셀에서 쓰인 것만(+ 입력칸용 「기타」·「상태양호」). 부재별 목록(getDefectTypePresetFor)에서 이 밖의 이름은 뺀다.
     // 이름이 엑셀 표기와 다른 변형(들뜸/변형↔변형/들뜸 등)은 둘 다 둔다.
@@ -29648,12 +29654,18 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
             }
         }
         // 2026-11-02 조합해서 쓴 접합부는 목록에 저장하지 않으므로, 지금 고른 동안만 칩으로 보여 준다(다른 부재를 고르면 사라짐)
-        if (!jointMode && currentComponent && isJointComponentName(currentComponent) && !componentOptions.includes(currentComponent)) {
+        // 2026-11-06 미장균열로 비구조체가 된 맨몸 기둥·보도 이 결함에만 보여 주고 재사용 목록에는 넣지 않음
+        if (!jointMode && currentComponent && !componentOptions.includes(currentComponent)
+            && (isJointComponentName(currentComponent)
+                || ((currentCategory === '비구조체' || currentCategory === '마감재')
+                    && isBareStructuralMemberChipName(currentComponent)))) {
             componentOptions = [currentComponent].concat(componentOptions);
         }
         const onComponentPick = (value) => {
             if (isDefectBulkEditMode()) markDefectBulkFieldChanged('component');
-            if (value && value !== currentComponent) recordDefectPickUsage('component', currentCategory, value);
+            if (value && value !== currentComponent && shouldLearnDefectComponentForCategory(currentCategory, value)) {
+                recordDefectPickUsage('component', currentCategory, value);
+            }
             syncDefectComboFields(componentSelect, componentInput, value);
             // 2026-10-19 접합부 모드에서 접합부를 골랐으면(=적용) 모드 끝
             if (jointMode && isJointComponentName(value)) window._defectComponentJointMode = false;
@@ -29712,6 +29724,7 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
         if (!window.state.customDefectComponents[cat]) window.state.customDefectComponents[cat] = [];
         const preset = getDefectComponentPresetForCategory(cat);
         if (preset.includes(trimmed) || window.state.customDefectComponents[cat].includes(trimmed)) return false;
+        if (!shouldLearnDefectComponentForCategory(cat, trimmed)) return false;
         window.state.customDefectComponents[cat].push(trimmed);
         const order = ensureOptionOrderEntry('defectComponentOrder', cat);
         if (!order.includes(trimmed)) order.push(trimmed);
@@ -29811,7 +29824,7 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
                         persistTypedDefectComponent(v);
                     }
                     const nextCustoms = (window.state.customDefectComponents && window.state.customDefectComponents[cat]) || [];
-                    if (preset.includes(v) || nextCustoms.includes(v)) {
+                    if (preset.includes(v) || nextCustoms.includes(v) || !shouldLearnDefectComponentForCategory(cat, v)) {
                         populateDefectComponentDropdown(cat, v);
                     } else if (select) {
                         if (!isDefectComboCustomToken(select.value)) select.selectedIndex = -1;
@@ -33621,7 +33634,8 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
                     migrateDefectComponentStateShape();
                     if (!window.state.customDefectComponents) window.state.customDefectComponents = { '구조체': [], '비구조체': [], '마감재': [] };
                     if (!window.state.customDefectComponents[cat]) window.state.customDefectComponents[cat] = [];
-                    if (!window.state.customDefectComponents[cat].includes(trimmed)) {
+                    if (!window.state.customDefectComponents[cat].includes(trimmed)
+                        && shouldLearnDefectComponentForCategory(cat, trimmed)) {
                         window.state.customDefectComponents[cat].push(trimmed);
                         const order = ensureOptionOrderEntry('defectComponentOrder', cat);
                         if (!order.includes(trimmed)) order.push(trimmed);
@@ -35045,6 +35059,11 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
             if (hiddenIdx !== -1) {
                 // 숨겨뒀던 기본 항목을 다시 추가하는 경우 -> 숨김 해제
                 ctx.hiddenList.splice(hiddenIdx, 1);
+            } else if (ctx.favField === 'component'
+                && typeof shouldLearnDefectComponentForCategory === 'function'
+                && !shouldLearnDefectComponentForCategory(ctx.favBucket, val)) {
+                window.showToast('기둥·보·슬래브 등 맨몸 구조 부재는 구조체 목록에만 둡니다.', 'info');
+                return;
             } else {
                 ctx.customList.push(val);
             }

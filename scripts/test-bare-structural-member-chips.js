@@ -62,9 +62,10 @@ const api = new Function(
     'const _bareStructuralMemberChipSet = new Set(BARE_STRUCTURAL_MEMBER_CHIPS);\n' +
     extractFunction('isBareStructuralMemberChipName') + '\n' +
     extractFunction('getDefectComponentPresetForCategory') + '\n' +
+    extractFunction('shouldLearnDefectComponentForCategory') + '\n' +
     extractFunction('applySavedOptionOrder') + '\n' +
     extractFunction('getDefaultVisibleOptionTexts') + '\n' +
-    'return { DEFECT_COMPONENT_PRESET, BARE_STRUCTURAL_MEMBER_CHIPS, isBareStructuralMemberChipName, getDefectComponentPresetForCategory, applySavedOptionOrder, getDefaultVisibleOptionTexts };'
+    'return { DEFECT_COMPONENT_PRESET, BARE_STRUCTURAL_MEMBER_CHIPS, isBareStructuralMemberChipName, getDefectComponentPresetForCategory, shouldLearnDefectComponentForCategory, applySavedOptionOrder, getDefaultVisibleOptionTexts };'
 )();
 
 const BARE = ['기둥', '보', '보(G)', '보(B)', '철골보(G)', '철골보(B)', '슬래브', 'RC벽체', '내력벽', '구조벽',
@@ -130,5 +131,14 @@ assert.ok(withCustom.includes('조적벽체'));
 q.DEFAULT_FAVORITES.component['구조체'].forEach((n) => {
     assert.ok(struct.includes(n), '구조체 ★ ' + n);
 });
+
+assert.strictEqual(api.shouldLearnDefectComponentForCategory('구조체', '기둥'), true);
+assert.strictEqual(api.shouldLearnDefectComponentForCategory('비구조체', '기둥'), false);
+assert.strictEqual(api.shouldLearnDefectComponentForCategory('마감재', '보(G)'), false);
+assert.strictEqual(api.shouldLearnDefectComponentForCategory('비구조체', '조적벽체'), true);
+assert.strictEqual(api.shouldLearnDefectComponentForCategory('마감재', '기둥 미장'), true);
+assert.ok(src.includes('shouldLearnDefectComponentForCategory(cat, trimmed)'), '직접추가·저장이 학습 가드를 탐');
+assert.ok(src.includes("|| !shouldLearnDefectComponentForCategory(cat, v)"), '이번만 사용이어도 이 결함 값은 유지');
+assert.ok(/isBareStructuralMemberChipName\(currentComponent\)/.test(src), '이 결함만 칩으로 보여 줌');
 
 console.log('test-bare-structural-member-chips: ok');
