@@ -15265,6 +15265,50 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
         return map[d] || d || '→';
     }
 
+    /** 마킹 화살표(ux,uy)를 바라본 기준 왼쪽·오른쪽 = 화살표에서 90도 꺾은 방향. 화면 y는 아래가 + */
+    function ndtTiltSideVector(side, ux, uy) {
+        const len = Math.hypot(ux, uy);
+        if ((side !== 'left' && side !== 'right') || !(len > 0)) return null;
+        const x = ux / len;
+        const y = uy / len;
+        return side === 'left' ? { x: y, y: -x } : { x: -y, y: x };
+    }
+
+    /** 왼쪽·오른쪽을 8방향 글자로 — dispSide를 모르는 예전 앱에도 방향이 보이도록 함께 저장 */
+    function ndtTiltSideGlyph(side, ux, uy) {
+        if (side === 'none') return '-';
+        const v = ndtTiltSideVector(side, ux, uy);
+        if (!v) return null;
+        const glyphs = ['→', '↘', '↓', '↙', '←', '↖', '↑', '↗'];
+        const i = Math.round(Math.atan2(v.y, v.x) / (Math.PI / 4));
+        return glyphs[(i + 8) % 8];
+    }
+
+    /** 표의 변위방향 칸에 방향 화살표를 그린다(박스 회전을 뺀 좌표계) */
+    function drawNdtTiltSideArrow(ctx, cx, cy, worldDir, netRotDeg, pinScale, color) {
+        const d = rotateVec2Deg(worldDir.x, worldDir.y, -(netRotDeg || 0));
+        const half = 8 * pinScale;
+        const head = 5 * pinScale;
+        const tipX = cx + d.x * half;
+        const tipY = cy + d.y * half;
+        const angle = Math.atan2(d.y, d.x);
+        ctx.save();
+        ctx.strokeStyle = color;
+        ctx.fillStyle = color;
+        ctx.lineWidth = 1.8 * pinScale;
+        ctx.beginPath();
+        ctx.moveTo(cx - d.x * half, cy - d.y * half);
+        ctx.lineTo(tipX - d.x * head * 0.7, tipY - d.y * head * 0.7);
+        ctx.stroke();
+        ctx.beginPath();
+        ctx.moveTo(tipX, tipY);
+        ctx.lineTo(tipX - head * Math.cos(angle - Math.PI / 6), tipY - head * Math.sin(angle - Math.PI / 6));
+        ctx.lineTo(tipX - head * Math.cos(angle + Math.PI / 6), tipY - head * Math.sin(angle + Math.PI / 6));
+        ctx.closePath();
+        ctx.fill();
+        ctx.restore();
+    }
+
     /**
      * 외벽 기울기 콜아웃 — 흰 배경 표(NO | 변위량/값 · 변위방향/화살표) + 측정점 지시 화살표
      */
@@ -15374,7 +15418,14 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
         drawOutlinedPinText(ctx, amountLabel, midX, -boxH / 4, color, `bold ${Math.round(10.5 * pinScale)}px "Pretendard", "Malgun Gothic", "맑은 고딕", sans-serif`, '#ffffff', textOpts);
         drawOutlinedPinText(ctx, '변위방향', midX, boxH / 4, color, `bold ${Math.round(10.5 * pinScale)}px "Pretendard", "Malgun Gothic", "맑은 고딕", sans-serif`, '#ffffff', textOpts);
         drawOutlinedPinText(ctx, tiltVal, rightX, -boxH / 4, color, `bold ${Math.round(12.5 * pinScale)}px "Pretendard", "Malgun Gothic", "맑은 고딕", sans-serif`, '#ffffff', textOpts);
-        drawOutlinedPinText(ctx, dispDir, rightX, boxH / 4, color, `bold ${Math.round(18 * pinScale)}px "Pretendard", "Malgun Gothic", "맑은 고딕", sans-serif`, '#ffffff', textOpts);
+        // 왼쪽·오른쪽으로 입력한 값은 마킹 화살표에서 90도 꺾은 방향으로 그린다. 예전 8방향 값은 글자 그대로
+        const sideDir = (cat === '기울기') ? ndtTiltSideVector(item.dispSide, ux, uy) : null;
+        if (sideDir) {
+            drawNdtTiltSideArrow(ctx, rightX, boxH / 4, sideDir, itemRot - (rotationAngle || 0), pinScale, color);
+        } else {
+            const dirText = (cat === '기울기' && item.dispSide !== undefined) ? '-' : dispDir;
+            drawOutlinedPinText(ctx, dirText, rightX, boxH / 4, color, `bold ${Math.round(18 * pinScale)}px "Pretendard", "Malgun Gothic", "맑은 고딕", sans-serif`, '#ffffff', textOpts);
+        }
 
         ctx.restore();
     }
@@ -18237,6 +18288,13 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
         const v2El = document.getElementById('ndtVal2');
         const v3El = document.getElementById('ndtVal3');
 
+        const isTiltCat = cat === '기울기';
+        placeNdtTiltValueFields(isTiltCat);
+        const sideWrap = document.getElementById('ndtTiltSideWrap');
+        const dirPadWrap = document.getElementById('ndtDirPadWrap');
+        if (sideWrap) sideWrap.style.display = isTiltCat ? '' : 'none';
+        if (dirPadWrap) dirPadWrap.style.display = isTiltCat ? 'none' : '';
+
         // 콘크리트 강도(반발경도)/탄산화는 각자 전용 UI를 쓰고,
         // 나머지 항목(실측/기울기/부재변위)은 기존 1~3회 입력 UI를 그대로 쓴다.
         if (strengthGrp) strengthGrp.style.display = (cat === '강도') ? 'flex' : 'none';
@@ -19652,6 +19710,44 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
             e.preventDefault();
             setNdtDispDirection(btn.getAttribute('data-dir'));
         });
+        const sidePad = document.getElementById('ndtDispSidePad');
+        if (sidePad) {
+            sidePad.addEventListener('click', (e) => {
+                const btn = e.target.closest('.ndt-dir-btn');
+                if (!btn) return;
+                e.preventDefault();
+                setNdtDispSide(btn.getAttribute('data-side'));
+            });
+        }
+    }
+
+    /** 외벽 기울기 변위 방향: 'left' | 'right' | 'none'(0mm) | ''(아직 안 고름) */
+    function setNdtDispSide(side, opts = {}) {
+        const hidden = document.getElementById('ndtDispSide');
+        if (hidden) hidden.value = side || '';
+        document.querySelectorAll('#ndtDispSidePad .ndt-dir-btn').forEach((btn) => {
+            btn.classList.toggle('active', btn.getAttribute('data-side') === (side || ''));
+        });
+        if (!opts.silent && typeof scheduleNdtAutoApply === 'function') scheduleNdtAutoApply();
+    }
+
+    /** 외벽 기울기만: 측정값·변위량 칸을 측정 높이와 기울기 비율 사이로 옮긴다(다른 항목은 원래 자리) */
+    function placeNdtTiltValueFields(isTilt) {
+        const slot = document.getElementById('ndtTiltValueSlot');
+        const values = document.getElementById('groupNdtGenericValues');
+        const avgRow = document.getElementById('groupNdtAvgValue')?.parentElement;
+        if (!slot || !values || !avgRow) return;
+        if (!slot._homes) {
+            slot._homes = [document.createComment('ndt-values-home'), document.createComment('ndt-avg-home')];
+            values.before(slot._homes[0]);
+            avgRow.before(slot._homes[1]);
+        }
+        if (isTilt) {
+            slot.append(values, avgRow);
+        } else {
+            slot._homes[0].after(values);
+            slot._homes[1].after(avgRow);
+        }
     }
 
     function openNdtModal(imgX, imgY, existingItem = null, extraOpts = null) {
@@ -19690,6 +19786,7 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
             if (heightEl) heightEl.value = existingItem.height || '';
             setNdtDispDirection(existingItem.dispDirection || '-', { silent: true });
             if (dispDirEl) dispDirEl.value = normalizeNdtDispDirSymbol(existingItem.dispDirection || '-');
+            setNdtDispSide(existingItem.dispSide || '', { silent: true });
             if (v1El) v1El.value = existingItem.v1 || '';
             if (v2El) v2El.value = existingItem.v2 || '';
             if (v3El) v3El.value = existingItem.v3 || '';
@@ -19817,6 +19914,7 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
             if (heightEl) heightEl.value = '';
             setNdtDispDirection(extraOpts?.dispDirection || '-', { silent: true });
             if (dispDirEl) dispDirEl.value = normalizeNdtDispDirSymbol(extraOpts?.dispDirection || '-');
+            setNdtDispSide('', { silent: true });
             if (v1El) v1El.value = '';
             if (v2El) v2El.value = '';
             if (v3El) v3El.value = '';
@@ -20004,6 +20102,7 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
         const rawHeightStr = (document.getElementById('ndtHeight')?.value || '').trim();
         const formattedHeight = rawHeightStr ? formatHeightValue(rawHeightStr) : '';
         const dispDir = document.getElementById('ndtDispDirection')?.value || '';
+        const dispSide = document.getElementById('ndtDispSide')?.value || '';
         const v1 = document.getElementById('ndtVal1')?.value || '';
         const v2 = document.getElementById('ndtVal2')?.value || '';
         const v3 = document.getElementById('ndtVal3')?.value || '';
@@ -20263,7 +20362,9 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
                     component: comp,
                     location: loc,
                     height: formattedHeight,
-                    dispDirection: dispDir,
+                    dispDirection: (cat === '기울기' && ndtTiltSideGlyph(dispSide, liveTargetX - liveBoxX, liveTargetY - liveBoxY)) || dispDir,
+                    // 예전 8방향 마킹은 왼쪽·오른쪽을 고르기 전까지 그 방향 그대로 둔다
+                    ...((cat === '기울기' && (dispSide || existing.dispSide !== undefined)) ? { dispSide } : {}),
                     targetX: liveTargetX,
                     targetY: liveTargetY,
                     boxX: liveBoxX,
@@ -20298,7 +20399,8 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
                 component: comp,
                 location: loc,
                 height: formattedHeight,
-                dispDirection: dispDir,
+                dispDirection: (cat === '기울기' && ndtTiltSideGlyph(dispSide, extra.targetX - extra.boxX, extra.targetY - extra.boxY)) || dispDir,
+                ...(cat === '기울기' ? { dispSide } : {}),
                 targetX: extra.targetX,
                 targetY: extra.targetY,
                 boxX: extra.boxX,
