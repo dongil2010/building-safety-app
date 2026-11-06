@@ -115,6 +115,7 @@ code += 'const state = { view: { offsetX: 20, offsetY: 30, scale: 2 }, rotationA
 code += 'let ndtView = { offsetX: 5, offsetY: 7, scale: 0.5 };\n';
 code += Object.keys(STATE_VARS).map((k) => 'let ' + k + ' = ' + JSON.stringify(STATE_VARS[k]) + ';').join('\n') + '\n';
 code += 'function getFloorPlanDisplayDims() { return { w: 1000, h: 800 }; }\n';
+code += 'function getNdtDrawingDims() { return { w: 900, h: 700 }; }\n';
 code += extractFunction('imgToViewCoords') + '\n' + extractFunction('viewToImgCoords') + '\n';
 code += extractFunction('getDefectMarkingImgCenter') + '\n' + extractFunction('viewToNdtImgCoords') + '\n';
 code += 'function clientToImgCoords(cx, cy) { const r = document.getElementById("planCanvas").getBoundingClientRect(); return viewToImgCoords((cx - r.left - state.view.offsetX) / state.view.scale, (cy - r.top - state.view.offsetY) / state.view.scale); }\n';

@@ -123,7 +123,7 @@ const settle = (extra) => Object.assign({ category: '변위', measureLength: 42.
     assert.ok(created >= 2, '구역을 만드는 두 곳(MARK 모드·모달) 모두 levelUnit mm로 시작해야 한다: ' + created);
     assert.ok(appSrc.includes('group.levelUnit = unitSelSave.value'), '구역 편집 저장이 단위를 저장해야 한다');
     assert.ok(htmlSrc.includes('id="ndtDispEditLevelUnit"'), '구역 편집에 단위 선택이 있어야 한다');
-    assert.ok(appSrc.includes("lblLevel.textContent = `📊 레벨값 ("), '단일 지점 모달 라벨이 구역 단위를 따라가야 한다');
+    assert.ok(/lblLevel\.textContent = [^\n]*`📊 레벨값 \(\$\{unit\}\)/.test(appSrc), '단일 지점 모달 라벨이 구역 단위를 따라가야 한다');
     assert.ok(!/value: `\$\{arrow\}\$\{deltaAbs\.toFixed\(1\)\}cm`/.test(appSrc), '결과 이미지에 cm를 하드코딩하면 안 된다');
     const statsSrc = fs.readFileSync(path.join(root, 'js', 'tabs', 'stats.js'), 'utf8');
     assert.ok(statsSrc.includes('calc.absDeltaMm'), '통계는 mm 환산값을 써야 한다');

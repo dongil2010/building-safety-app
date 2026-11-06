@@ -11218,6 +11218,8 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
                     const refNow = state.floorPlanRef;
                     const refOk = refNow && refNow.bldgId === bldg.id && refNow.floorCode === floorCode && refNow.w > 0;
                     if (!refOk) updateFloorPlanRefFromImage(img, bldg.id, floorCode);
+                    // 좌표 기준이 정해졌으니 비파괴 도면도 그 크기로 다시 맞춘다
+                    syncNdtBackgroundWithMapDrawing();
                 }
                 if (!state.floorDrawingTierImageCache) state.floorDrawingTierImageCache = {};
                 if (bldg && bldg.id) {
@@ -14521,8 +14523,6 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
             if (typeof markFloorKeyDirty === 'function') markFloorKeyDirty(key);
             drawNdtCanvas();
             renderNdtSummaryTable();
-            const seq = formatNdtDisplacementPointLabel(group.points.length);
-            window.showToast(`${group.groupNo} ${seq} 마킹 · NO.박스 탭으로 레벨 일괄 입력`, 'success', 2600);
             return { group, point };
         }
 
@@ -14550,10 +14550,16 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
         if (typeof markFloorKeyDirty === 'function') markFloorKeyDirty(key);
         drawNdtCanvas();
         renderNdtSummaryTable();
-        window.showToast(`${group.groupNo} 구역 시작 · 계속 마킹 후 NO.박스를 눌러 위치·길이·레벨 입력`, 'info', 3600);
+        window.showToast(`${group.groupNo} 구역 시작 · 위치·길이는 NO.박스를 눌러 입력`, 'info', 3600);
         return { group, point };
     }
     window.placeNdtDisplacementMarkAt = placeNdtDisplacementMarkAt;
+
+    /** 마킹을 찍자마자 그 지점의 레벨 입력창을 연다 */
+    function placeNdtDisplacementMarkAndEdit(imgX, imgY) {
+        const placed = placeNdtDisplacementMarkAt(imgX, imgY);
+        if (placed) openNdtDisplacementModal(imgX, imgY, placed.group, placed.point);
+    }
 
     // 수직변위/부재변위 그룹의 라벨 박스/포인트 원 히트테스트
     function findNdtDisplacementHit(vx, vy, opts) {
@@ -14703,13 +14709,26 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
         }
     }
 
+    /**
+     * 비파괴 도면의 좌표 기준 크기. 층 도면은 결함위치도와 같은 기준(floorPlanRef)을 쓴다 —
+     * 받은 그림(티어)의 픽셀 크기를 쓰면 새로고침 뒤 다른 크기 그림이 오는 순간 마킹이 어긋난다.
+     * 비파괴 전용 도면은 층 도면과 별개의 그림이라 그 그림 크기가 기준이다.
+     */
+    function getNdtDrawingDims() {
+        const key = `${state.currentBuildingId}_${state.currentFloor}`;
+        if (ndtBgImage && currentNdtCustomDrawingSrc(key)) {
+            return { w: ndtBgImage.naturalWidth || ndtBgImage.width || 1200, h: ndtBgImage.naturalHeight || ndtBgImage.height || 700 };
+        }
+        if (ndtBgImage) return getFloorPlanDisplayDims();
+        return { w: 1200, h: 700 };
+    }
+
     window.fitNdtCanvas = function() {
         const canvas = document.getElementById('ndtCanvas');
         if (!canvas) return;
         const cw = window._ndtCanvasCssW || canvas.clientWidth || canvas.width;
         const ch = window._ndtCanvasCssH || canvas.clientHeight || canvas.height;
-        let imgW = ndtBgImage ? (ndtBgImage.naturalWidth || ndtBgImage.width || 1200) : 1200;
-        let imgH = ndtBgImage ? (ndtBgImage.naturalHeight || ndtBgImage.height || 700) : 700;
+        const { w: imgW, h: imgH } = getNdtDrawingDims();
 
         const isRotated = (ndtRotationAngle === 90 || ndtRotationAngle === 270);
         const drawW = isRotated ? imgH : imgW;
@@ -14728,8 +14747,7 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
         const canvas = document.getElementById('ndtCanvas');
         const cw = window._ndtCanvasCssW || canvas?.clientWidth || canvas?.width || 800;
         const ch = window._ndtCanvasCssH || canvas?.clientHeight || canvas?.height || 600;
-        let imgW = ndtBgImage ? (ndtBgImage.naturalWidth || ndtBgImage.width || 1200) : 1200;
-        let imgH = ndtBgImage ? (ndtBgImage.naturalHeight || ndtBgImage.height || 700) : 700;
+        const { w: imgW, h: imgH } = getNdtDrawingDims();
         const isRotated = (ndtRotationAngle === 90 || ndtRotationAngle === 270);
         const drawW = isRotated ? imgH : imgW;
         const drawH = isRotated ? imgW : imgH;
@@ -14855,8 +14873,7 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
         ctx.translate(ndtView.offsetX, ndtView.offsetY);
         ctx.scale(ndtView.scale, ndtView.scale);
 
-        const imgW = ndtBgImage ? (ndtBgImage.naturalWidth || ndtBgImage.width || 1200) : 1200;
-        const imgH = ndtBgImage ? (ndtBgImage.naturalHeight || ndtBgImage.height || 700) : 700;
+        const { w: imgW, h: imgH } = getNdtDrawingDims();
 
         ctx.save();
         if (ndtRotationAngle === 90) {
@@ -14871,11 +14888,11 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
         }
 
         if (ndtBgImage) {
-            ctx.drawImage(ndtBgImage, 0, 0);
+            ctx.drawImage(ndtBgImage, 0, 0, imgW, imgH);
             const ndtKey = `${state.currentBuildingId}_${state.currentFloor}`;
             if (!currentNdtCustomDrawingSrc(ndtKey)) {
                 applyFloorDrawingDarken(ctx, getFloorDrawingDarken(state.currentBuildingId, state.currentFloor),
-                    () => ctx.drawImage(ndtBgImage, 0, 0));
+                    () => ctx.drawImage(ndtBgImage, 0, 0, imgW, imgH));
             }
         }
 
@@ -15560,6 +15577,14 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
             ctx.fill();
 
             if (groupCounterRotate) ctx.rotate((groupCounterRotate * Math.PI) / 180);
+            // 지금 레벨을 입력 중인 지점 표시
+            if (window._ndtDispEditingPointId && window._ndtDispEditingPointId === p.id) {
+                ctx.strokeStyle = '#f97316';
+                ctx.lineWidth = 3 * pinScale;
+                ctx.beginPath();
+                ctx.arc(0, 0, r + 5 * pinScale, 0, Math.PI * 2);
+                ctx.stroke();
+            }
             const ptColor = isPtDragged ? '#d97706' : color;
             drawOutlinedPinText(
                 ctx,
@@ -15996,9 +16021,7 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
 
     function viewToNdtImgCoords(vx, vy) {
         const angle = ndtRotationAngle || 0;
-        const img = ndtBgImage;
-        const imgW = img ? (img.naturalWidth || img.width || 1200) : 1200;
-        const imgH = img ? (img.naturalHeight || img.height || 700) : 700;
+        const { w: imgW, h: imgH } = getNdtDrawingDims();
 
         if (angle === 90) {
             return { x: vy, y: imgH - vx };
@@ -16390,7 +16413,7 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
             if (isNdtDisplacementMarking) {
                 isNdtDisplacementMarking = false;
                 const coords = window._ndtDispMarkCoords || { x: 100, y: 100 };
-                placeNdtDisplacementMarkAt(coords.x, coords.y);
+                placeNdtDisplacementMarkAndEdit(coords.x, coords.y);
             }
             if (isDraggingNdtPinGroup) {
                 touchMovedNdtItems(null);   // 함께 옮긴 핀·구역의 시각을 올린다
@@ -16976,7 +16999,8 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
                 const armedD = pendingNdtDispArmed;
                 pendingNdtDispHit = null;
                 pendingNdtDispArmed = false;
-                const actD = ndtTouchTapAction(pendD, armedD, ndtAddSelectEnabled);
+                // 부동침하·부재변위 마킹은 한 번 탭에 바로 입력창 (선택 단계 없음)
+                const actD = ndtTouchTapAction(Object.assign({}, pendD, { wasSelected: true }), armedD, ndtAddSelectEnabled);
                 applyNdtTouchTapSelection(actD, hit.group && hit.group.id ? ndtDispSelKey(hit.group.id) : '');
                 if (actD !== 'open') {
                     if (hit.group) setActiveNdtDispGroup(hit.group);
@@ -17008,7 +17032,7 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
                 ndtGestureCancelledByPinch = false;
                 if (!cancelled) {
                     const coords = window._ndtDispMarkCoords || { x: 100, y: 100 };
-                    placeNdtDisplacementMarkAt(coords.x, coords.y);
+                    placeNdtDisplacementMarkAndEdit(coords.x, coords.y);
                 }
                 window._ndtDispMarkCoords = null;
             }
@@ -20627,9 +20651,29 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
         });
     }
 
+    /** 입력 중인 지점이 입력창 밑에 가려지면 도면을 옮겨 보이게 한다 */
+    function keepNdtDispPointInView(modal, point) {
+        const canvas = document.getElementById('ndtCanvas');
+        const cardEl = modal.querySelector('.ndt-drawer-card');
+        if (!canvas || !cardEl || !point) return;
+        const rect = canvas.getBoundingClientRect();
+        const card = cardEl.getBoundingClientRect();
+        const sx = rect.left + ndtView.offsetX + point.x * ndtView.scale;
+        const sy = rect.top + ndtView.offsetY + point.y * ndtView.scale;
+        const m = 40;
+        if (sx < card.left - m || sx > card.right + m || sy < card.top - m || sy > card.bottom + m) return;
+        if (card.width > rect.width / 2) {
+            ndtView.offsetY += (rect.top + Math.min(card.top, rect.bottom)) / 2 - sy;
+        } else {
+            ndtView.offsetX += (rect.left + card.left) / 2 - sx;
+        }
+        drawNdtCanvas();
+    }
+
     function openNdtDisplacementModal(imgX, imgY, existingGroup, existingPoint) {
         const modal = document.getElementById('ndtDisplacementModal');
         if (!modal) return;
+        flushNdtDispLevelAutosave();
         window._pendingNdtDispCoords = { x: imgX, y: imgY };
         refreshNdtDispActiveTemplate();
 
@@ -20669,7 +20713,7 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
             groupIdEl.value = existingGroup.id;
             pointIdEl.value = existingPoint.id;
             const ptRole = isMemberDisp ? (idx === 0 ? ' [단부 1]' : (idx === existingGroup.points.length - 1 ? ' [단부 2]' : ' [중앙부]')) : '';
-            hintEl.textContent = `${existingGroup.groupNo} 구역 - ${formatNdtDisplacementPointLabel(idx + 1)} 지점${ptRole} 수정`;
+            hintEl.textContent = `${existingGroup.groupNo} 구역 · ${idx + 1}번째 지점 ${formatNdtDisplacementPointLabel(idx + 1)}${ptRole} · 전체 ${existingGroup.points.length}개`;
             infoBlock.style.display = 'none';
             if (damageRow) damageRow.style.display = 'none';
             levelEl.value = isNdtDispLevelFilled(existingPoint.level) ? existingPoint.level : '';
@@ -20720,7 +20764,20 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
         const lvlGroup = existingGroup || continueGroup
             || (tmpl ? getCurrentFloorDisplacementGroups(cat).find(g => g.id === tmpl.groupId) : null);
         const lblLevel = document.getElementById('lblNdtDispLevel');
-        if (lblLevel) lblLevel.textContent = `📊 레벨값 (${lvlGroup ? ndtDispLevelUnit(lvlGroup) : 'mm'})`;
+        const isPointEdit = !!(existingGroup && existingPoint);
+        if (lblLevel) {
+            const unit = lvlGroup ? ndtDispLevelUnit(lvlGroup) : 'mm';
+            lblLevel.textContent = isPointEdit ? `📊 레벨값 (${unit}) · 입력하면 자동 저장` : `📊 레벨값 (${unit})`;
+        }
+        // 지점 입력은 자동 저장 — 취소는 없고 저장 버튼은 「완료」, 다음 지점으로 바로 이동
+        const btnSave = document.getElementById('btnSaveNdtDisp');
+        const btnCancel = document.getElementById('btnCancelNdtDisp');
+        const btnNext = document.getElementById('btnNextNdtDispPoint');
+        if (btnSave) btnSave.innerHTML = `<i class="fa-solid fa-check"></i> ${isPointEdit ? '완료' : '저장'}`;
+        if (btnCancel) btnCancel.style.display = isPointEdit ? 'none' : '';
+        if (btnNext) btnNext.style.display = (isPointEdit && existingPoint !== existingGroup.points[existingGroup.points.length - 1]) ? '' : 'none';
+        window._ndtDispEditingPointId = isPointEdit ? existingPoint.id : null;
+        drawNdtCanvas();
         refreshNdtDispLocationChips('ndtDispLocationType', 'ndtDispLocationChips');
         document.body.classList.add('ndt-modal-open');
         modal.style.display = 'flex';
@@ -20730,9 +20787,49 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
             syncNdtDrawerToCanvasArea('ndtDisplacementModal');
             levelEl.focus();
         });
+        if (isPointEdit) {
+            window.setTimeout(() => {
+                if (window._ndtDispEditingPointId === existingPoint.id) keepNdtDispPointInView(modal, existingPoint);
+            }, 320);
+        }
+    }
+
+    /** 레벨 칸 입력을 잠시 뒤 저장 — 쓰다 만 값('-')은 건너뛴다 */
+    function saveNdtDispLevelNow() {
+        window.clearTimeout(window._ndtDispLevelSaveTimer);
+        window._ndtDispLevelSaveTimer = null;
+        if (!document.getElementById('ndtDispPointId')?.value) return;
+        const raw = document.getElementById('ndtDispLevel')?.value;
+        if (raw !== '' && isNaN(parseFloat(raw))) return;
+        if (!commitNdtDisplacement()) return;
+        drawNdtCanvas();
+        renderNdtSummaryTable();
+    }
+
+    function flushNdtDispLevelAutosave() {
+        if (window._ndtDispLevelSaveTimer) saveNdtDispLevelNow();
+    }
+
+    /** 같은 구역의 다음 지점 입력으로 이동. 마지막 지점이면 false */
+    function goToNextNdtDispPoint() {
+        flushNdtDispLevelAutosave();
+        const pointId = document.getElementById('ndtDispPointId')?.value;
+        const group = pointId ? getNdtDispGroupById(document.getElementById('ndtDispGroupId')?.value) : null;
+        if (!group) return false;
+        const idx = group.points.findIndex((p) => p.id === pointId);
+        const next = idx >= 0 ? group.points[idx + 1] : null;
+        if (!next) return false;
+        setActiveNdtDispGroup(group);
+        openNdtDisplacementModal(next.x, next.y, group, next);
+        return true;
     }
 
     function closeNdtDisplacementModal() {
+        flushNdtDispLevelAutosave();
+        if (window._ndtDispEditingPointId) {
+            window._ndtDispEditingPointId = null;
+            drawNdtCanvas();
+        }
         // 활성 구역은 유지 — 다음 마킹에서 같은 구역 (02)(03)… 이어쓰기
         window._ndtDisplacementTemplate = null;
         refreshNdtDispActiveTemplate();
@@ -21297,10 +21394,28 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
                 closeNdtDisplacementModal();
                 drawNdtCanvas();
                 renderNdtSummaryTable();
-                const nextNo = formatNdtDisplacementPointLabel(saved.group.points.length + 1);
-                window.showToast(`${saved.group.groupNo} 구역 저장 · 다음 마킹은 ${nextNo}로 이어집니다`, 'success', 3200);
             });
         }
+
+        const levelInput = document.getElementById('ndtDispLevel');
+        if (levelInput) {
+            levelInput.addEventListener('input', () => {
+                window.clearTimeout(window._ndtDispLevelSaveTimer);
+                window._ndtDispLevelSaveTimer = window.setTimeout(saveNdtDispLevelNow, 300);
+            });
+            // PC: Enter = 다음 지점, 마지막 지점이면 닫기
+            levelInput.addEventListener('keydown', (e) => {
+                if (e.key !== 'Enter' || !document.getElementById('ndtDispPointId')?.value) return;
+                e.preventDefault();
+                if (!goToNextNdtDispPoint()) closeNdtDisplacementModal();
+            });
+            // 키패드 「다음」: 창 안에 다음 숫자 칸이 없으면 다음 지점으로
+            levelInput.addEventListener('bsa-mkp-no-next', (e) => {
+                if (goToNextNdtDispPoint()) e.preventDefault();
+            });
+        }
+        const btnNextPoint = document.getElementById('btnNextNdtDispPoint');
+        if (btnNextPoint) btnNextPoint.addEventListener('click', () => goToNextNdtDispPoint());
 
         const btnAddAnother = document.getElementById('btnAddAnotherNdtPoint');
         if (btnAddAnother) {
@@ -37896,9 +38011,7 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
     function ndtImgToCanvasLocal(imgX, imgY) {
         if (!Number.isFinite(imgX) || !Number.isFinite(imgY)) return null;
         const angle = ndtRotationAngle || 0;
-        const img = ndtBgImage;
-        const imgW = img ? (img.naturalWidth || img.width || 1200) : 1200;
-        const imgH = img ? (img.naturalHeight || img.height || 700) : 700;
+        const { w: imgW, h: imgH } = getNdtDrawingDims();
         let vx = imgX;
         let vy = imgY;
         // viewToNdtImgCoords 의 역변환

@@ -5378,6 +5378,13 @@ html:not(.layout-desktop) .survey-inline-select {
     transform: translateX(0);
 }
 
+#ndtDispModalHint {
+    font-size: 1rem !important;
+    color: #c2410c !important;
+    border-color: rgba(249, 115, 22, 0.45) !important;
+    background: rgba(249, 115, 22, 0.08) !important;
+}
+
 #ndtDisplacementModal .ndt-disp-modal-hint,
 #ndtDisplacementGroupEditModal .ndt-disp-modal-hint {
     font-size: 0.85rem;

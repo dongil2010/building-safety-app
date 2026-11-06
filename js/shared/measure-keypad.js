@@ -373,7 +373,13 @@
         });
         var i = list.indexOf(el);
         var next = i >= 0 ? list[i + 1] : null;
-        if (!next) { close(true, true); return; }
+        if (!next) {
+            // 다음 칸이 없을 때 창이 직접 처리할 수 있다(부동침하: 다음 지점으로)
+            var noNext = new CustomEvent('bsa-mkp-no-next', { bubbles: true, cancelable: true });
+            if (el.dispatchEvent(noNext)) close(true, true);
+            else schedulePosition();
+            return;
+        }
         prepField(next); // 포커스 전에 → OS 키보드 안 뜸
         state.lastPointerType = 'touch';
         state.lastPointerAt = Date.now();
@@ -457,6 +463,8 @@
         document.documentElement.classList.add('bsa-mkp-open');
         el.classList.add('bsa-mkp-active');
         position();
+        // 칸이 든 창이 아직 미끄러져 들어오는 중이면 위 위치는 틀리다 — 멈춘 뒤 다시 잡는다
+        setTimeout(function () { if (state.field === el) { state.scrolled = false; schedulePosition(); } }, 340);
     }
 
     /** commit: 값이 바뀌었으면 change 발송. blur: 칸 포커스도 뺀다(완료 키) */
@@ -537,6 +545,9 @@
         document.addEventListener('click', onDocClick, true);
         document.addEventListener('keydown', onKeyDown, true);
         window.addEventListener('scroll', schedulePosition, true);
+        document.addEventListener('transitionend', function (e) {
+            if (state.field && e.target && e.target.contains && e.target.contains(state.field)) schedulePosition();
+        }, true);
         window.addEventListener('resize', function () { state.orientation = ''; schedulePosition(); });
         window.addEventListener('orientationchange', function () { state.orientation = ''; setTimeout(schedulePosition, 250); });
         if (window.visualViewport) {
