@@ -5781,6 +5781,11 @@ document.addEventListener('DOMContentLoaded', () => {
             window.appDialog.cancel();
             return true;
         }
+        // 직접 입력 팝업이 부모 수정창 위에 있으면 뒤로가기 = 팝업만 취소(부모는 유지)
+        if (window.BsaTypingPopup && typeof window.BsaTypingPopup.isOpen === 'function' && window.BsaTypingPopup.isOpen()) {
+            window.BsaTypingPopup.close('cancel');
+            return true;
+        }
         if (!shouldHandleAppBack()) return false;
         if (tryCloseTopOverlayForBack()) return true;
         const tab = (window.state && window.state.currentTab) || 'tab-home';
@@ -38057,6 +38062,8 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
         if (isMeasureKeypadTarget(target)) return true;
         // 앱 확인 창(삭제 확인 등)도 body에 붙는다 — 확인/취소 누를 때 결함 창이 닫히지 않게
         if (target.closest('#bsaAppDialog')) return true;
+        // 직접 입력 팝업도 body에 붙는다 — 완료/취소·바깥 누르면 결함 창까지 닫히던 문제(2026-11-06)
+        if (target.closest('#bsaTypingPopup, .bsa-typing-overlay')) return true;
         // 2026-10-19 접합부 부재(기둥·보…) 고르는 선택 목록 시트도 body에 붙는다 — 고를 때 수정창이 사라지던 문제
         if (target.closest('#bsaSelectSheet')) return true;
         if (target.closest('#defectMarkingMemberFloat')) return true;

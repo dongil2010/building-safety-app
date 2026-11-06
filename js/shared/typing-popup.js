@@ -6,7 +6,8 @@
  * 어떻게: 손가락으로 칸을 누르면 원래 칸 대신 보이는 화면(키보드 위) 가운데에 큰 입력칸을 띄운다.
  *        치는 글자는 원래 칸에 그대로 넣고 input 이벤트를 보낸다 → 기존 자동 저장 코드가 그대로 돈다.
  *        완료/Enter: 원래 칸의 확정 동작(blur·change, 원인 칸은 Enter)을 그대로 부른다.
- *        취소: 원래 값으로 되돌린다.
+ *        취소: 원래 값으로 되돌리고 확정 이벤트는 보내지 않는다.
+ *        완료·취소·Esc·뒤로가기는 이 팝업만 닫는다. 부모 결함/NDT 수정창은 연 채로 둔다.
  *        팝업이 떠 있는 동안 화면 전체를 덮어서 뒤쪽 도면·수정창은 터치되지 않는다.
  * PC:    마우스로 누르면 예전처럼 칸에 바로 입력한다(Tab 이동 등 유지).
  */
@@ -17,7 +18,11 @@
         defectLocation: { label: '상세 위치', commit: 'blur' },
         defectComponentInput: { label: '부재 명칭', commit: 'blur' },
         defectTypeInput: { label: '결함 종류', commit: 'blur' },
-        defectCauseInput: { label: '발생 원인 (이번 결함)', commit: 'enter' }
+        defectCauseInput: { label: '발생 원인 (이번 결함)', commit: 'enter' },
+        // 비파괴 조사 등록창 — 같은 직접 입력 패턴(이번 항목만 Enter 확정)
+        ndtLocation: { label: '측정 위치', commit: 'blur' },
+        ndtComponentInput: { label: '부재 구분', commit: 'enter' },
+        ndtFinishStateInput: { label: '마감상태', commit: 'enter' }
     };
 
     var lastPointerType = '';
@@ -71,6 +76,18 @@
         card.style.top = y + 'px';
     }
 
+    function isPopupElement(el) {
+        if (!el) return false;
+        if (active && active.overlay) {
+            if (el === active.overlay) return true;
+            if (typeof active.overlay.contains === 'function' && active.overlay.contains(el)) return true;
+        }
+        if (typeof el.closest === 'function') {
+            return !!el.closest('#bsaTypingPopup, .bsa-typing-overlay');
+        }
+        return false;
+    }
+
     function close(mode) {
         if (!active) return;
         var a = active;
@@ -87,13 +104,14 @@
         }
         if (a.cfg.commit === 'enter') {
             if (mode !== 'cancel' && a.input.value.trim()) fireEnter(a.input);
-        } else {
-            // 원래 칸의 blur 확정 코드(콤보 확정·원인 자동 체크 등)를 그대로 돌린다.
+        } else if (mode !== 'cancel') {
+            // 완료일 때만 원래 칸의 blur 확정 코드(콤보 확정·원인 자동 체크 등)를 돌린다.
+            // 취소는 값을 되돌린 뒤 확정 이벤트를 보내지 않는다(부모 창 상태 유지).
             fire(a.input, 'change');
             fire(a.input, 'blur');
         }
         try { a.proxy.blur(); } catch (e) { /* ignore */ }
-        // 닫는 탭이 뒤쪽 도면으로 새지 않게 한 박자 늦게 치운다.
+        // 닫는 탭이 뒤쪽 도면·부모 수정창으로 새지 않게 한 박자 늦게 치운다.
         setTimeout(function () {
             if (a.overlay.parentNode) a.overlay.parentNode.removeChild(a.overlay);
         }, 60);
@@ -102,6 +120,7 @@
     function open(input, cfg) {
         if (active) close('done');
         var overlay = document.createElement('div');
+        overlay.id = 'bsaTypingPopup';
         overlay.className = 'bsa-typing-overlay';
         overlay.setAttribute('role', 'dialog');
         overlay.setAttribute('aria-modal', 'true');
@@ -129,18 +148,22 @@
         proxy.addEventListener('keydown', function (e) {
             if (e.key === 'Enter' && !e.isComposing) {
                 e.preventDefault();
+                e.stopPropagation();
                 close('done');
             } else if (e.key === 'Escape') {
                 e.preventDefault();
+                e.stopPropagation();
                 close('cancel');
             }
         });
         overlay.querySelector('.bsa-typing-done').addEventListener('click', function (e) {
             e.preventDefault();
+            e.stopPropagation();
             close('done');
         });
         overlay.querySelector('.bsa-typing-cancel').addEventListener('click', function (e) {
             e.preventDefault();
+            e.stopPropagation();
             close('cancel');
         });
         // 뒤쪽(도면·수정창)으로 터치가 가지 않게 덮개가 다 받는다. 빈 곳을 누르면 완료.
@@ -186,6 +209,21 @@
             lastPointerType = e.pointerType || '';
             lastPointerAt = Date.now();
         }, true);
+        // 팝업이 떠 있는 동안 Enter/Esc 가 부모 수정창 단축키(Esc=닫기)로 새지 않게 캡처에서 처리한다.
+        document.addEventListener('keydown', function (e) {
+            if (!active || e.isComposing) return;
+            if (e.key === 'Enter') {
+                e.preventDefault();
+                e.stopPropagation();
+                if (e.stopImmediatePropagation) e.stopImmediatePropagation();
+                close('done');
+            } else if (e.key === 'Escape') {
+                e.preventDefault();
+                e.stopPropagation();
+                if (e.stopImmediatePropagation) e.stopImmediatePropagation();
+                close('cancel');
+            }
+        }, true);
         // 팝업으로 포커스를 옮길 때 원래 칸의 blur 리스너(확정 코드)가 미리 돌지 않게 막는다.
         document.addEventListener('blur', function (e) {
             if (suppressBlurFor && e.target === suppressBlurFor) e.stopImmediatePropagation();
@@ -197,7 +235,13 @@
         document.addEventListener('focusin', onFocusIn, false);
     }
 
-    var api = { init: init, close: close, isOpen: function () { return !!active; }, FIELDS: FIELDS };
+    var api = {
+        init: init,
+        close: close,
+        isOpen: function () { return !!active; },
+        isPopupElement: isPopupElement,
+        FIELDS: FIELDS
+    };
     if (typeof module !== 'undefined' && module.exports) module.exports = api;
     root.BsaTypingPopup = api;
     if (root.document) {
