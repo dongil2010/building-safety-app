@@ -60,6 +60,9 @@ const helpers = new Function(
     'const _bareStructuralMemberChipSet = new Set(BARE_STRUCTURAL_MEMBER_CHIPS);\n' +
     extractNamed('isBareStructuralMemberChipName') + '\n' +
     extractNamed('getDefectComponentPresetForCategory') + '\n' +
+    extractNamed('finishMemberChooserApi') + '\n' +
+    extractNamed('isFinishMemberBaseName') + '\n' +
+    extractNamed('isFinishCombinedMemberName') + '\n' +
     extractNamed('shouldLearnDefectComponentForCategory') + '\n' +
     extractNamed('getDefaultVisibleOptionTexts') + '\n' +
     'return { isBareStructuralMemberChipName, getDefectComponentPresetForCategory, shouldLearnDefectComponentForCategory, getDefaultVisibleOptionTexts };'

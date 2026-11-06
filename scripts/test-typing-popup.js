@@ -46,7 +46,7 @@ assert.ok(/function tryCloseTopOverlayForBack\(\) \{[\s\S]{0,400}BsaTypingPopup\
     '뒤로가기 = 자식 팝업만 취소');
 assert.ok(/tab-ndt[\s\S]{0,200}k === 'escape'[\s\S]{0,200}BsaTypingPopup\.isOpen/.test(app),
     'NDT Esc가 팝업 떠 있으면 부모를 안 닫음');
-assert.ok(/k === 'escape'[\s\S]{0,200}BsaTypingPopup\.isOpen[\s\S]{0,80}선 그리는 중/.test(app),
+assert.ok(/k === 'escape'[\s\S]{0,200}BsaTypingPopup\.isOpen[\s\S]{0,400}선 그리는 중/.test(app),
     '도면 Esc가 팝업 떠 있으면 부모를 안 닫음');
 assert.ok(/ndtMode === 'PAN' && isNdtModalOpen\(\)[\s\S]{0,200}BsaTypingPopup\.isOpen/.test(app),
     'NDT 빈곳 탭이 팝업 떠 있으면 부모를 안 닫음');

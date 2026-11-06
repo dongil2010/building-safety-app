@@ -62,6 +62,9 @@ const api = new Function(
     'const _bareStructuralMemberChipSet = new Set(BARE_STRUCTURAL_MEMBER_CHIPS);\n' +
     extractFunction('isBareStructuralMemberChipName') + '\n' +
     extractFunction('getDefectComponentPresetForCategory') + '\n' +
+    extractFunction('finishMemberChooserApi') + '\n' +
+    extractFunction('isFinishMemberBaseName') + '\n' +
+    extractFunction('isFinishCombinedMemberName') + '\n' +
     extractFunction('shouldLearnDefectComponentForCategory') + '\n' +
     extractFunction('applySavedOptionOrder') + '\n' +
     extractFunction('getDefaultVisibleOptionTexts') + '\n' +
@@ -137,6 +140,9 @@ assert.strictEqual(api.shouldLearnDefectComponentForCategory('비구조체', '�
 assert.strictEqual(api.shouldLearnDefectComponentForCategory('마감재', '보(G)'), false);
 assert.strictEqual(api.shouldLearnDefectComponentForCategory('비구조체', '조적벽체'), true);
 assert.strictEqual(api.shouldLearnDefectComponentForCategory('마감재', '기둥 미장'), true);
+assert.strictEqual(api.shouldLearnDefectComponentForCategory('마감재', '기둥'), false, '마감재 바탕 단추는 목록에 안 넣음');
+assert.strictEqual(api.shouldLearnDefectComponentForCategory('마감재', '벽체'), false);
+assert.strictEqual(api.shouldLearnDefectComponentForCategory('마감재', '기둥 타일'), true, '합친 이름은 배워도 됨');
 assert.ok(src.includes('shouldLearnDefectComponentForCategory(cat, trimmed)'), '직접추가·저장이 학습 가드를 탐');
 assert.ok(src.includes("|| !shouldLearnDefectComponentForCategory(cat, v)"), '이번만 사용이어도 이 결함 값은 유지');
 assert.ok(/isBareStructuralMemberChipName\(currentComponent\)/.test(src), '이 결함만 칩으로 보여 줌');

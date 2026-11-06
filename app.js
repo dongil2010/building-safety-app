@@ -5715,6 +5715,11 @@ document.addEventListener('DOMContentLoaded', () => {
                 window.BsaTypingPopup.close('cancel');
                 return true;
             }
+            if (window.BsaFinishMemberChooser && typeof window.BsaFinishMemberChooser.isOpen === 'function'
+                && window.BsaFinishMemberChooser.isOpen()) {
+                window.BsaFinishMemberChooser.close('cancel');
+                return true;
+            }
             if (typeof isDefectModalOpen === 'function' && isDefectModalOpen() && typeof closeDefectModal === 'function') {
                 closeDefectModal();
                 return true;
@@ -13867,6 +13872,18 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
             + '<button type="button" class="ndt-mo-chip" data-role="slab-toggle" aria-pressed="false">슬래브 두께 합산</button>'
             + '<input type="text" inputmode="decimal" id="ndtSlabThickness" class="form-control ndt-mo-slab-input" placeholder="슬래브 두께 (mm)" autocomplete="off" hidden>'
             + '</div>'
+            + '<div class="ndt-mo-group" data-role="ex-slab">'
+            + '<label class="ndt-mo-check"><input type="checkbox" data-role="ex-slab-on"> 슬래브 두께 제외</label>'
+            + '<input type="text" inputmode="decimal" id="ndtExcludeSlabMm" class="form-control ndt-mo-slab-input" placeholder="mm (선택)" autocomplete="off" hidden>'
+            + '</div>'
+            + '<div class="ndt-mo-group" data-role="ex-ins">'
+            + '<label class="ndt-mo-check"><input type="checkbox" data-role="ex-ins-on"> 단열 두께 제외</label>'
+            + '<input type="text" inputmode="decimal" id="ndtExcludeInsulationMm" class="form-control ndt-mo-slab-input" placeholder="mm (선택)" autocomplete="off" hidden>'
+            + '</div>'
+            + '<div class="ndt-mo-group" data-role="ex-wall">'
+            + '<label class="ndt-mo-check"><input type="checkbox" data-role="ex-wall-on"> 벽체 두께 제외</label>'
+            + '<input type="text" inputmode="decimal" id="ndtExcludeWallMm" class="form-control ndt-mo-slab-input" placeholder="mm (선택)" autocomplete="off" hidden>'
+            + '</div>'
             + '<div class="ndt-mo-hint" data-role="hint" hidden></div>';
         anchor.parentNode.insertBefore(row, anchor.nextSibling);
         row.addEventListener('click', (e) => {
@@ -13877,6 +13894,10 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
                 row.dataset.oneside = row.dataset.oneside === chip.dataset.oneside ? '' : chip.dataset.oneside;
             } else if (chip.dataset.role === 'slab-toggle') {
                 row.dataset.slab = row.dataset.slab === '1' ? '' : '1';
+                if (row.dataset.slab === '1') {
+                    const ex = row.querySelector('[data-role="ex-slab-on"]');
+                    if (ex) ex.checked = false;
+                }
             }
             refreshNdtMeasureOptsUi();
             if (typeof window.recalcNdtSectionAuto === 'function') window.recalcNdtSectionAuto();
@@ -13886,8 +13907,25 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
                 if (inp) { try { inp.focus(); } catch (_e) { /* ignore */ } }
             }
         });
-        row.querySelector('#ndtSlabThickness').addEventListener('input', () => {
+        row.addEventListener('change', (e) => {
+            const t = e.target;
+            if (!t || t.type !== 'checkbox') return;
+            if (t.getAttribute('data-role') === 'ex-slab-on' && t.checked) row.dataset.slab = '';
+            refreshNdtMeasureOptsUi();
             if (typeof window.recalcNdtSectionAuto === 'function') window.recalcNdtSectionAuto();
+            if (typeof scheduleNdtAutoApply === 'function') scheduleNdtAutoApply();
+            if (t.checked) {
+                const inpId = t.getAttribute('data-role') === 'ex-slab-on' ? 'ndtExcludeSlabMm'
+                    : (t.getAttribute('data-role') === 'ex-ins-on' ? 'ndtExcludeInsulationMm' : 'ndtExcludeWallMm');
+                const inp = document.getElementById(inpId);
+                if (inp) { try { inp.focus(); } catch (_e) { /* ignore */ } }
+            }
+        });
+        ['#ndtSlabThickness', '#ndtExcludeSlabMm', '#ndtExcludeInsulationMm', '#ndtExcludeWallMm'].forEach((sel) => {
+            const el = row.querySelector(sel);
+            if (el) el.addEventListener('input', () => {
+                if (typeof window.recalcNdtSectionAuto === 'function') window.recalcNdtSectionAuto();
+            });
         });
         return row;
     }
@@ -13899,21 +13937,54 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
         row.dataset.slab = (o && o.slabOn) ? '1' : '';
         const inp = row.querySelector('#ndtSlabThickness');
         if (inp) inp.value = (o && o.slab != null && o.slab !== '') ? String(o.slab) : '';
+        const setChk = (role, on, inpId, mm) => {
+            const c = row.querySelector(`[data-role="${role}"]`);
+            if (c) c.checked = !!on;
+            const i = row.querySelector(inpId);
+            if (i) i.value = (mm != null && mm !== '') ? String(mm) : '';
+        };
+        setChk('ex-slab-on', o && o.excludeSlabOn, '#ndtExcludeSlabMm', o && o.excludeSlabMm);
+        setChk('ex-ins-on', o && o.excludeInsulationOn, '#ndtExcludeInsulationMm', o && o.excludeInsulationMm);
+        setChk('ex-wall-on', o && o.excludeWallOn, '#ndtExcludeWallMm', o && o.excludeWallMm);
         refreshNdtMeasureOptsUi();
     }
 
     function readNdtMeasureOptsUi() {
         const row = document.getElementById('ndtMeasureOptsRow');
-        if (!row) return { oneSide: null, slabOn: false, slab: null };
-        const inp = row.querySelector('#ndtSlabThickness');
-        return { oneSide: row.dataset.oneside || null, slabOn: row.dataset.slab === '1', slab: inp ? inp.value : null };
+        if (!row) {
+            return {
+                oneSide: null, slabOn: false, slab: null,
+                excludeSlabOn: false, excludeSlabMm: null,
+                excludeInsulationOn: false, excludeInsulationMm: null,
+                excludeWallOn: false, excludeWallMm: null
+            };
+        }
+        const val = (sel) => { const el = row.querySelector(sel); return el ? el.value : null; };
+        const on = (role) => !!(row.querySelector(`[data-role="${role}"]`) || {}).checked;
+        return {
+            oneSide: row.dataset.oneside || null,
+            slabOn: row.dataset.slab === '1',
+            slab: val('#ndtSlabThickness'),
+            excludeSlabOn: on('ex-slab-on'),
+            excludeSlabMm: val('#ndtExcludeSlabMm'),
+            excludeInsulationOn: on('ex-ins-on'),
+            excludeInsulationMm: val('#ndtExcludeInsulationMm'),
+            excludeWallOn: on('ex-wall-on'),
+            excludeWallMm: val('#ndtExcludeWallMm')
+        };
     }
 
     function resolveNdtMeasureOptsFromForm(kind, designW, designD, rawW, rawD) {
         const api = ndtMeasureOptsApi();
         if (!api) return null;
         const ui = readNdtMeasureOptsUi();
-        return api.resolveRc({ kind, designW, designD, rawW, rawD, oneSide: ui.oneSide, slabOn: ui.slabOn, slab: ui.slab });
+        return api.resolveRc({
+            kind, designW, designD, rawW, rawD,
+            oneSide: ui.oneSide, slabOn: ui.slabOn, slab: ui.slab,
+            excludeSlabOn: ui.excludeSlabOn, excludeSlabMm: ui.excludeSlabMm,
+            excludeInsulationOn: ui.excludeInsulationOn, excludeInsulationMm: ui.excludeInsulationMm,
+            excludeWallOn: ui.excludeWallOn, excludeWallMm: ui.excludeWallMm
+        });
     }
 
     function refreshNdtMeasureOptsUi(kindArg) {
@@ -13923,7 +13994,8 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
         const kind = kindArg || getNdtFormDimKind();
         const showOne = api.supportsOneSide(kind);
         const showSlab = api.supportsSlab(kind);
-        row.hidden = !(showOne || showSlab);
+        const showExWallKind = typeof api.supportsExcludeWall === 'function' && api.supportsExcludeWall(kind);
+        row.hidden = !(showOne || showSlab || showExWallKind);
         if (kind !== 'steel') applyNdtDimLabels(kind);   // 칸 이름·안내를 기본으로 되돌린 뒤 아래에서 고친다
         const names = api.sideNames(kind);
         const os = showOne ? (row.dataset.oneside || '') : '';
@@ -13945,6 +14017,21 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
         }
         const slabInput = row.querySelector('#ndtSlabThickness');
         if (slabInput) slabInput.hidden = !slabOn;
+        const showExSlab = showSlab && os !== 'primary' && typeof api.supportsExcludeSlab === 'function' && api.supportsExcludeSlab(kind);
+        const showExIns = showSlab && os !== 'primary' && typeof api.supportsExcludeInsulation === 'function' && api.supportsExcludeInsulation(kind);
+        const showExWall = typeof api.supportsExcludeWall === 'function' && api.supportsExcludeWall(kind) && os !== 'secondary';
+        const visCheck = (groupRole, chkRole, inpSel, show) => {
+            const g = row.querySelector(`[data-role="${groupRole}"]`);
+            if (g) g.hidden = !show;
+            const chk = row.querySelector(`[data-role="${chkRole}"]`);
+            const on = show && !!(chk && chk.checked);
+            const inp = row.querySelector(inpSel);
+            if (inp) inp.hidden = !on;
+            if (slabOn && chkRole === 'ex-slab-on' && chk) chk.checked = false;
+        };
+        visCheck('ex-slab', 'ex-slab-on', '#ndtExcludeSlabMm', showExSlab);
+        visCheck('ex-ins', 'ex-ins-on', '#ndtExcludeInsulationMm', showExIns);
+        visCheck('ex-wall', 'ex-wall-on', '#ndtExcludeWallMm', showExWall);
         // 안 잰 쪽 칸은 잠근다(값은 지우지 않음 — 다시 끄면 그대로)
         const lock = (el, locked) => {
             if (!el) return;
@@ -13963,6 +14050,15 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
         if (!hint) return;
         const parts = [];
         if (mo && mo.slab != null && rawD > 0) parts.push(`실측 춤 = ${rawD} + 슬래브 ${mo.slab} = ${Math.round((rawD + mo.slab) * 100) / 100} mm`);
+        if (mo && (mo.excludeSlabMm || mo.excludeInsulationMm) && rawD > 0 && mo.storeD != null) {
+            parts.push(`실측 춤 = ${rawD}${mo.excludeSlabMm ? ` − 슬래브 ${mo.excludeSlabMm}` : ''}${mo.excludeInsulationMm ? ` − 단열 ${mo.excludeInsulationMm}` : ''} = ${mo.storeD} mm`);
+        }
+        if (mo && mo.excludeWallMm && mo.rawW > 0 && mo.storeW != null) {
+            parts.push(`실측 폭/지름 = ${mo.rawW} − 벽체 ${mo.excludeWallMm} = ${mo.storeW} mm`);
+        }
+        if (mo && ((mo.excludeSlabOn && !mo.excludeSlabMm) || (mo.excludeInsulationOn && !mo.excludeInsulationMm) || (mo.excludeWallOn && !mo.excludeWallMm))) {
+            parts.push('두께를 비워 두면 실측값은 그대로 두고 제외 표시만 남깁니다');
+        }
         if (mo && mo.oneSide) parts.push('안 잰 쪽은 설계치수로 보고 단면적 비율을 냅니다');
         hint.textContent = parts.join(' · ');
         hint.hidden = parts.length === 0;
@@ -14119,7 +14215,8 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
         const dimMode = (item.measureDimMode === 'rc' || !item.measureDimMode)
             ? getNdtMeasureDimKind(item.component)
             : item.measureDimMode;
-        return [api.oneSideNote(item, dimMode), withSlab ? api.slabNote(item, dimMode) : ''].filter(Boolean).join(' · ');
+        return [api.oneSideNote(item, dimMode), withSlab ? api.slabNote(item, dimMode) : '',
+            typeof api.excludeNote === 'function' ? api.excludeNote(item, dimMode) : ''].filter(Boolean).join(' · ');
     }
 
     /**
@@ -15875,6 +15972,7 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
             }
             if (ndtMode === 'PAN' && isNdtModalOpen()) {
                 if (window.BsaTypingPopup && typeof window.BsaTypingPopup.isOpen === 'function' && window.BsaTypingPopup.isOpen()) return;
+                if (window.BsaFinishMemberChooser && typeof window.BsaFinishMemberChooser.isOpen === 'function' && window.BsaFinishMemberChooser.isOpen()) return;
                 closeNdtModal();
                 if (!additive) {
                     selectedNdtIds.clear();
@@ -19462,9 +19560,22 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
                 const moApi = ndtMeasureOptsApi();
                 const slabV = (existingItem.category === '실측') ? (parseFloat(existingItem.slabThickness) || null) : null;
                 setNdtMeasureOptsUi(existingItem.category === '실측'
-                    ? { oneSide: existingItem.measureOneSide || null, slabOn: !!slabV, slab: slabV }
+                    ? {
+                        oneSide: existingItem.measureOneSide || null,
+                        slabOn: !!slabV, slab: slabV,
+                        excludeSlabOn: !!existingItem.excludeSlab,
+                        excludeSlabMm: existingItem.excludeSlabThickness,
+                        excludeInsulationOn: !!existingItem.excludeInsulation,
+                        excludeInsulationMm: existingItem.excludeInsulationThickness,
+                        excludeWallOn: !!existingItem.excludeWall,
+                        excludeWallMm: existingItem.excludeWallThickness
+                    }
                     : null);
-                if (moApi && slabV && measuredDepthElExisting) measuredDepthElExisting.value = moApi.depthInputValue(existingItem);
+                if (moApi && measuredDepthElExisting) measuredDepthElExisting.value = moApi.depthInputValue(existingItem);
+                if (moApi && typeof moApi.widthInputValue === 'function' && measuredWidthElExisting
+                    && existingItem.excludeWall) {
+                    measuredWidthElExisting.value = moApi.widthInputValue(existingItem);
+                }
             }
             [
                 ['ndtDesignWeb', 'designWeb'],
@@ -19752,6 +19863,8 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
         let sectionRatio = null;
         let sectionGrade = null;
         let measureOneSide = null, slabThickness = null, measuredDepthBelowSlab = null;
+        let excludeSlab = false, excludeSlabThickness = null, excludeInsulation = false, excludeInsulationThickness = null;
+        let excludeWall = false, excludeWallThickness = null, measuredDepthRaw = null, measuredWidthRaw = null;
         if (cat === '실측') {
             if (dimKind === 'steel') {
                 const designSteel = readNdtSteelDims('ndtDesign');
@@ -19776,9 +19889,14 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
                 }
             } else if (dimKind === 'circle') {
                 designWidth = parseNdtDimNumber(document.getElementById('ndtDesignWidth')?.value);
-                measuredWidth = parseNdtDimNumber(document.getElementById('ndtMeasuredWidth')?.value);
+                const rawCircleW = parseNdtDimNumber(document.getElementById('ndtMeasuredWidth')?.value);
+                const moC = resolveNdtMeasureOptsFromForm('circle', designWidth, null, rawCircleW, null);
+                measuredWidth = moC ? moC.storeW : rawCircleW;
+                excludeWall = !!(moC && moC.excludeWallOn);
+                excludeWallThickness = moC ? moC.excludeWallMm : null;
+                measuredWidthRaw = excludeWall ? (moC ? moC.rawW : null) : null;
                 if (measuredWidth !== null) avg = String(measuredWidth);
-                const sectionCalc = calcCircleSectionGrade(designWidth, measuredWidth);
+                const sectionCalc = calcCircleSectionGrade(designWidth, moC ? moC.calcW : measuredWidth);
                 if (sectionCalc) {
                     sectionRatio = sectionCalc.ratio;
                     sectionGrade = sectionCalc.code;
@@ -19802,6 +19920,14 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
                 measureOneSide = mo ? mo.oneSide : null;
                 slabThickness = mo ? mo.slab : null;
                 measuredDepthBelowSlab = mo ? mo.depthBelowSlab : null;
+                excludeSlab = !!(mo && mo.excludeSlabOn);
+                excludeSlabThickness = mo ? mo.excludeSlabMm : null;
+                excludeInsulation = !!(mo && mo.excludeInsulationOn);
+                excludeInsulationThickness = mo ? mo.excludeInsulationMm : null;
+                excludeWall = !!(mo && mo.excludeWallOn);
+                excludeWallThickness = mo ? mo.excludeWallMm : null;
+                measuredDepthRaw = (excludeSlab || excludeInsulation) ? (mo ? mo.rawD : null) : null;
+                measuredWidthRaw = excludeWall ? (mo ? mo.rawW : null) : null;
                 if (measuredWidth !== null) avg = String(measuredWidth);
                 const sectionCalc = calcSectionGrade(designWidth, designDepth,
                     mo ? mo.calcW : measuredWidth, noSecondary ? null : (mo ? mo.calcD : measuredDepth));
@@ -19890,7 +20016,9 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
                 designWeb, designFlange, designWebWidth, designFlangeWidth,
                 measuredWeb, measuredFlange, measuredWebWidth, measuredFlangeWidth,
                 sectionRatio, sectionGrade,
-                measureOneSide, slabThickness, measuredDepthBelowSlab
+                measureOneSide, slabThickness, measuredDepthBelowSlab,
+                excludeSlab, excludeSlabThickness, excludeInsulation, excludeInsulationThickness,
+                excludeWall, excludeWallThickness, measuredDepthRaw, measuredWidthRaw
             }
             : {
                 finishState: null, measureDimMode: null,
@@ -19898,7 +20026,9 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
                 designWeb: null, designFlange: null, designWebWidth: null, designFlangeWidth: null,
                 measuredWeb: null, measuredFlange: null, measuredWebWidth: null, measuredFlangeWidth: null,
                 sectionRatio: null, sectionGrade: null,
-                measureOneSide: null, slabThickness: null, measuredDepthBelowSlab: null
+                measureOneSide: null, slabThickness: null, measuredDepthBelowSlab: null,
+                excludeSlab: false, excludeSlabThickness: null, excludeInsulation: false, excludeInsulationThickness: null,
+                excludeWall: false, excludeWallThickness: null, measuredDepthRaw: null, measuredWidthRaw: null
             };
 
         // 내화피복 두께: 플렌지/웨브 실측값을 모으고, 평균은 한 부재(최대 6개소) 기준으로 저장.
@@ -27221,9 +27351,23 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
         if (cat === '구조체') return (DEFECT_COMPONENT_PRESET['구조체'] || []).slice();
         return (DEFECT_COMPONENT_PRESET[cat] || DEFECT_COMPONENT_PRESET['구조체'] || []).slice();
     }
+    function finishMemberChooserApi() {
+        return (typeof window !== 'undefined' && ((window.BSA && window.BSA.finishMemberChooser) || window.BsaFinishMemberChooser)) || null;
+    }
+    function isFinishMemberBaseName(name) {
+        const api = finishMemberChooserApi();
+        if (api && typeof api.isBase === 'function') return api.isBase(name);
+        return ['기둥', '벽체', '보', '슬래브'].includes(String(name || '').trim());
+    }
+    function isFinishCombinedMemberName(name) {
+        const api = finishMemberChooserApi();
+        if (api && typeof api.isCombined === 'function') return api.isCombined(name);
+        return /^(기둥|벽체|보|슬래브)\s+(타일|도장|마감재)$/.test(String(name || '').trim());
+    }
     /** 비구조체·마감재 재사용 목록(커스텀/직접추가)에 맨몸 구조 부재를 넣지 않음. 이 결함 값·화면 표시는 그대로. */
     function shouldLearnDefectComponentForCategory(category, name) {
         const cat = String(category || '').trim();
+        if (cat === '마감재' && isFinishMemberBaseName(name)) return false;
         if (cat !== '비구조체' && cat !== '마감재') return true;
         return !isBareStructuralMemberChipName(name);
     }
@@ -29657,8 +29801,9 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
         // 2026-11-06 미장균열로 비구조체가 된 맨몸 기둥·보도 이 결함에만 보여 주고 재사용 목록에는 넣지 않음
         if (!jointMode && currentComponent && !componentOptions.includes(currentComponent)
             && (isJointComponentName(currentComponent)
+                || isFinishCombinedMemberName(currentComponent)
                 || ((currentCategory === '비구조체' || currentCategory === '마감재')
-                    && isBareStructuralMemberChipName(currentComponent)))) {
+                    && (isBareStructuralMemberChipName(currentComponent) || isFinishMemberBaseName(currentComponent))))) {
             componentOptions = [currentComponent].concat(componentOptions);
         }
         const onComponentPick = (value) => {
@@ -29674,6 +29819,35 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
             if (typeof scheduleDefectAutoApply === 'function') scheduleDefectAutoApply();
             refreshDefectQuickPickBar();
         };
+        const finishBaseHost = document.getElementById('quickFinishBaseChips');
+        if (finishBaseHost) {
+            const showFinishBases = !jointMode && currentCategory === '마감재';
+            finishBaseHost.style.display = showFinishBases ? '' : 'none';
+            finishBaseHost.innerHTML = '';
+            if (showFinishBases) {
+                const chooser = finishMemberChooserApi();
+                const bases = (chooser && chooser.BASES) ? chooser.BASES : ['기둥', '벽체', '보', '슬래브'];
+                const parsedFinish = chooser && chooser.parse ? chooser.parse(currentComponent) : null;
+                const activeBase = parsedFinish ? parsedFinish.base : (isFinishMemberBaseName(currentComponent) ? currentComponent : '');
+                finishBaseHost.innerHTML = bases.map((b) => {
+                    const on = b === activeBase;
+                    return `<button type="button" class="defect-quick-chip defect-finish-base-chip${on ? ' active' : ''}" tabindex="-1" data-finish-base="${escapeHtml(b)}">${escapeHtml(b)}</button>`;
+                }).join('');
+                finishBaseHost.querySelectorAll('[data-finish-base]').forEach((btn) => {
+                    btn.addEventListener('click', () => {
+                        const base = btn.getAttribute('data-finish-base') || '';
+                        if (!chooser || typeof chooser.open !== 'function') return;
+                        chooser.open({
+                            base,
+                            previousValue: currentComponent,
+                            onConfirm: (label) => onComponentPick(label),
+                            onCancel: () => {}
+                        });
+                    });
+                });
+                componentOptions = componentOptions.filter((v) => !isFinishMemberBaseName(v) || (compCustom || []).includes(v));
+            }
+        }
         if (jointMode) {
             renderQuickPickChipGroup('quickComponentChips', componentOptions, currentComponent, onComponentPick);
         } else {
@@ -30300,6 +30474,9 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
     function getCrackKindsForComponent(component) {
         const key = normalizeComponentKey(component);
         if (!key) return null;
+        // 마감 재료가 붙은 이름(기둥 타일·벽체 도장·슬래브 마감재)은 바탕 부재 RC 균열 칩으로 가지 않음
+        if (key.includes('타일') || key.includes('석재') || key.includes('도장') || key.includes('수장')
+            || key.includes('마감재') || key.includes('미장') || key.includes('뿜칠') || key.includes('페인트')) return null;
         if (key.includes('데크슬래브')) return null;
         if (key.includes('슬래브') && !key.includes('접합')) return null; // 슬래브는 '균열'만
         if (key.includes('철골') && key.includes('접합')) return null;
@@ -30309,7 +30486,6 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
         if (key.includes('조적')) return WALL_CRACK_KINDS.slice();
         if (key.includes('ALC') || key.includes('칸막이')) return null;
         if (key.includes('창호') || key.includes('셔터') || key.includes('패널') || key.includes('난간')) return null;
-        if (key.includes('타일') || key.includes('석재') || key.includes('도장') || key.includes('수장')) return null;
         if (key.includes('천장') || key.includes('바닥') || key === '문') return null;
         if (key.includes('벽체') || key === '내력벽') return WALL_CRACK_KINDS.slice();
         if (key.includes('옹벽') || key.includes('파라펫')) return WALL_CRACK_KINDS.slice();
@@ -30490,9 +30666,10 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
         // 2026-10-30 회사 결함표: 같은 바탕 부재 이름(벽체·기둥·보·슬래브·바닥)도 분류에 따라 결함 목록이 다르다
         if (key && category === '마감재') {
             if (key.includes('뿜칠') || key.includes('내화피복')) return SPRAY_FINISH_DEFECTS;
-            if (/^(벽체|기둥|보|보\(G\)|보\(B\)|슬래브|바닥)$/.test(key)) return COMPANY_FINISH_DEFECTS;
             if (key.includes('타일') && !componentDefectPreset[key]) return COMPANY_TILE_DEFECTS;
+            if (key.includes('도장') || key.includes('페인트')) return EXT_PAINT_DEFECTS;
             if (key.includes('마감재') && !key.includes('천장')) return COMPANY_FINISH_DEFECTS;
+            if (/^(벽체|기둥|보|보\(G\)|보\(B\)|슬래브|바닥)$/.test(key)) return COMPANY_FINISH_DEFECTS;
         }
         if (key && category === '비구조체') {
             if (key === '벽체') return MASONRY_WALL_DEFECTS;
@@ -38244,6 +38421,8 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
         // 2026-11-06 직접 입력 자식 팝업(완료/취소)도 body에 붙는다 — 누르면 부모 수정창이 같이 닫히던 문제
         if (typeof window !== 'undefined' && window.BsaTypingPopup && typeof window.BsaTypingPopup.isElement === 'function' && window.BsaTypingPopup.isElement(target)) return true;
         if (target.closest('#bsaTypingPopup') || target.closest('.bsa-typing-overlay')) return true;
+        if (typeof window !== 'undefined' && window.BsaFinishMemberChooser && typeof window.BsaFinishMemberChooser.isElement === 'function' && window.BsaFinishMemberChooser.isElement(target)) return true;
+        if (target.closest('#bsaFinishMemberChooser') || target.closest('.bsa-finish-chooser-overlay')) return true;
         // 2026-10-19 접합부 부재(기둥·보…) 고르는 선택 목록 시트도 body에 붙는다 — 고를 때 수정창이 사라지던 문제
         if (target.closest('#bsaSelectSheet')) return true;
         if (target.closest('#defectMarkingMemberFloat')) return true;
@@ -44229,6 +44408,7 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
         if (window.state.currentTab === 'tab-ndt') {
             if (k === 'escape') {
                 if (window.BsaTypingPopup && typeof window.BsaTypingPopup.isOpen === 'function' && window.BsaTypingPopup.isOpen()) return;
+                if (window.BsaFinishMemberChooser && typeof window.BsaFinishMemberChooser.isOpen === 'function' && window.BsaFinishMemberChooser.isOpen()) return;
                 e.preventDefault();
                 if (isNdtModalOpen()) closeNdtModal();
                 if (typeof isNdtCrackMonitorModalOpen === 'function' && isNdtCrackMonitorModalOpen()) {
@@ -44311,6 +44491,7 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
         }
         if (k === 'escape') {
             if (window.BsaTypingPopup && typeof window.BsaTypingPopup.isOpen === 'function' && window.BsaTypingPopup.isOpen()) return;
+            if (window.BsaFinishMemberChooser && typeof window.BsaFinishMemberChooser.isOpen === 'function' && window.BsaFinishMemberChooser.isOpen()) return;
             e.preventDefault();
             // 선 그리는 중: Esc = 그리기 취소(점 버림). 다각형은 아래처럼 지금까지 찍은 모양으로 저장
             if (pendingAreaPoly && pendingAreaPoly.length && getPendingPolyShape() === 'polyline') {

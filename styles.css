@@ -17884,6 +17884,69 @@ input.ndt-mo-locked { background: var(--bg-secondary, #f2f2f2); color: var(--tex
 }
 .ndt-mo-group { display: inline-flex; flex-wrap: wrap; gap: 6px; align-items: center; }
 .ndt-mo-label { font-size: 12px; font-weight: 600; color: var(--text-secondary, #555); margin-right: 2px; }
+.ndt-mo-check { display: inline-flex; align-items: center; gap: 4px; font-size: 12.5px; font-weight: 600; color: var(--text-primary, #222); cursor: pointer; white-space: nowrap; }
+.dqg-finish-bases { margin-bottom: 4px; }
+.defect-finish-base-chip { border-style: dashed; }
+.bsa-finish-chooser-overlay {
+    position: fixed;
+    inset: 0;
+    z-index: 2147483300;
+    background: rgba(15, 23, 42, 0.55);
+    touch-action: none;
+    overscroll-behavior: contain;
+}
+.bsa-finish-chooser-card {
+    position: absolute;
+    left: 50%;
+    top: 22%;
+    transform: translateX(-50%);
+    width: min(420px, calc(100vw - 32px));
+    box-sizing: border-box;
+    background: var(--bg-card, #ffffff);
+    color: var(--text-primary, #0f172a);
+    border-radius: 14px;
+    box-shadow: 0 12px 40px rgba(15, 23, 42, 0.35);
+    padding: 14px 16px 12px;
+    touch-action: manipulation;
+}
+.bsa-finish-chooser-title {
+    font-size: 0.95rem;
+    font-weight: 800;
+    color: var(--text-secondary, #334155);
+    margin-bottom: 10px;
+}
+.bsa-finish-chooser-choices {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 8px;
+}
+.bsa-finish-chooser-choice {
+    min-width: 88px;
+    min-height: 44px;
+    font-size: 1rem;
+    font-weight: 800;
+    border-radius: 10px;
+    border: 1px solid var(--border-highlight, #cbd5e1);
+    background: var(--bg-secondary, #f8fafc);
+    color: var(--text-primary, #0f172a);
+    cursor: pointer;
+}
+.bsa-finish-chooser-actions {
+    display: flex;
+    justify-content: flex-end;
+    margin-top: 12px;
+}
+.bsa-finish-chooser-cancel {
+    min-width: 88px;
+    min-height: 44px;
+    font-size: 1rem;
+    font-weight: 800;
+    border-radius: 10px;
+    border: 1px solid var(--border-highlight, #cbd5e1);
+    background: var(--bg-secondary, #f8fafc);
+    color: var(--text-primary, #0f172a);
+    cursor: pointer;
+}
 @media (max-width: 600px) { .ndt-mo-group[data-role="slab"] { flex: 1 1 100%; } }
 
 /* 2026-10-19 받기 화면 진단 줄(캡처해서 보내기용) · 같은 Wi-Fi로 받기 */

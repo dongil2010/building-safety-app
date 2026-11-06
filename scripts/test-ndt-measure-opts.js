@@ -38,6 +38,61 @@ function testModule() {
     assert.strictEqual(mo.slabNote({ slabThickness: 150 }, 'beam'), '슬래브 150 포함');
     assert.strictEqual(mo.depthInputValue({ slabThickness: 150, measuredDepthBelowSlab: 450, measuredDepth: 600 }), 450, '다시 열면 슬래브 아래 춤');
     assert.strictEqual(mo.depthInputValue({ slabThickness: 150, measuredDepth: 600 }), 450);
+
+    assert.ok(mo.supportsExcludeSlab('beam') && mo.supportsExcludeInsulation('beam') && !mo.supportsExcludeWall('beam'));
+    assert.ok(mo.supportsExcludeWall('column') && mo.supportsExcludeWall('circle'));
+    assert.ok(!mo.supportsExcludeSlab('column') && !mo.supportsExcludeInsulation('circle'));
+
+    // 체크만(mm 없음): 실측값 그대로, 주석만
+    const flagOnly = mo.resolveRc({ kind: 'beam', designW: 400, designD: 600, rawW: 405, rawD: 590, excludeSlabOn: true });
+    assert.deepStrictEqual([flagOnly.storeD, flagOnly.excludeSlabOn, flagOnly.excludeSlabMm], [590, true, null]);
+    assert.strictEqual(mo.excludeNote({ excludeSlab: true }, 'beam'), '슬래브 두께 제외');
+
+    // mm 있으면 춤에서 빼고, 다시 열면 입력값
+    const beamEx = mo.resolveRc({ kind: 'beam', designW: 400, designD: 600, rawW: 405, rawD: 590, excludeSlabOn: true, excludeSlabMm: 120 });
+    assert.deepStrictEqual([beamEx.storeD, beamEx.rawD, beamEx.excludeSlabMm], [470, 590, 120]);
+    const again = mo.resolveRc({
+        kind: 'beam', designW: 400, designD: 600, rawW: mo.depthInputValue({
+            measuredDepth: beamEx.storeD, measuredDepthRaw: beamEx.rawD, excludeSlab: true, excludeSlabThickness: 120
+        }), rawD: mo.depthInputValue({
+            measuredDepth: beamEx.storeD, measuredDepthRaw: beamEx.rawD, excludeSlab: true, excludeSlabThickness: 120
+        }), excludeSlabOn: true, excludeSlabMm: 120
+    });
+    assert.strictEqual(again.storeD, 470, '다시 저장해도 두 번 빼지 않음');
+    assert.strictEqual(mo.depthInputValue({
+        measuredDepth: 470, measuredDepthRaw: 590, excludeSlab: true, excludeSlabThickness: 120
+    }), 590);
+    assert.strictEqual(mo.excludeNote({ excludeSlab: true, excludeSlabThickness: 120 }, 'beam'), '슬래브 120 제외');
+
+    const bothEx = mo.resolveRc({
+        kind: 'beam', rawW: 400, rawD: 600, excludeSlabOn: true, excludeSlabMm: 100,
+        excludeInsulationOn: true, excludeInsulationMm: 50
+    });
+    assert.strictEqual(bothEx.storeD, 450);
+
+    // 합산과 슬래브 제외는 같이 못 켬 — 합산이 이김
+    const mutex = mo.resolveRc({ kind: 'beam', rawW: 400, rawD: 450, slabOn: true, slab: 150, excludeSlabOn: true, excludeSlabMm: 80 });
+    assert.strictEqual(mutex.slab, 150);
+    assert.strictEqual(mutex.excludeSlabOn, false);
+    assert.strictEqual(mutex.storeD, 600);
+
+    const col = mo.resolveRc({ kind: 'column', rawW: 500, rawD: 600, excludeWallOn: true, excludeWallMm: 40 });
+    assert.deepStrictEqual([col.storeW, col.storeD, col.rawW], [460, 600, 500]);
+    assert.strictEqual(mo.widthInputValue({
+        measuredWidth: 460, measuredWidthRaw: 500, excludeWall: true, excludeWallThickness: 40
+    }), 500);
+    const colAgain = mo.resolveRc({
+        kind: 'column', rawW: mo.widthInputValue({
+            measuredWidth: 460, measuredWidthRaw: 500, excludeWall: true, excludeWallThickness: 40
+        }), rawD: 600, excludeWallOn: true, excludeWallMm: 40
+    });
+    assert.strictEqual(colAgain.storeW, 460, '기둥 폭 두 번 빼지 않음');
+
+    const circ = mo.resolveRc({ kind: 'circle', rawW: 600, excludeWallOn: true, excludeWallMm: 20 });
+    assert.strictEqual(circ.storeW, 580);
+    const circFlag = mo.resolveRc({ kind: 'circle', rawW: 600, excludeWallOn: true });
+    assert.strictEqual(circFlag.storeW, 600);
+    assert.strictEqual(mo.excludeNote({ excludeWall: true }, 'circle'), '벽체 두께 제외');
 }
 
 function loadFormat() {
@@ -67,6 +122,17 @@ function testFormat() {
     const beamSlab = { component: '보', designWidth: 400, designDepth: 600, measuredWidth: 405, measuredDepth: 600, slabThickness: 150, measuredDepthBelowSlab: 450 };
     assert.strictEqual(c.out(beamSlab, 'measured', '×'), '405×600', '합산 춤으로 출력');
     assert.ok(/슬래브 150 포함/.test(c.screen(beamSlab, 'measured', '×')), '앱 화면엔 슬래브 합산 표시');
+
+    const beamExOut = {
+        component: '보', designWidth: 400, designDepth: 600, measuredWidth: 405, measuredDepth: 470,
+        excludeSlab: true, excludeSlabThickness: 120, measuredDepthRaw: 590
+    };
+    assert.strictEqual(c.out(beamExOut, 'measured', '×'), '405×470\n(슬래브 120 제외)', '출력 칸에 제외 주석·빼 둔 춤');
+    const colExOut = {
+        component: '기둥', measureDimMode: 'column', designWidth: 500, designDepth: 600,
+        measuredWidth: 460, measuredDepth: 600, excludeWall: true, excludeWallThickness: 40, measuredWidthRaw: 500
+    };
+    assert.ok(/벽체 40 제외/.test(c.out(colExOut, 'measured', '×')));
 }
 
 function testWiring() {
@@ -75,6 +141,9 @@ function testWiring() {
     assert.ok(/ndtSlabThickness/.test(app), '슬래브 두께 칸');
     assert.ok(/measureOneSide/.test(extractFunction(app, 'function resolveNdtMeasureOptsFromForm(')) || /resolveRc\(/.test(extractFunction(app, 'function resolveNdtMeasureOptsFromForm(')));
     assert.ok(/slabThickness/.test(app) && /measuredDepthBelowSlab/.test(app), '저장 필드');
+    assert.ok(/excludeSlab/.test(app) && /excludeInsulation/.test(app) && /excludeWall/.test(app));
+    assert.ok(/ndtExcludeSlabMm/.test(app) && /ndtExcludeWallMm/.test(app));
+    assert.ok(!/keypad.?dock|measure-keypad-dock/i.test(extractFunction(app, 'function ensureNdtMeasureOptsRow(')), '키패드 도킹 변경 없음');
     const html = fs.readFileSync(path.join(root, 'index.html'), 'utf8');
     assert.ok(/js\/core\/ndt-measure-opts\.js\?v=/.test(html));
     assert.ok(html.indexOf('js/core/ndt-measure-opts.js') < html.indexOf('src="app.js'));
