@@ -17989,7 +17989,7 @@ input.ndt-mo-locked { background: var(--bg-secondary, #f2f2f2); color: var(--tex
 .ndt-mo-group { display: inline-flex; flex-wrap: wrap; gap: 6px; align-items: center; }
 .ndt-mo-label { font-size: 12px; font-weight: 600; color: var(--text-secondary, #555); margin-right: 2px; }
 .ndt-mo-check { display: inline-flex; align-items: center; gap: 4px; font-size: 12.5px; font-weight: 600; color: var(--text-primary, #222); cursor: pointer; white-space: nowrap; }
-.dqg-finish-bases { margin-bottom: 4px; }
+.defect-quick-chip-grid.dqg-finish-bases { margin-bottom: 4px; grid-template-columns: repeat(2, minmax(0, 1fr)); }
 .defect-finish-base-chip { border-style: dashed; }
 .bsa-finish-chooser-overlay {
     position: fixed;

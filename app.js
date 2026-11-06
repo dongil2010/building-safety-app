@@ -33832,12 +33832,17 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
         const t = String(defectType).trim();
         if (defectCausePreset[t]) return t;
         if (isRcStructuralCrackKind(t)) return '균열';
-        const keys = Object.keys(defectCausePreset).sort((a, b) => b.length - a.length);
-        for (const k of keys) {
-            if (k === '기타') continue;
-            if (t.includes(k) || k.includes(t)) return k;
-        }
-        return '기타';
+        // 2026-11-06 띄어쓰기만 다르면 같은 종류(도장박리 → 도장 박리)
+        const compact = t.replace(/\s+/g, '');
+        const keysAll = Object.keys(defectCausePreset).filter((k) => k !== '기타');
+        const sameWords = keysAll.find((k) => k.replace(/\s+/g, '') === compact);
+        if (sameWords) return sameWords;
+        // 긴 이름 안에 아는 종류가 들어 있으면 가장 구체적인 것(콘크리트 박리 및 철근노출 → 콘크리트 박리)
+        const inside = keysAll.filter((k) => t.includes(k)).sort((a, b) => b.length - a.length)[0];
+        if (inside) return inside;
+        // 짧게 적었으면 가장 일반적인 것. 2026-11-06 전엔 가장 긴 이름을 골라 「박리」가 「콘크리트 박리」가 됐다(→ 박리/박락)
+        const broader = keysAll.filter((k) => k.includes(t)).sort((a, b) => a.length - b.length)[0];
+        return broader || '기타';
     }
 
     /** 복수 결함 종류 → 원인 프리셋 그룹(RC 균열 계열만 하나로 합침) */
@@ -34430,7 +34435,9 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
                 document.getElementById('defectTypeInput')
             ) || '균열';
             // 세팅 창의 「결함 종류」 선택으로 다른 종류의 원인 목록도 바로 편집
-            const key = window._optionManagerCauseKey || getCauseDisplayGroups(dType)[0]?.key || getCauseKey(dType);
+            // 결함 종류를 여러 개 고른 마킹은 마지막에 고른 종류를 먼저 보여 준다(「콘크리트 박리, 도장 박리」→ 도장 박리)
+            const causeGroups = getCauseDisplayGroups(dType);
+            const key = window._optionManagerCauseKey || causeGroups[causeGroups.length - 1]?.key || getCauseKey(dType);
             if (!window.state.customDefectCauses) window.state.customDefectCauses = {};
             if (!window.state.hiddenDefectCauses) window.state.hiddenDefectCauses = {};
             if (!window.state.hiddenDefectCauses[key]) window.state.hiddenDefectCauses[key] = [];
