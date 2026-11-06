@@ -939,6 +939,20 @@ document.addEventListener('DOMContentLoaded', () => {
         });
     }
     window.bsaSyncProgressSummary = syncProgressSummary;
+    /** 2026-11-06 멈춘 사진을 어느 현장·층·번호 것인지로 보여 준다(사진 id는 사람이 못 찾는다) */
+    function syncProgressPhotoLabel(photoId) {
+        try {
+            const defs = (window.state && window.state.defects) || {};
+            for (const fk of Object.keys(defs)) {
+                const d = (defs[fk] || []).find((x) => x && ((x.photoIds || []).includes(photoId) || (x.prevRoundPhotoIds || []).includes(photoId)));
+                if (d) {
+                    const s = syncProgressSiteOfFloor(fk);
+                    return `${s ? `${s.site} ${s.floor}` : fk}${d.no ? ` ${d.no}` : ''}`;
+                }
+            }
+        } catch (_e) { /* id 그대로 */ }
+        return String(photoId);
+    }
     /** 2026-11-06 층 키 → 현장(회차)·동+층 이름. 진행률 창 「현장별 남은 변경」 */
     function syncProgressSiteOfFloor(fk) {
         const b = findBuildingForFloorKey(fk);
@@ -1173,7 +1187,7 @@ document.addEventListener('DOMContentLoaded', () => {
                     parkedHtml = `<div class="bsp-parked" style="border:1px solid #f59e0b;background:#fffbeb;color:#92400e;border-radius:8px;padding:8px 10px;margin-bottom:8px;font-size:0.85rem;">`
                         + `<strong><i class="fa-solid fa-circle-pause"></i> 자동 올리기를 멈췄습니다</strong> — 같은 실패를 반복하며 서버 사용량을 쓰지 않도록 멈춘 것이고, 이 기기의 데이터는 지우지 않았습니다.`
                         + (parkedGate ? `<br>원인: ${esc(g.kind === 'permanent' ? '서버가 거부(권한·없음·잘못된 값 등)' : `${g.fails || 0}번 연속 실패`)} · ${esc(g.reason || '')}` : '')
-                        + (parkedPhotos.length ? `<br>못 올린 사진 ${parkedPhotos.length}장: ${esc(parkedPhotos.slice(0, 5).map((x) => `${x.id} (${x.reason || x.kind})`).join(', '))}${parkedPhotos.length > 5 ? ' …' : ''}` : '')
+                        + (parkedPhotos.length ? `<br>못 올린 사진 ${parkedPhotos.length}장: ${esc(parkedPhotos.slice(0, 5).map((x) => `${syncProgressPhotoLabel(x.id)} (${x.reason || x.kind})`).join(', '))}${parkedPhotos.length > 5 ? ' …' : ''}` : '')
                         + `<br>원인을 해결한 뒤 아래 「지금 다시 올리기」를 눌러 주세요.</div>`;
                 }
                 body.innerHTML = parkedHtml + sp.renderPanelHtml(sum, syncProgressFloorLabel);
@@ -63788,6 +63802,56 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
         return true;
     }
 
+    /**
+     * 2026-11-06 일지에 「안 올라감」으로 남은 사진을 층과 상관없이 직접 올린다.
+     * 층 묶음이 먼저 올라가 「올릴 층」에서 빠지면 그 층 사진 작업이 다시 돌지 않아, 남은 사진이 영영 안 올라가고
+     * 진행률은 「남음 2」에서 멈춘 채 계속 올리는 것처럼 보였다(새희망교회 1F, 영광군청사 B1F·EXT_1).
+     * 기기에 원본이 없으면 서버를 한 번만 본다: 서버에 있으면 올라간 것으로, 없으면 멈춤 목록에 남겨 다시 촬영하게 한다.
+     * 일지에 남은 사진만 보므로 전 사진 문서를 읽지 않는다. 아무것도 지우지 않는다.
+     */
+    async function uploadPendingJournalPhotos() {
+        const j = typeof syncJournal === 'function' ? syncJournal() : null;
+        const collection = getCompanyPhotosCollection();
+        if (!j || !collection || navigator.onLine === false) return;
+        j.summary(syncProgressCtx());   // 결함에서 빠진 사진을 먼저 정리
+        const ids = j.pendingEntries().filter((e) => e.k === 'photo' && !isPhotoMarkedOnStorage(e.id)).map((e) => e.id);
+        if (!ids.length) return;
+        const tracker = photoRetryTracker();
+        await runPhotoJobsInBatches(ids, async (id) => {
+            if (tracker && !tracker.shouldTry(id)) return;
+            let failure = null;
+            try {
+                const url = await resolveLocalPhotoUrl(id);
+                if (typeof url === 'string' && url.indexOf('data:') === 0) {
+                    if (_photoLastError) _photoLastError.delete(id);
+                    if (!(await persistPhotoToCloud(id, url))) {
+                        failure = _photoLastError.get(id) || { code: 'upload-failed', message: '사진 업로드 실패' };
+                    }
+                } else if (typeof url === 'string' && isFirebaseStorageHttpUrl(url)) {
+                    markPhotoOnStorage(id);
+                } else {
+                    const snap = await collection.doc(id).get({ source: 'server' });
+                    const data = snap.exists ? (snap.data() || {}) : null;
+                    if (data && (hasFirebaseStorageMeta(data) || (typeof data.dataUrl === 'string' && data.dataUrl.length > 32))) {
+                        markPhotoOnStorage(id);
+                    } else {
+                        failure = { code: 'missing-local-blob', message: '이 기기에 원본 없음·서버에도 없음 — 찍은 기기에서 올리거나 다시 촬영' };
+                    }
+                }
+            } catch (e) {
+                failure = e;
+            }
+            if (!tracker) return;
+            if (failure) {
+                const r = tracker.fail(id, failure);
+                console.warn('[사진] 일지에 남은 사진 올리기 실패:', id, r.kind, r.n);
+            } else {
+                tracker.ok(id);
+            }
+        });
+        if (typeof scheduleSyncProgressRender === 'function') scheduleSyncProgressRender();
+    }
+
     async function runPhotoJobsInBatches(items, worker, batchSize) {
         const size = batchSize || PHOTO_STORAGE_UPLOAD_MAX;
         const list = Array.isArray(items) ? items : [];
@@ -66954,6 +67018,8 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
             try { offlineWorked = localStorage.getItem('bsa_offline_worked_v1') === '1'; } catch (_e) { /* ignore */ }
             // 오프라인을 겪은 적이 없으면(준비만 해 둔 상태) 비울지 묻지 않는다 — 현장 가기 전 준비가 지워지면 안 된다
             const statuses = offlineWorked ? (await prep.listStatuses()).filter(Boolean) : [];
+            // 2026-11-06 올릴 층이 없어도 일지에 남은 사진은 올린다(동기화가 안 돌면 영영 안 올라감)
+            try { await uploadPendingJournalPhotos(); } catch (e) { console.warn('[오프라인 복귀] 남은 사진 올리기 실패', e); }
             const hadPending = _dirtyFloorKeys.size > 0 || ((window._defectPhotoSaves && window._defectPhotoSaves.size) || 0) > 0;
             if (!statuses.length && !hadPending) return;
             if (typeof syncProgressBegin === 'function') syncProgressBegin();
@@ -70719,6 +70785,7 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
 
             // 사진/도면 업로드 (잠금 유지 + heartbeat)
             const photoFailedFloors = await uploadInlineDefectPhotosForSync(subsetDefectsMap(window.state.defects, Array.from(floorsToSync)));
+            await uploadPendingJournalPhotos();
             const fieldRasterOnly = typeof isNativeAndroidApp === 'function' && isNativeAndroidApp() && !layoutIsPcLike();
             if (!fieldRasterOnly) {
                 await uploadFloorDrawingPdfsForSync(window.state.buildings);

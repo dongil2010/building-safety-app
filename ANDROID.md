@@ -59,3 +59,11 @@ Android Studio에서 **Run** (실기기 또는 에뮬레이터).
 - 로그인·동기화·사진·도면은 **인터넷 연결**이 필요합니다. 기본 화면은 APK 안에서 열립니다.
 - 네이티브 앱에서는 Service Worker를 등록하지 않습니다. 웹 캐시는 홈 **새로고침**으로 비울 수 있습니다.
 - 앱 번호(`versionCode` / `versionName`)는 **웹 앱을 따릅니다** — `android/app/build.gradle`이 빌드 때 `app.js`의 `window.BSA_APP_BUILD = { versionCode, versionName }`(홈 배지의 v번호)를 읽습니다. 번호를 올릴 땐 그 한 줄만 고치고(`versionCode`는 늘 이전보다 크게) APK를 다시 빌드하세요. `build.gradle`의 숫자를 직접 고치지 마세요.
+
+## 정식 서명 APK (2026-11-06, Play 프로텍트 유해 앱 경고 대응)
+
+`npm run android:build:release` — 디버그 표시 없는 릴리스 APK를 `android/app/build/outputs/apk/release/app-release.apk`로 만든다. **업로드는 하지 않는다.**
+
+- 키는 저장소 밖 `~/.bsa-release/`(이 PC)에만 있다. `release.jks`·`release.pass`·`debug-to-release.lineage` 셋 다 따로 백업한다. 잃어버리면 앱을 더 업데이트할 수 없다.
+- 서명 키 교체(APK v3 rotation)라서 Android 9 이상은 앱을 지우지 않고 덮어쓴다. 앱을 지우면 기기의 오프라인 데이터도 지워지므로, 설치 실패 시 지우지 말 것.
+- 전환 뒤 `npm run android:build:debug`로 업로드하면 옛 키로 내려가 업데이트가 막힌다. `scripts/upload-mobile-release.js`를 릴리스 APK로 바꾼 뒤 배포할 것.
