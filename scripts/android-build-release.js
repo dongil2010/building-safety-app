@@ -52,12 +52,16 @@ function ensureKey() {
     process.env.BSA_RELEASE_PASS = fs.readFileSync(PASS_FILE, 'utf8').trim();
     process.env.BSA_DEBUG_PASS = 'android'; // Android 디버그 키의 공개된 기본 비밀번호
     if (!fs.existsSync(KS)) {
+        if (process.argv.indexOf('--init') < 0) {
+            throw new Error(`비밀번호 파일만 있고 키가 없습니다: ${KS} 새로 만들면 안 됩니다. 백업한 폴더를 복사하세요.`);
+        }
         run('keytool', ['-genkeypair', '-keystore', KS, '-storetype', 'PKCS12', '-alias', ALIAS, '-keyalg', 'RSA', '-keysize', '4096',
             '-validity', '10000', '-dname', 'CN=Smart Safety Inspection, C=KR',
             '-storepass:env', 'BSA_RELEASE_PASS', '-keypass:env', 'BSA_RELEASE_PASS']);
         console.log(`새 릴리스 키를 만들었습니다: ${KS} — 따로 백업하세요.`);
     }
     if (!fs.existsSync(LINEAGE)) {
+        if (!fs.existsSync(OLD_KS)) throw new Error(`키 교체 증명도 옛 디버그 키도 없습니다: ${LINEAGE} 백업한 폴더를 복사하세요.`);
         run(sdkTool('apksigner.bat'), ['rotate', '--out', `"${LINEAGE}"`,
             '--old-signer', '--ks', `"${OLD_KS}"`, '--ks-key-alias', 'androiddebugkey', '--ks-pass', 'env:BSA_DEBUG_PASS', '--key-pass', 'env:BSA_DEBUG_PASS',
             '--new-signer', '--ks', `"${KS}"`, '--ks-key-alias', ALIAS, '--ks-pass', 'env:BSA_RELEASE_PASS', '--key-pass', 'env:BSA_RELEASE_PASS']);
@@ -72,9 +76,14 @@ function main() {
     const aligned = path.join(OUT_DIR, 'app-release-aligned.apk');
     const signed = path.join(OUT_DIR, 'app-release.apk');
     run(sdkTool('zipalign.exe'), ['-f', '-p', '4', unsigned, aligned]);
+    // 옛 디버그 키가 없는 PC: 정식 키 + 키 교체 증명으로 v3 서명만 한다. Android 9 이상만 설치·업데이트된다.
+    const oldSigner = fs.existsSync(OLD_KS)
+        ? ['--ks', `"${OLD_KS}"`, '--ks-key-alias', 'androiddebugkey', '--ks-pass', 'env:BSA_DEBUG_PASS', '--key-pass', 'env:BSA_DEBUG_PASS', '--next-signer']
+        : ['--min-sdk-version', '28', '--v1-signing-enabled', 'false', '--v2-signing-enabled', 'false', '--v3-signing-enabled', 'true', '--v4-signing-enabled', 'false'];
+    if (!fs.existsSync(OLD_KS)) console.warn(`옛 디버그 키가 없습니다(${OLD_KS}). Android 9 이상 전용으로 서명합니다.`);
     run(sdkTool('apksigner.bat'), ['sign',
-        '--ks', `"${OLD_KS}"`, '--ks-key-alias', 'androiddebugkey', '--ks-pass', 'env:BSA_DEBUG_PASS', '--key-pass', 'env:BSA_DEBUG_PASS',
-        '--next-signer', '--ks', `"${KS}"`, '--ks-key-alias', ALIAS, '--ks-pass', 'env:BSA_RELEASE_PASS', '--key-pass', 'env:BSA_RELEASE_PASS',
+        ...oldSigner,
+        '--ks', `"${KS}"`, '--ks-key-alias', ALIAS, '--ks-pass', 'env:BSA_RELEASE_PASS', '--key-pass', 'env:BSA_RELEASE_PASS',
         '--lineage', `"${LINEAGE}"`, '--rotation-min-sdk-version', '28', '--out', `"${signed}"`, `"${aligned}"`]);
     fs.unlinkSync(aligned);
     console.log(`완료 (업로드 안 함): ${signed}`);

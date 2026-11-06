@@ -156,7 +156,7 @@ function assertReleaseSigned(apkPath) {
     const btRoot = path.join(sdk, 'build-tools');
     const versions = fs.readdirSync(btRoot).sort((a, b) => a.localeCompare(b, undefined, { numeric: true }));
     const bt = path.join(btRoot, versions[versions.length - 1]);
-    const certs = execSync(`"${path.join(bt, 'apksigner.bat')}" verify --print-certs "${apkPath}"`, { encoding: 'utf8', stdio: ['ignore', 'pipe', 'ignore'] });
+    const certs = execSync(`"${path.join(bt, 'apksigner.bat')}" verify --min-sdk-version 28 --print-certs "${apkPath}"`, { encoding: 'utf8', stdio: ['ignore', 'pipe', 'ignore'] });
     if (certs.indexOf(RELEASE_CERT_SHA256) < 0) fail('정식 키로 서명된 APK가 아니라 올리지 않습니다: ' + apkPath);
     const badging = execSync(`"${path.join(bt, 'aapt2.exe')}" dump badging "${apkPath}"`, { encoding: 'utf8', stdio: ['ignore', 'pipe', 'ignore'], maxBuffer: 1 << 26 });
     if (badging.indexOf('application-debuggable') >= 0) fail('디버그 빌드라 올리지 않습니다: ' + apkPath);

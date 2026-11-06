@@ -66,24 +66,22 @@ public class MainActivity extends BridgeActivity {
         } catch (Exception ignored) { /* older API paths */ }
     }
 
-    /** 상태줄·하단 버튼을 숨겨 화면 전체를 쓴다. 가장자리를 쓸어 올리면 잠깐만 보인다. */
+    /** 상단 시계·알림은 두고 하단 버튼만 숨긴다. 아래 가장자리를 쓸어 올리면 잠깐만 보인다. */
     private void enterFullscreen() {
         try {
             if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) {
-                getWindow().setDecorFitsSystemWindows(false);
+                getWindow().setDecorFitsSystemWindows(true);
                 WindowInsetsController controller = getWindow().getInsetsController();
                 if (controller != null) {
-                    controller.hide(WindowInsets.Type.statusBars() | WindowInsets.Type.navigationBars());
+                    controller.show(WindowInsets.Type.statusBars());
+                    controller.hide(WindowInsets.Type.navigationBars());
                     controller.setSystemBarsBehavior(WindowInsetsController.BEHAVIOR_SHOW_TRANSIENT_BARS_BY_SWIPE);
                 }
             } else {
                 View decor = getWindow().getDecorView();
                 decor.setSystemUiVisibility(
                     View.SYSTEM_UI_FLAG_IMMERSIVE_STICKY
-                        | View.SYSTEM_UI_FLAG_FULLSCREEN
                         | View.SYSTEM_UI_FLAG_HIDE_NAVIGATION
-                        | View.SYSTEM_UI_FLAG_LAYOUT_FULLSCREEN
-                        | View.SYSTEM_UI_FLAG_LAYOUT_HIDE_NAVIGATION
                         | View.SYSTEM_UI_FLAG_LAYOUT_STABLE
                 );
             }
