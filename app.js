@@ -1101,6 +1101,11 @@ document.addEventListener('DOMContentLoaded', () => {
         const sp = window.BSA && window.BSA.syncProgress;
         const sum = syncProgressSummary();
         if (!sp || !sum || !document.body) return;
+        // 2026-11-06 드래그 중엔 진행률 숫자를 다시 그리지 않는다(끝나면 곧 그림)
+        if (typeof isRealtimeUiGestureBusy === 'function' && isRealtimeUiGestureBusy()) {
+            setTimeout(scheduleSyncProgressRender, 500);
+            return;
+        }
         try { sum.sites = syncProgressSiteRows(sp, syncProgressCtx()); } catch (e) { sum.sites = []; console.warn('[진행률] 현장별 표시 실패', e); }
         const now = Date.now();
         // 오프라인 배지: 안 올라간 수
@@ -5441,6 +5446,7 @@ document.addEventListener('DOMContentLoaded', () => {
             while (queue.length) {
                 const item = queue.shift();
                 try {
+                    if (typeof yieldToUiGesture === 'function') await yieldToUiGesture();
                     await worker(item);
                 } catch (e) {
                     console.warn('도면 처리 실패:', item, e);
@@ -64012,6 +64018,7 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
         const list = Array.isArray(items) ? items : [];
         for (let i = 0; i < list.length; i += size) {
             const slice = list.slice(i, i + size);
+            await yieldToUiGesture();
             await Promise.all(slice.map((item) => worker(item)));
         }
     }
@@ -66996,6 +67003,7 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
             const worker = async () => {
                 while (queue.length && !cancelled()) {
                     const job = queue.shift();
+                    await yieldToUiGesture();
                     try { await fetchOne(job); } catch (e) {
                         rec.photos.failed++;
                         console.warn('[오프라인 준비] 사진 받기 실패:', job && job.key, e);
@@ -70349,6 +70357,15 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
      * 업로드 동기화가 state.defects/ndtData를 통째로 교체하고 도면을 다시 그리면
      * 잡고 있던 핀 객체가 옛 객체가 되어 드래그가 풀리므로, 제스처가 끝난 뒤 진행한다.
      */
+    /**
+     * 2026-11-06 업로드·받기 작업 사이사이에 부른다: 도면을 끄는 동안엔 다음 사진·층을 시작하지 않는다.
+     * 업로드는 대부분 인터넷을 기다리는 시간인데, 사진 변환·층 합치기·저장은 화면과 같은 스레드에서 돌아 드래그가 끊겼다.
+     * 드래그가 아주 길어도 멈추지 않게 최대 15초만 기다린다.
+     */
+    function yieldToUiGesture() {
+        return (typeof isRealtimeUiGestureBusy === 'function' && isRealtimeUiGestureBusy()) ? waitForUiGestureIdle(15000) : Promise.resolve();
+    }
+
     async function waitForUiGestureIdle(maxMs = 60000) {
         if (typeof isRealtimeUiGestureBusy !== 'function') return;
         const deadline = Date.now() + maxMs;
@@ -71046,6 +71063,7 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
                 const code = floorCodeFromFloorKey(floorKey, floorBldg);
                 if (!floorBldg || !code) continue;
                 if (floorsSkipWrite.has(floorKey) || !floorReadRev.has(floorKey)) continue;   // 못 읽은 층은 쓰지 않음(올릴 것 표시 유지)
+                await yieldToUiGesture();
                 // 2026-10-16 쓰기 직전 서버 버전 재확인 — 읽은 뒤 다른 기기가 썼으면 다시 읽어 합친 뒤 쓴다(최대 3회)
                 const guard = window.BSA && window.BSA.floorSyncGuard;
                 const conf = await guard.confirmRevBeforeWrite(
