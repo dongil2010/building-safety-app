@@ -8428,7 +8428,7 @@ ${roundMobile ? '' : `<button type="button" class="icon-btn icon-btn-trash" titl
                 ${drawingPreviewDragHandleHtml(floorCode, item.floorLabel)}
                 <span class="add-drawing-preview-name" title="${escapeHtml(item.fileName)}">${escapeHtml(item.fileName)}</span>
                 <select class="form-control drawing-floor-select" data-idx="${idx}" style="width:auto; font-size:0.78rem; padding:0.2rem 0.4rem;">
-                    ${window.buildFloorCodeOptionsHtml(item.floorCode)}
+                    ${window.buildFloorCodeOptionsHtml(item.floorCode, null, item.floorLabel)}
                 </select>
             </div>`;
 
@@ -8451,7 +8451,7 @@ ${roundMobile ? '' : `<button type="button" class="icon-btn icon-btn-trash" titl
                                 </span>
                                 ${!isFinal ? `<button type="button" class="btn btn-sm btn-outline pick-final-drawing" data-idx="${idx}" style="font-size:0.68rem; padding:0.1rem 0.5rem; flex-shrink:0;">이 파일 저장</button>` : ''}
                                 <select class="form-control drawing-floor-select" data-idx="${idx}" style="width:auto; font-size:0.72rem; padding:0.15rem 0.3rem; flex-shrink:0;">
-                                    ${window.buildFloorCodeOptionsHtml(item.floorCode)}
+                                    ${window.buildFloorCodeOptionsHtml(item.floorCode, null, item.floorLabel)}
                                 </select>
                             </div>`;
                         }).join('')}
@@ -8525,7 +8525,7 @@ ${roundMobile ? '' : `<button type="button" class="icon-btn icon-btn-trash" titl
     function assignDrawingUploadItems(files, usedCodes) {
         const used = (usedCodes || []).slice();
         const fi = window.BSA && window.BSA.floorIdentity;
-        return Array.from(files || []).map((file) => {
+        const items = Array.from(files || []).map((file) => {
             const info = window.parseFloorInfoFromFilename(file.name);
             const assigned = (fi && typeof fi.assignParsedFloorForUpload === 'function')
                 ? fi.assignParsedFloorForUpload(info, used)
@@ -8539,6 +8539,29 @@ ${roundMobile ? '' : `<button type="button" class="icon-btn icon-btn-trash" titl
                 floorLabel: assigned.floorLabel,
                 matched: assigned.matched
             };
+        });
+        applySoleExteriorFileLabel(items, usedCodes);
+        return items;
+    }
+
+    /**
+     * 2026-11-06 파일명이 「외부」인 도면 한 장만 등록하면 층 이름은 「외부1」이 아니라 「외부」.
+     * 등록할 때 이름만 정한다(코드는 EXT_1 그대로). 이미 등록된 층의 이름·출력은 건드리지 않는다.
+     * 저장 전에 외부 도면이 더 들어오면 번호를 붙여 외부1·외부2로 돌려놓는다.
+     */
+    function applySoleExteriorFileLabel(items, usedCodes) {
+        const fi = window.BSA && window.BSA.floorIdentity;
+        const isExt = (c) => !!(fi && fi.isExteriorLikeCode && fi.isExteriorLikeCode(c));
+        const isSerial = (it) => /^EXT_\d+$/i.test(String((it && it.floorCode) || ''));
+        const newExt = (items || []).filter((it) => isExt(it.floorCode));
+        if (!newExt.length) return;
+        const stem = String(newExt[0].fileName || '').replace(/\.[^.]+$/, '').trim();
+        if (newExt.length === 1 && !(usedCodes || []).some(isExt) && isSerial(newExt[0]) && stem === '외부') {
+            newExt[0].floorLabel = '외부';
+            return;
+        }
+        [].concat(window.selectedUploadedDrawings || [], window.selectedEditUploadedDrawings || []).forEach((it) => {
+            if (it && isSerial(it) && it.floorLabel === '외부') it.floorLabel = `외부${parseInt(it.floorCode.split('_')[1], 10)}`;
         });
     }
 
@@ -9301,7 +9324,7 @@ ${roundMobile ? '' : `<button type="button" class="icon-btn icon-btn-trash" titl
                                 ${willReplace ? '<span class="edit-floor-drawing-badge" style="color:#b45309;">기존 도면 교체</span>' : '<span class="edit-floor-drawing-badge">새 층</span>'}
                             </span>
                             <select class="form-control edit-drawing-floor-select" data-idx="${idx}" style="width:auto; max-width:11rem; font-size:0.78rem; padding:0.2rem 0.4rem; flex-shrink:0;">
-                                ${window.buildFloorCodeOptionsHtml(item.floorCode, existingFloors)}
+                                ${window.buildFloorCodeOptionsHtml(item.floorCode, existingFloors, item.floorLabel)}
                             </select>
                         </div>
                     `;
@@ -9323,7 +9346,7 @@ ${roundMobile ? '' : `<button type="button" class="icon-btn icon-btn-trash" titl
                                         </span>
                                         ${!isFinal ? `<button type="button" class="btn btn-sm btn-outline pick-final-edit-drawing" data-idx="${idx}" style="font-size:0.68rem; padding:0.1rem 0.5rem; flex-shrink:0;">이 파일 저장</button>` : ''}
                                         <select class="form-control edit-drawing-floor-select" data-idx="${idx}" style="width:auto; max-width:11rem; font-size:0.72rem; padding:0.15rem 0.3rem; flex-shrink:0;">
-                                            ${window.buildFloorCodeOptionsHtml(item.floorCode, existingFloors)}
+                                            ${window.buildFloorCodeOptionsHtml(item.floorCode, existingFloors, item.floorLabel)}
                                         </select>
                                     </div>`;
                                 }).join('')}
@@ -21635,8 +21658,10 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
     function getDefectHwpxCompareRoundLabels(defect, bldg) {
         const currKey = getBuildingSurveyRoundKey(bldg);
         let prevKey = defect && defect.prevSurveyRound ? defect.prevSurveyRound : null;
+        // 2026-11-06 전차 칸에 이번 회차가 적혀 있으면 틀린 값 — 왼쪽·오른쪽이 같은 회차로 찍혔다(2026년 하반기 / 2026년 하반기)
+        if (prevKey && prevKey === currKey) prevKey = null;
         if (!prevKey && defect && getDefectPrevOutputPhotos(defect).length > 0) {
-            if (defect.surveyRound && isPreviousRoundDefect(defect)) {
+            if (defect.surveyRound && defect.surveyRound !== currKey && isPreviousRoundDefect(defect)) {
                 prevKey = defect.surveyRound;
             } else {
                 prevKey = getPreviousSurveyRoundKey(currKey);
@@ -21657,8 +21682,10 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
     function getDefectHwpxCompareRoundLabelsFull(defect, bldg) {
         const currKey = getBuildingSurveyRoundKey(bldg);
         let prevKey = defect && defect.prevSurveyRound ? defect.prevSurveyRound : null;
+        // 2026-11-06 전차 칸에 이번 회차가 적혀 있으면 틀린 값 — 왼쪽·오른쪽이 같은 회차로 찍혔다(2026년 하반기 / 2026년 하반기)
+        if (prevKey && prevKey === currKey) prevKey = null;
         if (!prevKey && defect && getDefectPrevOutputPhotos(defect).length > 0) {
-            if (defect.surveyRound && isPreviousRoundDefect(defect)) {
+            if (defect.surveyRound && defect.surveyRound !== currKey && isPreviousRoundDefect(defect)) {
                 prevKey = defect.surveyRound;
             } else {
                 prevKey = getPreviousSurveyRoundKey(currKey);

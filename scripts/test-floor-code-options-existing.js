@@ -47,7 +47,7 @@ assert.ok(weird.includes('&lt;b&gt;'));
 
 // 4) 도면 수정창은 기존 층 목록을 넘기고, 기존 층마다 「파일로 교체」 단추가 있다
 const app = fs.readFileSync(path.join(__dirname, '..', 'app.js'), 'utf8');
-assert.ok(/buildFloorCodeOptionsHtml\(item\.floorCode, existingFloors\)/.test(app));
+assert.ok(/buildFloorCodeOptionsHtml\(item\.floorCode, existingFloors, item\.floorLabel\)/.test(app));
 assert.ok(app.includes('edit-floor-drawing-replace'));
 
 console.log('test-floor-code-options-existing: ok');

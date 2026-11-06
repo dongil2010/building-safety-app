@@ -952,7 +952,7 @@ window.getFloorRankFromCode = function(code) {
     return 0;
 };
 
-window.buildFloorCodeOptionsHtml = function(selectedCode, existingFloors) {
+window.buildFloorCodeOptionsHtml = function(selectedCode, existingFloors, selectedLabel) {
     // 2026-11-02 existingFloors(도면 수정창): 이 건물에 이미 있는 층(외부 도면 포함)을 맨 위에 「교체」 대상으로 보여 준다 —
     // 파일 이름을 기존 층 이름과 똑같이 맞추지 않아도 고른 층의 도면을 1:1로 바꿀 수 있다.
     const esc = (v) => String(v == null ? '' : v).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;');
@@ -979,7 +979,7 @@ window.buildFloorCodeOptionsHtml = function(selectedCode, existingFloors) {
         const isExtExisting = typeof window.isExteriorFloorCode === 'function' && window.isExteriorFloorCode(selectedCode, '');
         const extLabel = (typeof window.getFloorLabelFromCode === 'function') ? window.getFloorLabelFromCode(selectedCode)
             : ((window.BSA && window.BSA.floorIdentity) ? window.BSA.floorIdentity.labelFromCode(selectedCode) : selectedCode);
-        const shownLabel = isExtExisting ? extLabel : `✏️ ${selectedCode} (직접 입력함)`;
+        const shownLabel = isExtExisting ? (selectedLabel || extLabel) : `✏️ ${selectedCode} (직접 입력함)`;
         html += `<option value="${selectedCode}" selected>${shownLabel}</option>`;
     }
     html += `<option value="__CUSTOM_FLOOR__">➕ [층 이름 직접 입력...]</option>`;

@@ -1,0 +1,38 @@
+#!/usr/bin/env node
+'use strict';
+/** 2026-11-06 파일명 「외부」 한 장 등록 → 층 이름 「외부」. 등록할 때만, 다른 경우는 그대로 */
+const assert = require('assert');
+const fs = require('fs');
+const path = require('path');
+const vm = require('vm');
+const { extractFunction } = require('./lib-extract-fn');
+const app = fs.readFileSync(path.join(__dirname, '..', 'app.js'), 'utf8').replace(/\r\n/g, '\n');
+const fi = { isExteriorLikeCode: (c) => /^EXT/.test(String(c)) };
+const win = { BSA: { floorIdentity: fi }, selectedUploadedDrawings: [], selectedEditUploadedDrawings: [] };
+const ctx = { window: win, parseInt, String };
+vm.createContext(ctx);
+vm.runInContext(extractFunction(app, 'function applySoleExteriorFileLabel(') + ';this.f = applySoleExteriorFileLabel;', ctx);
+const item = (fileName, n) => ({ fileName, floorCode: 'EXT_' + n, floorLabel: '외부' + n });
+let a = item('외부.pdf', 1);
+ctx.f([a], ['1F']);
+assert.strictEqual(a.floorLabel, '외부', '파일명 외부 한 장');
+assert.strictEqual(a.floorCode, 'EXT_1', '코드는 그대로');
+a = item('외부.pdf', 2);
+ctx.f([a], ['EXT_1']);
+assert.strictEqual(a.floorLabel, '외부2', '이미 외부가 있으면 번호');
+const x = item('외부.pdf', 1), y = item('외부2.pdf', 2);
+ctx.f([x, y], []);
+assert.deepStrictEqual([x.floorLabel, y.floorLabel], ['외부1', '외부2'], '두 장이면 번호');
+a = item('외벽 입면.pdf', 1);
+ctx.f([a], []);
+assert.strictEqual(a.floorLabel, '외부1', '파일명이 외부가 아니면 그대로');
+const first = item('외부.pdf', 1);
+ctx.f([first], []);
+win.selectedUploadedDrawings = [first];
+const second = item('외부3.pdf', 2);
+ctx.f([second], ['EXT_1']);
+assert.strictEqual(first.floorLabel, '외부1', '저장 전에 하나 더 넣으면 번호로 돌아감');
+const pick = { fileName: '1층.pdf', floorCode: '1F', floorLabel: '지상1층' };
+ctx.f([pick], []);
+assert.strictEqual(pick.floorLabel, '지상1층');
+console.log('test-sole-exterior-file-label: ok');
