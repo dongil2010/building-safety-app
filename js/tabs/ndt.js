@@ -34,6 +34,8 @@ window.BSA.tabs['tab-ndt'] = {
         if (typeof window.BSA.shared.bindSurveyNdtTableScrollPassthrough === 'function') {
             window.BSA.shared.bindSurveyNdtTableScrollPassthrough();
         }
+        // 확대해 둔 도면은 탭에 돌아와도 그대로 둔다 (처음 여는 도면·다른 층은 맞춤)
+        var keepZoom = typeof window.isNdtViewZoomedIn === 'function' && window.isNdtViewZoomedIn();
         function refreshNdt(firstPass) {
             if (firstPass) {
                 if (typeof window.setupNdtCanvas === 'function') window.setupNdtCanvas();
@@ -46,7 +48,7 @@ window.BSA.tabs['tab-ndt'] = {
                 if (typeof window.BSA.shared.bindSurveyNdtTableScrollPassthrough === 'function') {
                     window.BSA.shared.bindSurveyNdtTableScrollPassthrough();
                 }
-            } else if (typeof window.fitNdtCanvas === 'function') {
+            } else if (typeof window.fitNdtCanvas === 'function' && !keepZoom) {
                 window.fitNdtCanvas();
             }
         }

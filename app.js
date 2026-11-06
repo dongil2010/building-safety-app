@@ -14673,6 +14673,27 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
         drawNdtCanvas();
     }
 
+    /**
+     * 비파괴 도면 그림을 바꾼다. 맞춤은 층이나 도면 크기가 바뀔 때만 — 같은 도면의 화질 교체·진하게·
+     * 탭 복귀에 쓰던 확대·위치를 맞춤으로 되돌리지 않는다.
+     */
+    let _ndtFitDrawingSig = '';
+    function applyNdtBackgroundImage(img, key) {
+        ndtBgImage = img;
+        let autoRotated = false;
+        if (img.naturalHeight > img.naturalWidth * 1.15 && (ndtRotationAngle === undefined || ndtRotationAngle === 0)) {
+            ndtRotationAngle = 90;
+            autoRotated = true;
+        }
+        const dims = getNdtDrawingDims();
+        const sig = `${key}|${dims.w}x${dims.h}`;
+        if (autoRotated || sig !== _ndtFitDrawingSig) {
+            _ndtFitDrawingSig = sig;
+            fitNdtCanvas();
+        }
+        drawNdtCanvas();
+    }
+
     function loadFloorNdtDrawing() {
         const key = `${state.currentBuildingId}_${state.currentFloor}`;
         const ref = ndtDrawingRefFor(key);
@@ -14687,22 +14708,10 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
 
         if (src) {
             const img = new Image();
-            img.onload = () => {
-                ndtBgImage = img;
-                if (img.naturalHeight > img.naturalWidth * 1.15 && (ndtRotationAngle === undefined || ndtRotationAngle === 0)) {
-                    ndtRotationAngle = 90;
-                }
-                fitNdtCanvas();
-                drawNdtCanvas();
-            };
+            img.onload = () => applyNdtBackgroundImage(img, key);
             img.src = src;
         } else if (state.bgImage) {
-            ndtBgImage = state.bgImage;
-            if (ndtBgImage.naturalHeight > ndtBgImage.naturalWidth * 1.15 && (ndtRotationAngle === undefined || ndtRotationAngle === 0)) {
-                ndtRotationAngle = 90;
-            }
-            fitNdtCanvas();
-            drawNdtCanvas();
+            applyNdtBackgroundImage(state.bgImage, key);
         } else {
             ndtBgImage = null;
             drawNdtCanvas();
@@ -14773,6 +14782,12 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
         const fit = getNdtFitScale();
         return (ndtView.scale || 1) <= fit * 1.08;
     }
+    /** 지금 도면을 확대해 둔 상태인가 — 탭에 다시 들어올 때 맞춤으로 되돌릴지 정한다 */
+    window.isNdtViewZoomedIn = function() {
+        const dims = getNdtDrawingDims();
+        const sig = `${state.currentBuildingId}_${state.currentFloor}|${dims.w}x${dims.h}`;
+        return sig === _ndtFitDrawingSig && !shouldAutoFitNdtView();
+    };
 
     window.zoomNdtCanvas = function(factor, focalX, focalY) {
         const canvas = document.getElementById('ndtCanvas');
