@@ -34345,6 +34345,8 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
     }
 
     function ensureOptionOrderEntry(bucket, key) {
+        // 2026-11-06 대분류 미선택('') — 저장하지 않는다. '' 칸은 서버가 거부해 자동 올리기 전체가 멈췄다
+        if (key === '' || key == null) return [];
         if (!window.state[bucket] || typeof window.state[bucket] !== 'object') {
             window.state[bucket] = {};
         }
@@ -67154,6 +67156,7 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
         if (!prep) return;
         // 2026-10-20 자동(시작·온라인·포커스)은 멈춘 올리기나 백오프 중이면 돌리지 않는다 — 매번 전 층을 서버에서 다시 읽던 것 방지
         const manual = reason === 'manual';
+        try { unparkFixedSyncErrors(); } catch (_e) { /* ignore */ }
         if (!manual) {
             const g = syncGate();
             if (g && !g.autoAllowed()) return;
@@ -70766,7 +70769,21 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
         return _deployedPhotoIdScheme > PHOTO_ID_SCHEME;
     }
 
+    /**
+     * 2026-11-06 빈 칸 이름 오류로 멈춘 기기는 코드가 고쳐졌으니 알아서 푼다. 이 오류는 데이터 문제가 아니고,
+     * 안 풀면 사람이 「지금 다시 올리기」를 누를 때까지 그 기기의 층·사진 올리기가 조용히 멈춰 있다.
+     */
+    function unparkFixedSyncErrors() {
+        const g = syncGate();
+        if (!g || !g.isParked()) return;
+        if (/Field names must not be empty/.test(String((g.state() || {}).reason || ''))) {
+            console.info('[동기화] 고쳐진 오류로 멈춰 있던 자동 올리기를 다시 시작합니다.');
+            g.unpark();
+        }
+    }
+
     async function syncStateToFirebase() {
+        try { unparkFixedSyncErrors(); } catch (_e) { /* ignore */ }
         // 2026-10-16 서버 시계 차이 측정(10분에 한 번, 기다리지 않음) — 이후 찍는 동기화 시각에 반영
         try { void measureServerClockOffset(false); } catch (_e) { /* ignore */ }
         if (!db || !window.state.companyId || !navigator.onLine) return;

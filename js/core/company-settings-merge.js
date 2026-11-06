@@ -80,8 +80,9 @@
             var v = obj[key];
             if (v === undefined) return;
             if (DEPTH[key] === 2 && isPlainObject(v)) {
+                // 2026-11-06 빈 이름 칸은 서버가 거부한다(Field names must not be empty) — 대분류 미선택일 때 state에 생긴 '' 칸
                 Object.keys(v).forEach(function (sub) {
-                    if (v[sub] !== undefined) out[pathOf(key, sub)] = v[sub];
+                    if (sub !== '' && v[sub] !== undefined) out[pathOf(key, sub)] = v[sub];
                 });
                 return;
             }
@@ -171,7 +172,7 @@
         Object.keys(store.dirty).sort().forEach(function (p) {
             var d = store.dirty[p];
             var sp = splitPath(p);
-            if (KEYS.indexOf(sp.key) < 0) { delete store.dirty[p]; return; }
+            if (KEYS.indexOf(sp.key) < 0 || sp.sub === '') { delete store.dirty[p]; return; }
             var serverAt = serverStampOf(serverData, p);
             if (serverAt > (Number(d.at) || 0)) {
                 adopt.push({ path: p, key: sp.key, sub: sp.sub, value: serverFlat[p], serverAt: serverAt });

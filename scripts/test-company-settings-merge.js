@@ -184,4 +184,15 @@ assert.ok(/const inc = csApi\.applyIncoming\(csStore, window\.state, data, bsaSy
 assert.ok(/trackCompanySettingsLocal\(\); \} catch/.test(app), '기기 저장 때 바뀐 칸 적기');
 assert.ok(/window\.bsaCompanySettingsPending\(\)\.length\) \{\n\s+scheduleSyncToFirebase\(\{ skipMarkCurrent: true \}\);/.test(app), '다시 연결: 설정 칸만 남아도 올린다');
 
+// 2026-11-06 대분류 미선택으로 생긴 '' 칸: 서버에 쓰지 않는다(Field names must not be empty → 자동 올리기 멈춤)
+{
+    const flat = csm.flatten({ defectComponentOrder: { '': ['x'], 구조체: ['y'] } });
+    assert.deepStrictEqual(Object.keys(flat).filter((p) => p.startsWith('defectComponentOrder')).length, 1, '빈 이름 칸은 빠짐');
+    const st = csm.initStore(csm.flatten({}));
+    const bad = Object.keys(csm.flatten({ defectComponentOrder: { 구조체: ['y'] } }))[0].replace('구조체', '');
+    st.dirty[bad] = { at: 5, h: 'x' };
+    const plan = csm.planWrite(st, {}, {});
+    assert.strictEqual(plan.writes.length, 0, '이미 쌓인 빈 이름 칸도 쓰지 않음');
+    assert.ok(!(bad in st.dirty), '쌓인 표시 정리');
+}
 console.log('test-company-settings-merge: ok');
