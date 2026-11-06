@@ -160,6 +160,12 @@
 `[COMPLETED]` t567u 승인: 새 마킹 대분류 미선택(PR #35)을 main에 배포. 구현 `90f58d5` · 버전 `b6a9fc1` · 토큰 `20261106_102652`. 기존 저장 분류 유지.
 
 ### ⚡ [Cursor] - 2026-11-06 11:20:00
-`[IN_PROGRESS]` t570u: 회차선택 담당자·연락처(t568u) + 직접입력 프리셋/이번만 토글(t569u) main 배포. t571u 원인 매핑은 별도 미배포.
+`[COMPLETED]` t570u: 회차선택 담당자·연락처(t568u) + 직접입력 프리셋/이번만 토글(t569u) main 배포. 구현 `a246cab` · 버전 `c3f9122` · 토큰 `20261106_112232`. live web-version short `c3f9122`.
+
+### ⚡ [Cursor] - 2026-11-06 11:26:00
+`[WAITING_REVIEW]` t571u: 기본 결함→원인 제안에서 명백히 안 맞는 조합만 필터. company-vocab 미수정. 미배포 브랜치 `cursor/cause-mapping-cleanup-45fc` PR #36 `deea905`.
+
+### ⚡ [Cursor] - 2026-11-06 11:35:00
+`[COMPLETED]` t572u: 프리셋 트리 소스 데이터만 추출 (XLSX 없음). `artifacts/preset-tree.json` + `artifacts/preset-tree-notes.md`. 배포 기준 `c3f9122` vs t571u 제안 `deea905`(미배포) 구분. 계정 커스텀 unavailable. company-vocab 읽기만.
 
 
