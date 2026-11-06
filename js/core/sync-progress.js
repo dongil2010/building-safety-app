@@ -340,6 +340,12 @@
                     if (w !== 'sync' && w.indexOf('photo:') !== 0 && dirty.indexOf(w) < 0) { delete data.failures[w]; changed = true; }
                 });
             }
+            // 2026-11-06 남은 것이 하나도 없으면 지난 실패 기록은 끝난 일이다. 동기화 전체 실패('sync')는 다음 성공 때만 지워지는데,
+            // 올릴 것이 없으면 동기화가 안 돌아 「모두 서버에 올라감」 아래에 「올리기 실패 1건」이 계속 남았다.
+            if (pd === 0 && !ctx.syncing && Object.keys(data.failures).length) {
+                data.failures = {};
+                changed = true;
+            }
             var failures = Object.keys(data.failures).map(function (w) {
                 return { where: w, reason: data.failures[w].reason, at: data.failures[w].at };
             });

@@ -98,4 +98,17 @@ assert.ok(app.includes("if (fk === 'sync') return '건물 정보·회사 동기�
     assert.ok(!P.renderPanelHtml(sum2, (w) => w).includes('현장별'), '건물별 패널엔 없음');
 }
 assert.ok(app.includes('_syncActiveFloorKeys = new Set(floorsToSync);'));
+// 2026-11-06 다 올렸는데 「올리기 실패 1건」이 남던 문제
+{
+    const m3 = {};
+    const tr3 = P.createTracker({ storage: { getItem: (k) => (k in m3 ? m3[k] : null), setItem: (k, v) => { m3[k] = String(v); } }, storageKey: () => 'k3', now: () => 9000 });
+    tr3.noteFailure('sync', '서버 동기화 실패');
+    let s3 = tr3.summary({ dirtyFloorKeys: ['a_1F'], pendingBuildingIds: [], online: true });
+    assert.strictEqual(s3.failures.length, 1, '남은 것이 있으면 실패 표시 유지');
+    s3 = tr3.summary({ dirtyFloorKeys: [], pendingBuildingIds: [], online: true, syncing: true });
+    assert.strictEqual(s3.failures.length, 1, '올리는 중에는 아직 지우지 않음');
+    s3 = tr3.summary({ dirtyFloorKeys: [], pendingBuildingIds: [], online: true });
+    assert.strictEqual(s3.failures.length, 0, '남은 것이 없으면 실패 표시 없음');
+    assert.ok(P.renderPanelHtml(s3, (w) => w).indexOf('올리기 실패') < 0);
+}
 console.log('test-sync-progress-building-info: ok');
