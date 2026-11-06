@@ -11592,7 +11592,7 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
             drawPin(ctx, {
                 no: liveNoStr,
                 groupNo: previewMeta.fromGroup ? previewMeta.label : (pendingDefect?.groupNo || liveNoStr),
-                category: pendingDefect?.category || document.getElementById('defectCategory')?.value || '구조체',
+                category: pendingDefect ? inheritDefectCategory(pendingDefect) : readDefectCategoryUi(),
                 defectType: pendingDefect?.defectType || getDefectComboValue(document.getElementById('defectType'), document.getElementById('defectTypeInput')) || '',
                 x: liveBoxImgX,
                 y: liveBoxImgY,
@@ -11611,7 +11611,7 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
                 areaY2: areaCurImgY,
                 areaShape: (state.areaCreateShape === 'ellipse') ? 'ellipse' : 'rect',
                 areaAngle: 0,
-                category: document.getElementById('defectCategory')?.value || '구조체',
+                category: readDefectCategoryUi(),
                 no: ''
             }, true);
             }
@@ -12591,10 +12591,41 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
     }
 
     // 결함(구조체/비구조체/마감재) 카테고리 → 스타일 설정 키 매핑 (색상/크기 공용)
+    var DEFECT_CATEGORY_KNOWN = ['구조체', '비구조체', '마감재'];
+
+    /** 화면 대분류. 알려진 값만, 아니면 미선택('') — `|| '구조체'`로 덮지 않는다 */
+    function readDefectCategoryUi(raw) {
+        const v = raw !== undefined ? raw : (document.getElementById('defectCategory')?.value);
+        return DEFECT_CATEGORY_KNOWN.indexOf(v) >= 0 ? v : '';
+    }
+
+    /**
+     * 저장된 결함 대분류.
+     * 명시적 '' = 새 마킹 미선택(필터·출력에서 구조체로 취급하지 않음).
+     * 필드 없음(옛 데이터) = 구조체. 기존 저장분을 다시 쓰지 않는다.
+     */
+    function resolveDefectCategory(cat) {
+        if (cat === '') return '';
+        if (DEFECT_CATEGORY_KNOWN.indexOf(cat) >= 0) return cat;
+        return '구조체';
+    }
+
+    /** 그룹/템플릿 이어받기. 명시적 미선택은 유지, 없는 옛 마킹은 구조체 */
+    function inheritDefectCategory(src) {
+        if (!src) return '';
+        if (src.category === '') return '';
+        return resolveDefectCategory(src.category);
+    }
+
+    window.readDefectCategoryUi = readDefectCategoryUi;
+    window.resolveDefectCategory = resolveDefectCategory;
+    window.inheritDefectCategory = inheritDefectCategory;
+
     function getDefectStyleKey(category, defectType) {
         const isGood = isGoodDefectType(defectType);
         if (category === '비구조체') return isGood ? 'defectNonStructuralGood' : 'defectNonStructural';
         if (category === '마감재') return isGood ? 'defectFinishGood' : 'defectFinish';
+        // 미선택·구조체·기타: 그리는 색만 구조체 스타일(분류를 저장하지는 않음)
         return isGood ? 'defectStructuralGood' : 'defectStructural';
     }
 
@@ -21241,7 +21272,7 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
             no: groupNo,
             groupId: grp.groupId,
             groupNo,
-            category: src.category || '구조체',
+            category: inheritDefectCategory(src),
             component: src.component || '',
             location: src.location || composeDefectLocation(''),
             defectType: src.defectType || '',
@@ -24841,7 +24872,11 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
         const catFilter = window.state.categoryFilter;
         if (catFilter) {
             list = list.filter(d => {
-                const cat = d.category || '구조체';
+                const cat = (typeof resolveDefectCategory === 'function')
+                    ? resolveDefectCategory(d.category)
+                    : (d.category === '' ? '' : (d.category || '구조체'));
+                // 대분류 미선택 새 마킹은 구조체 표시를 꺼도 남긴다(선택·터치 가능)
+                if (cat === '') return true;
                 if (cat === '비구조체') return catFilter.nonStructural !== false;
                 if (cat === '마감재') return catFilter.finishing !== false;
                 // 구조체: 부재 종류로 기둥·벽체 / 보·슬래브 두 그룹으로 세분화.
@@ -25351,7 +25386,8 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
         if (summaryEl) {
             const counts = { columnWall: 0, beamSlab: 0, nonStructural: 0, finishing: 0 };
             allFloorDefects.forEach(d => {
-                const cat = d.category || '구조체';
+                const cat = resolveDefectCategory(d.category);
+                if (cat === '') return;
                 if (cat === '비구조체') {
                     counts.nonStructural++;
                     return;
@@ -29526,7 +29562,7 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
         const componentInput = document.getElementById('defectComponentInput');
         const typeSelect = document.getElementById('defectType');
         const typeInput = document.getElementById('defectTypeInput');
-        const currentCategory = categoryEl?.value || '구조체';
+        const currentCategory = readDefectCategoryUi(categoryEl?.value);
         const currentComponent = getDefectComboValue(componentSelect, componentInput);
         const currentType = getDefectComboValue(typeSelect, typeInput);
 
@@ -30600,7 +30636,7 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
      */
     function maybeReclassifyPlasterCrackToNonStructural() {
         const catEl = document.getElementById('defectCategory');
-        if (!catEl || catEl.value !== '구조체') return false;
+        if (!catEl || (catEl.value !== '구조체' && catEl.value !== '')) return false;
         const typeSelect = document.getElementById('defectType');
         const typeInput = document.getElementById('defectTypeInput');
         const typeVal = getDefectComboValue(typeSelect, typeInput);
@@ -30638,7 +30674,7 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
     function maybeReclassifyJointGapToNonStructural() {
         if (window._defectFormHydrating || isDefectBulkEditMode()) return false;
         const catEl = document.getElementById('defectCategory');
-        if (!catEl || catEl.value !== '구조체') return false;
+        if (!catEl || (catEl.value !== '구조체' && catEl.value !== '')) return false;
         const compVal = getDefectComboValue(document.getElementById('defectComponent'), document.getElementById('defectComponentInput'));
         const typeVal = getDefectComboValue(document.getElementById('defectType'), document.getElementById('defectTypeInput'));
         if (!isJointGapDefect(compVal, typeVal)) { window._jointGapKeepStructural = false; return false; }
@@ -35453,7 +35489,7 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
                 defect: {
                     no: label,
                     groupNo: label,
-                    category: tmpl.category || '구조체',
+                    category: inheritDefectCategory(tmpl),
                     defectType: tmpl.defectType || ''
                 },
                 fromGroup: true,
@@ -35463,7 +35499,7 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
         }
         const floorKey = `${state.currentBuildingId}_${state.currentFloor}`;
         const label = getNextDefectNoStr(getFloorDefectsForNumbering(floorKey));
-        const defaultCat = document.getElementById('defectCategory')?.value || '구조체';
+        const defaultCat = readDefectCategoryUi();
         const scale = getStyleSize(getDefectStyleKey(defaultCat, '균열')).pin;
         return { label, scale, defect: null };
     }
@@ -35497,7 +35533,7 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
 
     function drawPendingDefectPreview(ctx, currentDefects) {
         if (!isDefectModalOpen() || !isNewDefectModalSession()) return;
-        const category = document.getElementById('defectCategory')?.value || '구조체';
+        const category = readDefectCategoryUi();
         const floorKey = `${state.currentBuildingId}_${state.currentFloor}`;
         const no = document.getElementById('defectNo')?.value || getNextDefectNoStr(getFloorDefectsForNumbering(floorKey));
         const forceArrowDir = document.getElementById('defectForceArrowDir')?.checked || false;
@@ -37873,7 +37909,7 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
         if (pinIdEl) pinIdEl.value = '';
         if (noEl) noEl.value = `선택 ${defects.length}건`;
 
-        const cat = bulkFieldConsensus(defects, d => d.category || '구조체');
+        const cat = bulkFieldConsensus(defects, d => resolveDefectCategory(d.category));
         const comp = bulkFieldConsensus(defects, d => memberNameOut(d.component) || '');
         const type = bulkFieldConsensus(defects, d => d.defectType || '');
         const cause = bulkFieldConsensus(defects, d => d.cause || '');
@@ -37881,7 +37917,7 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
         const size = bulkFieldConsensus(defects, d => d.size || '');
         const measureSig = bulkFieldConsensus(defects, d => getDefectCrackMeasureSignature(d));
 
-        const uiCategory = cat.mixed ? (rep.category || '구조체') : (cat.value || '구조체');
+        const uiCategory = cat.mixed ? resolveDefectCategory(rep.category) : cat.value;
         if (catEl) catEl.value = uiCategory;
         populateDefectComponentDropdown(uiCategory, comp.mixed ? '' : (comp.value || ''));
         updateDefectTypeDropdown(uiCategory, type.mixed ? '' : (type.value || ''));
@@ -38135,8 +38171,8 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
         if (existingPin) {
             if (pinIdEl) pinIdEl.value = existingPin.id;
             if (noEl) noEl.value = existingPin.no || 'NO.01';
-            if (catEl) catEl.value = existingPin.category || '구조체';
-            const compCatExisting = existingPin.category || '구조체';
+            if (catEl) catEl.value = existingPin.category === '' ? '' : resolveDefectCategory(existingPin.category);
+            const compCatExisting = existingPin.category === '' ? '' : resolveDefectCategory(existingPin.category);
             // 저장된 부재가 비어 있으면 공란 유지(과거처럼 기둥으로 채우지 않음)
             populateDefectComponentDropdown(compCatExisting, memberNameOut(existingPin.component) || '');
             updateDefectTypeDropdown(existingPin.category || '구조체', existingPin.defectType);
@@ -38235,7 +38271,7 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
 
             if (pinIdEl) pinIdEl.value = '';
             if (noEl) noEl.value = (tmpl && tmpl.groupId) ? (tmpl.groupNo || defectNoStr) : defectNoStr;
-            const defaultCat = (tmpl && tmpl.category) || '구조체';
+            const defaultCat = tmpl ? inheritDefectCategory(tmpl) : '';
             if (catEl) catEl.value = defaultCat;
             populateDefectComponentDropdown(defaultCat, tmpl ? (memberNameOut(tmpl.component) || '') : '');
             updateDefectTypeDropdown(defaultCat, tmpl ? (tmpl.defectType || '') : '');
@@ -38276,7 +38312,7 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
                 const ay2 = Math.max(areaRect.y1, areaRect.y2);
                 const cx = (ax1 + ax2) / 2;
                 const cy = (ay1 + ay2) / 2;
-                const areaCat = (tmpl && tmpl.category) || document.getElementById('defectCategory')?.value || '구조체';
+                const areaCat = tmpl ? inheritDefectCategory(tmpl) : readDefectCategoryUi();
                 const areaNo = noEl?.value || 'NO.01';
                 const areaStyleKey = getDefectStyleKey(areaCat, tmpl ? (tmpl.defectType || '') : '');
                 const areaScale = getStyleSize(areaStyleKey).pin;
@@ -39906,7 +39942,7 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
         const causesSelected = getSelectedCausesFromUi();
         return {
             no: document.getElementById('defectNo')?.value || 'NO.01',
-            category: document.getElementById('defectCategory')?.value || '구조체',
+            category: readDefectCategoryUi(),
             component: getDefectComboValue(
                 document.getElementById('defectComponent'),
                 document.getElementById('defectComponentInput')
@@ -40095,7 +40131,7 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
             const newDefect = {
                 id: generateDefectUniqueId(`${state.currentBuildingId}_${state.currentFloor}`),
                 no: document.getElementById('defectNo')?.value || 'NO.01',
-                category: (window.bsaPlasterNonStructCategory ? window.bsaPlasterNonStructCategory((document.getElementById('defectCategory')?.value || '구조체'), dTypeVal) : (document.getElementById('defectCategory')?.value || '구조체')),
+                category: (window.bsaPlasterNonStructCategory ? window.bsaPlasterNonStructCategory(readDefectCategoryUi(), dTypeVal) : readDefectCategoryUi()),
                 component: compVal,
                 location: locVal,
                 defectType: dTypeVal,

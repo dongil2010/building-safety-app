@@ -52,8 +52,9 @@
         return /균열|이격/.test(textOf(d && d.defectType));
     }
 
-    /** 구분이 비어 있으면 구조체로 나간다(조사표·통계 기본값) */
+    /** 명시적 미선택('')은 그대로. 필드 없는 옛 데이터만 구조체(조사표·통계 기본값) */
     function categoryOf(d) {
+        if (d && d.category === '') return '';
         return textOf(d && d.category) || '구조체';
     }
 

@@ -13,7 +13,8 @@ const codes = (d) => lint.lintDefect(d).map((i) => i.code);
 // ── 체크 오류 ──
 assert.deepStrictEqual(codes({ component: '블록벽체', defectType: '수직균열', category: '구조체', size: '1.2/1.8', crackMeasures: [{ width: '1.2', length: '1.8', join: '/' }] }),
     ['masonry-structural'], '블록벽체가 구조체로 체크됨');
-assert.deepStrictEqual(codes({ component: 'ALC 블록', defectType: '수직균열', category: '', size: '' }), ['masonry-structural'], '구분이 비어 있으면 구조체로 나간다');
+assert.deepStrictEqual(codes({ component: 'ALC 블록', defectType: '수직균열', size: '' }), ['masonry-structural'], '구분 필드 없는 옛 데이터는 구조체로 나간다');
+assert.deepStrictEqual(codes({ component: 'ALC 블록', defectType: '수직균열', category: '', size: '' }), [], '명시적 대분류 미선택은 구조체로 단정하지 않는다');
 assert.deepStrictEqual(codes({ component: '조적벽체', defectType: '수평균열', category: '비구조체' }), [], '비구조체로 체크돼 있으면 정상');
 assert.deepStrictEqual(codes({ component: '벽체 타일', defectType: '균열', category: '구조체' }), ['finish-structural'], '마감재가 구조체로 체크됨');
 assert.deepStrictEqual(codes({ component: '천장 마감재', defectType: '오염', category: '마감재' }), []);
