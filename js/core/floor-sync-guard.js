@@ -34,6 +34,21 @@
     }
 
     /**
+     * 2026-11-06 서버 확인: 이 기기 마킹 중 서버 목록에 없는 것을 나눈다.
+     * deletedElsewhere = 서버에 삭제 기록이 있음(다른 기기가 지움) — 못 올린 것이 아니다.
+     * missing = 서버에 마킹도 삭제 기록도 없음 — 정말 안 올라간 것.
+     */
+    function splitMissingMarkings(localItems, serverIds, serverDeletedIds) {
+        var del = new Set(serverDeletedIds || []);
+        var out = { missing: [], deletedElsewhere: [] };
+        (localItems || []).forEach(function (d) {
+            if (!d || !d.id || (serverIds && serverIds.has(d.id))) return;
+            (del.has(d.id) ? out.deletedElsewhere : out.missing).push(d.id);
+        });
+        return out;
+    }
+
+    /**
      * 쓰기 직전 버전 확인을 몇 번까지 다시 할지 정하는 작은 상태기계.
      * check(): 서버 rev를 돌려주는 async 함수, reread(): 다시 읽고 합친 뒤 새 rev를 돌려주는 async 함수(실패 시 throw).
      * 반환: { ok: true, rev } 이면 써도 됨 / { ok: false, reason } 이면 이번엔 쓰지 말 것(층은 '올릴 것'으로 남김)
@@ -92,6 +107,7 @@
         classifyFloorSnap: classifyFloorSnap,
         revOf: revOf,
         lostServerIds: lostServerIds,
+        splitMissingMarkings: splitMissingMarkings,
         confirmRevBeforeWrite: confirmRevBeforeWrite,
         lostServerBuildings: lostServerBuildings,
         orphanDirtyFloorKeys: orphanDirtyFloorKeys

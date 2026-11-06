@@ -18674,3 +18674,16 @@ html.bsa-kb-dock-follow body.defect-modal-open #tab-map #mobileMapDock.mobile-ca
     border-color: var(--accent-blue, #2563eb);
     color: #ffffff;
 }
+
+/* 2026-11-06 동기화 진행률 창: 현장별 남은 변경 (js/core/sync-progress.js) */
+.bsp-sites { margin-bottom: 10px; }
+.bsp-sites-title { font-size: 0.8rem; font-weight: 700; color: #475569; margin-bottom: 4px; }
+.bsp-sites ul { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 6px; max-height: 30vh; overflow-y: auto; }
+.bsp-site { padding: 7px 10px; border: 1px solid #e2e8f0; border-radius: 10px; }
+.bsp-site-active { border-color: #2563eb; background: #eff6ff; }
+.bsp-site-head { display: flex; align-items: center; gap: 8px; }
+.bsp-site-head > i { color: #2563eb; flex: 0 0 auto; }
+.bsp-site-name { font-weight: 700; font-size: 0.9rem; min-width: 0; overflow-wrap: anywhere; }
+.bsp-site-head .bsp-left { flex: 0 0 auto; }
+.bsp-site-floors { margin-top: 3px; font-size: 0.78rem; color: #64748b; overflow-wrap: anywhere; }
+.bsp-site-floors b { color: #1d4ed8; }

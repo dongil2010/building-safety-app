@@ -13,6 +13,7 @@
 (function (root) {
     'use strict';
 
+    var UNKNOWN_SITE = '현장 확인 중';
     var KINDS = ['bldg', 'photo', 'move', 'edit', 'add', 'del', 'ndt', 'other'];
     // 2026-11-04 bldg: 건물 정보(점검날짜·이름 등 건물 단위) ? 층이 아니라 건물마다 한 건. 앱이 「올릴 건물 정보 있음」(_pendingCloudSync) 목록을
     //  ctx.pendingBuildingIds로 넘기고, 목록에서 빠지면(루트·건물 문서 쓰기 성공 뒤에만 지워짐) 올라감으로 센다.
@@ -416,6 +417,30 @@
             };
         }
 
+        /**
+         * 2026-11-06 층별 남은 변경 수 — 「어느 현장 것을 올리는지」 표시용. 먼저 summary()로 정리된 뒤 부른다.
+         * 사진은 층 키 없이 적힌 것이 있어 ctx.photoFloorKey(id)로 찾는다. 못 찾으면 unknown.
+         */
+        function pendingByFloor(ctx) {
+            load();
+            var floors = {};
+            var unknown = 0;
+            var touch = function (fk) { if (!floors[fk]) floors[fk] = { pending: 0, photo: 0 }; return floors[fk]; };
+            Object.keys(data.entries).forEach(function (k) {
+                var e = data.entries[k];
+                if (!e) return;
+                var fk = e.fk || (e.k === 'photo' && ctx && typeof ctx.photoFloorKey === 'function' ? ctx.photoFloorKey(e.id) : '');
+                if (!fk) { unknown += 1; return; }
+                var f = touch(fk);
+                f.pending += 1;
+                if (e.k === 'photo') f.photo += 1;
+            });
+            ((ctx && ctx.dirtyFloorKeys) || []).map(String).forEach(function (fk) {
+                if (!hasFloorEntries(fk)) touch(fk).pending += 1;
+            });
+            return { floors: floors, unknown: unknown };
+        }
+
         function pendingEntries() {
             load();
             return Object.keys(data.entries).map(function (k) { return Object.assign({}, data.entries[k]); });
@@ -426,9 +451,64 @@
         return {
             record: record, mark: mark, confirmFloor: confirmFloor, confirmPhoto: confirmPhoto, drop: drop,
             noteFailure: noteFailure, clearFailure: clearFailure, startSession: startSession,
-            summary: summary, summaryFor: summaryFor, pendingEntries: pendingEntries, onChange: onChange, reset: reset,
+            summary: summary, summaryFor: summaryFor, pendingByFloor: pendingByFloor, pendingEntries: pendingEntries, onChange: onChange, reset: reset,
             _data: function () { return load(); }
         };
+    }
+
+    /**
+     * 2026-11-06 현장별 줄 만들기. by: pendingByFloor() 결과 · opts.resolve(fk) → { site, floor } (못 찾으면 null)
+     * opts.activeFloorKeys: 지금 올리는 층 · opts.pendingBuildingSites: 건물 정보가 남은 건물마다 현장 이름
+     * 지금 올리는 현장을 맨 위로, 그다음 많이 남은 순.
+     */
+    function buildSiteRows(by, opts) {
+        opts = opts || {};
+        var sites = {};
+        var active = (opts.activeFloorKeys || []).map(String);
+        var get = function (name) {
+            if (!sites[name]) sites[name] = { site: name, pending: 0, photo: 0, active: false, floors: [] };
+            return sites[name];
+        };
+        var floors = (by && by.floors) || {};
+        Object.keys(floors).forEach(function (fk) {
+            var r = typeof opts.resolve === 'function' ? opts.resolve(fk) : null;
+            var s = get((r && r.site) || UNKNOWN_SITE);
+            var isActive = active.indexOf(fk) >= 0;
+            s.pending += floors[fk].pending;
+            s.photo += floors[fk].photo;
+            if (isActive) s.active = true;
+            s.floors.push({ label: (r && r.floor) || fk, pending: floors[fk].pending, active: isActive });
+        });
+        (opts.pendingBuildingSites || []).forEach(function (name) { get(name || UNKNOWN_SITE).pending += 1; });
+        if (by && by.unknown) get(UNKNOWN_SITE).pending += by.unknown;
+        return Object.keys(sites).map(function (k) {
+            var s = sites[k];
+            s.floors.sort(function (a, b) { return (b.active - a.active) || (b.pending - a.pending); });
+            return s;
+        }).sort(function (a, b) { return (b.active - a.active) || (b.pending - a.pending); });
+    }
+
+    /** 지금 올리는 현장 이름 한 줄 — 없으면 '' (예: 「동명병원」, 「동명병원 외 1곳」) */
+    function activeSiteText(rows) {
+        var on = (rows || []).filter(function (s) { return s.active; });
+        if (!on.length) return '';
+        return on[0].site + (on.length > 1 ? ' 외 ' + (on.length - 1) + '곳' : '');
+    }
+
+    function siteRowsHtml(rows) {
+        if (!rows || !rows.length) return '';
+        return '<div class="bsp-sites"><div class="bsp-sites-title">현장별 남은 변경</div><ul>' + rows.map(function (s) {
+            var shown = s.floors.slice(0, 6).map(function (f) {
+                return (f.active ? '<b>' + esc(f.label) + '</b>' : esc(f.label)) + ' ' + f.pending;
+            }).join(' · ');
+            var more = s.floors.length > 6 ? ' · 외 ' + (s.floors.length - 6) + '개 층' : '';
+            return '<li class="bsp-site' + (s.active ? ' bsp-site-active' : '') + '">'
+                + '<div class="bsp-site-head"><i class="fa-solid ' + (s.active ? 'fa-arrows-rotate fa-spin' : 'fa-building') + '"></i>'
+                + '<span class="bsp-site-name">' + esc(s.site) + '</span>'
+                + '<span class="bsp-left">남음 ' + s.pending + (s.photo ? ' (사진 ' + s.photo + ')' : '') + '</span></div>'
+                + (shown ? '<div class="bsp-site-floors">' + (s.active ? '올리는 중 · ' : '') + shown + more + '</div>' : '')
+                + '</li>';
+        }).join('') + '</ul></div>';
     }
 
     /** 배지(작은 알약) 글자 — 없으면 '' */
@@ -458,7 +538,8 @@
         } else if (!sum.online) {
             head = '<div class="bsp-state bsp-off"><i class="fa-solid fa-wifi-slash"></i> 오프라인 — 인터넷이 연결되면 자동으로 올립니다</div>';
         } else if (sum.syncing || sum.sessionActive) {
-            head = '<div class="bsp-state bsp-run"><i class="fa-solid fa-arrows-rotate fa-spin"></i> 서버에 올리는 중</div>';
+            var nowSite = activeSiteText(sum.sites);
+            head = '<div class="bsp-state bsp-run"><i class="fa-solid fa-arrows-rotate fa-spin"></i> 서버에 올리는 중' + (nowSite ? ' — ' + esc(nowSite) : '') + '</div>';
         } else {
             head = '<div class="bsp-state bsp-wait"><i class="fa-solid fa-clock"></i> 올릴 차례를 기다리는 중</div>';
         }
@@ -480,7 +561,7 @@
                 + '</ul></div>'
             : '';
         var note = '<p class="bsp-note">이 기기에서 한 변경만 셉니다. 서버가 저장을 확인한 것만 「올라감」으로 셉니다.</p>';
-        return head + bar + '<ul class="bsp-rows">' + rows + '</ul>' + fails + note;
+        return head + bar + siteRowsHtml(sum.sites) + '<ul class="bsp-rows">' + rows + '</ul>' + fails + note;
     }
 
     /**
@@ -510,6 +591,7 @@
 
     var api = {
         KINDS: KINDS, LABELS: LABELS, createTracker: createTracker, pillText: pillText,
+        buildSiteRows: buildSiteRows, activeSiteText: activeSiteText,
         renderPanelHtml: renderPanelHtml, emptyCounts: emptyCounts, refreshStatusText: refreshStatusText
     };
     if (root) {

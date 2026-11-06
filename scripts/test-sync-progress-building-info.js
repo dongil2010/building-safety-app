@@ -63,4 +63,39 @@ assert.ok(!row(s, 'bldg'));
 const app = fs.readFileSync(path.join(__dirname, '..', 'app.js'), 'utf8');
 assert.ok(/\.filter\(\(b\) => b && b\.id && b\._pendingCloudSync\)\.map\(\(b\) => String\(b\.id\)\);[\s\S]{0,200}dirtyFloorKeys: dirty,\s*pendingBuildingIds,/.test(app), '진행률에 올릴 건물 정보 목록');
 assert.ok(app.includes("if (fk === 'sync') return '건물 정보·회사 동기화';"));
+
+// 2026-11-06 현장별 남은 변경: 사진은 층 키 없어도 찾아서, 지금 올리는 현장이 맨 위
+{
+    const m2 = {};
+    const tr2 = P.createTracker({ storage: { getItem: (k) => (k in m2 ? m2[k] : null), setItem: (k, v) => { m2[k] = String(v); } }, storageKey: () => 'k2', now: () => 5000 });
+    tr2.record('edit', 'd1', 'a_1F');
+    tr2.record('edit', 'd2', 'a_1F');
+    tr2.record('move', 'd3', 'b_2F');
+    tr2.record('photo', 'p1');
+    tr2.record('photo', 'p9');
+    const ctx2 = { dirtyFloorKeys: ['a_1F', 'b_2F', 'b_3F'], pendingBuildingIds: ['a'], online: true, syncing: true, photoState: () => 'pending',
+        photoFloorKey: (id) => (id === 'p1' ? 'b_2F' : '') };
+    const sum2 = tr2.summary(ctx2);
+    const by = tr2.pendingByFloor(ctx2);
+    assert.deepStrictEqual(by.floors['b_2F'], { pending: 2, photo: 1 });
+    assert.deepStrictEqual(by.floors['b_3F'], { pending: 1, photo: 0 }, '일지 없는 dirty 층');
+    assert.strictEqual(by.unknown, 1, '층을 못 찾은 사진');
+    const rows = P.buildSiteRows(by, {
+        resolve: (fk) => ({ site: fk[0] === 'a' ? '동명병원' : '각화동', floor: fk.slice(2) }),
+        activeFloorKeys: ['b_2F'], pendingBuildingSites: ['동명병원']
+    });
+    assert.deepStrictEqual(rows.map((r) => r.site), ['각화동', '동명병원', '현장 확인 중'], '올리는 현장 먼저, 그다음 많이 남은 순');
+    assert.strictEqual(rows[0].pending, 3);
+    assert.strictEqual(rows[1].pending, 3, '층 2 + 건물 정보 1');
+    assert.strictEqual(rows.reduce((n, r) => n + r.pending, 0), sum2.pending, '현장별 합 = 전체 남음');
+    assert.strictEqual(P.activeSiteText(rows), '각화동');
+    sum2.sites = rows;
+    const h2 = P.renderPanelHtml(sum2, (w) => w);
+    assert.ok(h2.includes('서버에 올리는 중 — 각화동') && h2.includes('현장별 남은 변경') && h2.includes('<b>2F</b>'));
+    sum2.sites = [{ site: '<x>', pending: 1, photo: 0, active: true, floors: [{ label: '<y>', pending: 1, active: true }] }];
+    assert.ok(!/<x>|<y>/.test(P.renderPanelHtml(sum2, (w) => w)), '이름 이스케이프');
+    delete sum2.sites;
+    assert.ok(!P.renderPanelHtml(sum2, (w) => w).includes('현장별'), '건물별 패널엔 없음');
+}
+assert.ok(app.includes('_syncActiveFloorKeys = new Set(floorsToSync);'));
 console.log('test-sync-progress-building-info: ok');

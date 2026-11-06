@@ -86,5 +86,18 @@ const SM = require(path.join(__dirname, '..', 'js', 'core', 'sync-merge.js'));
     assert.strictEqual((appSrc.match(/await serverRootDataForWrite\(docRef\)/g) || []).length, 2, '동기화 두 곳 모두');
     assert.ok(!/serverData = Object\.assign\(\{\}, _lastRootSnapshotData\)/.test(appSrc), '캐시 루트 문서를 그대로 쓰던 옛 코드 없음');
     assert.ok(appSrc.includes('_lastRootSnapshotFromServer = !(doc && doc.metadata && doc.metadata.fromCache);'));
+    // 2026-11-06 서버 확인: 다른 기기가 지운 마킹은 「서버에 없음」이 아니다
+    {
+        const r = G.splitMissingMarkings([{ id: 'a' }, { id: 'b' }, { id: 'c' }, null], new Set(['a']), ['b']);
+        assert.deepStrictEqual(r, { missing: ['c'], deletedElsewhere: ['b'] });
+        const fk = 'B_1F';
+        const m = SM.mergeDefectsMaps(
+            { [fk]: [{ id: 'a', updatedAt: 1 }] },
+            { [fk]: [{ id: 'a', updatedAt: 1 }, { id: 'b', updatedAt: 1 }] },
+            { [fk]: ['b'] }, { [fk]: [] }, { [fk]: { b: 100 } }, { [fk]: {} }
+        );
+        assert.deepStrictEqual(m.defects[fk].map((d) => d.id), ['a'], '지운 마킹은 이 기기에서도 빠짐');
+        assert.ok(appSrc.includes('guard.splitMissingMarkings(local, ids, serverMarkings.deletedIds)'), '서버 확인이 삭제 기록을 본다');
+    }
     console.log('test-floor-sync-guard: ok');
 })().catch((e) => { console.error(e); process.exit(1); });

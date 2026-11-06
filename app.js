@@ -859,6 +859,8 @@ document.addEventListener('DOMContentLoaded', () => {
     }
 
     let _syncProgressRenderTimer = null;
+    /** 2026-11-06 이번 회차에 층 잠금을 잡고 올리는 층 — 「어느 현장 것을 올리는지」 표시용 */
+    let _syncActiveFloorKeys = new Set();
     let _syncPillSeenSession = false;
     let _syncPillDoneUntil = 0;
     let _syncPillDoneFor = 0;
@@ -937,6 +939,50 @@ document.addEventListener('DOMContentLoaded', () => {
         });
     }
     window.bsaSyncProgressSummary = syncProgressSummary;
+    /** 2026-11-06 층 키 → 현장(회차)·동+층 이름. 진행률 창 「현장별 남은 변경」 */
+    function syncProgressSiteOfFloor(fk) {
+        const b = findBuildingForFloorKey(fk);
+        if (!b) return null;
+        const code = floorCodeFromFloorKey(fk, b);
+        let fl = code;
+        try { fl = stripFloorCodeSuffix(window.getFloorLabelFromCode(code)) || code; } catch (_e) { /* 코드 그대로 */ }
+        const dong = getBuildingDongLabel(b);
+        return { site: syncProgressSiteName(b), floor: `${dong ? dong + ' ' : ''}${fl}` };
+    }
+    function syncProgressSiteName(b) {
+        const site = getBuildingSiteName(b);
+        let round = '';
+        try { round = formatSurveyRoundLabelShort(getBuildingSurveyRoundKey(b)) || ''; } catch (_e) { /* 현장 이름만 */ }
+        return round ? `${site} (${round})` : site;
+    }
+    function syncProgressSiteRows(sp, ctx) {
+        const j = syncJournal();
+        if (!j || !sp || typeof j.pendingByFloor !== 'function') return [];
+        let photoFloor = null;
+        const by = j.pendingByFloor(Object.assign({}, ctx, {
+            photoFloorKey: (id) => {
+                if (!photoFloor) {
+                    photoFloor = new Map();
+                    const defs = (window.state && window.state.defects) || {};
+                    Object.keys(defs).forEach((k) => (defs[k] || []).forEach((d) => {
+                        if (!d) return;
+                        (d.photoIds || []).forEach((x) => photoFloor.set(x, k));
+                        (d.prevRoundPhotoIds || []).forEach((x) => photoFloor.set(x, k));
+                    }));
+                }
+                return photoFloor.get(id) || '';
+            }
+        }));
+        const pendingBuildingSites = (ctx.pendingBuildingIds || []).map((id) => {
+            const b = ((window.state && window.state.buildings) || []).find((x) => x && String(x.id) === String(id));
+            return b ? syncProgressSiteName(b) : '';
+        });
+        return sp.buildSiteRows(by, {
+            resolve: (fk) => { try { return syncProgressSiteOfFloor(fk); } catch (_e) { return null; } },
+            activeFloorKeys: Array.from(_syncActiveFloorKeys),
+            pendingBuildingSites
+        });
+    }
     function syncProgressFloorLabel(fk) {
         if (fk === 'sync') return '건물 정보·회사 동기화';
         try {
@@ -1041,6 +1087,7 @@ document.addEventListener('DOMContentLoaded', () => {
         const sp = window.BSA && window.BSA.syncProgress;
         const sum = syncProgressSummary();
         if (!sp || !sum || !document.body) return;
+        try { sum.sites = syncProgressSiteRows(sp, syncProgressCtx()); } catch (e) { sum.sites = []; console.warn('[진행률] 현장별 표시 실패', e); }
         const now = Date.now();
         // 오프라인 배지: 안 올라간 수
         const ob = document.getElementById('offlineBadge');
@@ -1108,6 +1155,8 @@ document.addEventListener('DOMContentLoaded', () => {
                 txt.textContent = (parkedGate || parkedPhotos.length)
                     ? `자동 올리기 멈춤${parkedPhotos.length ? ` · 사진 ${parkedPhotos.length}장` : ''} · 눌러서 다시 시도`
                     : (mode === 'fail' ? `올리기 실패 · 남음 ${sum.pending}건` : sp.pillText(sum));
+                const nowSite = mode === 'run' ? sp.activeSiteText(sum.sites) : '';
+                if (nowSite && !parkedGate && !parkedPhotos.length) txt.textContent += ` · ${nowSite}`;
             }
             if (bar) bar.style.width = sum.percent + '%';
             if (ic) ic.className = 'fa-solid ' + (mode === 'done' ? 'fa-circle-check' : (mode === 'fail' ? 'fa-triangle-exclamation' : (sum.syncing ? 'fa-arrows-rotate fa-spin' : 'fa-cloud-arrow-up')));
@@ -66841,8 +66890,41 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
             try { bundle = await readFloorBundleStrict(bldg, fc); } catch (e) { problems.push(`${fc} 서버 읽기 실패`); continue; }
             const ids = new Set();
             collectMarkingIdsDeep(bundle && bundle.markings, ids, 0);
-            const missing = local.filter((d) => d && d.id && !ids.has(d.id)).length;
-            if (missing) problems.push(`${fc} 마킹 ${missing}개 서버에 없음`);
+            // 2026-11-06 서버에 삭제 기록이 있는 마킹은 못 올린 것이 아니라 다른 기기가 지운 것 — 평소 동기화와 같은 규칙으로
+            // 이 기기에도 반영한다(이 기기의 오프라인 수정이 지운 시각보다 뒤면 합치기가 살려 두고, 그건 올릴 것으로 표시).
+            const guard = window.BSA.floorSyncGuard;
+            const serverMarkings = (bundle && bundle.markings) || {};
+            let split = guard.splitMissingMarkings(local, ids, serverMarkings.deletedIds);
+            if (split.deletedElsewhere.length) {
+                const floorKey = `${bldg.id}_${fc}`;
+                await waitForUiGestureIdle();
+                const merged = mergeDefectsMaps(
+                    { [floorKey]: serverMarkings.items || [] },
+                    { [floorKey]: window.state.defects[floorKey] || [] },
+                    { [floorKey]: serverMarkings.deletedIds || [] },
+                    { [floorKey]: (window.state.deletedDefectIds || {})[floorKey] || [] },
+                    { [floorKey]: serverMarkings.deletedAt || {} },
+                    { [floorKey]: (window.state.deletedDefectAt || {})[floorKey] || {} }
+                );
+                window.state.defects[floorKey] = merged.defects[floorKey] || [];
+                if (!window.state.deletedDefectIds) window.state.deletedDefectIds = {};
+                if (!window.state.deletedDefectAt) window.state.deletedDefectAt = {};
+                window.state.deletedDefectIds[floorKey] = (merged.deletedDefectIds || {})[floorKey] || [];
+                window.state.deletedDefectAt[floorKey] = (merged.deletedDefectAt || {})[floorKey] || {};
+                _suppressSyncOnSave = true;
+                try { if (typeof saveStateToLocalStorage === 'function') saveStateToLocalStorage(); } finally { _suppressSyncOnSave = false; }
+                if (floorKey === currentInspectionFloorKey()) {
+                    if (typeof renderDefectListPanel === 'function') renderDefectListPanel();
+                    if (typeof drawCanvas === 'function') drawCanvas();
+                }
+                const survived = guard.splitMissingMarkings(window.state.defects[floorKey], ids, serverMarkings.deletedIds);
+                if (survived.deletedElsewhere.length) {
+                    markFloorKeyDirty(floorKey);
+                    problems.push(`${fc} 마킹 ${survived.deletedElsewhere.length}개 아직 안 올라감`);
+                }
+                split = survived;
+            }
+            if (split.missing.length) problems.push(`${fc} 마킹 ${split.missing.length}개 서버에 없음`);
         }
         let photoMissing = 0;
         for (const key of offlinePrepPhotoKeysOfBuilding(bldg.id)) {
@@ -70585,6 +70667,9 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
                 floorLeases.set(floorKey, { ref: fLeaseRef, info });
                 floorsToSync.add(floorKey);
             }
+            // 2026-11-06 진행률 창에 「지금 올리는 현장」으로 보인다. 남은 변경이 없는 층(보고 있는 층)은 현장별 줄에 안 잡힌다
+            _syncActiveFloorKeys = new Set(floorsToSync);
+            if (typeof scheduleSyncProgressRender === 'function') scheduleSyncProgressRender();
             if (busyFloorKeys.size) {
                 console.info('[동기화] 다른 기기가 올리는 중인 층은 이번에 건너뜀(잠시 뒤 다시):', Array.from(busyFloorKeys));
             }
@@ -70919,6 +71004,7 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
                 await releaseCompanySyncLease(fl.ref, fl.info);
             }
             floorLeases.clear();
+            _syncActiveFloorKeys = new Set();
             setTimeout(() => { isRemoteSyncing = false; }, 400);
             _syncInFlight = false;
             try { _tabLockRelease(); } catch (_e) { /* ignore */ }
