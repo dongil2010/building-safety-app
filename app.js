@@ -6249,12 +6249,29 @@ document.addEventListener('DOMContentLoaded', () => {
 
         // ── 3단: 현장 → 회차 → (여러 동만) 동 ──
         // 요약·탭은 현장 목록 첫 화면에서만 (현장 안으로 들어가면 숨김)
+        // 회차선택(현장 진입)에는 기존 inspector/contactPhone 을 현장 목록과 같은 문구로 보여 준다.
         {
             const sumEl = document.getElementById('dashboardSummary');
             const tabEl = document.getElementById('dashboardTabs');
+            const contactEl = document.getElementById('dashboardSiteContact');
+            const HS = window.BSA && window.BSA.homeSites;
             if (selectedSiteKey) {
                 if (sumEl) sumEl.hidden = true;
                 if (tabEl) tabEl.hidden = true;
+            }
+            const onRoundSelect = !!(selectedSiteKey && !window.state.dashboardRoundKey);
+            if (contactEl && onRoundSelect) {
+                const siteMembers = allBldgs.filter((b) => getBuildingSiteName(b) === selectedSiteKey);
+                const line = HS && typeof HS.formatSiteContactLine === 'function'
+                    ? HS.formatSiteContactLine(siteMembers)
+                    : '현장 담당자·연락처 미등록';
+                contactEl.hidden = false;
+                contactEl.textContent = line;
+                contactEl.classList.toggle('is-empty', line === ((HS && HS.SITE_CONTACT_EMPTY) || '현장 담당자·연락처 미등록'));
+            } else if (contactEl) {
+                contactEl.hidden = true;
+                contactEl.textContent = '';
+                contactEl.classList.remove('is-empty');
             }
         }
         if (selectedSiteKey && window.state.dashboardRoundKey) {
@@ -6540,13 +6557,8 @@ ${roundMobile ? '' : `<button type="button" class="icon-btn icon-btn-trash" titl
                 return '';
             };
             const addr = pickField((b) => b.address);
-            const inspector = pickField((b) => b.inspector);
-            const phone = pickField((b) => b.contactPhone);
-            const contactBits = [];
-            if (inspector) contactBits.push(inspector);
-            if (phone) contactBits.push(phone);
-            const contactLine = contactBits.length
-                ? `현장 담당자 ${contactBits.join(' · ')}`
+            const contactLine = HS && typeof HS.formatSiteContactLine === 'function'
+                ? HS.formatSiteContactLine(members)
                 : '현장 담당자·연락처 미등록';
             const addrLine = addr || '주소 미등록';
             const safeSite = escapeHtml(siteKey);

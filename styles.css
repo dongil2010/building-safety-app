@@ -10797,6 +10797,39 @@ body.bsa-tab-stats .app-content {
     color: #0f172a;
 }
 
+/* 회차선택: 현장 목록과 같은 담당자·연락처. 폰·태블릿에서도 줄바꿈·읽기 크기 유지 */
+.dashboard-site-contact {
+    flex: 1 1 100%;
+    margin-top: 0.2rem;
+    padding: 0.45rem 0.65rem;
+    border-radius: 0.55rem;
+    background: #f1f5f9;
+    color: #1e293b;
+    font-size: 0.92rem;
+    font-weight: 700;
+    line-height: 1.4;
+    white-space: normal;
+    overflow-wrap: anywhere;
+    word-break: break-word;
+}
+
+.dashboard-site-contact[hidden] {
+    display: none !important;
+}
+
+.dashboard-site-contact.is-empty {
+    font-weight: 600;
+    color: #64748b;
+    background: #f8fafc;
+}
+
+@media (max-width: 1024px) {
+    .dashboard-site-contact {
+        font-size: 1rem;
+        padding: 0.55rem 0.75rem;
+    }
+}
+
 .building-row-site .building-row-name i {
     margin-right: 0.35rem;
     color: #64748b;

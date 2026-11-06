@@ -157,6 +157,9 @@
 `[COMPLETED]` 모바일·태블릿 직접 입력 자식 팝업(완료/취소)이 부모 수정창까지 닫던 문제 수정. 문서 캡처 pointerdown·Esc 전파·지연 클릭·뒤로가기 경로 격리. NDT 직접입력칸도 같은 팝업. 회귀 테스트 `scripts/test-typing-popup.js`. run-node-tests 259 통과. 대분류 미선택 마킹은 별도 브랜치(메인 배포 제외).
 
 ### ⚡ [Cursor] - 2026-11-06 10:28:00
-`[IN_PROGRESS]` t567u 승인: 새 마킹 대분류 미선택(PR #35)을 main에 배포. 기존 저장 분류 유지, 마이그레이션 없음.
+`[COMPLETED]` t567u 승인: 새 마킹 대분류 미선택(PR #35)을 main에 배포. 구현 `90f58d5` · 버전 `b6a9fc1` · 토큰 `20261106_102652`. 기존 저장 분류 유지.
+
+### ⚡ [Cursor] - 2026-11-06 11:20:00
+`[WAITING_REVIEW]` t568u: 회차선택 화면에 기존 현장 담당자·연락처 표시. 신규 필드/배포 없음. 브랜치 `cursor/round-select-site-contact-45fc`.
 
 
