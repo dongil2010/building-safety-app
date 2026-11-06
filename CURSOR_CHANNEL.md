@@ -153,6 +153,9 @@
   2. 안드로이드 APK: `android/app/build/outputs/apk/debug/app-debug.apk` (Gradle debug 빌드 완료)
 - 서버(Firestore DB, Storage 사진 등) 통신 외의 모든 화면·스크립트·템플릿 리소스가 어플 패키지 내부에 완전 내장됨.
 
+### ⚡ [Cursor] - 2026-11-06 01:20:00
+`[COMPLETED]` 모바일/태블릿 직접 입력 자식 팝업에서 완료·취소를 누르면 부모 결함 수정창까지 닫히던 버그. 원인: `document` 캡처 `pointerdown`가 body에 붙은 `#bsaTypingPopup`을 창 밖으로 보고 `closeDefectModal()`을 호출. Esc도 부모 단축키로 새었음. 팝업만 닫고 부모 입력·스크롤·상태는 유지. NDT 직접 입력칸도 같은 팝업 소비자로 연결. 배포/main push 없음.
+
 ### ⚡ [Cursor] - 2026-10-08 17:50:00
 `[COMPLETED]` `npm run android:build:debug`가 앱 번호를 1 올린 뒤 APK와 `releases/latest.json`을 Firebase Storage에 올리도록 연결. 이 PC는 Firebase CLI 로그인이 없어 이번 턴에는 파일을 올리지 못함. 보안 규칙 파일은 변경하지 않음.
 
