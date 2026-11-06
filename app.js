@@ -24666,29 +24666,87 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
         const count = countSelectedMarkPhotos(d);
         const status = formatMapSelPopupPhotoStatus(count);
         const has = count > 0;
+        // 2026-11-06 팝업에는 찍힌 사진만. 넣는 버튼은 툴바 위(updateMapSelPhotoBar). 기기에 있는 그림만 쓴다(서버 안 읽음)
+        const ids = Array.isArray(d.photoIds) ? d.photoIds : [];
+        const thumbs = [];
+        for (let i = 0; i < Math.max(ids.length, (d.photos || []).length) && thumbs.length < 4; i++) {
+            const u = (d.photos && d.photos[i]) || (ids[i] && window._photoCache && window._photoCache[ids[i]]) || (d.photoUrls && d.photoUrls[i]) || '';
+            if (typeof u === 'string' && /^(data:image|https:|blob:)/.test(u)) thumbs.push(u);
+        }
         return '<div class="map-sel-popup-photo" data-photo-defect-id="' + escapeHtml(id) + '">'
-            + '<button type="button" class="map-sel-popup-photo-add" data-photo-defect-id="' + escapeHtml(id) + '"'
-            + ' title="이 마킹에 사진 추가">'
-            + '<i class="fa-solid fa-camera" aria-hidden="true"></i> 사진 추가</button>'
+            + thumbs.map((u) => '<img class="map-sel-popup-thumb" alt="" src="' + escapeHtml(u) + '">').join('')
             + '<span class="map-sel-popup-photo-status' + (has ? ' has-photos' : ' no-photos') + '">'
             + escapeHtml(status) + '</span></div>';
     }
 
+    /**
+     * 2026-11-06 마킹을 한 번 누르면 툴바 바로 위 오른쪽에 「사진 추가」「사진 촬영」 — 오른손 엄지로만 점검.
+     * 사진을 넣는 길은 예전 팝업 버튼과 같다(그 마킹에 붙임). 마킹 선택이 풀리거나 수정창이 열리면 숨긴다.
+     */
+    function mapSelPhotoBarTarget() {
+        const sel = (typeof window.getSelectedDefectIds === 'function') ? window.getSelectedDefectIds() : null;
+        if (!sel || sel.size === 0) return null;
+        const all = (typeof getCurrentFloorDefects === 'function' ? getCurrentFloorDefects() : []) || [];
+        const picked = all.filter((d) => d && sel.has(d.id));
+        if (!picked.length) return null;
+        const groups = new Set(picked.map((d) => d.groupId || d.id));
+        if (groups.size !== 1) return null;   // 서로 다른 마킹을 여러 개 고른 때는 어디에 넣을지 모호하다
+        const cycle = window._groupBoxCycle && window._groupBoxCycle.lastId;
+        const direct = picked.find((d) => d.id === cycle) || picked[0];
+        if (direct.groupId && typeof buildDefectMarkingFloatSlots === 'function') {
+            const slot = buildDefectMarkingFloatSlots(direct.groupId).find((s) =>
+                (s.dirMember && s.dirMember.id === direct.id) || (s.formMember && s.formMember.id === direct.id));
+            if (slot) return slot.formMember || slot.dirMember || direct;
+        }
+        return direct;
+    }
+
+    function updateMapSelPhotoBar() {
+        const anchor = document.getElementById('mapSelectedDefectPopup');
+        if (!anchor || !anchor.parentElement) return;
+        let bar = document.getElementById('mapSelPhotoBar');
+        if (!bar) {
+            bar = document.createElement('div');
+            bar.id = 'mapSelPhotoBar';
+            bar.className = 'map-sel-photo-bar';
+            bar.hidden = true;
+            bar.innerHTML = '<button type="button" class="map-sel-photo-btn" data-photo-mode="gallery"><i class="fa-solid fa-images" aria-hidden="true"></i> 사진 추가</button>'
+                + '<button type="button" class="map-sel-photo-btn primary" data-photo-mode="camera"><i class="fa-solid fa-camera" aria-hidden="true"></i> 사진 촬영</button>';
+            // 도면 드래그·선택 해제로 넘어가지 않게 버튼 위 터치는 여기서 끝낸다
+            ['pointerdown', 'pointerup', 'mousedown', 'touchstart', 'touchend', 'click'].forEach((t) => {
+                bar.addEventListener(t, (e) => e.stopPropagation());
+            });
+            bar.querySelectorAll('[data-photo-mode]').forEach((btn) => {
+                btn.addEventListener('click', (e) => {
+                    e.preventDefault();
+                    const d = mapSelPhotoBarTarget();
+                    startMapPopupPhotoAdd(d && d.id, btn.getAttribute('data-photo-mode'));
+                });
+            });
+            anchor.parentElement.appendChild(bar);
+        }
+        const modalOpen = typeof isDefectModalOpen === 'function' && isDefectModalOpen();
+        const target = modalOpen ? null : mapSelPhotoBarTarget();
+        bar.hidden = !target;
+        if (!target) return;
+        // 툴바가 아래쪽 가로줄이면 그 바로 위, 오른쪽 세로줄이면 맨 아래에서 그 왼쪽
+        const rail = document.getElementById('mobileMapSideRail');
+        const box = anchor.parentElement.getBoundingClientRect();
+        const r = rail ? rail.getBoundingClientRect() : null;
+        const railShown = !!(r && r.width > 0 && r.height > 0);
+        const horizontal = railShown && r.width > r.height;
+        bar.style.bottom = (horizontal ? Math.max(8, box.bottom - r.top + 6) : 10) + 'px';
+        bar.style.right = ((railShown && !horizontal) ? Math.max(8, box.right - r.left + 6) : 8) + 'px';
+    }
+
     function bindMapSelPopupPhotoControls(root) {
         if (!root) return;
-        root.querySelectorAll('.map-sel-popup-photo-add').forEach((btn) => {
-            btn.onclick = (e) => {
-                e.preventDefault();
-                e.stopPropagation();
-                startMapPopupPhotoAdd(btn.getAttribute('data-photo-defect-id'));
-            };
-        });
         root.querySelectorAll('.map-sel-popup-photo').forEach((row) => {
             row.onclick = (e) => { e.stopPropagation(); };
         });
     }
 
-    function startMapPopupPhotoAdd(defectId) {
+    function startMapPopupPhotoAdd(defectId, mode) {
         if (!defectId) {
             window.showToast?.('사진을 넣을 마킹이 없습니다.', 'warning', 2500);
             return;
@@ -24706,7 +24764,7 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
             return;
         }
         if (typeof window.triggerDefectPhotoPick === 'function') {
-            window.triggerDefectPhotoPick('gallery', 'curr', target);
+            window.triggerDefectPhotoPick(mode === 'camera' ? 'camera' : 'gallery', 'curr', target);
         }
     }
     window.startMapPopupPhotoAdd = startMapPopupPhotoAdd;
@@ -24715,6 +24773,7 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
     window.formatMapSelPopupPhotoStatus = formatMapSelPopupPhotoStatus;
 
     function updateMapSelectedDefectPopup() {
+        try { updateMapSelPhotoBar(); } catch (e) { console.warn('[사진 버튼] 표시 실패', e); }
         const popup = document.getElementById('mapSelectedDefectPopup');
         if (!popup) return;
         const show = !isMapDefectListOpen();

@@ -18699,3 +18699,11 @@ html.bsa-kb-dock-follow body.defect-modal-open #tab-map #mobileMapDock.mobile-ca
 
 /* 2026-11-06 hidden 일 때 확실히 숨김(직접 입력 중에만 보임) */
 .defect-typed-preset-mode[hidden] { display: none !important; }
+
+/* 2026-11-06 마킹 선택 시 툴바 위 사진 버튼 — 오른손 엄지 자리. 팝업에는 찍힌 사진만 */
+.map-sel-photo-bar { position: absolute; right: 8px; bottom: 10px; z-index: 43; display: flex; gap: 8px; pointer-events: auto; touch-action: manipulation; }
+.map-sel-photo-bar[hidden] { display: none !important; }
+.map-sel-photo-btn { min-height: 52px; min-width: 104px; padding: 0 14px; font-size: 0.95rem; font-weight: 800; border-radius: 12px; border: 1px solid #94a3b8; background: #ffffff; color: #0f172a; box-shadow: 0 4px 12px rgba(15, 23, 42, 0.22); cursor: pointer; white-space: nowrap; }
+.map-sel-photo-btn.primary { background: #2563eb; border-color: #2563eb; color: #ffffff; }
+body.defect-modal-open .map-sel-photo-bar { display: none !important; }
+.map-sel-popup-thumb { width: 44px; height: 33px; object-fit: cover; border-radius: 4px; border: 1px solid #cbd5e1; flex: 0 0 auto; }

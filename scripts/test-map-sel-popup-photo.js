@@ -153,7 +153,7 @@ function makePhotoWorld(opts) {
 
 {
     const start = extractFunction('function startMapPopupPhotoAdd(');
-    assert.ok(start.includes("triggerDefectPhotoPick('gallery', 'curr', target)"));
+    assert.ok(start.includes("triggerDefectPhotoPick(mode === 'camera' ? 'camera' : 'gallery', 'curr', target)"));
     const bind = extractFunction('function bindMapSelPopupPhotoControls(');
     assert.ok(bind.includes('e.stopPropagation()'));
     const popup = extractFunction('function updateMapSelectedDefectPopup(');
@@ -161,12 +161,16 @@ function makePhotoWorld(opts) {
     assert.ok(popup.includes('buildMapSelPopupPhotoRowHtml(photoMember)'));
     assert.ok(popup.includes("e.target.closest('.map-sel-popup-photo')"), 'photo row does not open editor');
     const rowHtml = extractFunction('function buildMapSelPopupPhotoRowHtml(');
-    assert.ok(rowHtml.includes('사진 추가'));
+    assert.ok(!rowHtml.includes('사진 추가'), '팝업에는 찍힌 사진만');
+    assert.ok(rowHtml.includes('map-sel-popup-thumb'));
+    const barFn = extractFunction('function updateMapSelPhotoBar(');
+    assert.ok(barFn.includes('사진 추가') && barFn.includes('사진 촬영') && barFn.includes('data-photo-mode'), '툴바 위 버튼');
+    assert.ok(popup.includes('updateMapSelPhotoBar()'), '선택이 바뀔 때마다 갱신');
     assert.ok(rowHtml.includes('formatMapSelPopupPhotoStatus'));
 }
 
 assert.ok(html.includes('id="mapSelectedDefectPopup"'));
-assert.ok(/\.map-sel-popup-photo-add[\s\S]*min-height:\s*2\.2rem/.test(css), 'touch-friendly add button');
+assert.ok(/\.map-sel-photo-btn \{[^}]*min-height: 52px/.test(css), '엄지로 누르기 쉬운 크기');
 assert.ok(app.includes('if (typeof updateMapSelectedDefectPopup === \'function\') updateMapSelectedDefectPopup();'));
 assert.ok(!/fetchPhotosDocIfAllowed|collection\(/.test(extractFunction('function countDefectLocalPhotoSlots(')),
     'count must not do remote reads');
