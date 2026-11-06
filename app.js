@@ -34113,9 +34113,25 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
             .filter((c) => _defectCauseAllowSet.has(c) && c !== '기타').slice(0, 6);
         return uniqCauseList(base.concat(raw.includes('기타') ? ['기타'] : []));
     }
-    function getDefaultCausePresetListRaw(key, types, category, component) {
+    /**
+     * 2026-11-06 결함 종류 이름에 마감 재료가 붙어 있으면(타일 균열·석재 파손·도장 균열 …) 그 재료 기준 원인을 쓴다.
+     * 전엔 「타일 균열」이 그냥 「균열」 키 + 바탕 부재(벽체 등)로 잡혀 건조수축·내력부족 같은 구조체 균열 원인이 맨 위에 떴다.
+     */
+    function getFinishCauseGroupFromTypes(types) {
+        const all = (Array.isArray(types) ? types : [types]).map((t) => String(t || '').replace(/\s+/g, '')).join(' ');
+        if (!all) return '';
+        if (all.includes('타일')) return '타일';
+        if (all.includes('석재')) return '석재';
+        if (all.includes('내장도장')) return '내장도장';
+        if (all.includes('도장') || all.includes('페인트')) return '도장';
+        return '';
+    }
+    const FINISH_MATERIAL_CAUSE_GROUPS = ['타일', '석재', '도장', '내장도장'];
+    function getDefaultCausePresetListRaw(key, types, catArg, component) {
         const k = String(key || '').trim() || '기타';
-        const group = getCauseMemberGroup(category, component);
+        const group = getFinishCauseGroupFromTypes(types) || getCauseMemberGroup(catArg, component);
+        // 타일·석재·도장은 어느 분류로 적었어도 마감재 결함 → 마감재 원인 순서(구조체 균열 맨 위 3개를 올리지 않음)
+        const category = FINISH_MATERIAL_CAUSE_GROUPS.includes(group) ? '마감재' : catArg;
         if (k === '균열') {
             const byMember = CRACK_CAUSE_BY_MEMBER[group] || null;
             if (!byMember) return leakCauseOrder(k, finishCauseOrder(k, category, rankCausesByCompany(k, CORE_CRACK_CAUSE_PRESET)));

@@ -410,6 +410,12 @@ function testMemberContextCauses() {
     // 마감재 오염·들뜸: 같은 키를 두 번 써서 회사 결함표 원인이 사라지던 문제(상부 방수층 파손·건조수축이 목록에 있음)
     assert.ok(crack('마감재', '천장 마감재', '오염').includes('상부 방수층 파손'));
     assert.ok(crack('마감재', '벽체 타일', '들뜸').includes('건조수축 및 재료적 특성'));
+    // 2026-11-06 「타일 균열」처럼 종류에 마감 재료가 붙으면 바탕 부재·분류와 상관없이 타일 원인(구조체 균열 맨 위 3개 아님)
+    [['마감재', '벽체', '타일 균열'], ['구조체', '벽체', '타일 균열'], ['비구조체', '', '타일균열'], ['구조체', '타일', '균열']].forEach(([cat, comp, t]) => {
+        const list = crack(cat, comp, t);
+        assert.strictEqual(list[0], '시공미흡', 'tile crack top ' + cat + '/' + comp + '/' + t);
+        ['이질재료 거동차이', '내력부족', '개구부 주위 응력집중', '주변부재의 구속'].forEach((c) => assert.ok(!list.includes(c), c + ' in tile crack ' + cat + '/' + t));
+    });
     assert.ok(api.defectCausePreset['들뜸'].includes('바탕 균열 전달'));
     // 결함 종류: 엑셀에 많이 나오는 조합이 목록에 보임
     assert.ok(api.getDefectTypePresetFor('비구조체', '기둥').includes('이격'));
