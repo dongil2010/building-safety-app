@@ -201,19 +201,26 @@ function testAutoCheckedCause() {
             assert.deepStrictEqual(api.getDefaultCausePresetList(g.key, g.types, '구조체', comp).slice(0, 3), ['건조수축 및 재료적 특성', '이질재료 거동차이', '내력부족'], 'crack top3 ' + comp);
         });
     });
-    // 2026-10-30 마감재: 맨 위 4개 고정(미장균열만 균열 3개 우선)
+    // 2026-10-30 마감재: 수분·들뜸류는 맨 위 4개 유지. 마모·줄눈 등 수분 무관 종류에는 상부 누수를 끼우지 않음(t571u)
     const FIN4 = ['시공미흡', '경과년수 증대에 따른 노후화', '상부 배관 누수', '상부 누수'];
     ['벽체 타일', '바닥 타일', '도장', '천장 마감재', '외벽 마감재'].forEach((comp) => {
         (api.getDefectTypePresetFor('마감재', comp) || []).forEach((t) => {
             if (t === '상태양호' || t === '미장균열') return;
             api.getCauseDisplayGroups(t).forEach((g) => {
                 if (g.key === '미장균열' || /^누수( ?흔적)?$/.test(g.key) || /^(백태|백태\/유출|백화)$/.test(g.key)) return;
-                assert.deepStrictEqual(api.getDefaultCausePresetList(g.key, g.types, '마감재', comp).slice(0, 4), FIN4, 'finish top4 ' + comp + '/' + t);
+                const list = api.getDefaultCausePresetList(g.key, g.types, '마감재', comp);
+                if (/누수|습기|결로|백태|오염|변색|들뜸|박리|박락|탈락|처짐|부풀음|곰팡이/.test(g.key)) {
+                    assert.deepStrictEqual(list.slice(0, 4), FIN4, 'finish top4 ' + comp + '/' + t);
+                } else {
+                    assert.ok(!list.includes('상부 배관 누수') && !list.includes('상부 누수'), 'no pipe leak on dry finish ' + comp + '/' + t);
+                }
             });
         });
     });
     api.getCauseDisplayGroups('미장균열').forEach((g) => {
-        assert.deepStrictEqual(api.getDefaultCausePresetList(g.key, g.types, '마감재', '벽체 미장').slice(0, 3), ['건조수축 및 재료적 특성', '이질재료 거동차이', '내력부족'], 'finish 미장균열');
+        const list = api.getDefaultCausePresetList(g.key, g.types, '마감재', '벽체 미장');
+        assert.deepStrictEqual(list.slice(0, 2), ['건조수축 및 재료적 특성', '이질재료 거동차이'], 'finish 미장균열 lead');
+        assert.ok(!list.includes('내력부족'), '마감재 미장균열에 내력부족 제안 없음');
     });
     // 2026-10-30 누수류: 모든 분류에서 맨 위 3개 고정, 결함부위 수분유입은 그 아래
     // 사용자는 두 원인을 함께 고름: 누수 = 방수층 파손 → 결함부위 수분유입 → 창호 실링 → 배관

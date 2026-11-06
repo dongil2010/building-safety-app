@@ -34087,19 +34087,42 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
         '추가하중 적치', '지하수 유입', '부식', '누수', '동결융해 반복', '실 변경으로 인한 하중증가', '추가하중 설치', '부착력 저하', '시공 누락',
         '온도변화', '기타'];
     let _defectCauseAllowSet = null;
+    /**
+     * 기본 제안에만 쓰는 결함→원인 제외. 용어를 전역에서 지우지 않고,
+     * 그 결함 종류·분류에 명백히 안 맞는 조합만 뺀다. 저장된 원인·사용자 프리셋은 손대지 않음.
+     */
+    const STRUCTURAL_ONLY_CAUSES = ['내력부족', '철근 부식 팽창', '피복두께 부족', '피복 두께 부족'];
+    const MOISTURE_PIPE_CAUSES = ['상부 배관 누수', '상부 누수'];
+    function isMoistureRelatedCauseKey(key) {
+        const k = String(key || '').trim();
+        if (isLeakCauseKey(k) || isEffloCauseKey(k)) return true;
+        return /누수|습기|결로|백태|오염|변색|들뜸|박리|박락|탈락|처짐|부풀음|곰팡이/.test(k);
+    }
+    function shouldDropIncompatibleCause(key, cause, category) {
+        const c = String(cause || '').trim();
+        const cat = String(category || '').trim();
+        if (!c) return false;
+        if ((cat === '마감재' || cat === '비구조체') && STRUCTURAL_ONLY_CAUSES.indexOf(c) >= 0) return true;
+        if (cat === '마감재' && MOISTURE_PIPE_CAUSES.indexOf(c) >= 0 && !isMoistureRelatedCauseKey(key)) return true;
+        return false;
+    }
+    function filterIncompatibleDefaultCauses(key, list, category) {
+        return (list || []).filter((c) => !shouldDropIncompatibleCause(key, c, category));
+    }
+
     function getDefaultCausePresetList(key, types, category, component) {
         const raw = getDefaultCausePresetListRaw(key, types, category, component);
         if (!_defectCauseAllowSet) {
             _defectCauseAllowSet = new Set(DEFECT_CAUSE_ALLOW.concat(CRACK_TOP_CAUSES, LEAK_TOP_CAUSES, FINISH_TOP_CAUSES));
             Object.values(CRACK_LEAD_BY_GROUP).forEach((l) => l.forEach((c) => _defectCauseAllowSet.add(c)));
         }
-        const out = raw.filter((c) => _defectCauseAllowSet.has(c));
+        const out = filterIncompatibleDefaultCauses(key, raw.filter((c) => _defectCauseAllowSet.has(c)), category);
         if (out.some((c) => c !== '기타')) return out;
         // 그 종류에 쓸 원인이 엑셀에 하나도 없으면(기타·도장 박리·줄눈 손상 …) 엑셀에서 많이 쓰인 일반 원인으로
         const rk = companyCauseRankKey(key) || (/이격/.test(String(key)) ? '이격' : '');
         const base = (COMPANY_CAUSE_RANK[rk] || ['시공미흡', '경과년수 증대에 따른 노후화', '관리미흡', '사용자 부주의'])
             .filter((c) => _defectCauseAllowSet.has(c) && c !== '기타').slice(0, 6);
-        return uniqCauseList(base.concat(raw.includes('기타') ? ['기타'] : []));
+        return filterIncompatibleDefaultCauses(key, uniqCauseList(base.concat(raw.includes('기타') ? ['기타'] : [])), category);
     }
     function getDefaultCausePresetListRaw(key, types, category, component) {
         const k = String(key || '').trim() || '기타';
