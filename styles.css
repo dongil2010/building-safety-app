@@ -1004,9 +1004,10 @@ html.layout-desktop #tab-ndt .ndt-top-canvas-tools {
     left: 8px;
     z-index: 14;
     display: flex;
-    align-items: flex-start;
-    gap: 0.4rem;
-    max-width: min(72vw, 280px);
+    flex-direction: column;
+    align-items: stretch;
+    gap: 0.32rem;
+    max-width: min(78vw, 300px);
     padding: 0.35rem 0.45rem;
     background: rgba(255, 255, 255, 0.96);
     border: 1.5px solid #2563eb;
@@ -1015,6 +1016,14 @@ html.layout-desktop #tab-ndt .ndt-top-canvas-tools {
     cursor: pointer;
     pointer-events: auto;
     box-sizing: border-box;
+}
+
+.map-sel-popup-head {
+    display: flex;
+    align-items: flex-start;
+    gap: 0.4rem;
+    width: 100%;
+    min-width: 0;
 }
 
 .map-selected-defect-popup[hidden] {
@@ -1128,8 +1137,9 @@ html.layout-desktop #tab-ndt .ndt-top-canvas-tools {
 
 .map-selected-defect-popup .map-sel-popup-item {
     display: flex;
-    align-items: center;
-    gap: 0.38rem;
+    flex-direction: column;
+    align-items: stretch;
+    gap: 0.28rem;
     width: 100%;
     padding: 0.24rem 0.34rem;
     border-radius: 6px;
@@ -1137,6 +1147,10 @@ html.layout-desktop #tab-ndt .ndt-top-canvas-tools {
     box-sizing: border-box;
     cursor: pointer;
     transition: background 0.12s ease, border-color 0.12s ease;
+}
+
+.map-selected-defect-popup .map-sel-popup-item .map-sel-popup-head {
+    align-items: center;
 }
 
 .map-selected-defect-popup .map-sel-popup-item:hover {
@@ -1171,6 +1185,61 @@ html.layout-desktop #tab-ndt .ndt-top-canvas-tools {
 
 .map-selected-defect-popup .map-sel-popup-assign-btn:hover {
     background: #1d4ed8;
+}
+
+.map-sel-popup-photo {
+    display: flex;
+    align-items: center;
+    gap: 0.4rem;
+    width: 100%;
+    min-width: 0;
+}
+
+.map-sel-popup-photo-add {
+    flex: 0 0 auto;
+    min-height: 2.2rem;
+    min-width: 5.6rem;
+    padding: 0.28rem 0.55rem;
+    border: 1px solid #93c5fd;
+    border-radius: 8px;
+    background: #eff6ff;
+    color: #1d4ed8;
+    font-size: 0.72rem;
+    font-weight: 800;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    gap: 0.28rem;
+    cursor: pointer;
+    -webkit-tap-highlight-color: transparent;
+    touch-action: manipulation;
+}
+
+.map-sel-popup-photo-add:hover,
+.map-sel-popup-photo-add:focus-visible {
+    background: #dbeafe;
+    border-color: #2563eb;
+}
+
+.map-sel-popup-photo-status {
+    font-size: 0.68rem;
+    font-weight: 700;
+    color: #64748b;
+    min-width: 0;
+    line-height: 1.25;
+}
+
+.map-sel-popup-photo-status.has-photos {
+    color: #0f766e;
+}
+
+.map-sel-popup-photo-status.no-photos {
+    color: #94a3b8;
+}
+
+html:not(.layout-desktop) .map-sel-popup-photo-add {
+    min-height: 2.45rem;
+    font-size: 0.78rem;
 }
 
 .map-zoom-overlay {
@@ -16830,6 +16899,88 @@ html.bsa-touch-ui button#btnToggleCrosshairNdt#btnToggleCrosshairNdt,
 html.bsa-touch-ui button#mobileNdtBtnCrosshair#mobileNdtBtnCrosshair,
 html.bsa-touch-ui button#btnGridLines#btnGridLines,
 html.bsa-touch-ui button#mobileBtnGridLines#mobileBtnGridLines {
+    display: none !important;
+}
+
+/* t599u compact More: hide ONLY 그리기·범위선택·추가·출력범위 on phone/tablet.
+   박스 정리 and other More items stay. Desktop / layout-desktop rail unchanged.
+   NDT 범위선택·추가는 이 규칙에 넣지 않음. (#id#id — tablet rail display:flex !important 보다 우선) */
+html.bsa-touch-ui:not(.layout-desktop) button#mobileBtnAreaInk#mobileBtnAreaInk,
+html.layout-tablet:not(.layout-desktop) button#mobileBtnAreaInk#mobileBtnAreaInk,
+html.bsa-touch-ui:not(.layout-desktop) button#mobileBtnQuickDrag#mobileBtnQuickDrag,
+html.layout-tablet:not(.layout-desktop) button#mobileBtnQuickDrag#mobileBtnQuickDrag,
+html.bsa-touch-ui:not(.layout-desktop) button#mobileBtnAddSelect#mobileBtnAddSelect,
+html.layout-tablet:not(.layout-desktop) button#mobileBtnAddSelect#mobileBtnAddSelect,
+html.bsa-touch-ui:not(.layout-desktop) button#mobileBtnPrintCrop#mobileBtnPrintCrop,
+html.layout-tablet:not(.layout-desktop) button#mobileBtnPrintCrop#mobileBtnPrintCrop {
+    display: none !important;
+}
+
+#mobileBtnMapZoom,
+#mobileMapZoomPad {
+    display: none !important;
+}
+
+html.bsa-touch-ui:not(.layout-desktop) button#mobileBtnMapZoom#mobileBtnMapZoom,
+html.layout-tablet:not(.layout-desktop) button#mobileBtnMapZoom#mobileBtnMapZoom {
+    display: flex !important;
+}
+
+html.bsa-touch-ui:not(.layout-desktop) #mobileMapZoomPad:not([hidden]),
+html.layout-tablet:not(.layout-desktop) #mobileMapZoomPad:not([hidden]) {
+    display: flex !important;
+}
+
+.mobile-map-zoom-pad {
+    position: absolute;
+    right: 3.15rem;
+    top: 50%;
+    transform: translateY(-50%);
+    z-index: 46;
+    flex-direction: column;
+    align-items: center;
+    gap: 0.35rem;
+    padding: 0.4rem 0.32rem;
+    background: #ffffff;
+    border: 1px solid #d4d4d4;
+    border-radius: 12px;
+    box-shadow: 0 8px 20px rgba(15, 23, 42, 0.18);
+    pointer-events: auto;
+    touch-action: manipulation;
+}
+
+.mobile-map-zoom-pad-btn {
+    width: 2.75rem;
+    min-width: 44px;
+    height: 2.75rem;
+    min-height: 44px;
+    border: 1.5px solid #e5e7eb;
+    border-radius: 10px;
+    background: #f8fafc;
+    color: #0f172a;
+    font-size: 1.15rem;
+    cursor: pointer;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    -webkit-tap-highlight-color: transparent;
+}
+
+.mobile-map-zoom-pad-btn:active {
+    background: #e2e8f0;
+}
+
+.mobile-map-zoom-pad-label {
+    font-size: 0.68rem;
+    font-weight: 800;
+    color: #475569;
+    min-width: 2.6rem;
+    text-align: center;
+}
+
+html.layout-desktop #mobileBtnMapZoom,
+html.layout-desktop #mobileMapZoomPad,
+html.layout-desktop #mobileMapZoomPad:not([hidden]) {
     display: none !important;
 }
 

@@ -493,12 +493,25 @@
                                 <i class="fa-solid fa-wand-magic-sparkles"></i>
                                 <span>박스 정리</span>
                             </button>
+                            <button type="button" class="mobile-rail-btn" id="mobileBtnMapZoom" title="도면 확대·축소" aria-label="도면 확대·축소" aria-expanded="false" aria-controls="mobileMapZoomPad">
+                                <i class="fa-solid fa-magnifying-glass-plus"></i>
+                                <span>확대·축소</span>
+                            </button>
                             <button type="button" class="mobile-rail-btn" id="mobileBtnPrintCrop" title="위치도 출력 범위 — 한글·PDF 위치도에 넣을 부분을 정합니다(정하지 않으면 도면 전체)">
                                 <i class="fa-solid fa-crop-simple"></i>
                                 <span>출력범위</span>
                             </button>
                             </div>
                         </aside>
+                        <div id="mobileMapZoomPad" class="mobile-map-zoom-pad" hidden role="dialog" aria-label="도면 확대·축소" aria-modal="true">
+                            <button type="button" class="mobile-map-zoom-pad-btn" id="mobileMapZoomIn" title="확대" aria-label="확대">
+                                <i class="fa-solid fa-plus" aria-hidden="true"></i>
+                            </button>
+                            <span id="mobileMapZoomPadLabel" class="mobile-map-zoom-pad-label">100%</span>
+                            <button type="button" class="mobile-map-zoom-pad-btn" id="mobileMapZoomOut" title="축소" aria-label="축소">
+                                <i class="fa-solid fa-minus" aria-hidden="true"></i>
+                            </button>
+                        </div>
 
                         <!-- Bottom Icon Toolbar (PC: 도면 안 하단 오버레이) -->
                         <div class="canvas-bottom-toolbar">

@@ -24510,6 +24510,114 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
         return allDefects.find((d) => d && d.id && sel.has(d.id)) || null;
     }
 
+    /** 현차 사진 칸 수 — photoIds·인라인 photos·photoUrls만 본다(원격 fetch 없음). 빈 칸은 세지 않음. */
+    function countDefectLocalPhotoSlots(d, kind) {
+        if (!d) return 0;
+        const isPrev = kind === 'prev';
+        const ids = isPrev ? d.prevRoundPhotoIds : d.photoIds;
+        const photos = isPrev ? d.prevRoundPhotos : d.photos;
+        const urls = isPrev ? d.prevRoundPhotoUrls : d.photoUrls;
+        const n = Math.max(
+            Array.isArray(ids) ? ids.length : 0,
+            Array.isArray(photos) ? photos.length : 0,
+            Array.isArray(urls) ? urls.length : 0
+        );
+        let count = 0;
+        for (let i = 0; i < n; i++) {
+            if ((Array.isArray(ids) && ids[i])
+                || (Array.isArray(photos) && photos[i])
+                || (Array.isArray(urls) && urls[i])) {
+                count += 1;
+            }
+        }
+        return count;
+    }
+
+    /** 선택 마킹 요약용. 그 결함 수정창이 열려 있으면 창의 현차(_pendingPhotos)가 최신. */
+    function countSelectedMarkPhotos(d) {
+        if (!d) return 0;
+        try {
+            if (typeof isDefectModalOpen === 'function' && isDefectModalOpen()) {
+                const pinNow = document.getElementById('defectPinId')?.value || '';
+                if (pinNow && pinNow === d.id && Array.isArray(window._pendingPhotos)) {
+                    return window._pendingPhotos.filter(Boolean).length;
+                }
+            }
+        } catch (_e) { /* ignore */ }
+        return countDefectLocalPhotoSlots(d, 'curr');
+    }
+
+    function formatMapSelPopupPhotoStatus(count) {
+        const n = Math.max(0, Number(count) || 0);
+        return n > 0 ? (`사진 있음 (${n}장)`) : '사진 없음';
+    }
+
+    function capturePhotoTargetForSelectedDefect(d) {
+        if (!d || !d.id) return null;
+        const floorKey = state.currentBuildingId ? `${state.currentBuildingId}_${state.currentFloor}` : '';
+        let modalTarget = null;
+        try {
+            if (typeof captureDefectPhotoTarget === 'function') modalTarget = captureDefectPhotoTarget();
+        } catch (_e) { modalTarget = null; }
+        if (modalTarget && modalTarget.open && modalTarget.pinId === d.id) return modalTarget;
+        if (!floorKey) return null;
+        return { open: false, pinId: d.id, seq: 0, floorKey };
+    }
+
+    function buildMapSelPopupPhotoRowHtml(d) {
+        const id = d && d.id ? String(d.id) : '';
+        if (!id) return '';
+        const count = countSelectedMarkPhotos(d);
+        const status = formatMapSelPopupPhotoStatus(count);
+        const has = count > 0;
+        return '<div class="map-sel-popup-photo" data-photo-defect-id="' + escapeHtml(id) + '">'
+            + '<button type="button" class="map-sel-popup-photo-add" data-photo-defect-id="' + escapeHtml(id) + '"'
+            + ' title="이 마킹에 사진 추가">'
+            + '<i class="fa-solid fa-camera" aria-hidden="true"></i> 사진 추가</button>'
+            + '<span class="map-sel-popup-photo-status' + (has ? ' has-photos' : ' no-photos') + '">'
+            + escapeHtml(status) + '</span></div>';
+    }
+
+    function bindMapSelPopupPhotoControls(root) {
+        if (!root) return;
+        root.querySelectorAll('.map-sel-popup-photo-add').forEach((btn) => {
+            btn.onclick = (e) => {
+                e.preventDefault();
+                e.stopPropagation();
+                startMapPopupPhotoAdd(btn.getAttribute('data-photo-defect-id'));
+            };
+        });
+        root.querySelectorAll('.map-sel-popup-photo').forEach((row) => {
+            row.onclick = (e) => { e.stopPropagation(); };
+        });
+    }
+
+    function startMapPopupPhotoAdd(defectId) {
+        if (!defectId) {
+            window.showToast?.('사진을 넣을 마킹이 없습니다.', 'warning', 2500);
+            return;
+        }
+        const all = (typeof getCurrentFloorDefects === 'function' ? getCurrentFloorDefects() : []) || [];
+        const d = all.find((x) => x && x.id === defectId) || null;
+        if (!d) {
+            window.showToast?.('선택한 마킹을 찾을 수 없습니다.', 'warning', 2500);
+            if (typeof updateMapSelectedDefectPopup === 'function') updateMapSelectedDefectPopup();
+            return;
+        }
+        const target = capturePhotoTargetForSelectedDefect(d);
+        if (!target || !target.pinId) {
+            window.showToast?.('사진을 넣을 마킹이 없습니다.', 'warning', 2500);
+            return;
+        }
+        if (typeof window.triggerDefectPhotoPick === 'function') {
+            window.triggerDefectPhotoPick('gallery', 'curr', target);
+        }
+    }
+    window.startMapPopupPhotoAdd = startMapPopupPhotoAdd;
+    window.countDefectLocalPhotoSlots = countDefectLocalPhotoSlots;
+    window.countSelectedMarkPhotos = countSelectedMarkPhotos;
+    window.formatMapSelPopupPhotoStatus = formatMapSelPopupPhotoStatus;
+
     function updateMapSelectedDefectPopup() {
         const popup = document.getElementById('mapSelectedDefectPopup');
         if (!popup) return;
@@ -24595,11 +24703,13 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
                     const catClass = cat === '비구조체' ? 'cat-nonstructural'
                         : (cat === '마감재' ? 'cat-finishing' : '');
 
+                    const photoMember = formMember || dirMember || rep;
                     itemsHtml +=
                         `<div class="map-sel-popup-item ${isActive ? 'is-active' : ''} ${catClass}"`
                         + ` data-marking-member-id="${escapeHtml(formMember.id)}"`
                         + ` data-focus-member-id="${escapeHtml((dirMember || formMember).id)}"`
                         + ` data-display-label="${escapeHtml(badgeNo)}">`
+                        + `<div class="map-sel-popup-head">`
                         + `<span class="map-sel-popup-badge">${escapeHtml(badgeNo)}</span>`
                         + `<div class="map-sel-popup-lines">`
                         + (comp ? `<span class="map-sel-popup-comp">${escapeHtml(comp)}</span>` : '')
@@ -24614,6 +24724,8 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
                                 + `<i class="fa-solid fa-pen"></i>`
                                 + `</button>`
                           )
+                        + `</div>`
+                        + buildMapSelPopupPhotoRowHtml(photoMember)
                         + `</div>`;
                 });
 
@@ -24659,9 +24771,11 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
                         e.stopPropagation(); // 팝업을 누른 것이 도면·다른 마킹으로 새지 않게
                         if (assignBtn && assignBtn.contains(e.target)) return;
                         if (editBtn && editBtn.contains(e.target)) return;
+                        if (e.target.closest && e.target.closest('.map-sel-popup-photo')) return;
                         openItemDetail();
                     };
                 });
+                bindMapSelPopupPhotoControls(popup);
                 return;
             }
         }
@@ -24704,13 +24818,16 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
 
         popup.className = ('map-selected-defect-popup ' + catClass).trim();
         popup.innerHTML =
+            '<div class="map-sel-popup-head">' +
             '<span class="map-sel-popup-badge">' + escapeHtml(badgeNo) + '</span>' +
             '<div class="map-sel-popup-lines">' +
             (comp ? ('<span class="map-sel-popup-comp">' + escapeHtml(comp) + '</span>') : '') +
             typeHtml +
             measureHtml +
             '</div>' +
-            '<button type="button" class="map-sel-popup-edit" title="결함 수정"><i class="fa-solid fa-pen"></i></button>';
+            '<button type="button" class="map-sel-popup-edit" title="결함 수정"><i class="fa-solid fa-pen"></i></button>' +
+            '</div>' +
+            buildMapSelPopupPhotoRowHtml(d);
         popup.hidden = false;
         const editBtn = popup.querySelector('.map-sel-popup-edit');
         const openDetail = () => {
@@ -24726,9 +24843,11 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
         if (editBtn) {
             editBtn.onclick = (e) => { e.stopPropagation(); openDetail(); };
         }
+        bindMapSelPopupPhotoControls(popup);
         popup.onclick = (e) => {
             e.stopPropagation(); // 팝업을 누른 것이 도면·다른 마킹으로 새지 않게
             if (editBtn && editBtn.contains(e.target)) return;
+            if (e.target.closest && e.target.closest('.map-sel-popup-photo')) return;
             // 마킹 여러 개를 뽑아 둔 상태(통합 묶음이 아님)에서 팝업 몸통을 눌러도 선택이 한 개로 바뀌지 않게 — 연필 버튼으로만 연다
             if (sel.size > 1 && !d.groupId) return;
             openDetail();
@@ -37718,7 +37837,8 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
     const MAP_FLOATING_OVERLAY_SELECTOR = [
         '#mapSelectedDefectPopup', '.map-selected-defect-popup', '#markShapeBar', '#areaPolyTouchBar', '#areaPolygonRedrawBanner',
         '#areaToolPanel', '#mapStyleSizeToolbar', '#mapGuideBar', '#mapCountBar', '#mapEvalMemberBar', '#evalUnitBar',
-        '#areaShapePicker', '.canvas-top-toolbar', '.canvas-bottom-toolbar', '#mobileMapSideRail', '.map-selection-bar', '#mapSelectionBar'
+        '#areaShapePicker', '.canvas-top-toolbar', '.canvas-bottom-toolbar', '#mobileMapSideRail', '#mobileMapZoomPad', '.mobile-map-zoom-pad',
+        '.map-selection-bar', '#mapSelectionBar'
     ].join(', ');
 
     function isMapFloatingOverlayTarget(target) {
@@ -39278,6 +39398,7 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
             renderDefectPhotoSection();
             void persistOpenDefectPhotosNow();
             scheduleDefectAutoApply();
+            if (typeof window.updateMapSelectedDefectPopup === 'function') window.updateMapSelectedDefectPopup();
         }
     };
 
@@ -39774,6 +39895,7 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
         scheduleSyncToFirebase({ skipMarkCurrent: true });
         if (typeof renderSurveyTable === 'function' && window.state.currentTab === 'tab-survey') renderSurveyTable();
         if (typeof renderDefectListPanel === 'function') renderDefectListPanel();
+        if (typeof updateMapSelectedDefectPopup === 'function') updateMapSelectedDefectPopup();
         return d;
     }
 
@@ -39788,9 +39910,9 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
         } catch (_e) { /* 기록 실패는 무시 */ }
     }
 
-    async function triggerDefectPhotoPick(mode, target = 'curr') {
+    async function triggerDefectPhotoPick(mode, target = 'curr', photoTargetOverride) {
         // 파일 창을 띄우기 전에 어느 결함용인지 잡아 둔다
-        const photoTarget = captureDefectPhotoTarget();
+        const photoTarget = photoTargetOverride || captureDefectPhotoTarget();
         const file = await pickImageFromDevice(mode);
         if (file) handleSelectedPhotoFile(file, target, photoTarget);
     }
@@ -39822,6 +39944,7 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
                 renderDefectPhotoSection();
                 void persistOpenDefectPhotosNow();
                 scheduleDefectAutoApply();
+                if (typeof updateMapSelectedDefectPopup === 'function') updateMapSelectedDefectPopup();
                 return;
             }
             if (isDefectPhotoTargetStillOpen(pickedFor)) {
@@ -39832,6 +39955,7 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
                 renderDefectPhotoSection();
                 void persistOpenDefectPhotosNow();
                 scheduleDefectAutoApply();
+                if (typeof updateMapSelectedDefectPopup === 'function') updateMapSelectedDefectPopup();
                 return;
             }
             // 사진을 줄이는 사이 창이 닫혔거나 다른 결함으로 바뀌었다 — 고를 때의 그 결함에 붙인다
@@ -39996,6 +40120,7 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
             renderDefectPhotoSection();
             void persistOpenDefectPhotosNow();
             scheduleDefectAutoApply();
+            if (typeof window.updateMapSelectedDefectPopup === 'function') window.updateMapSelectedDefectPopup();
             window.showToast('휴대폰에서 사진을 받아 결함에 추가했습니다.', 'success');
         } else {
             window._phoneRelayInbox.push(dataUrl);
@@ -44747,6 +44872,79 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
     });
 
     // 모바일: 우측 레일(마킹) + 하단 액션 바
+    function closeMobileMapZoomPad() {
+        const pad = document.getElementById('mobileMapZoomPad');
+        const btn = document.getElementById('mobileBtnMapZoom');
+        if (pad) {
+            pad.hidden = true;
+            pad.setAttribute('aria-hidden', 'true');
+        }
+        if (btn) {
+            btn.classList.remove('active');
+            btn.setAttribute('aria-expanded', 'false');
+        }
+        document.removeEventListener('pointerdown', onMobileMapZoomPadOutside, true);
+        document.removeEventListener('keydown', onMobileMapZoomPadKey, true);
+    }
+
+    function onMobileMapZoomPadKey(e) {
+        if (e.key === 'Escape' || e.key === 'Esc') {
+            e.preventDefault();
+            closeMobileMapZoomPad();
+        }
+    }
+
+    function onMobileMapZoomPadOutside(e) {
+        const pad = document.getElementById('mobileMapZoomPad');
+        const btn = document.getElementById('mobileBtnMapZoom');
+        if (!pad || pad.hidden) return;
+        if (pad.contains(e.target)) return;
+        if (btn && btn.contains(e.target)) return;
+        const rail = document.getElementById('mobileMapSideRail');
+        const dock = document.getElementById('mobileMapDock');
+        if ((rail && rail.contains(e.target)) || (dock && dock.contains(e.target))) {
+            closeMobileMapZoomPad();
+            return;
+        }
+        if (typeof e.stopPropagation === 'function') e.stopPropagation();
+        if (e.cancelable && typeof e.preventDefault === 'function') e.preventDefault();
+        closeMobileMapZoomPad();
+    }
+
+    function syncMobileMapZoomPadLabel() {
+        const label = document.getElementById('mobileMapZoomPadLabel');
+        if (label) label.textContent = formatMapZoomLabel();
+    }
+
+    function openMobileMapZoomPad() {
+        const pad = document.getElementById('mobileMapZoomPad');
+        const btn = document.getElementById('mobileBtnMapZoom');
+        if (!pad) return;
+        pad.hidden = false;
+        pad.setAttribute('aria-hidden', 'false');
+        if (btn) {
+            btn.classList.add('active');
+            btn.setAttribute('aria-expanded', 'true');
+        }
+        syncMobileMapZoomPadLabel();
+        document.removeEventListener('pointerdown', onMobileMapZoomPadOutside, true);
+        document.addEventListener('pointerdown', onMobileMapZoomPadOutside, true);
+        document.removeEventListener('keydown', onMobileMapZoomPadKey, true);
+        document.addEventListener('keydown', onMobileMapZoomPadKey, true);
+    }
+
+    function toggleMobileMapZoomPad() {
+        const pad = document.getElementById('mobileMapZoomPad');
+        if (!pad || pad.hidden) openMobileMapZoomPad();
+        else closeMobileMapZoomPad();
+    }
+
+    function applyMobileMapZoomStep(direction) {
+        const id = direction === 'out' ? 'btnZoomOut' : 'btnZoomIn';
+        document.getElementById(id)?.click();
+        syncMobileMapZoomPadLabel();
+    }
+
     function closeMobileMapSheets() {
         document.getElementById('mapStyleSizeToolbar')?.classList.remove('is-mobile-sheet-open');
         const sizeToggle = document.getElementById('mobileBtnToggleSize');
@@ -44754,6 +44952,7 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
             sizeToggle.classList.remove('active');
             sizeToggle.setAttribute('aria-expanded', 'false');
         }
+        closeMobileMapZoomPad();
     }
 
     function closeMobileNdtSheets() {
@@ -44841,6 +45040,7 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
             const label = btn.querySelector('span');
             if (label) label.textContent = open ? '접기' : '더보기';
             try { localStorage.setItem(storageKey, open ? '1' : '0'); } catch (_e) { /* ignore */ }
+            if (!open && railId === 'mobileMapSideRail') closeMobileMapZoomPad();
         };
         let startOpen = false;
         try { startOpen = localStorage.getItem(storageKey) === '1'; } catch (_e) { startOpen = false; }
@@ -44910,6 +45110,27 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
     if (mobileBtnZoomFit) {
         mobileBtnZoomFit.addEventListener('click', () => {
             document.getElementById('btnZoomFit')?.click();
+        });
+    }
+    const mobileBtnMapZoom = document.getElementById('mobileBtnMapZoom');
+    if (mobileBtnMapZoom) {
+        mobileBtnMapZoom.addEventListener('click', (e) => {
+            e.stopPropagation();
+            toggleMobileMapZoomPad();
+        });
+    }
+    const mobileMapZoomIn = document.getElementById('mobileMapZoomIn');
+    if (mobileMapZoomIn) {
+        mobileMapZoomIn.addEventListener('click', (e) => {
+            e.stopPropagation();
+            applyMobileMapZoomStep('in');
+        });
+    }
+    const mobileMapZoomOut = document.getElementById('mobileMapZoomOut');
+    if (mobileMapZoomOut) {
+        mobileMapZoomOut.addEventListener('click', (e) => {
+            e.stopPropagation();
+            applyMobileMapZoomStep('out');
         });
     }
     const mobileBtnUndo = document.getElementById('mobileBtnUndo');
