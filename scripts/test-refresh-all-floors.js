@@ -39,6 +39,8 @@ function device(opts) {
         navigator: { onLine: o.offline ? false : true },
         console: { warn() {} },
         Map, Date, Promise, setTimeout,
+        FLOOR_READ_CONCURRENCY: 4,
+        runPool: async (items, limit, worker) => { for (const it of items) await worker(it); },
         _syncInFlight: false,
         isRemoteSyncing: false,
         buildingFloorCodesForBackup: () => ['B1', '1F', '2F'],

@@ -66688,14 +66688,29 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
     }
 
     /** 서버의 층 묶음을 읽는다. 읽기 실패·저장 중인 층은 조용히 빈 층으로 두지 않고 멈춘다. */
+    /** 2026-11-06 오프라인 복귀 때 서버 확인에서 읽은 층을 곧바로 이어지는 다시 받기에서 또 읽지 않게(2분) */
+    let _floorBundleMemo = null;
+    const FLOOR_BUNDLE_MEMO_MS = 2 * 60 * 1000;
+    /** 층을 동시에 받는 수. 한 층씩 받으면 층이 많은 건물에서 기다리는 시간이 그대로 쌓인다 */
+    const FLOOR_READ_CONCURRENCY = 4;
+
     async function readFloorBundleStrict(bldg, floorCode) {
+        const memoKey = `${bldg && bldg.id}_${floorCode}`;
+        const memo = _floorBundleMemo && _floorBundleMemo.get(memoKey);
+        if (memo && Date.now() - memo.at < FLOOR_BUNDLE_MEMO_MS) return memo.bundle;
         const ref = getFloorScopeRef(bldg, floorCode);
         if (!ref) throw new Error('로그인 상태를 확인해 주세요.');
         const snap = await ref.get({ source: 'server' });
-        if (!snap.exists) return await readFloorSyncBundle(bldg, floorCode);   // 옛 저장 방식 층
-        const json = await decodeChunkedPayloadFromData(snap.data() || {}, ref);
-        if (!json) throw new Error(`${floorCode} 층을 다른 기기가 저장하는 중입니다. 잠시 뒤 다시 시도해 주세요.`);
-        return bundleFromPackObject(JSON.parse(json));
+        let bundle;
+        if (!snap.exists) {
+            bundle = await readFloorSyncBundle(bldg, floorCode);   // 옛 저장 방식 층
+        } else {
+            const json = await decodeChunkedPayloadFromData(snap.data() || {}, ref);
+            if (!json) throw new Error(`${floorCode} 층을 다른 기기가 저장하는 중입니다. 잠시 뒤 다시 시도해 주세요.`);
+            bundle = bundleFromPackObject(JSON.parse(json));
+        }
+        if (_floorBundleMemo) _floorBundleMemo.set(memoKey, { at: Date.now(), bundle });
+        return bundle;
     }
 
     /** 이 건물의 안 올라간 수정을 먼저 서버에 올린다. 못 올리면 백업·되살리기를 하지 않는다. */
@@ -66750,21 +66765,21 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
         const codesAll = buildingFloorCodesForBackup(bldg);
         // 2026-10-20 회차 손글씨 메모 자리도 같이 받는다(층 목록에는 안 넣음)
         if (typeof pullRoundSketchMemos === 'function') { try { await pullRoundSketchMemos(bldg); } catch (_e) { /* 메모만 실패 */ } }
-        let codeIdx = 0;
+        let codeDone = 0;
         const tellProgress = (n) => { if (typeof o.onProgress === 'function') { try { o.onProgress(n, codesAll.length); } catch (_e) { /* ignore */ } } };
-        for (const code of codesAll) {
-            tellProgress(codeIdx++);
+        await runPool(codesAll, FLOOR_READ_CONCURRENCY, async (code) => {
             try {
                 const bundle = await readFloorBundleStrict(bldg, code);
                 if (bundle) {
-                    mergeFloorBundleIntoState(bldg, code, bundle);
+                    mergeFloorBundleIntoState(bldg, code, bundle);   // 합치기는 동기라 층끼리 안 섞인다
                     merged++;
                 }
             } catch (e) {
                 console.warn(`[전 층 받기] ${code} 층을 받지 못함:`, e);
                 failed.push(code);
             }
-        }
+            tellProgress(++codeDone);
+        });
         tellProgress(codesAll.length);
         if (merged && typeof saveStateToLocalStorage === 'function') saveStateToLocalStorage();
         if (!failed.length) _buildingFloorsFreshAt.set(bldg.id, Date.now());
@@ -66831,10 +66846,9 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
             rec.floors.total = floorCodes.length;
             const urlsById = {};
             let merged = 0;
-            for (let i = 0; i < floorCodes.length; i++) {
-                if (cancelled()) throw new Error('취소했습니다.');
-                const code = floorCodes[i];
-                report('floors', i, floorCodes.length, code);
+            let floorsDone = 0;
+            await runPool(floorCodes, FLOOR_READ_CONCURRENCY, async (code) => {
+                if (cancelled()) return;
                 try {
                     const bundle = await readFloorBundleStrict(bldg, code);
                     if (bundle) {
@@ -66848,7 +66862,9 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
                     console.warn('[오프라인 준비] 층 받기 실패:', code, e);
                     rec.floors.failed.push(code);
                 }
-            }
+                report('floors', ++floorsDone, floorCodes.length, code);
+            });
+            if (cancelled()) throw new Error('취소했습니다.');
             report('floors', floorCodes.length, floorCodes.length);
             if (merged && typeof saveStateToLocalStorage === 'function') saveStateToLocalStorage();
             // 방금 전 층을 받았으니 보고서 직전 전 층 받기가 같은 문서를 또 읽지 않게
@@ -66905,9 +66921,19 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
             rec.photoKeys = jobs.map((j) => j.key);
             let doneCount = 0;
             const companyReady = !!(db && window.state.companyId);
+            // 2026-11-06 지난번에 다 받은 사진은 있는지만 본다. 다시 받기마다 전 사진을 통째로 읽어(장당 수 MB) 아주 느렸다
+            const prevPhotoOk = new Set((prevRec && prevRec.complete && prevRec.photoKeys) || []);
+            const prevPhotoAvg = (prevRec && prevRec.complete && prevRec.photos && prevRec.photos.total)
+                ? Math.round((Number(prevRec.photosBytes) || 0) / prevRec.photos.total) : 0;
             const fetchOne = async (job) => {
                 if (cancelled()) return;
                 if (!window._photoCache) window._photoCache = {};
+                if (prevPhotoOk.has(job.key) && await idbHas('photos', job.key)) {
+                    bytes += prevPhotoAvg;
+                    rec.photos.ok++;
+                    if (downloadedPhotoKeys.has(job.key)) rec.downloadedPhotoKeys.push(job.key);
+                    return;
+                }
                 const local = await idbGet('photos', job.key);
                 if (prep.isDataUrl(local)) {
                     bytes += prep.dataUrlBytes(local);
@@ -66972,7 +66998,9 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
                 }
             };
             report('photos', 0, jobs.length);
-            await Promise.all([0, 1, 2, 3].map(() => worker()));
+            const bytesBeforePhotos = bytes;
+            await Promise.all([0, 1, 2, 3, 4, 5].map(() => worker()));
+            rec.photosBytes = bytes - bytesBeforePhotos;
             if (cancelled()) throw new Error('취소했습니다.');
             // 이번 화면 층 사진도 기기 사본으로 다시 붙인다
             try { await hydrateCurrentBuildingDefectPhotosIntoState(); } catch (_e) { /* ignore */ }
@@ -67095,11 +67123,17 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
             const n = j ? j.pendingEntries().filter((e) => e.fk && String(e.fk).startsWith(prefix)).length : 0;
             if (n) problems.push(`이 기기 변경 ${n}건 서버 확인 안 됨`);
         } catch (_e) { /* ignore */ }
-        for (const fc of buildingFloorCodesForBackup(bldg)) {
+        const verifyFloors = buildingFloorCodesForBackup(bldg);
+        const verifyRead = new Map();
+        await runPool(verifyFloors.filter((fc) => ((window.state.defects && window.state.defects[`${bldg.id}_${fc}`]) || []).length), FLOOR_READ_CONCURRENCY, async (fc) => {
+            try { verifyRead.set(fc, { bundle: await readFloorBundleStrict(bldg, fc) }); } catch (e) { verifyRead.set(fc, { failed: true }); }
+        });
+        for (const fc of verifyFloors) {
             const local = (window.state.defects && window.state.defects[`${bldg.id}_${fc}`]) || [];
             if (!local.length) continue;
-            let bundle = null;
-            try { bundle = await readFloorBundleStrict(bldg, fc); } catch (e) { problems.push(`${fc} 서버 읽기 실패`); continue; }
+            const readRes = verifyRead.get(fc);
+            if (!readRes || readRes.failed) { problems.push(`${fc} 서버 읽기 실패`); continue; }
+            const bundle = readRes.bundle;
             const ids = new Set();
             collectMarkingIdsDeep(bundle && bundle.markings, ids, 0);
             // 2026-11-06 서버에 삭제 기록이 있는 마킹은 못 올린 것이 아니라 다른 기기가 지운 것 — 평소 동기화와 같은 규칙으로
@@ -67203,6 +67237,7 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
                 if (vg) vg.fail({ code: 'pending', message: '아직 안 올라간 층' });
                 return;
             }
+            _floorBundleMemo = new Map();
             for (const b of bldgs) {
                 const probs = await verifyBuildingOnServer(b);
                 if (probs.length) failed.push(`${b.name || b.id}: ${probs.join(', ')}`);
@@ -67230,6 +67265,7 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
         } catch (e) {
             console.warn('[오프라인 복귀] 실패', e);
         } finally {
+            _floorBundleMemo = null;
             _offlineReturnRunning = false;
             // 2026-10-19 올리기·확인·다시 받기가 끝난 뒤에만 오래된 캐시 정리(보호 규칙은 정리 함수 안에서 다시 확인)
             setTimeout(() => {

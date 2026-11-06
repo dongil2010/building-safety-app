@@ -77,7 +77,7 @@ const app = fs.readFileSync(path.join(root, 'app.js'), 'utf8').replace(/\r\n/g, 
     const prep = extractFunction(app, 'async function runOfflinePrep(');
     assert.ok(!writesServer.test(prep), '오프라인 준비도 서버에 쓰지 않음');
     const all = extractFunction(app, 'async function refreshBuildingFloorsFromServer(');
-    assert.ok(/tellProgress\(codeIdx\+\+\)/.test(all) && /saveStateToLocalStorage\(\)/.test(all), '층마다 진행 알림 + 기기 저장');
+    assert.ok(/tellProgress\(\+\+codeDone\)/.test(all) && /saveStateToLocalStorage\(\)/.test(all), '층마다 진행 알림 + 기기 저장');
     const prepAll = extractFunction(app, 'async function runOfflinePrep(');
     assert.ok(/buildingFloorCodesForBackup\(bldg\)\.concat/.test(prepAll), '모든 층(안 연 층 포함)');
 }

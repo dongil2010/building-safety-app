@@ -109,6 +109,21 @@ async function idbGet(storeName, key) {
     }
 }
 
+/** 값을 읽지 않고 있는지만 — 사진처럼 큰 값을 확인만 하려고 통째로 읽으면 수백 장에서 아주 느리다 */
+async function idbHas(storeName, key) {
+    try {
+        const db = await openLocalImageDb();
+        return await new Promise((resolve, reject) => {
+            const tx = db.transaction(storeName, 'readonly');
+            const req = tx.objectStore(storeName).count(key);
+            req.onsuccess = () => resolve(req.result > 0);
+            req.onerror = () => reject(req.error);
+        });
+    } catch (e) {
+        return false;
+    }
+}
+
 async function idbDelete(storeName, key) {
     try {
         const db = await openLocalImageDb();
