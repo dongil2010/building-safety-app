@@ -16252,21 +16252,7 @@ html:not(.layout-desktop) .crack-monitor-photo-slots {
     overflow-wrap: break-word;
 }
 
-/* ── 2026-09-28 빠른 선택 최적화: 더보기 칩 · 맛도리 세팅(★) ── */
-.defect-quick-chip.defect-quick-more {
-    border-style: dashed;
-    background: transparent;
-    color: #64748b;
-    font-weight: 700;
-}
-.defect-quick-chip.defect-quick-more:hover {
-    color: #334155;
-    border-color: #94a3b8;
-}
-.defect-cause-checks-host .defect-cause-more {
-    grid-column: 1 / -1;
-    justify-self: stretch;
-}
+/* ── 2026-09-28 빠른 선택 최적화: 맛도리 세팅(★) ── */
 .defect-quick-label .defect-quick-sub {
     font-size: 0.66rem;
     font-weight: 600;

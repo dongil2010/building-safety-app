@@ -5829,6 +5829,13 @@ document.addEventListener('DOMContentLoaded', () => {
                 window.BsaFinishMemberChooser.close('cancel');
                 return true;
             }
+            // 톱니바퀴 프리셋 세팅 창은 수정창 위에 뜬다 — 그것만 닫고 수정창은 유지
+            const optionManagerEl = document.getElementById('optionManagerModal');
+            if (isModalElOpen(optionManagerEl)) {
+                optionManagerEl.classList.remove('open');
+                optionManagerEl.style.display = 'none';
+                return true;
+            }
             if (typeof isDefectModalOpen === 'function' && isDefectModalOpen() && typeof closeDefectModal === 'function') {
                 closeDefectModal();
                 return true;
@@ -5872,7 +5879,7 @@ document.addEventListener('DOMContentLoaded', () => {
                 window.closeSurveySizeEditor();
                 return true;
             }
-            const plainIds = ['optionManagerModal', 'reportPreviewModal', 'mobileQrModal', 'buildingTrashModal', 'errorLogModal'];
+            const plainIds = ['reportPreviewModal', 'mobileQrModal', 'buildingTrashModal', 'errorLogModal'];
             for (let j = 0; j < plainIds.length; j++) {
                 const m = document.getElementById(plainIds[j]);
                 if (isModalElOpen(m)) {
@@ -29845,7 +29852,7 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
         });
     }
 
-    // ── 2026-09-28 빠른 선택 최적화: ★즐겨찾기·사용 빈도로 먼저 보일 칩만, 나머지는 「더보기」 ──
+    // ── 2026-09-28 빠른 선택: ★즐겨찾기를 먼저, 항목은 접지 않고 전부 표시 ──
     function getDefectQuickPresetsApi() {
         return (window.BSA && window.BSA.defectQuickPresets) || null;
     }
@@ -29895,7 +29902,7 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
         const q = getDefectQuickPresetsApi();
         if (!q) return { visible: (ordered || []).slice(), hidden: [] };
         return q.computeVisibleChips(ordered, {
-            limit: (q.VISIBLE_LIMIT && q.VISIBLE_LIMIT[field]) || 8,
+            limit: (ordered || []).length, // 접지 않고 전부 표시
             favorites: getDefectFavoriteList(field, bucket),
             usage: q.getUsageCounts(window.state.defectPickUsage, field, bucket),
             selected: selected || [],
@@ -29903,39 +29910,16 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
         });
     }
 
-    function isDefectChipMoreOpen(key) {
-        return !!(window._defectChipMoreOpen && window._defectChipMoreOpen[key]);
-    }
-
-    function toggleDefectChipMore(key) {
-        if (!window._defectChipMoreOpen) window._defectChipMoreOpen = {};
-        window._defectChipMoreOpen[key] = !window._defectChipMoreOpen[key];
-    }
-
-    /** 칩 + 「더보기 N」/「접기」 — 선택된 칩은 항상 보이는 쪽에 들어 있다 */
-    function renderDefectChipsWithMore(containerId, split, isActive, onPick, moreKey, onMoreToggled) {
+    /** 칩 전부 표시 (순서: 고정 → ★ → 나머지) */
+    function renderDefectChips(containerId, split, isActive, onPick) {
         const container = document.getElementById(containerId);
         if (!container) return;
-        const open = isDefectChipMoreOpen(moreKey);
-        const hidden = (split && split.hidden) || [];
-        const list = ((split && split.visible) || []).concat(open ? hidden : []);
-        let html = list.map((value) => {
+        container.innerHTML = ((split && split.visible) || []).map((value) => {
             const active = isActive(value);
             return `<button type="button" class="defect-quick-chip${active ? ' active' : ''}" tabindex="-1" data-value="${escapeHtml(value)}">${escapeHtml(value)}</button>`;
         }).join('');
-        if (hidden.length) {
-            html += `<button type="button" class="defect-quick-chip defect-quick-more" tabindex="-1" data-more="1" title="${open ? '자주 쓰는 것만 보기' : '나머지 항목 보기'}">${open ? '접기 ▲' : `더보기 ${hidden.length} ▼`}</button>`;
-        }
-        container.innerHTML = html;
         container.querySelectorAll('.defect-quick-chip').forEach((btn) => {
-            btn.addEventListener('click', () => {
-                if (btn.dataset.more) {
-                    toggleDefectChipMore(moreKey);
-                    if (typeof onMoreToggled === 'function') onMoreToggled();
-                    return;
-                }
-                onPick(btn.dataset.value || '');
-            });
+            btn.addEventListener('click', () => onPick(btn.dataset.value || ''));
         });
     }
 
@@ -30311,11 +30295,9 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
         if (jointMode) {
             renderQuickPickChipGroup('quickComponentChips', componentOptions, currentComponent, onComponentPick);
         } else {
-            // ★즐겨찾기 + 많이 쓴 순으로 8개만, 나머지는 「더보기」
             const compSplit = computeDefectVisibleChips('component', currentCategory, componentOptions,
                 currentComponent ? [currentComponent] : []);
-            renderDefectChipsWithMore('quickComponentChips', compSplit, (v) => v === currentComponent,
-                onComponentPick, 'component', refreshDefectQuickPickBar);
+            renderDefectChips('quickComponentChips', compSplit, (v) => v === currentComponent, onComponentPick);
         }
 
         renderMemberGbHint(jointMode ? '' : currentComponent, onComponentPick);
@@ -30324,12 +30306,12 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
             const selectedTypeSet = new Set(selectedTypeParts);
             const typeChipOptions = getPinnedDefectTypeChips(currentCategory, currentComponent);
             const typeSplit = computeDefectVisibleChips('type', currentCategory, typeChipOptions, selectedTypeParts, ['상태양호']);
-            renderDefectChipsWithMore('quickDefectTypeChips', typeSplit, (v) => selectedTypeSet.has(v), (value) => {
+            renderDefectChips('quickDefectTypeChips', typeSplit, (v) => selectedTypeSet.has(v), (value) => {
                 if (value && value !== '상태양호' && !selectedTypeSet.has(value)) {
                     recordDefectPickUsage('type', currentCategory, value);
                 }
                 toggleDefectTypeChip(value);
-            }, 'type', refreshDefectQuickPickBar);
+            });
         } else {
             const typeHost = document.getElementById('quickDefectTypeChips');
             if (typeHost) typeHost.innerHTML = '';
@@ -34121,19 +34103,6 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
             return;
         }
 
-        // 원인은 목록 순(계정 순서)대로 8개만 먼저 — 체크된 것은 항상 보임, 나머지는 「더보기」
-        const causeLimit = ((getDefectQuickPresetsApi() || {}).VISIBLE_LIMIT || {}).cause || 8;
-        const causeMoreOpen = isDefectChipMoreOpen('cause');
-        let hiddenCauseCount = 0;
-        if (!causeMoreOpen && flatItems.length > causeLimit) {
-            const keepIdx = new Set();
-            flatItems.forEach((it, i) => { if (i < causeLimit || selected.has(it.cause)) keepIdx.add(i); });
-            hiddenCauseCount = flatItems.length - keepIdx.size;
-            const kept = flatItems.filter((_it, i) => keepIdx.has(i));
-            flatItems.length = 0;
-            kept.forEach((it) => flatItems.push(it));
-        }
-
         box.innerHTML = flatItems.map(({ cause, tone }, idx) => {
             const id = `causeCheck_${idx}_${String(cause).replace(/[^a-zA-Z0-9가-힣]/g, '_')}`;
             const checked = selected.has(cause) ? 'checked' : '';
@@ -34143,19 +34112,7 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
                 <input type="checkbox" id="${id}" value="${safe}" tabindex="-1" ${checked}>
                 <span>${cause}</span>
             </label>`;
-        }).join('') + (hiddenCauseCount > 0
-            ? `<button type="button" class="defect-quick-chip defect-quick-more defect-cause-more" tabindex="-1" data-cause-more="1">더보기 ${hiddenCauseCount} ▼</button>`
-            : ((causeMoreOpen && flatItems.length > causeLimit)
-                ? `<button type="button" class="defect-quick-chip defect-quick-more defect-cause-more" tabindex="-1" data-cause-more="1">접기 ▲</button>`
-                : ''));
-
-        const causeMoreBtn = box.querySelector('[data-cause-more]');
-        if (causeMoreBtn) {
-            causeMoreBtn.addEventListener('click', () => {
-                toggleDefectChipMore('cause');
-                renderMultiTypeCauseChecks(defectTypeStr, joinCauseList(getSelectedCausesFromUi()));
-            });
-        }
+        }).join('');
 
         box.querySelectorAll('input[type="checkbox"]').forEach(inp => {
             inp.addEventListener('change', () => {
@@ -34778,7 +34735,7 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
         if (!host) return;
         const who = window.state.uid ? '로그인한 계정에 저장 (다른 기기에서도 같음)' : '이 기기에 저장 (로그인하면 계정에 저장)';
         if (ctx.favField !== 'cause') {
-            host.innerHTML = `<p class="option-manager-note">★ = 결함 수정창에 항상 먼저 보임 · 나머지는 많이 쓴 순으로 채우고 「더보기」로 접힘 · 끌어서 순서 변경<br><span>${escapeHtml(who)}</span></p>`;
+            host.innerHTML = `<p class="option-manager-note">★ = 결함 수정창에 먼저 보임 · 끌어서 순서 변경<br><span>${escapeHtml(who)}</span></p>`;
             return;
         }
         const keys = [];
@@ -38924,6 +38881,8 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
         if (isMeasureKeypadTarget(target)) return true;
         // 앱 확인 창(삭제 확인 등)도 body에 붙는다 — 확인/취소 누를 때 결함 창이 닫히지 않게
         if (target.closest('#bsaAppDialog')) return true;
+        // 톱니바퀴 프리셋 세팅 창도 수정창 밖 형제 요소다 — 세팅 중 수정창이 닫히던 문제
+        if (target.closest('#optionManagerModal')) return true;
         // 2026-11-06 직접 입력 자식 팝업(완료/취소)도 body에 붙는다 — 누르면 부모 수정창이 같이 닫히던 문제
         if (typeof window !== 'undefined' && window.BsaTypingPopup && typeof window.BsaTypingPopup.isElement === 'function' && window.BsaTypingPopup.isElement(target)) return true;
         if (target.closest('#bsaTypingPopup') || target.closest('.bsa-typing-overlay')) return true;
@@ -38990,9 +38949,8 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
         const forceArrowDirEl = document.getElementById('defectForceArrowDir');
 
         if (forceArrowDirEl) forceArrowDirEl.disabled = false;
-        // 새로 연 창은 자주 쓰는 칩만(더보기 접힘), 자동 원인 기록 없음
+        // 새로 연 창은 자동 원인 기록 없음
         window._defectAutoCauses = [];
-        window._defectChipMoreOpen = {};
 
         let photoHydratePromise = Promise.resolve();
         if (existingPin) {
