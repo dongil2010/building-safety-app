@@ -30635,6 +30635,13 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
     }
     window.syncTypedPresetModeUi = syncTypedPresetModeUi;
 
+    window.resetTypedPresetMode = resetTypedPresetMode;
+    function resetTypedPresetMode() {
+        const TPM = window.BSA && window.BSA.typedPresetMode;
+        if (TPM && typeof TPM.reset === 'function') TPM.reset();
+        syncTypedPresetModeUi();
+    }
+
     function bindTypedPresetModeToggle() {
         const host = document.getElementById('defectTypedPresetMode');
         if (!host || host.dataset.bound) return;
@@ -30654,6 +30661,8 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
             const input = document.getElementById(id);
             if (!input) return;
             input.addEventListener('focus', () => {
+                // 새 입력은 항상 「이번만 사용」에서 시작(프리셋 저장은 이번 입력에만 적용).
+                resetTypedPresetMode();
                 setTimeout(() => {
                     if (document.activeElement !== input) return;   // 입력 팝업으로 넘어감
                     (input.closest('.defect-cause-custom-row') || input).after(host);
@@ -30716,6 +30725,8 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
                     if (selectId === 'defectType' && shouldPersistTypedPreset()) persistTypedDefectType(v);
                     ensureDefectComboOption(select, v);
                 }
+                // 「프리셋에 저장」은 이번 확정 한 번에만 쓰고 다시 기본(이번만)으로.
+                if (shouldPersistTypedPreset()) resetTypedPresetMode();
                 if (onChange) onChange(v);
                 if (selectId === 'defectType') {
                     // 타이핑 중 onChange가 원인을 비우므로, 칸에 들어올 때 기억한 원인을 기준으로 맞춘다.
@@ -30933,6 +30944,7 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
                         && typeof window.BSA.typedPresetMode.shouldPersist === 'function'
                         && window.BSA.typedPresetMode.shouldPersist());
                     commitDefectCauseDirectInput(persistTyped);
+                    if (persistTyped && typeof window.resetTypedPresetMode === 'function') window.resetTypedPresetMode();   // 저장은 이번 한 번만
                 }
             });
         }

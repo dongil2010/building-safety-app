@@ -1,6 +1,7 @@
 /**
  * 결함 직접 입력(부재·결함내용·원인)을 프리셋에 넣을지, 이번 결함만 쓸지.
- * 기기 localStorage 선호값. 값 없으면 예전과 같이 이번만 사용(목록에 안 넣음).
+ * 2026-11-06: 기본은 항상 「이번만 사용」. 「프리셋에 저장」은 그 입력 한 번에만 적용되고
+ * 다음 입력(칸 포커스·입력 팝업 열림)에서 reset()으로 다시 이번만으로 돌아간다(기기에 저장 안 함).
  */
 (function (root) {
     'use strict';
@@ -14,29 +15,29 @@
         return raw === SAVE ? SAVE : (raw === ONCE ? ONCE : '');
     }
 
-    function readStored() {
-        try {
-            if (!root.localStorage) return '';
-            return normalize(root.localStorage.getItem(KEY));
-        } catch (e) {
-            return '';
-        }
-    }
+    var current = EMPTY_DEFAULT;
+
+    // 예전 버전이 기기에 남긴 「프리셋에 저장」 선호값은 지운다(다음 입력에 끌려가지 않게).
+    try {
+        if (root.localStorage && typeof root.localStorage.removeItem === 'function') root.localStorage.removeItem(KEY);
+    } catch (e) { /* ignore */ }
 
     function getMode() {
-        return readStored() || EMPTY_DEFAULT;
+        return current;
     }
 
     function hasStoredPreference() {
-        return !!readStored();
+        return false;
     }
 
     function setMode(mode) {
-        var next = mode === SAVE ? SAVE : ONCE;
-        try {
-            if (root.localStorage) root.localStorage.setItem(KEY, next);
-        } catch (e) { /* 기기 저장 실패해도 화면은 바뀜 */ }
-        return next;
+        current = mode === SAVE ? SAVE : ONCE;
+        return current;
+    }
+
+    function reset() {
+        current = EMPTY_DEFAULT;
+        return current;
     }
 
     function shouldPersist() {
@@ -50,6 +51,7 @@
         EMPTY_DEFAULT: EMPTY_DEFAULT,
         getMode: getMode,
         setMode: setMode,
+        reset: reset,
         shouldPersist: shouldPersist,
         hasStoredPreference: hasStoredPreference,
         normalize: normalize
