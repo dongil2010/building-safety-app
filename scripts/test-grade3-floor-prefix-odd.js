@@ -38,7 +38,7 @@ Object.keys(odd).forEach((n) => assert.strictEqual(p(n), odd[n], `${n} → ${odd
 // 3) 기존 규칙의 결과는 그대로
 const keep = {
     '1F': '1', '2F': '2', B1F: 'B1', B2F: 'B2', ROOF: 'R', 옥상층: 'R', 옥상지붕층: 'RR', 지붕층: 'RF', 옥탑층: 'PH', 옥탑1층: 'PH1', PH_ROOF: 'PHR',
-    EXT: 'O', 외부: 'O', 외부1: 'O', 부대시설: 'O', 지하층: 'B1', 지하1층: 'B1', 지하2층: 'B2', '지하 1F': 'B1', 피트: 'P', 피트층: 'P', 그리드아이언: 'G', '그리드 아이언': 'G'
+    EXT: 'O', 외부: 'O', 외부1: 'O', 부대시설: 'A', 지하층: 'B1', 지하1층: 'B1', 지하2층: 'B2', '지하 1F': 'B1', 피트: 'P', 피트층: 'P', 그리드아이언: 'G', '그리드 아이언': 'G'
 };
 Object.keys(keep).forEach((n) => assert.strictEqual(p(n), keep[n], `기존 규칙 ${n} → ${keep[n]}`));
 

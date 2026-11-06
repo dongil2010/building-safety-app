@@ -24,7 +24,7 @@ vm.runInContext(rti + ';\n' + extractFunction(app, 'function getGrade3RoofPrefix
 const cases = {
     ROOF: 'R', 옥상층: 'R', 옥상지붕층: 'RR', 지붕층: 'RF', 옥탑층: 'PH', 옥탑1층: 'PH1', '옥탑 2층': 'PH2', PH1: 'PH1', RF2: 'PH2',
     PH_ROOF: 'PHR', 옥탑지붕층: 'PHR', '옥탑 지붕층': 'PHR', PH: 'PH2',
-    '1F': '1', B1F: 'B1', '10F': '10', EXT_FRONT: 'O', 외부: 'O', 부대시설: 'O'
+    '1F': '1', B1F: 'B1', '10F': '10', EXT_FRONT: 'O', 외부: 'O', 부대시설: 'A'
 };
 Object.keys(cases).forEach((c) => assert.strictEqual(ctx.p(c), cases[c], c));
 // 서로 다른 층은 서로 다른 접두사

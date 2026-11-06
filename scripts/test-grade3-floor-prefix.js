@@ -13,7 +13,7 @@ const app = fs.readFileSync(path.join(root, 'app.js'), 'utf8').replace(/\r\n/g, 
 const stateSrc = fs.readFileSync(path.join(root, 'js', 'core', 'state.js'), 'utf8');
 
 // 표시 이름 조회(등록된 층 이름) 흉내 — 코드는 그대로 두고 이름만 바꾼 층
-const labels = { X1: '피트층', X2: '그리드 아이언', X3: '부대시설 정화조', X4: '지하층', '2F': '2층', IMG_9: 'IMG_9', X5: '지하 주차장' };
+const labels = { EXT_9: '부대시설', X1: '피트층', X2: '그리드 아이언', X3: '부대시설 정화조', X4: '지하층', '2F': '2층', IMG_9: 'IMG_9', X5: '지하 주차장' };
 const ctx = { window: { getFloorLabelFromCode: (c) => labels[c] || c, isExteriorFloorCode: () => false } };
 vm.createContext(ctx);
 vm.runInContext(extractFunction(stateSrc, 'window.parseRooftopIndex = function(') + ';\n'
@@ -29,7 +29,7 @@ const cases = {
     // 이미 맞던 규칙 — 그대로
     '1F': '1', '2F': '2', '10F': '10', B1F: 'B1', B2F: 'B2', B10F: 'B10',
     ROOF: 'R', 옥상층: 'R', 옥상지붕층: 'RR', 지붕층: 'RF', 옥탑층: 'PH', 옥탑1층: 'PH1', PH: 'PH', PH_ROOF: 'PHR',
-    EXT: 'O', EXT_1: 'O', EXT_FRONT: 'O', 외부: 'O', 외부1: 'O', 부대시설: 'O',
+    EXT: 'O', EXT_1: 'O', EXT_FRONT: 'O', 외부: 'O', 외부1: 'O', 부대시설: 'A',
     // 새로 맞추는 것
     지하층: 'B1', 지하: 'B1', '지하 층': 'B1', 지하1층: 'B1', '지하 1층': 'B1', '지하1F': 'B1', '지하 1F': 'B1', '지하1': 'B1',
     지하2층: 'B2', '지하 2층': 'B2', 지하10층: 'B10', 'B 1F': 'B1', B1: 'B1', b2: 'B2', 'B-1F': 'B1', 'B2': 'B2',
@@ -47,7 +47,9 @@ Object.keys(cases).forEach((c) => assert.strictEqual(ctx.p(c), cases[c], `${c} �
 // 등록된 이름(label)으로 알아보기: 코드는 임의 문자열이어도 이름이 피트층·그리드 아이언·부대시설·지하층이면 맞춘다
 assert.strictEqual(ctx.p('X1'), 'P');
 assert.strictEqual(ctx.p('X2'), 'G');
-assert.strictEqual(ctx.p('X3'), 'O');
+assert.strictEqual(ctx.p('X3'), 'A', '이름이 부대시설이면 A');
+assert.strictEqual(ctx.p('EXT_9'), 'A', '코드가 EXT여도 이름이 부대시설이면 A');
+assert.strictEqual(ctx.p('EXT_1'), 'O', '외부는 O');
 assert.strictEqual(ctx.p('X4'), 'B1');
 assert.ok(!/^B/.test(ctx.p('X5')), '지하 주차장 이름은 지하(B) 규칙이 아니다');
 // 코드가 정해져 있으면 이름보다 코드가 우선(2F 를 「지하층」으로 이름만 바꿔도 번호는 2)
@@ -69,6 +71,6 @@ assert.strictEqual(ctx.fmt(d, false, '지하층'), '3', '1·2종은 접두사 �
 
 // 외부는 A 가 아니라 O (hwpx 범례 O-외부) — 기존 결정 유지
 const fnSrc = extractFunction(app, 'function getGrade3FloorPrefix(');
-assert.ok(/return 'O'/.test(fnSrc) && !/return 'A'/.test(fnSrc));
+assert.ok(/return 'O'/.test(fnSrc) && /return 'A'/.test(fnSrc));
 
 console.log('test-grade3-floor-prefix: OK');
