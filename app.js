@@ -1190,7 +1190,7 @@ document.addEventListener('DOMContentLoaded', () => {
                         + (parkedPhotos.length ? `<br>못 올린 사진 ${parkedPhotos.length}장: ${esc(parkedPhotos.slice(0, 5).map((x) => `${syncProgressPhotoLabel(x.id)} (${x.reason || x.kind})`).join(', '))}${parkedPhotos.length > 5 ? ' …' : ''}` : '')
                         + `<br>원인을 해결한 뒤 아래 「지금 다시 올리기」를 눌러 주세요.</div>`;
                 }
-                body.innerHTML = parkedHtml + sp.renderPanelHtml(sum, syncProgressFloorLabel);
+                body.innerHTML = parkedHtml + syncMissingPhotosHtml() + sp.renderPanelHtml(sum, syncProgressFloorLabel);
             }
             const retry = sheet.querySelector('[data-bsp="retry"]');
             if (retry) retry.disabled = !sum.online || !(sum.pending || parkedGate || parkedPhotos.length);
@@ -63810,6 +63810,102 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
      * 일지에 남은 사진만 보므로 전 사진 문서를 읽지 않는다. 아무것도 지우지 않는다.
      */
     const MISSING_PHOTO_REASON = '이 기기에 원본 없음';
+
+    /**
+     * 2026-11-06 원본이 어디에도 없는 사진 번호를 마킹 목록에서 뺀다(사람이 버튼으로만).
+     * 지운 사진 번호가 목록에 되살아나면 그 칸은 영원히 못 받으므로 「사진을 다 받기 전엔 못 지움」에 막혀 창에서 지울 수 없다.
+     * 누르는 순간 서버·기기를 다시 확인하고, 지움 기록을 남겨 다른 기기에서도 되살아나지 않게 한다.
+     */
+    function findDefectByPhotoId(photoId) {
+        const defs = (window.state && window.state.defects) || {};
+        for (const fk of Object.keys(defs)) {
+            for (const d of (defs[fk] || [])) {
+                if (!d) continue;
+                if ((d.photoIds || []).includes(photoId)) return { fk, d, kind: 'cur' };
+                if ((d.prevRoundPhotoIds || []).includes(photoId)) return { fk, d, kind: 'prev' };
+            }
+        }
+        return null;
+    }
+    async function dropMissingPhotoFromDefect(photoId) {
+        const found = findDefectByPhotoId(photoId);
+        const tracker = photoRetryTracker();
+        if (!found) {
+            if (tracker) tracker.ok(photoId);
+            if (typeof scheduleSyncProgressRender === 'function') scheduleSyncProgressRender();
+            return false;
+        }
+        if (navigator.onLine === false) {
+            window.showToast('인터넷이 연결된 뒤에 다시 눌러 주세요. 서버에 사진이 있는지 먼저 확인합니다.', 'warning', 3500);
+            return false;
+        }
+        const local = await resolveLocalPhotoUrl(photoId);
+        const snap = await getCompanyPhotosCollection().doc(photoId).get({ source: 'server' });
+        if (local || snap.exists) {
+            if (tracker) tracker.ok(photoId);
+            window.showToast('이 사진은 원본이 있습니다. 목록에서 빼지 않고 다시 올립니다.', 'info', 3500);
+            if (typeof scheduleSyncProgressRender === 'function') scheduleSyncProgressRender();
+            return false;
+        }
+        const { fk, d, kind } = found;
+        if (!await window.confirmDelete(`${syncProgressPhotoLabel(photoId)}의 없는 사진을 목록에서 뺄까요?\n원본이 이 기기에도 서버에도 없는 것을 확인했습니다. 다른 기기에 원본이 남아 있다면 그 사진도 함께 빠집니다.`)) return false;
+        const idKey = kind === 'prev' ? 'prevRoundPhotoIds' : 'photoIds';
+        const photoKey = kind === 'prev' ? 'prevRoundPhotos' : 'photos';
+        const urlKey = kind === 'prev' ? 'prevRoundPhotoUrls' : 'photoUrls';
+        const before = d[idKey].slice();
+        const i = before.indexOf(photoId);
+        if (i < 0) return false;   // 확인하는 사이 동기화로 이미 빠짐
+        [idKey, photoKey, urlKey].forEach((k) => {
+            if (!Array.isArray(d[k])) return;
+            if (k === idKey || d[k].length === before.length) d[k].splice(i, 1);
+        });
+        if (!d[idKey].length) { delete d[idKey]; delete d[photoKey]; delete d[urlKey]; }
+        if (d.repairPhotoId === photoId) delete d.repairPhotoId;
+        // 지움 기록은 다른 칸의 사진 받기 상태와 무관하다 — 이 번호 하나만 뺀 것이 확실하다
+        const savedComplete = window._defectPhotosComplete;
+        window._defectPhotosComplete = true;
+        try {
+            if (kind === 'cur') recordDefectPhotoState(d, before, d.photoIds || []);
+            stampDefectPhotosChangedIfSafe(d);
+        } finally {
+            window._defectPhotosComplete = savedComplete;
+        }
+        touchDefectUpdatedAt(d);
+        markFloorKeyDirty(fk);
+        if (tracker) tracker.ok(photoId);
+        saveStateToLocalStorage();
+        scheduleSyncToFirebase({ skipMarkCurrent: true });
+        window.showToast('없는 사진을 목록에서 뺐습니다.', 'success', 2500);
+        if (typeof renderDefectListPanel === 'function') renderDefectListPanel();
+        if (typeof drawCanvas === 'function') drawCanvas();
+        if (typeof scheduleSyncProgressRender === 'function') scheduleSyncProgressRender();
+        return true;
+    }
+    /** 진행률 창·오프라인 준비 창 공통: 원본 없는 사진 목록 + 「목록에서 빼기」 (buildingId를 주면 그 건물 것만) */
+    function syncMissingPhotosHtml(buildingId) {
+        const tracker = photoRetryTracker();
+        if (!tracker) return '';
+        const esc = (x) => String(x == null ? '' : x).replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
+        const rows = tracker.parked().filter((x) => String(x.reason || '').indexOf(MISSING_PHOTO_REASON) === 0).filter((x) => {
+            const f = findDefectByPhotoId(x.id);
+            return !!f && (!buildingId || String(f.fk).indexOf(`${buildingId}_`) === 0);
+        });
+        if (!rows.length) return '';
+        return '<div class="bsp-missing"><div class="bsp-missing-title"><i class="fa-solid fa-image"></i> 원본을 찾을 수 없는 사진 ' + rows.length + '장</div>'
+            + '<p>찍은 기기에서 앱을 열면 올라갑니다. 이미 지운 사진이거나 원본이 없으면 목록에서 빼세요.</p><ul>'
+            + rows.map((x) => '<li><span>' + esc(syncProgressPhotoLabel(x.id)) + '</span><button type="button" class="btn btn-outline btn-sm" data-bsp-drop-photo="' + esc(x.id) + '">목록에서 빼기</button></li>').join('')
+            + '</ul></div>';
+    }
+    document.addEventListener('click', (e) => {
+        const b = e.target && e.target.closest && e.target.closest('[data-bsp-drop-photo]');
+        if (!b) return;
+        b.disabled = true;
+        dropMissingPhotoFromDefect(b.getAttribute('data-bsp-drop-photo')).catch((err) => {
+            console.warn('[사진] 목록에서 빼기 실패', err);
+            window.showToast('서버를 확인하지 못해 그대로 두었습니다. 잠시 뒤 다시 눌러 주세요.', 'warning', 3500);
+            b.disabled = false;
+        });
+    });
     async function uploadPendingJournalPhotos() {
         const j = typeof syncJournal === 'function' ? syncJournal() : null;
         const collection = getCompanyPhotosCollection();
@@ -67424,7 +67520,7 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
             blocks.push(`<section class="op-sync-bldg tone-${tone}" data-op-sync-b="${idq}">
                     <div class="op-sync-head"><strong>${escapeHtml(who)}</strong><span class="op-sync-line">${running ? '<i class="fa-solid fa-arrows-rotate fa-spin"></i> ' : ''}${escapeHtml(line)}</span></div>
                     ${running ? `<div class="bsp-bar op-sync-dl" role="progressbar" aria-valuemin="0" aria-valuemax="100" aria-valuenow="${pct}"><span style="width:${pct}%"></span></div>` : ''}
-                    <div class="op-sync-body">${bsum ? sp.renderPanelHtml(bsum, syncProgressFloorLabel) : ''}</div>
+                    <div class="op-sync-body">${syncMissingPhotosHtml(b.id)}${bsum ? sp.renderPanelHtml(bsum, syncProgressFloorLabel) : ''}</div>
                     <div class="op-sync-actions">
                         <button type="button" class="btn btn-outline btn-sm" data-op-sync-retry="${idq}"${(bsum && bsum.pending && online) ? '' : ' disabled'}><i class="fa-solid fa-cloud-arrow-up"></i> 지금 다시 올리기</button>
                         <button type="button" class="btn btn-primary btn-sm" data-op-sync-refresh="${idq}"${(!running && online) ? '' : ' disabled'}><i class="fa-solid fa-cloud-arrow-down"></i> 최신으로 다시 받기</button>

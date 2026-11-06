@@ -18687,3 +18687,12 @@ html.bsa-kb-dock-follow body.defect-modal-open #tab-map #mobileMapDock.mobile-ca
 .bsp-site-head .bsp-left { flex: 0 0 auto; }
 .bsp-site-floors { margin-top: 3px; font-size: 0.78rem; color: #64748b; overflow-wrap: anywhere; }
 .bsp-site-floors b { color: #1d4ed8; }
+
+/* 2026-11-06 원본 없는 사진 목록 */
+.bsp-missing { border: 1px solid #f59e0b; background: #fffbeb; color: #92400e; border-radius: 10px; padding: 8px 10px; margin-bottom: 10px; font-size: 0.85rem; }
+.bsp-missing-title { font-weight: 700; }
+.bsp-missing p { margin: 3px 0 6px; font-size: 0.78rem; }
+.bsp-missing ul { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 5px; }
+.bsp-missing li { display: flex; align-items: center; justify-content: space-between; gap: 8px; }
+.bsp-missing li span { min-width: 0; overflow-wrap: anywhere; }
+.bsp-missing li button { flex: 0 0 auto; }
