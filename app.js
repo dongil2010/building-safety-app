@@ -5710,6 +5710,11 @@ document.addEventListener('DOMContentLoaded', () => {
     /** 뒤로가기: 열린 창/시트만 닫고 홈으로 나가지 않음 */
     function tryCloseTopOverlayForBack() {
         try {
+            // 직접 입력 자식 팝업이 떠 있으면 그것만 닫고 부모 수정창은 유지
+            if (window.BsaTypingPopup && typeof window.BsaTypingPopup.isOpen === 'function' && window.BsaTypingPopup.isOpen()) {
+                window.BsaTypingPopup.close('cancel');
+                return true;
+            }
             if (typeof isDefectModalOpen === 'function' && isDefectModalOpen() && typeof closeDefectModal === 'function') {
                 closeDefectModal();
                 return true;
@@ -15826,6 +15831,7 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
                 return;
             }
             if (ndtMode === 'PAN' && isNdtModalOpen()) {
+                if (window.BsaTypingPopup && typeof window.BsaTypingPopup.isOpen === 'function' && window.BsaTypingPopup.isOpen()) return;
                 closeNdtModal();
                 if (!additive) {
                     selectedNdtIds.clear();
@@ -38057,6 +38063,9 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
         if (isMeasureKeypadTarget(target)) return true;
         // 앱 확인 창(삭제 확인 등)도 body에 붙는다 — 확인/취소 누를 때 결함 창이 닫히지 않게
         if (target.closest('#bsaAppDialog')) return true;
+        // 2026-11-06 직접 입력 자식 팝업(완료/취소)도 body에 붙는다 — 누르면 부모 수정창이 같이 닫히던 문제
+        if (typeof window !== 'undefined' && window.BsaTypingPopup && typeof window.BsaTypingPopup.isElement === 'function' && window.BsaTypingPopup.isElement(target)) return true;
+        if (target.closest('#bsaTypingPopup') || target.closest('.bsa-typing-overlay')) return true;
         // 2026-10-19 접합부 부재(기둥·보…) 고르는 선택 목록 시트도 body에 붙는다 — 고를 때 수정창이 사라지던 문제
         if (target.closest('#bsaSelectSheet')) return true;
         if (target.closest('#defectMarkingMemberFloat')) return true;
@@ -44041,6 +44050,7 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
 
         if (window.state.currentTab === 'tab-ndt') {
             if (k === 'escape') {
+                if (window.BsaTypingPopup && typeof window.BsaTypingPopup.isOpen === 'function' && window.BsaTypingPopup.isOpen()) return;
                 e.preventDefault();
                 if (isNdtModalOpen()) closeNdtModal();
                 if (typeof isNdtCrackMonitorModalOpen === 'function' && isNdtCrackMonitorModalOpen()) {
@@ -44122,6 +44132,7 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
             return;
         }
         if (k === 'escape') {
+            if (window.BsaTypingPopup && typeof window.BsaTypingPopup.isOpen === 'function' && window.BsaTypingPopup.isOpen()) return;
             e.preventDefault();
             // 선 그리는 중: Esc = 그리기 취소(점 버림). 다각형은 아래처럼 지금까지 찍은 모양으로 저장
             if (pendingAreaPoly && pendingAreaPoly.length && getPendingPolyShape() === 'polyline') {

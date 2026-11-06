@@ -1,13 +1,15 @@
 /**
- * 결함 핀 수정창 직접 입력칸 → 화면 가운데 입력 팝업 (터치 기기) — 2026-11-05
+ * 결함/NDT 수정창 직접 입력칸 → 화면 가운데 입력 팝업 (터치 기기) — 2026-11-05
  *
  * 왜:    폰·태블릿에서 상세 위치·부재 명칭·결함 종류·발생 원인 칸을 누르면 키보드에 밀리고
- *        위쪽 결함 핀 수정창에 가려 치는 글자가 안 보였다.
+ *        위쪽 수정창에 가려 치는 글자가 안 보였다.
  * 어떻게: 손가락으로 칸을 누르면 원래 칸 대신 보이는 화면(키보드 위) 가운데에 큰 입력칸을 띄운다.
  *        치는 글자는 원래 칸에 그대로 넣고 input 이벤트를 보낸다 → 기존 자동 저장 코드가 그대로 돈다.
- *        완료/Enter: 원래 칸의 확정 동작(blur·change, 원인 칸은 Enter)을 그대로 부른다.
+ *        완료/Enter: 원래 칸의 확정 동작(blur·change, 원인·NDT 부재/마감은 Enter)을 그대로 부른다.
  *        취소: 원래 값으로 되돌린다.
  *        팝업이 떠 있는 동안 화면 전체를 덮어서 뒤쪽 도면·수정창은 터치되지 않는다.
+ * 닫기:  완료/취소/Esc/Enter는 이 팝업만 닫는다. 부모 수정창·스크롤·다른 칸 값은 그대로.
+ *        (2026-11-06: 확인·취소가 부모 창까지 닫던 문제 — 캡처 단계 바깥 누르기·Esc 전파·지연 클릭)
  * PC:    마우스로 누르면 예전처럼 칸에 바로 입력한다(Tab 이동 등 유지).
  */
 (function (root) {
@@ -17,13 +19,22 @@
         defectLocation: { label: '상세 위치', commit: 'blur' },
         defectComponentInput: { label: '부재 명칭', commit: 'blur' },
         defectTypeInput: { label: '결함 종류', commit: 'blur' },
-        defectCauseInput: { label: '발생 원인 (이번 결함)', commit: 'enter' }
+        defectCauseInput: { label: '발생 원인 (이번 결함)', commit: 'enter' },
+        ndtLocation: { label: '측정 위치', commit: 'blur' },
+        ndtComponentInput: { label: '부재 구분', commit: 'enter' },
+        ndtFinishStateInput: { label: '마감상태', commit: 'enter' }
     };
+
+    var OVERLAY_ID = 'bsaTypingPopup';
+    var OVERLAY_CLASS = 'bsa-typing-overlay';
+    var REMOVE_DELAY_MS = 450; // iOS·안드로이드 지연 클릭이 부모 취소/닫기에 떨어지지 않게
 
     var lastPointerType = '';
     var lastPointerAt = 0;
     var active = null; // { input, cfg, initial, overlay, proxy }
+    var shieldOverlay = null; // 닫은 뒤에도 잠시 남겨 뒤쪽 클릭을 막음
     var suppressBlurFor = null;
+    var removeTimer = null;
 
     function isTouchLike() {
         var recent = Date.now() - lastPointerAt < 1500;
@@ -58,6 +69,22 @@
         el.dispatchEvent(ev);
     }
 
+    function isElement(el) {
+        if (!el) return false;
+        if (el.id === OVERLAY_ID) return true;
+        if (el.classList && el.classList.contains(OVERLAY_CLASS)) return true;
+        if (el.closest) {
+            if (el.closest('#' + OVERLAY_ID) || el.closest('.' + OVERLAY_CLASS)) return true;
+        }
+        if (shieldOverlay && (el === shieldOverlay || (shieldOverlay.contains && shieldOverlay.contains(el)))) return true;
+        if (active && active.overlay && (el === active.overlay || (active.overlay.contains && active.overlay.contains(el)))) return true;
+        return false;
+    }
+
+    function isOpen() {
+        return !!(active || shieldOverlay);
+    }
+
     function positionCard() {
         if (!active) return;
         var card = active.overlay.querySelector('.bsa-typing-card');
@@ -71,14 +98,44 @@
         card.style.top = y + 'px';
     }
 
-    function close(mode) {
-        if (!active) return;
-        var a = active;
-        active = null;
-        if (root.visualViewport) {
-            root.visualViewport.removeEventListener('resize', positionCard);
-            root.visualViewport.removeEventListener('scroll', positionCard);
+    function stopFromParent(e) {
+        if (!e) return;
+        if (e.stopPropagation) e.stopPropagation();
+        if (e.stopImmediatePropagation) e.stopImmediatePropagation();
+    }
+
+    function isolateOverlayEvent(e) {
+        var onBackdrop = e.target === e.currentTarget;
+        // 캡처에서 stop하면 완료/취소 단추까지 이벤트가 안 내려간다.
+        // 문서 캡처(부모 창 바깥 누르기 닫기)는 이미 지난 뒤라, 버블에서만 끊는다.
+        if (e.eventPhase === 1) {
+            if (onBackdrop && e.cancelable
+                && (e.type === 'touchstart' || e.type === 'pointerdown' || e.type === 'mousedown' || e.type === 'wheel')) {
+                e.preventDefault();
+            }
+            return;
         }
+        stopFromParent(e);
+        if (onBackdrop && e.cancelable
+            && (e.type === 'touchstart' || e.type === 'pointerdown' || e.type === 'mousedown' || e.type === 'wheel')) {
+            e.preventDefault();
+        }
+    }
+
+    function bindOverlayIsolation(overlay) {
+        var types = [
+            'pointerdown', 'pointerup', 'pointercancel',
+            'mousedown', 'mouseup',
+            'touchstart', 'touchend', 'touchcancel',
+            'click', 'wheel'
+        ];
+        types.forEach(function (t) {
+            overlay.addEventListener(t, isolateOverlayEvent, { capture: true, passive: false });
+            overlay.addEventListener(t, isolateOverlayEvent, { capture: false, passive: false });
+        });
+    }
+
+    function applyCommit(a, mode) {
         if (mode === 'cancel') {
             if (a.input.value !== a.initial) {
                 a.input.value = a.initial;
@@ -92,17 +149,58 @@
             fire(a.input, 'change');
             fire(a.input, 'blur');
         }
+    }
+
+    function removeOverlayLater(overlay) {
+        shieldOverlay = overlay;
+        overlay.setAttribute('data-bsa-typing-closing', '1');
+        if (removeTimer) clearTimeout(removeTimer);
+        removeTimer = setTimeout(function () {
+            removeTimer = null;
+            if (overlay.parentNode) overlay.parentNode.removeChild(overlay);
+            if (shieldOverlay === overlay) shieldOverlay = null;
+        }, REMOVE_DELAY_MS);
+    }
+
+    function close(mode) {
+        if (!active) return;
+        var a = active;
+        active = null;
+        if (root.visualViewport) {
+            root.visualViewport.removeEventListener('resize', positionCard);
+            root.visualViewport.removeEventListener('scroll', positionCard);
+        }
+        applyCommit(a, mode);
         try { a.proxy.blur(); } catch (e) { /* ignore */ }
-        // 닫는 탭이 뒤쪽 도면으로 새지 않게 한 박자 늦게 치운다.
-        setTimeout(function () {
-            if (a.overlay.parentNode) a.overlay.parentNode.removeChild(a.overlay);
-        }, 60);
+        // 닫는 탭·지연 클릭이 뒤쪽 수정창 취소/닫기·도면 빈곳(부모 닫기)으로 새지 않게 덮개를 잠시 남긴다.
+        removeOverlayLater(a.overlay);
+    }
+
+    function bindAction(el, mode) {
+        function go(e) {
+            if (e) {
+                if (e.preventDefault) e.preventDefault();
+                stopFromParent(e);
+            }
+            close(mode);
+        }
+        ['pointerup', 'click'].forEach(function (t) {
+            el.addEventListener(t, go);
+        });
+        // 키보드 활성화(Space/Enter)는 click으로 들어온다.
     }
 
     function open(input, cfg) {
         if (active) close('done');
+        if (shieldOverlay && shieldOverlay.parentNode) {
+            shieldOverlay.parentNode.removeChild(shieldOverlay);
+            shieldOverlay = null;
+        }
+        if (removeTimer) { clearTimeout(removeTimer); removeTimer = null; }
+
         var overlay = document.createElement('div');
-        overlay.className = 'bsa-typing-overlay';
+        overlay.id = OVERLAY_ID;
+        overlay.className = OVERLAY_CLASS;
         overlay.setAttribute('role', 'dialog');
         overlay.setAttribute('aria-modal', 'true');
         overlay.innerHTML =
@@ -121,6 +219,8 @@
 
         active = { input: input, cfg: cfg, initial: input.value, overlay: overlay, proxy: proxy };
 
+        bindOverlayIsolation(overlay);
+
         proxy.addEventListener('input', function () {
             if (!active || active.proxy !== proxy) return;
             input.value = proxy.value;
@@ -128,30 +228,19 @@
         });
         proxy.addEventListener('keydown', function (e) {
             if (e.key === 'Enter' && !e.isComposing) {
-                e.preventDefault();
+                if (e.preventDefault) e.preventDefault();
+                stopFromParent(e);
                 close('done');
-            } else if (e.key === 'Escape') {
-                e.preventDefault();
+            } else if (e.key === 'Escape' || e.key === 'Esc') {
+                if (e.preventDefault) e.preventDefault();
+                stopFromParent(e);
                 close('cancel');
             }
         });
-        overlay.querySelector('.bsa-typing-done').addEventListener('click', function (e) {
-            e.preventDefault();
-            close('done');
-        });
-        overlay.querySelector('.bsa-typing-cancel').addEventListener('click', function (e) {
-            e.preventDefault();
-            close('cancel');
-        });
-        // 뒤쪽(도면·수정창)으로 터치가 가지 않게 덮개가 다 받는다. 빈 곳을 누르면 완료.
-        ['pointerdown', 'touchstart', 'mousedown', 'wheel'].forEach(function (t) {
-            overlay.addEventListener(t, function (e) {
-                e.stopPropagation();
-                if (e.target === overlay && e.cancelable) e.preventDefault();
-            }, { passive: false });
-        });
+        bindAction(overlay.querySelector('.bsa-typing-done'), 'done');
+        bindAction(overlay.querySelector('.bsa-typing-cancel'), 'cancel');
+        // 빈 곳을 누르면 완료. isolate가 먼저 전파를 끊고, 여기선 덮개 자신만 닫는다.
         overlay.addEventListener('click', function (e) {
-            e.stopPropagation();
             if (e.target === overlay) close('done');
         });
 
@@ -179,6 +268,19 @@
         open(el, FIELDS[el.id]);
     }
 
+    function onGlobalKeydown(e) {
+        if (!isOpen() || !active) return;
+        if (e.key === 'Enter' && !e.isComposing) {
+            if (e.preventDefault) e.preventDefault();
+            stopFromParent(e);
+            close('done');
+        } else if (e.key === 'Escape' || e.key === 'Esc') {
+            if (e.preventDefault) e.preventDefault();
+            stopFromParent(e);
+            close('cancel');
+        }
+    }
+
     function init() {
         if (!root.document || root.__bsaTypingPopupBound) return;
         root.__bsaTypingPopupBound = true;
@@ -195,9 +297,23 @@
         }, true);
         // focus 리스너(종류 칸의 「들어올 때 값 기억」)가 먼저 돌도록 focusin(버블) 단계에서 연다.
         document.addEventListener('focusin', onFocusIn, false);
+        // 캡처에서 Esc/Enter를 끊어 부모 수정창 단축키(창 닫기)로 안 흘러가게.
+        if (root.addEventListener) {
+            root.addEventListener('keydown', onGlobalKeydown, true);
+        } else {
+            document.addEventListener('keydown', onGlobalKeydown, true);
+        }
     }
 
-    var api = { init: init, close: close, isOpen: function () { return !!active; }, FIELDS: FIELDS };
+    var api = {
+        init: init,
+        close: close,
+        isOpen: isOpen,
+        isElement: isElement,
+        FIELDS: FIELDS,
+        OVERLAY_ID: OVERLAY_ID,
+        REMOVE_DELAY_MS: REMOVE_DELAY_MS
+    };
     if (typeof module !== 'undefined' && module.exports) module.exports = api;
     root.BsaTypingPopup = api;
     if (root.document) {

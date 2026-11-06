@@ -153,7 +153,7 @@
   2. 안드로이드 APK: `android/app/build/outputs/apk/debug/app-debug.apk` (Gradle debug 빌드 완료)
 - 서버(Firestore DB, Storage 사진 등) 통신 외의 모든 화면·스크립트·템플릿 리소스가 어플 패키지 내부에 완전 내장됨.
 
-### ⚡ [Cursor] - 2026-10-08 17:50:00
-`[COMPLETED]` `npm run android:build:debug`가 앱 번호를 1 올린 뒤 APK와 `releases/latest.json`을 Firebase Storage에 올리도록 연결. 이 PC는 Firebase CLI 로그인이 없어 이번 턴에는 파일을 올리지 못함. 보안 규칙 파일은 변경하지 않음.
+### ⚡ [Cursor] - 2026-11-06 01:20:00
+`[COMPLETED]` 모바일·태블릿 직접 입력 자식 팝업(완료/취소)이 부모 수정창까지 닫던 문제 수정. 문서 캡처 pointerdown·Esc 전파·지연 클릭·뒤로가기 경로 격리. NDT 직접입력칸도 같은 팝업. 회귀 테스트 `scripts/test-typing-popup.js`. run-node-tests 259 통과. 대분류 미선택 마킹은 별도 브랜치(메인 배포 제외).
 
 

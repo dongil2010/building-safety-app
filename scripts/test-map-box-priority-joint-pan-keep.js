@@ -65,6 +65,8 @@ return shouldKeepDefectModalForTarget;
 const fakeTarget = (inside) => ({ closest: (sel) => (inside.some((x) => sel === x) ? {} : null) });
 assert.strictEqual(K(fakeTarget(['#bsaSelectSheet'])), true, '선택 시트는 수정창 밖으로 안 봄');
 assert.strictEqual(K(fakeTarget(['#defectModal .defect-drawer-card'])), true);
+assert.strictEqual(K(fakeTarget(['#bsaTypingPopup'])), true, '직접 입력 팝업은 수정창 밖으로 안 봄');
+assert.strictEqual(K(fakeTarget(['.bsa-typing-overlay'])), true, '직접 입력 덮개 클래스는 수정창 밖으로 안 봄');
 assert.strictEqual(K(fakeTarget(['#someHeader'])), false, '다른 곳은 그대로 닫힘');
 
 // ── 4) 터치로 도면을 끌면 선택·수정창 그대로, 움직이지 않은 탭만 해제 ──

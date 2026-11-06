@@ -18352,8 +18352,10 @@ html.bsa-kb-dock-follow body.defect-modal-open #tab-map #mobileMapDock.mobile-ca
 /* 2026-11-04 평가 표 부재 옆 개수(구조 부재 탭) */
 .stats-eval-count { font-weight: 400; color: #475569; font-size: 0.85em; }
 
-/* 2026-11-05 결함 핀 수정창 직접 입력칸 → 화면 가운데 입력 팝업 (js/shared/typing-popup.js)
-   덮개가 화면 전체를 받아서 팝업이 떠 있는 동안 뒤쪽 도면·수정창은 터치되지 않는다. */
+/* 2026-11-05 결함/NDT 수정창 직접 입력칸 → 화면 가운데 입력 팝업 (js/shared/typing-popup.js)
+   덮개가 화면 전체를 받아서 팝업이 떠 있는 동안 뒤쪽 도면·수정창은 터치되지 않는다.
+   2026-11-06 완료/취소는 이 덮개만 닫는다(부모 수정창 유지). */
+#bsaTypingPopup,
 .bsa-typing-overlay {
     position: fixed;
     inset: 0;
