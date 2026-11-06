@@ -43,6 +43,8 @@ import java.util.Map;
 public class OfflineAwareWebViewClient extends BridgeWebViewClient {
     private static final String APP_HOST = "dongil2010.github.io";
     private static final String APP_BASE = "/building-safety-app/";
+    private static final int FAST_CONNECT_MS = 2500;
+    private static final int FAST_READ_MS = 6000;
     private final Context ctx;
     private final Bridge bridge;
     private final File cacheDir;
@@ -116,8 +118,10 @@ public class OfflineAwareWebViewClient extends BridgeWebViewClient {
         if (hasInternet()) {
             try {
                 HttpURLConnection c = (HttpURLConnection) new URL(u.toString()).openConnection();
-                c.setConnectTimeout(8000);
-                c.setReadTimeout(20000);
+                // 2026-11-06 saved copy exists: don't make a weak signal hold up app start, use the copy
+                boolean hasCopy = body.exists();
+                c.setConnectTimeout(hasCopy ? FAST_CONNECT_MS : 8000);
+                c.setReadTimeout(hasCopy ? FAST_READ_MS : 20000);
                 c.setInstanceFollowRedirects(true);
                 for (Map.Entry<String, String> h : request.getRequestHeaders().entrySet()) {
                     String k = h.getKey();
@@ -155,6 +159,12 @@ public class OfflineAwareWebViewClient extends BridgeWebViewClient {
             try {
                 byte[] data = readAll(ctx.getAssets().open("public/" + rel));
                 return respond(u, data, guessMime(rel));
+            } catch (Exception ignored) { }
+        } else if (u.getHost() != null && u.getPath() != null) {
+            // 2026-11-06 external library never downloaded on this device (new install): copy bundled in the APK
+            try {
+                byte[] data = readAll(ctx.getAssets().open("public/_cdn/" + u.getHost().toLowerCase(Locale.ROOT) + u.getPath()));
+                return respond(u, data, guessMime(u.getPath()));
             } catch (Exception ignored) { }
         }
         return null;

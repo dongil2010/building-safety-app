@@ -7,7 +7,7 @@
   "scripts": {
     "test": "node scripts/run-node-tests.js",
     "prepare:www": "powershell -ExecutionPolicy Bypass -File ./scripts/prepare-www.ps1",
-    "cap:sync": "npm run prepare:www && npx cap sync android",
+    "cap:sync": "npm run prepare:www && node scripts/bundle-cdn-assets.js && npx cap sync android",
     "cap:open": "npx cap open android",
     "android:sync": "npm run cap:sync",
     "android:open": "npm run cap:open",
