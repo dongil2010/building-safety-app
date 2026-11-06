@@ -668,11 +668,12 @@
                             </label>
                         </div>
 
-                        <!-- 도면 메모 (결함 아님) -->
+                        <!-- 도면 메모 (결함 아님) · 화면 마킹 표시 옵션 -->
                         <div class="filter-group">
                             <span class="filter-label">도면 주석:</span>
                             <label class="checkbox-chip"><input type="checkbox" data-memo-show checked> 📝 주석 표시</label>
                             <label class="checkbox-chip" title="한글·PDF 위치도에 주석을 함께 넣습니다(기본 끔)"><input type="checkbox" data-memo-print> 주석 출력(한글·PDF)</label>
+                            <label class="checkbox-chip" title="균열 결함만, 폭 0.3mm 이상을 번호칸에 숫자(0.3mm)로 표시합니다. 중요 표시와는 별개입니다(기본 켬, 화면만)"><input type="checkbox" id="filterShowCrackWidthBadge" data-crack-width-badge checked> 균열폭 표시</label>
                         </div>
 
                         <!-- Damage Type Filter -->
@@ -3635,6 +3636,7 @@
     <script src="js/shared/grid-lines.js?v=20261106_130005"></script>
     <script src="js/shared/grid-auto-detect.js?v=20261106_130005"></script>
     <script src="js/shared/box-auto-layout.js?v=20261106_130005"></script>
+    <script src="js/shared/crack-width-badge.js?v=20261106_130005"></script>
     <script src="js/shared/print-crop.js?v=20261106_130005"></script>
     <script src="js/core/legend-layout.js?v=20261106_130005"></script>
     <script src="js/core/error-log-view.js?v=20261106_130005"></script>

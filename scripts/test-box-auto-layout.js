@@ -62,6 +62,8 @@ assert.ok(r7.moves.o && r7.after === 0);
 assert.deepStrictEqual(L.boxExtent(60, 24, 0, null), { l: 30, t: 12, r: 30, b: 12 });
 const eb = L.boxExtent(60, 24, 0, { w: 20, h: 8 });
 assert.ok(eb.l === 40 && eb.t === 16 && eb.r === 30 && eb.b === 12, JSON.stringify(eb));
+const er = L.boxExtent(60, 24, 0, { w: 20, h: 8, right: 12 });
+assert.ok(er.l === 40 && er.t === 16 && er.r === 42 && er.b === 12, '균열폭 우측 여백 ' + JSON.stringify(er));
 const e90 = L.boxExtent(60, 24, 90, null);
 assert.ok(Math.abs(e90.l - 12) < 1e-9 && Math.abs(e90.t - 30) < 1e-9, '90° 회전은 가로·세로 바뀜');
 // 기하

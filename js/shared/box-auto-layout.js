@@ -368,8 +368,9 @@
     function boxExtent(w, h, rotationDeg, badge) {
         const bw = badge ? Math.max(0, num(badge.w, 0)) : 0;
         const bh = badge ? Math.max(0, num(badge.h, 0)) : 0;
-        // 화면 기준 사각형(가운데 0,0): 왼쪽·위로 「중요」 글자 반쯤 튀어나옴
-        const sx1 = -w / 2 - bw / 2; const sy1 = -h / 2 - bh / 2; const sx2 = w / 2; const sy2 = h / 2;
+        const rightExtra = badge ? Math.max(0, num(badge.right, 0)) : 0;
+        // 화면 기준 사각형(가운데 0,0): 왼쪽·위로 「중요」 글자 반쯤 튀어나옴. 균열폭은 우측(badge.right)
+        const sx1 = -w / 2 - bw / 2; const sy1 = -h / 2 - bh / 2; const sx2 = w / 2 + rightExtra; const sy2 = h / 2;
         const r = ((Math.round(num(rotationDeg, 0) / 90) * 90) % 360 + 360) % 360;
         // 화면 → 이미지: 그릴 때 이미지 좌표에서 -rot 만큼 돌려 그림 → 로컬 (x,y)는 이미지에서 rot(-rot)(x,y)
         const rad = -r * Math.PI / 180;

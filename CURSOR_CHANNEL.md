@@ -176,3 +176,6 @@
 
 ### ⚡ [Cursor] - 2026-11-06 13:00:05
 `[COMPLETED]` t589u: 마감재 바탕 선택 팝업 + NDT 두께 제외 main 배포. t571u/PR36 미포함. 토큰 `20261106_130005`.
+
+### ⚡ [Cursor] - 2026-11-06 04:45:00
+`[WAITING_REVIEW]` t592u: 도면 마킹 균열폭 배지(화면만). 균열 + 폭≥0.3mm만 `0.3mm` 숫자 배지. 고급필터 「도면 주석」옆 「균열폭 표시」기본 ON(`bsa_map_crack_width_badge_v1`). 중요 배지 독립·비중첩. PDF/한글 미변경. 브랜치 `cursor/crack-width-badge-45fc` 미배포. t571u 미포함.

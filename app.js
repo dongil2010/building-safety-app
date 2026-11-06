@@ -27114,6 +27114,83 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
         ctx.restore();
     }
 
+    // 화면 전용 균열폭 배지 (t592u). 저장값·drawPinSafe(PDF/한글)는 건드리지 않는다.
+    function crackWidthBadgeApi() {
+        return (window.BSA && window.BSA.crackWidthBadge) || null;
+    }
+    function readCrackWidthBadgePref() {
+        const api = crackWidthBadgeApi();
+        return api ? api.readPref() : true;
+    }
+    function writeCrackWidthBadgePref(on) {
+        const api = crackWidthBadgeApi();
+        if (api) api.writePref(!!on);
+    }
+    function crackWidthBadgeTextFor(defect) {
+        const api = crackWidthBadgeApi();
+        if (!api || !readCrackWidthBadgePref()) return '';
+        return api.formatBadgeText(defect) || '';
+    }
+    function syncCrackWidthBadgeUi() {
+        const on = readCrackWidthBadgePref();
+        document.querySelectorAll('[data-crack-width-badge]').forEach((el) => { el.checked = !!on; });
+    }
+    function setCrackWidthBadgeShow(on) {
+        writeCrackWidthBadgePref(!!on);
+        syncCrackWidthBadgeUi();
+        if (typeof drawCanvas === 'function') drawCanvas();
+    }
+    function measureCrackWidthBadgeText(text, glyphH) {
+        const family = '"Pretendard", "Malgun Gothic", "맑은 고딕", "Apple SD Gothic Neo", "Noto Sans KR", sans-serif';
+        const ctx = state && state.ctx;
+        if (!ctx || !text) return 0;
+        ctx.save();
+        ctx.font = `900 ${glyphH}px ${family}`;
+        let w = 0;
+        try { w = ctx.measureText(text).width; } catch (_e) { w = 0; }
+        ctx.restore();
+        return w;
+    }
+    function drawCrackWidthChrome(ctx, w, h, scale, text, hasBookmark) {
+        if (!ctx || !text) return;
+        const api = crackWidthBadgeApi();
+        const family = '"Pretendard", "Malgun Gothic", "맑은 고딕", "Apple SD Gothic Neo", "Noto Sans KR", sans-serif';
+        ctx.save();
+        const glyphH = (typeof getBookmarkChromeGlyphHeight === 'function')
+            ? getBookmarkChromeGlyphHeight(scale)
+            : (2 * Math.max(8, 10 * Math.max(0.85, Number(scale) || 1)) / 3);
+        let fontPx = glyphH;
+        ctx.font = `900 ${fontPx}px ${family}`;
+        try {
+            const m = ctx.measureText(text);
+            const mh = (m.actualBoundingBoxAscent || 0) + (m.actualBoundingBoxDescent || 0);
+            if (mh > 0) fontPx = fontPx * glyphH / mh;
+        } catch (_e) { /* 옛 브라우저 */ }
+        ctx.font = `900 ${fontPx}px ${family}`;
+        ctx.textAlign = 'center';
+        ctx.textBaseline = 'middle';
+        let textW = 0;
+        try { textW = ctx.measureText(text).width; } catch (_e) { textW = String(text).length * fontPx * 0.62; }
+        const laid = api && typeof api.layout === 'function'
+            ? api.layout(w, h, scale, text, !!hasBookmark, () => textW)
+            : { cx: w / 2, cy: -h / 2 };
+        let cx = laid.cx;
+        let cy = laid.cy;
+        try {
+            const m2 = ctx.measureText(text);
+            if (m2.actualBoundingBoxAscent || m2.actualBoundingBoxDescent) {
+                cy += (m2.actualBoundingBoxAscent - m2.actualBoundingBoxDescent) / 2;
+            }
+        } catch (_e) { /* ignore */ }
+        ctx.lineJoin = 'round';
+        ctx.lineWidth = Math.max(0.5, fontPx * 0.11);
+        ctx.strokeStyle = '#0c4a6e';
+        ctx.strokeText(text, cx, cy);
+        ctx.fillStyle = '#38bdf8';
+        ctx.fillText(text, cx, cy);
+        ctx.restore();
+    }
+
     function drawPin(ctx, defect, arrows) {
         drawPinBody(ctx, defect, arrows);
     }
@@ -27297,6 +27374,8 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
 
         drawPinBoxLabel(ctx, pinLabel, getPinBoxTextColor(activeColor, shapeCfg, isBeingDragged), scale, shapeCfg);
         if (defectHasCornerMark(defect)) drawBookmarkChrome(ctx, w, h, scale);
+        const cwText = crackWidthBadgeTextFor(defect);
+        if (cwText) drawCrackWidthChrome(ctx, w, h, scale, cwText, defectHasCornerMark(defect));
 
         ctx.restore();
     }
@@ -41713,7 +41792,9 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
     if (btnMemoBarDone) btnMemoBarDone.addEventListener('click', () => setDrawMode('PAN'));
     document.querySelectorAll('[data-memo-show]').forEach((el) => el.addEventListener('change', () => setMemoShow(el.checked)));
     document.querySelectorAll('[data-memo-print]').forEach((el) => el.addEventListener('change', () => setMemoPrint(el.checked)));
+    document.querySelectorAll('[data-crack-width-badge]').forEach((el) => el.addEventListener('change', () => setCrackWidthBadgeShow(el.checked)));
     syncDrawingMemoBar();
+    syncCrackWidthBadgeUi();
     setupAreaToolPanelEvents();
 
     const btnSnapToCad = document.getElementById('btnSnapToCad');
@@ -43202,9 +43283,16 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
             const label = formatDefectPinLabel(rep, styleKey);
             const dims = measurePinBoxDimensions(state.ctx, label, scale, 1.0);
             let badge = null;
-            if (defectHasCornerMark(rep)) {
+            const hasBm = defectHasCornerMark(rep);
+            const cwApi = crackWidthBadgeApi();
+            const cwText = (cwApi && readCrackWidthBadgePref()) ? (cwApi.formatBadgeText(rep) || '') : '';
+            if (hasBm || cwText) {
                 const gh = getBookmarkChromeGlyphHeight(scale);
-                badge = { w: gh * 2.2, h: gh };
+                if (cwApi && cwText && typeof cwApi.badgeExtentExtra === 'function') {
+                    badge = cwApi.badgeExtentExtra(dims.w, scale, cwText, hasBm, measureCrackWidthBadgeText);
+                } else if (hasBm) {
+                    badge = { w: gh * 2.2, h: gh };
+                }
             }
             const targets = [];
             members.filter((m) => m && !m.surveyExtra).forEach((m) => {
