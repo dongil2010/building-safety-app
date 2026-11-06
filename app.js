@@ -38646,6 +38646,7 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
         }
 
         window._pendingPhotos = [];
+        window._defectFormShownPhotoIds = null;
         window._pendingPrevRoundPhotos = [];
         window._pendingRepairPhotoIdx = -1;
         window._pendingPinCoords = null;
@@ -38725,6 +38726,7 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
         window._pendingPinCoords = null;
         window._pendingAreaRect = null;
         window._pendingPhotos = [];
+        window._defectFormShownPhotoIds = null;
         window._pendingPrevRoundPhotos = [];
         window._pendingRepairPhotoIdx = -1;
         renderDefectMarkingTimeline(null);
@@ -38871,6 +38873,7 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
             window._pendingPrevRoundPhotos = Array.isArray(existingPin.prevRoundPhotos)
                 ? existingPin.prevRoundPhotos.filter(Boolean).slice()
                 : [];
+            noteDefectFormShownPhotos(existingPin);
             if (typeof ensureDefectPhotosLoaded === 'function') {
                 const needsPhotoHydrate = (
                     window._pendingPhotos.length === 0 && existingPin.photoIds && existingPin.photoIds.length > 0
@@ -38900,6 +38903,7 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
                     const keepExtra = (loaded, pending) => (pending || []).filter(p => p && loaded.indexOf(p) < 0);
                     window._pendingPhotos = loadedCurr.concat(keepExtra(loadedCurr, window._pendingPhotos));
                     window._pendingPrevRoundPhotos = loadedPrev.concat(keepExtra(loadedPrev, window._pendingPrevRoundPhotos));
+                    noteDefectFormShownPhotos(existingPin);
                     renderDefectPhotoSection();
                     if (typeof renderDefectListPanel === 'function') renderDefectListPanel();
                 }).catch(() => {});
@@ -38968,6 +38972,8 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
             }
             syncDefectArrowDirUi();
             window._pendingPhotos = [];
+            window._defectFormShownPhotoIds = null;
+        window._defectFormShownPhotoIds = null;
             window._pendingPrevRoundPhotos = [];
             window._pendingRepairPhotoIdx = -1;
 
@@ -40449,6 +40455,33 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
         defect.photoState = state;
     }
 
+    /** 2026-11-06 수정 창에 보인 사진 id 기록 — 보이지 않은 사진을 지운 것으로 만들지 않기 위해 */
+    function noteDefectFormShownPhotos(defect) {
+        const shownOf = (pairs, pending) => {
+            const urls = new Set((pending || []).filter(Boolean));
+            return new Set((pairs || []).filter((p) => p && p.id && p.url && urls.has(p.url)).map((p) => p.id));
+        };
+        window._defectFormShownPhotoIds = {
+            cur: shownOf(captureDefectPhotoPairs(defect).pairs, window._pendingPhotos),
+            prev: shownOf(captureDefectPhotoPairs(defect, 'prev').pairs, window._pendingPrevRoundPhotos)
+        };
+    }
+    /** 창에 안 보인 사진은 목록에 그대로 둔다(아직 안 받은 칸은 빈 칸). 지움 기록·서버 삭제 대상에서도 자연히 빠진다. */
+    function keepUnseenDefectPhotos(defect, idKey, photoKey, beforeSide, kind) {
+        const shownAll = window._defectFormShownPhotoIds;
+        const shown = shownAll && shownAll[kind];
+        if (!shown) return;
+        const ids = Array.isArray(defect[idKey]) ? defect[idKey] : [];
+        const keep = beforeSide ? window.BSA.floorSyncGuard.unseenPhotoPairs(beforeSide.pairs, shown, ids) : [];
+        ids.forEach((id) => shown.add(id));   // 이 창에서 넣은 사진은 이제 보인 사진(이 창에서 지울 수 있음)
+        if (!keep.length) return;
+        console.warn('[사진] 창에 안 보인 사진은 지우지 않고 남깁니다:', defect.id, keep.map((p) => p.id));
+        const photos = (Array.isArray(defect[photoKey]) ? defect[photoKey] : []).filter(Boolean).slice(0, ids.length);
+        while (photos.length < ids.length) photos.push(null);
+        defect[idKey] = ids.concat(keep.map((p) => p.id));
+        defect[photoKey] = photos.concat(keep.map((p) => p.url));
+    }
+
     // before: 결함 사진을 바꾸기 전에 captureDefectPhotoIdsBefore로 받아 둔 것. 없으면(새 결함) 전부 새 ID.
     function syncDefectPhotoRefs(defect, photosVal, prevVal, before) {
         if (!defect) return;
@@ -40459,12 +40492,14 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
         } else {
             delete defect.photoIds;
         }
+        keepUnseenDefectPhotos(defect, 'photoIds', 'photos', before && before.cur, 'cur');
         recordDefectPhotoState(defect, before && before.cur && before.cur.visibleIds, defect.photoIds);
         if (prev.length > 0) {
             defect.prevRoundPhotoIds = assignDefectPhotoIds(defect.id, prev, before && before.prev, 'prev');
         } else if (prevVal !== undefined) {
             delete defect.prevRoundPhotoIds;
         }
+        if (prevVal !== undefined) keepUnseenDefectPhotos(defect, 'prevRoundPhotoIds', 'prevRoundPhotos', before && before.prev, 'prev');
     }
 
     /** 목록에서 빠진 사진(IndexedDB/클라우드/캐시)만 지운다. 남은 사진은 ID가 그대로라 건드리지 않는다. */
@@ -63848,7 +63883,7 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
             return false;
         }
         const { fk, d, kind } = found;
-        if (!await window.confirmDelete(`${syncProgressPhotoLabel(photoId)}의 없는 사진을 목록에서 뺄까요?\n원본이 이 기기에도 서버에도 없는 것을 확인했습니다. 다른 기기에 원본이 남아 있다면 그 사진도 함께 빠집니다.`)) return false;
+        if (!await window.confirmDelete(`${syncProgressPhotoLabel(photoId)}의 없는 사진을 목록에서 뺄까요?\n원본이 이 기기에도 서버에도 없습니다. 다른 사람이 찍은 사진일 수 있으니, 찍은 사람 기기에 원본이 없는지 먼저 확인하세요.`)) return false;
         const idKey = kind === 'prev' ? 'prevRoundPhotoIds' : 'photoIds';
         const photoKey = kind === 'prev' ? 'prevRoundPhotos' : 'photos';
         const urlKey = kind === 'prev' ? 'prevRoundPhotoUrls' : 'photoUrls';
@@ -63892,7 +63927,7 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
         });
         if (!rows.length) return '';
         return '<div class="bsp-missing"><div class="bsp-missing-title"><i class="fa-solid fa-image"></i> 원본을 찾을 수 없는 사진 ' + rows.length + '장</div>'
-            + '<p>찍은 기기에서 앱을 열면 올라갑니다. 이미 지운 사진이거나 원본이 없으면 목록에서 빼세요.</p><ul>'
+            + '<p>다른 사람이 찍은 사진일 수 있습니다. 찍은 사람에게 확인한 뒤, 원본이 없을 때만 목록에서 빼세요.</p><ul>'
             + rows.map((x) => '<li><span>' + esc(syncProgressPhotoLabel(x.id)) + '</span><button type="button" class="btn btn-outline btn-sm" data-bsp-drop-photo="' + esc(x.id) + '">목록에서 빼기</button></li>').join('')
             + '</ul></div>';
     }
@@ -70872,9 +70907,12 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
                 } catch (e) {
                     console.warn('[동기화] 층을 서버에서 읽지 못해 이번에는 쓰지 않습니다(다음에 다시):', floorKey, e && e.message);
                     floorsSkipWrite.add(floorKey);
-                    if (!cycleFailReason) cycleFailReason = `층 읽기 실패(${floorKey}): ${(e && e.message) || e}`;
                     if (syncRetryApi() && syncRetryApi().classify(e) === 'permanent') throw e;
-                    if (typeof syncProgressFail === 'function') syncProgressFail(floorKey, '서버에서 층을 읽지 못함 — 다음 동기화에서 다시');
+                    // 2026-11-06 보고 있을 뿐 올릴 것이 없는 층의 읽기 실패는 올리기 실패가 아니다
+                    if (_dirtyFloorKeys.has(floorKey)) {
+                        if (!cycleFailReason) cycleFailReason = `층 읽기 실패(${floorKey}): ${(e && e.message) || e}`;
+                        if (typeof syncProgressFail === 'function') syncProgressFail(floorKey, '서버에서 층을 읽지 못함 — 다음 동기화에서 다시');
+                    }
                     continue;
                 }
                 // 서버 층 칸을 다른 동이 쓰고 있으면 덮어쓰지 않는다(이 기기에 그 동 정보가 아직 없을 때 칸이 겹침)
@@ -70957,9 +70995,12 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
                     3
                 );
                 if (!conf.ok) {
-                    if (!cycleFailReason) cycleFailReason = `층 버전 확인 실패(${floorKey}): ${conf.reason || ''}`;
                     console.warn('[동기화] 서버 층이 계속 바뀌거나 확인되지 않아 이번에는 쓰지 않습니다(다음에 다시):', floorKey, conf.reason);
-                    if (typeof syncProgressFail === 'function') syncProgressFail(floorKey, '다른 기기가 같은 층을 올리는 중 — 합친 뒤 다시');
+                    // 2026-11-06 올릴 것이 없는 층(보고 있는 층)은 다른 사람이 쓰는 중이어도 실패가 아니다
+                    if (_dirtyFloorKeys.has(floorKey)) {
+                        if (!cycleFailReason) cycleFailReason = `층 버전 확인 실패(${floorKey}): ${conf.reason || ''}`;
+                        if (typeof syncProgressFail === 'function') syncProgressFail(floorKey, '다른 기기가 같은 층을 올리는 중 — 합친 뒤 다시');
+                    }
                     continue;
                 }
                 const lost = guard.lostServerIds(

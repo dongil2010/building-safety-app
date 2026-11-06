@@ -34,6 +34,25 @@
     }
 
     /**
+     * 2026-11-06 사고: 수정 창에 아직 안 뜬 사진(다른 사람이 넣어 동기화로 들어옴·아직 못 받음)이 창의 사진 목록에 없다는
+     * 이유로 「지운 사진」이 되어 서버 사본까지 지워졌다. 창에 보인 적 없는 사진은 사용자가 지울 수 없었으니 지운 것이 아니다.
+     * beforePairs: 저장 전 [{id,url}] · shownIds: 창에 보인 사진 id Set(null이면 판단 안 함) · afterIds: 창이 남긴 id
+     * → 그대로 남겨야 할 [{id,url}]
+     */
+    function unseenPhotoPairs(beforePairs, shownIds, afterIds) {
+        if (!shownIds) return [];
+        var after = new Set(afterIds || []);
+        var seen = new Set();
+        var out = [];
+        (beforePairs || []).forEach(function (p) {
+            if (!p || !p.id || after.has(p.id) || shownIds.has(p.id) || seen.has(p.id)) return;
+            seen.add(p.id);
+            out.push({ id: p.id, url: p.url || null });
+        });
+        return out;
+    }
+
+    /**
      * 2026-11-06 서버 확인: 이 기기 마킹 중 서버 목록에 없는 것을 나눈다.
      * deletedElsewhere = 서버에 삭제 기록이 있음(다른 기기가 지움) — 못 올린 것이 아니다.
      * missing = 서버에 마킹도 삭제 기록도 없음 — 정말 안 올라간 것.
@@ -108,6 +127,7 @@
         revOf: revOf,
         lostServerIds: lostServerIds,
         splitMissingMarkings: splitMissingMarkings,
+        unseenPhotoPairs: unseenPhotoPairs,
         confirmRevBeforeWrite: confirmRevBeforeWrite,
         lostServerBuildings: lostServerBuildings,
         orphanDirtyFloorKeys: orphanDirtyFloorKeys

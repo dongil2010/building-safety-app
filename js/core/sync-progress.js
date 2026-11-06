@@ -334,6 +334,12 @@
                 dn += done;
                 pd += p;
             });
+            // 2026-11-06 올릴 것이 없어진 층의 실패 기록은 지운다 — 다시 올릴 일이 없어 「올리기 실패」가 영원히 남았다
+            if (ctx.dirtyFloorKeys) {
+                Object.keys(data.failures).forEach(function (w) {
+                    if (w !== 'sync' && w.indexOf('photo:') !== 0 && dirty.indexOf(w) < 0) { delete data.failures[w]; changed = true; }
+                });
+            }
             var failures = Object.keys(data.failures).map(function (w) {
                 return { where: w, reason: data.failures[w].reason, at: data.failures[w].at };
             });
