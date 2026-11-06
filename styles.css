@@ -18696,3 +18696,6 @@ html.bsa-kb-dock-follow body.defect-modal-open #tab-map #mobileMapDock.mobile-ca
 .bsp-missing li { display: flex; align-items: center; justify-content: space-between; gap: 8px; }
 .bsp-missing li span { min-width: 0; overflow-wrap: anywhere; }
 .bsp-missing li button { flex: 0 0 auto; }
+
+/* 2026-11-06 hidden 일 때 확실히 숨김(직접 입력 중에만 보임) */
+.defect-typed-preset-mode[hidden] { display: none !important; }

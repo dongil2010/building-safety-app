@@ -30079,7 +30079,6 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
             : String(document.getElementById('defectTypeInput')?.value || '').trim();
         const good = typeof isGoodDefectType === 'function' && isGoodDefectType(typeVal);
         const causeOn = memberOn && !good && typeof hasActionableDefectType === 'function' && hasActionableDefectType(typeVal);
-        setDefectProgressiveGroupOpen(document.getElementById('defectTypedPresetMode'), catOn);
         setDefectProgressiveGroupOpen(document.getElementById('quickComponentGroup'), catOn);
         setDefectProgressiveGroupOpen(document.getElementById('quickTypeGroup'), memberOn);
         setDefectProgressiveGroupOpen(document.getElementById('quickCauseGroup'), causeOn);
@@ -30318,6 +30317,22 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
             const TPM = window.BSA && window.BSA.typedPresetMode;
             if (TPM && typeof TPM.setMode === 'function') TPM.setMode(btn.getAttribute('data-typed-preset-mode'));
             syncTypedPresetModeUi();
+        });
+        // 2026-11-06 「프리셋에 저장/이번만 사용」은 직접 입력하는 동안 그 칸 바로 아래에만 보인다(구조 분류 위에 늘 떠 있지 않게).
+        // 터치 기기는 입력 팝업 안에 같은 버튼이 있어 여기서는 안 띄운다.
+        const TYPED_INPUT_IDS = ['defectComponentInput', 'defectTypeInput', 'defectCauseInput'];
+        host.addEventListener('mousedown', (e) => e.preventDefault());   // 버튼을 눌러도 입력칸 포커스 유지
+        TYPED_INPUT_IDS.forEach((id) => {
+            const input = document.getElementById(id);
+            if (!input) return;
+            input.addEventListener('focus', () => {
+                setTimeout(() => {
+                    if (document.activeElement !== input) return;   // 입력 팝업으로 넘어감
+                    (input.closest('.defect-cause-custom-row') || input).after(host);
+                    host.hidden = false;
+                }, 0);
+            });
+            input.addEventListener('blur', () => { host.hidden = true; });
         });
         syncTypedPresetModeUi();
     }

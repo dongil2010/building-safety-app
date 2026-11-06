@@ -87,6 +87,7 @@ function extractNamed(name) {
         'defectTypedPresetMode', 'quickComponentGroup', 'quickTypeGroup', 'quickCauseGroup'].forEach((id) => {
         els[id] = makeEl(id);
     });
+    els.defectTypedPresetMode.hidden = true;   // 2026-11-06 직접 입력 중에만 보임 — 단계 표시와 무관
     function setState(cat, comp, type) {
         els.defectCategory.value = cat;
         els.defectComponent.value = comp;

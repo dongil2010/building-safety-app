@@ -57,7 +57,9 @@ function extractFunction(name) {
 })();
 
 (function wiring() {
-    assert.ok(html.includes('id="defectTypedPresetMode"'));
+    assert.ok(/id="defectTypedPresetMode"[^>]*hidden>/.test(html), '평소엔 숨김');
+    assert.ok(!app.includes("setDefectProgressiveGroupOpen(document.getElementById('defectTypedPresetMode')"), '분류 고른다고 나오지 않음');
+    assert.ok(/host.hidden = false/.test(app) && /host.hidden = true/.test(app), '직접 입력 중에만 보임');
     assert.ok(html.includes('data-typed-preset-mode="save"') && html.includes('data-typed-preset-mode="once"'));
     assert.ok(html.includes('js/shared/typed-preset-mode.js?v='));
     assert.ok(html.indexOf('js/shared/typed-preset-mode.js') < html.indexOf('src="app.js'));
