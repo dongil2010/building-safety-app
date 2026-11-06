@@ -6271,6 +6271,62 @@ html:not(.layout-desktop) .survey-inline-select {
     font-weight: 700;
 }
 
+.defect-typed-preset-mode {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: 0.35rem;
+    margin: 0 0 0.45rem;
+    padding: 0.35rem 0.45rem;
+    border-radius: 0.55rem;
+    background: #f1f5f9;
+}
+
+.defect-typed-preset-mode-label {
+    font-size: 0.72rem;
+    font-weight: 800;
+    color: #475569;
+    margin-right: 0.1rem;
+}
+
+.defect-typed-preset-mode-btn {
+    border: 1px solid #cbd5e1;
+    background: #fff;
+    color: #334155;
+    border-radius: 999px;
+    font-size: 0.78rem;
+    font-weight: 700;
+    line-height: 1.2;
+    padding: 0.28rem 0.7rem;
+    cursor: pointer;
+}
+
+.defect-typed-preset-mode-btn.is-active {
+    border-color: #1d4ed8;
+    background: #dbeafe;
+    color: #1e3a8a;
+}
+
+.defect-typed-preset-mode-btn:focus-visible {
+    outline: 2px solid #2563eb;
+    outline-offset: 1px;
+}
+
+@media (max-width: 1024px) {
+    .defect-typed-preset-mode-btn {
+        font-size: 0.86rem;
+        padding: 0.38rem 0.8rem;
+        min-height: 2.1rem;
+    }
+}
+
+.bsa-typing-preset-mode {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 0.35rem;
+    margin: 0 0 0.45rem;
+}
+
 .defect-cause-custom-row {
     display: flex;
     align-items: center;
@@ -10795,6 +10851,39 @@ body.bsa-tab-stats .app-content {
     font-size: 0.88rem;
     font-weight: 800;
     color: #0f172a;
+}
+
+/* 회차선택: 현장 목록과 같은 담당자·연락처. 폰·태블릿에서도 줄바꿈·읽기 크기 유지 */
+.dashboard-site-contact {
+    flex: 1 1 100%;
+    margin-top: 0.2rem;
+    padding: 0.45rem 0.65rem;
+    border-radius: 0.55rem;
+    background: #f1f5f9;
+    color: #1e293b;
+    font-size: 0.92rem;
+    font-weight: 700;
+    line-height: 1.4;
+    white-space: normal;
+    overflow-wrap: anywhere;
+    word-break: break-word;
+}
+
+.dashboard-site-contact[hidden] {
+    display: none !important;
+}
+
+.dashboard-site-contact.is-empty {
+    font-weight: 600;
+    color: #64748b;
+    background: #f8fafc;
+}
+
+@media (max-width: 1024px) {
+    .dashboard-site-contact {
+        font-size: 1rem;
+        padding: 0.55rem 0.75rem;
+    }
 }
 
 .building-row-site .building-row-name i {

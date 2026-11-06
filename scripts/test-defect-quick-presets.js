@@ -222,7 +222,7 @@ function testNoImplicitAdd() {
     assert.ok(!/customDefect(Components|Types)\s*(\[[^\]]*\])?\s*\.push/.test(combo), 'typed component/type must not push custom lists');
     assert.ok(!/recordDefectPickUsage|toggleDefectFavorite/.test(combo), 'typing must not record usage or favorites');
     const causeDirect = extractFunction('bindDefectCauseDirectInput');
-    assert.ok(/commitDefectCauseDirectInput\(false\)/.test(causeDirect), 'cause Enter stays non-persisting');
+    assert.ok(/typedPresetMode\.shouldPersist/.test(causeDirect), 'cause Enter follows typed-preset toggle (default once)');
     const open = extractFunction('openAddDefectModal');
     assert.ok(!/applyCauseAutoPickForType/.test(open), 'opening a defect must not auto-change causes');
     assert.ok(/updateDefectCauseDropdown\(existingPin\.defectType \|\| '균열', existingPin\.cause\)/.test(open));

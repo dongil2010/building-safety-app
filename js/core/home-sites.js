@@ -64,6 +64,27 @@
         };
     }
 
+    /** 기존 건물 칸 inspector / contactPhone 만 읽는다. 없으면 현장 목록과 같은 미등록 문구. */
+    var SITE_CONTACT_EMPTY = '현장 담당자·연락처 미등록';
+
+    function pickFirstField(members, fn) {
+        var list = members || [];
+        for (var i = 0; i < list.length; i++) {
+            var v = String(fn(list[i]) || '').trim();
+            if (v) return v;
+        }
+        return '';
+    }
+
+    function formatSiteContactLine(members) {
+        var inspector = pickFirstField(members, function (b) { return b && b.inspector; });
+        var phone = pickFirstField(members, function (b) { return b && b.contactPhone; });
+        var bits = [];
+        if (inspector) bits.push(inspector);
+        if (phone) bits.push(phone);
+        return bits.length ? ('현장 담당자 ' + bits.join(' · ')) : SITE_CONTACT_EMPTY;
+    }
+
     /** 이른 점검일이 위. 점검일 없는 현장은 맨 아래(그 안에서는 이름순). 같은 날짜는 이름순 */
     function compareSites(a, b) {
         var da = a.date || '';
@@ -81,7 +102,15 @@
         return d.getFullYear() + '-' + m + '-' + day;
     }
 
-    var api = { siteStatus: siteStatus, summarize: summarize, compareSites: compareSites, todayLocal: todayLocal, validDate: validDate };
+    var api = {
+        siteStatus: siteStatus,
+        summarize: summarize,
+        compareSites: compareSites,
+        todayLocal: todayLocal,
+        validDate: validDate,
+        formatSiteContactLine: formatSiteContactLine,
+        SITE_CONTACT_EMPTY: SITE_CONTACT_EMPTY
+    };
     root.BSA = root.BSA || {};
     root.BSA.homeSites = api;
     if (typeof module !== 'undefined' && module.exports) module.exports = api;

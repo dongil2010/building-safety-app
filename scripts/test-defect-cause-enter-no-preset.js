@@ -63,6 +63,7 @@ function makeEnv() {
         }
     };
     const window = { state: env.state, showToast: (m) => env.toasts.push(m) };
+    env.window = window;
     const deps = {
         document,
         window,
@@ -138,8 +139,18 @@ function testSourceGates() {
         'NDT 추가 button keeps saving');
 }
 
+function testEnterSavesPresetWhenToggleOn() {
+    const env = makeEnv();
+    env.window.BSA = { typedPresetMode: { shouldPersist: () => true } };
+    env.input.value = '배관 누수';
+    env.fire('input', 'keydown', { key: 'Enter', preventDefault() {} });
+    assert.deepStrictEqual(env.state.customDefectCauses['균열'], ['배관 누수'], '프리셋에 저장이면 Enter도 목록에 넣음');
+    assert.strictEqual(env.saved, 1);
+}
+
 testEnterSelectsWithoutSavingPreset();
 testAddButtonStillSavesPreset();
 testPromptAddStillSaves();
 testSourceGates();
+testEnterSavesPresetWhenToggleOn();
 console.log('test-defect-cause-enter-no-preset: ok');

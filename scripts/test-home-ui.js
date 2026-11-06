@@ -152,4 +152,20 @@ const TODAY = '2026-10-28';
     assert.ok(css.includes('.dashboard-tab.active') && css.includes('.dashboard-summary-remain'));
 })();
 
+// 8) 회차선택: 기존 현장 담당자·연락처를 현장 목록과 같은 칸으로 표시
+(function roundSelectContact() {
+    assert.ok(html.includes('id="dashboardSiteContact"'), '회차선택 상단에 담당자·연락처 칸');
+    assert.ok(typeof HS.formatSiteContactLine === 'function');
+    assert.strictEqual(HS.formatSiteContactLine([{ inspector: '홍길동', contactPhone: '010-1111-2222' }]), '현장 담당자 홍길동 · 010-1111-2222');
+    assert.strictEqual(HS.formatSiteContactLine([{ inspector: '', contactPhone: '' }]), HS.SITE_CONTACT_EMPTY);
+    assert.ok(app.includes('dashboardSiteContact') && app.includes('formatSiteContactLine'));
+    assert.ok(app.includes("heroTitle.textContent = '📅 점검 회차 선택'"));
+    const fillStart = app.indexOf('회차선택(현장 진입)에는 기존 inspector/contactPhone');
+    assert.ok(fillStart > 0);
+    const fillBody = app.slice(fillStart, fillStart + 1400);
+    assert.ok(fillBody.includes('contactEl.textContent = line'), '표시만 하고 건물 칸은 쓰지 않음');
+    assert.ok(!/\.inspector\s*=/.test(fillBody) && !/\.contactPhone\s*=/.test(fillBody));
+    assert.ok(css.includes('.dashboard-site-contact') && css.includes('overflow-wrap: anywhere'));
+})();
+
 console.log('test-home-ui OK');
