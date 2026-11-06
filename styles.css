@@ -16916,71 +16916,20 @@ html.layout-tablet:not(.layout-desktop) button#mobileBtnPrintCrop#mobileBtnPrint
     display: none !important;
 }
 
-#mobileBtnMapZoom,
-#mobileMapZoomPad {
+#mobileBtnMapZoomIn,
+#mobileBtnMapZoomOut {
     display: none !important;
 }
 
-html.bsa-touch-ui:not(.layout-desktop) button#mobileBtnMapZoom#mobileBtnMapZoom,
-html.layout-tablet:not(.layout-desktop) button#mobileBtnMapZoom#mobileBtnMapZoom {
+html.bsa-touch-ui:not(.layout-desktop) button#mobileBtnMapZoomIn#mobileBtnMapZoomIn,
+html.layout-tablet:not(.layout-desktop) button#mobileBtnMapZoomIn#mobileBtnMapZoomIn,
+html.bsa-touch-ui:not(.layout-desktop) button#mobileBtnMapZoomOut#mobileBtnMapZoomOut,
+html.layout-tablet:not(.layout-desktop) button#mobileBtnMapZoomOut#mobileBtnMapZoomOut {
     display: flex !important;
 }
 
-html.bsa-touch-ui:not(.layout-desktop) #mobileMapZoomPad:not([hidden]),
-html.layout-tablet:not(.layout-desktop) #mobileMapZoomPad:not([hidden]) {
-    display: flex !important;
-}
-
-.mobile-map-zoom-pad {
-    position: absolute;
-    right: 3.15rem;
-    top: 50%;
-    transform: translateY(-50%);
-    z-index: 46;
-    flex-direction: column;
-    align-items: center;
-    gap: 0.35rem;
-    padding: 0.4rem 0.32rem;
-    background: #ffffff;
-    border: 1px solid #d4d4d4;
-    border-radius: 12px;
-    box-shadow: 0 8px 20px rgba(15, 23, 42, 0.18);
-    pointer-events: auto;
-    touch-action: manipulation;
-}
-
-.mobile-map-zoom-pad-btn {
-    width: 2.75rem;
-    min-width: 44px;
-    height: 2.75rem;
-    min-height: 44px;
-    border: 1.5px solid #e5e7eb;
-    border-radius: 10px;
-    background: #f8fafc;
-    color: #0f172a;
-    font-size: 1.15rem;
-    cursor: pointer;
-    display: flex;
-    align-items: center;
-    justify-content: center;
-    -webkit-tap-highlight-color: transparent;
-}
-
-.mobile-map-zoom-pad-btn:active {
-    background: #e2e8f0;
-}
-
-.mobile-map-zoom-pad-label {
-    font-size: 0.68rem;
-    font-weight: 800;
-    color: #475569;
-    min-width: 2.6rem;
-    text-align: center;
-}
-
-html.layout-desktop #mobileBtnMapZoom,
-html.layout-desktop #mobileMapZoomPad,
-html.layout-desktop #mobileMapZoomPad:not([hidden]) {
+html.layout-desktop #mobileBtnMapZoomIn,
+html.layout-desktop #mobileBtnMapZoomOut {
     display: none !important;
 }
 

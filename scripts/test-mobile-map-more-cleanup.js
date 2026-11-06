@@ -1,9 +1,9 @@
 #!/usr/bin/env node
 'use strict';
 /**
- * t599u: 모바일·태블릿 컴팩트 도면 더보기 정리
+ * t599u/t601u: 모바일·태블릿 컴팩트 도면 더보기 정리
  * - 숨김은 그리기·범위선택·추가·출력범위만 (박스 정리는 유지)
- * - 「도면 확대·축소」 런처 + 기존 btnZoomIn/Out 경로
+ * - 더보기에 「확대 +」「축소 −」 직접 버튼 (팝업 없음, 기존 btnZoomIn/Out)
  * - 데스크톱 레일·핀치·맞춤 유지, NDT 범위선택/추가는 이 규칙 밖
  */
 const assert = require('assert');
@@ -38,7 +38,10 @@ assert.ok(!hideBlock.includes('mobileBtnZoomFit'), '맞춤 not hidden');
 assert.ok(!hideBlock.includes('#btnZoomIn'), 'PC zoom-in not hidden');
 assert.ok(hideBlock.includes('html.bsa-touch-ui:not(.layout-desktop)'), 'compact touch scope');
 assert.ok(hideBlock.includes('html.layout-tablet:not(.layout-desktop)'), 'tablet compact scope');
-assert.ok(/html\.layout-desktop #mobileBtnMapZoom/.test(hideBlock), 'desktop hides zoom launcher');
+assert.ok(/html\.layout-desktop #mobileBtnMapZoomIn/.test(hideBlock), 'desktop hides 확대 +');
+assert.ok(/html\.layout-desktop #mobileBtnMapZoomOut/.test(hideBlock), 'desktop hides 축소 −');
+assert.ok(!hideBlock.includes('mobileMapZoomPad'), 'zoom popup CSS removed');
+assert.ok(!hideBlock.includes('#mobileBtnMapZoom#'), 'single launcher CSS removed');
 
 const desktopSecondary = sliceBetween(
     css,
@@ -56,10 +59,12 @@ assert.ok(secondary.includes('id="mobileBtnQuickDrag"') && secondary.includes('<
 assert.ok(secondary.includes('id="mobileBtnAddSelect"') && secondary.includes('<span>추가</span>'));
 assert.ok(secondary.includes('id="mobileBtnPrintCrop"') && secondary.includes('<span>출력범위</span>'));
 assert.ok(secondary.includes('id="mobileBtnBoxAutoLayout"') && secondary.includes('<span>박스 정리</span>'));
-assert.ok(secondary.includes('id="mobileBtnMapZoom"'));
-assert.ok(secondary.includes('title="도면 확대·축소"') || secondary.includes('aria-label="도면 확대·축소"'));
-assert.ok(html.includes('id="mobileMapZoomPad"'));
-assert.ok(html.includes('id="mobileMapZoomIn"') && html.includes('id="mobileMapZoomOut"'));
+assert.ok(secondary.includes('id="mobileBtnMapZoomIn"') && secondary.includes('<span>확대 +</span>'));
+assert.ok(secondary.includes('id="mobileBtnMapZoomOut"') && secondary.includes('<span>축소 −</span>'));
+assert.ok(!secondary.includes('id="mobileBtnMapZoom"'), 'single launcher gone from More');
+assert.ok(!html.includes('id="mobileMapZoomPad"'), 'zoom popup markup removed');
+assert.ok(!html.includes('id="mobileMapZoomIn"') && !html.includes('id="mobileMapZoomOut"'),
+    'popup inner zoom ids removed');
 assert.ok(html.includes('id="mobileBtnZoomFit"') && /<span>맞춤<\/span>/.test(html));
 assert.ok(html.includes('id="btnZoomIn"') && html.includes('id="btnZoomOut"') && html.includes('id="btnZoomFit"'));
 assert.ok(html.includes('id="mobileNdtBtnQuickDrag"') && html.includes('id="mobileNdtBtnAddSelect"'));
@@ -67,12 +72,14 @@ assert.ok(html.includes('id="mobileNdtBtnQuickDrag"') && html.includes('id="mobi
 assert.ok(/function applyMobileMapZoomStep\(direction\) \{[\s\S]*btnZoomOut[\s\S]*btnZoomIn/.test(app),
     'compact +/- reuse existing zoom buttons');
 assert.ok(app.includes("document.getElementById(id)?.click()"), 'zoom step clicks existing control');
-assert.ok(app.includes("if (!open && railId === 'mobileMapSideRail') closeMobileMapZoomPad()"),
-    'More collapse dismisses zoom pad');
-assert.ok(/e\.stopPropagation\(\);\s*if \(e\.cancelable/.test(app), 'outside tap does not fall through to canvas');
-assert.ok(app.includes("e.key === 'Escape'") && app.includes('closeMobileMapZoomPad'), 'Esc dismisses pad');
-assert.ok(app.includes("'#mobileMapZoomPad'") || app.includes("'.mobile-map-zoom-pad'"),
-    'zoom pad is a floating overlay');
+assert.ok(app.includes("getElementById('mobileBtnMapZoomIn')"));
+assert.ok(app.includes("getElementById('mobileBtnMapZoomOut')"));
+assert.ok(app.includes("applyMobileMapZoomStep('in')") && app.includes("applyMobileMapZoomStep('out')"));
+assert.ok(app.includes('e.stopPropagation()') && /mobileBtnMapZoomIn[\s\S]{0,250}stopPropagation/.test(app),
+    'zoom taps do not fall through to canvas');
+assert.ok(!app.includes('closeMobileMapZoomPad'), 'popup close wiring removed');
+assert.ok(!app.includes('toggleMobileMapZoomPad'), 'popup toggle removed');
+assert.ok(!app.includes('mobileMapZoomPad'), 'popup id gone from app.js');
 assert.ok(app.includes('isPinching = true') && app.includes('getMapViewScaleLimits()'), 'pinch zoom kept');
 assert.ok(/mobileBtnZoomFit[\s\S]{0,400}btnZoomFit/.test(app), '맞춤 still uses fit control');
 

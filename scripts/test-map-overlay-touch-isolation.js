@@ -40,7 +40,7 @@ const ev = (type, target, extra) => {
 {
     const { api } = makeEnv();
     assert(api.isMapFloatingOverlayTarget(popup), 'popup is overlay');
-    ['#markShapeBar', '#areaPolyTouchBar', '#areaPolygonRedrawBanner', '#areaToolPanel', '#mapStyleSizeToolbar', '#evalUnitBar', '#mapGuideBar', '#mapCountBar', '#mobileMapZoomPad']
+    ['#markShapeBar', '#areaPolyTouchBar', '#areaPolygonRedrawBanner', '#areaToolPanel', '#mapStyleSizeToolbar', '#evalUnitBar', '#mapGuideBar', '#mapCountBar', '#mobileMapSideRail']
         .forEach((id) => assert(api.isMapFloatingOverlayTarget(overlayEl(id)), id));
     assert(!api.isMapFloatingOverlayTarget(plainCanvas), 'canvas is not overlay');
     assert(!api.isMapFloatingOverlayTarget(null));

@@ -37837,7 +37837,7 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
     const MAP_FLOATING_OVERLAY_SELECTOR = [
         '#mapSelectedDefectPopup', '.map-selected-defect-popup', '#markShapeBar', '#areaPolyTouchBar', '#areaPolygonRedrawBanner',
         '#areaToolPanel', '#mapStyleSizeToolbar', '#mapGuideBar', '#mapCountBar', '#mapEvalMemberBar', '#evalUnitBar',
-        '#areaShapePicker', '.canvas-top-toolbar', '.canvas-bottom-toolbar', '#mobileMapSideRail', '#mobileMapZoomPad', '.mobile-map-zoom-pad',
+        '#areaShapePicker', '.canvas-top-toolbar', '.canvas-bottom-toolbar', '#mobileMapSideRail',
         '.map-selection-bar', '#mapSelectionBar'
     ].join(', ');
 
@@ -44872,77 +44872,9 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
     });
 
     // 모바일: 우측 레일(마킹) + 하단 액션 바
-    function closeMobileMapZoomPad() {
-        const pad = document.getElementById('mobileMapZoomPad');
-        const btn = document.getElementById('mobileBtnMapZoom');
-        if (pad) {
-            pad.hidden = true;
-            pad.setAttribute('aria-hidden', 'true');
-        }
-        if (btn) {
-            btn.classList.remove('active');
-            btn.setAttribute('aria-expanded', 'false');
-        }
-        document.removeEventListener('pointerdown', onMobileMapZoomPadOutside, true);
-        document.removeEventListener('keydown', onMobileMapZoomPadKey, true);
-    }
-
-    function onMobileMapZoomPadKey(e) {
-        if (e.key === 'Escape' || e.key === 'Esc') {
-            e.preventDefault();
-            closeMobileMapZoomPad();
-        }
-    }
-
-    function onMobileMapZoomPadOutside(e) {
-        const pad = document.getElementById('mobileMapZoomPad');
-        const btn = document.getElementById('mobileBtnMapZoom');
-        if (!pad || pad.hidden) return;
-        if (pad.contains(e.target)) return;
-        if (btn && btn.contains(e.target)) return;
-        const rail = document.getElementById('mobileMapSideRail');
-        const dock = document.getElementById('mobileMapDock');
-        if ((rail && rail.contains(e.target)) || (dock && dock.contains(e.target))) {
-            closeMobileMapZoomPad();
-            return;
-        }
-        if (typeof e.stopPropagation === 'function') e.stopPropagation();
-        if (e.cancelable && typeof e.preventDefault === 'function') e.preventDefault();
-        closeMobileMapZoomPad();
-    }
-
-    function syncMobileMapZoomPadLabel() {
-        const label = document.getElementById('mobileMapZoomPadLabel');
-        if (label) label.textContent = formatMapZoomLabel();
-    }
-
-    function openMobileMapZoomPad() {
-        const pad = document.getElementById('mobileMapZoomPad');
-        const btn = document.getElementById('mobileBtnMapZoom');
-        if (!pad) return;
-        pad.hidden = false;
-        pad.setAttribute('aria-hidden', 'false');
-        if (btn) {
-            btn.classList.add('active');
-            btn.setAttribute('aria-expanded', 'true');
-        }
-        syncMobileMapZoomPadLabel();
-        document.removeEventListener('pointerdown', onMobileMapZoomPadOutside, true);
-        document.addEventListener('pointerdown', onMobileMapZoomPadOutside, true);
-        document.removeEventListener('keydown', onMobileMapZoomPadKey, true);
-        document.addEventListener('keydown', onMobileMapZoomPadKey, true);
-    }
-
-    function toggleMobileMapZoomPad() {
-        const pad = document.getElementById('mobileMapZoomPad');
-        if (!pad || pad.hidden) openMobileMapZoomPad();
-        else closeMobileMapZoomPad();
-    }
-
     function applyMobileMapZoomStep(direction) {
         const id = direction === 'out' ? 'btnZoomOut' : 'btnZoomIn';
         document.getElementById(id)?.click();
-        syncMobileMapZoomPadLabel();
     }
 
     function closeMobileMapSheets() {
@@ -44952,7 +44884,6 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
             sizeToggle.classList.remove('active');
             sizeToggle.setAttribute('aria-expanded', 'false');
         }
-        closeMobileMapZoomPad();
     }
 
     function closeMobileNdtSheets() {
@@ -45040,7 +44971,6 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
             const label = btn.querySelector('span');
             if (label) label.textContent = open ? '접기' : '더보기';
             try { localStorage.setItem(storageKey, open ? '1' : '0'); } catch (_e) { /* ignore */ }
-            if (!open && railId === 'mobileMapSideRail') closeMobileMapZoomPad();
         };
         let startOpen = false;
         try { startOpen = localStorage.getItem(storageKey) === '1'; } catch (_e) { startOpen = false; }
@@ -45112,23 +45042,18 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
             document.getElementById('btnZoomFit')?.click();
         });
     }
-    const mobileBtnMapZoom = document.getElementById('mobileBtnMapZoom');
-    if (mobileBtnMapZoom) {
-        mobileBtnMapZoom.addEventListener('click', (e) => {
-            e.stopPropagation();
-            toggleMobileMapZoomPad();
-        });
-    }
-    const mobileMapZoomIn = document.getElementById('mobileMapZoomIn');
-    if (mobileMapZoomIn) {
-        mobileMapZoomIn.addEventListener('click', (e) => {
+    const mobileBtnMapZoomIn = document.getElementById('mobileBtnMapZoomIn');
+    if (mobileBtnMapZoomIn) {
+        mobileBtnMapZoomIn.addEventListener('click', (e) => {
+            e.preventDefault();
             e.stopPropagation();
             applyMobileMapZoomStep('in');
         });
     }
-    const mobileMapZoomOut = document.getElementById('mobileMapZoomOut');
-    if (mobileMapZoomOut) {
-        mobileMapZoomOut.addEventListener('click', (e) => {
+    const mobileBtnMapZoomOut = document.getElementById('mobileBtnMapZoomOut');
+    if (mobileBtnMapZoomOut) {
+        mobileBtnMapZoomOut.addEventListener('click', (e) => {
+            e.preventDefault();
             e.stopPropagation();
             applyMobileMapZoomStep('out');
         });
