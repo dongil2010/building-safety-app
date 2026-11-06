@@ -27188,14 +27188,39 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
     // 예외: 보(G)·보(B)·철골보(G)·철골보(B)는 사용자가 구조체 탭에서 그대로 쓰기로 해서 유지(엑셀엔 G/B 구분 없이 「보」로 적힘).
     // 그냥 '보'는 G/B를 몰라 목록에서 뺌(예전 이름·그냥 '보'로 저장된 결함은 새 이름으로 보이고, '보'는 지정 필요 표시).
     // 접합부 이름은 부재 칩에 늘어놓지 않는다 — 「접합부」 단추를 눌러 고르면 입력칸에 써지기만 한다(DEFECT_JOINT_COMPONENT_PRESET)
+    // 2026-11-06 t575u: 맨몸 구조 부재(기둥·보·슬래브·RC벽체/내력벽/구조벽)는 구조체 칩만.
+    // 2026-10-30 「공통 부재명을 비구조·마감에도」 결정은 사용자가 뒤집음. 조적벽체·벽체 타일·기둥 미장은 유지.
+    // 그냥 「벽체」는 구조벽과 자동 동일시하지 않음. 저장 결함·커스텀은 지우지 않음(수정창에서 예전 이름 그대로 편집 가능).
     const DEFECT_COMPONENT_PRESET = {
         '구조체': ['기둥', '보(G)', '보(B)', '철골보(G)', '철골보(B)', '슬래브', '벽체', 'RC벽체', '계단', '옹벽', '기타'],
-        // 비구조체: 엑셀에 많이 나온 순. 보(G)·보(B)는 한 쌍으로 같이 둔다. 「벽체」는 조적벽체와 따로.
-        '비구조체': ['벽체', '조적벽체', '바닥', '파라펫', '기둥', '부대시설', '벽체 접합부', '난간', '슬래브', 'RC벽체', '치장벽돌',
-            '옹벽', '계단', '보(G)', '보(B)', '배수로', '바닥 포장', '기타'],
-        // 마감재: 부재 칸에 「바탕 부재 + 마감」(벽체 타일·보 뿜칠)을 쓴다. 결함 칸에는 결함만(파손·들뜸·균열·오염·박락…)
-        '마감재': ['천장 마감재', '벽체 타일', '벽체', '기둥', '보(G)', '보(B)', '슬래브', '바닥', '지붕 마감재', '타일 마감재', '기둥 미장', '기타']
+        // 비구조체: 엑셀에 많이 나온 순. 「벽체」는 조적벽체와 따로(구조벽으로 치지 않음).
+        '비구조체': ['벽체', '조적벽체', '바닥', '파라펫', '부대시설', '벽체 접합부', '난간', '치장벽돌',
+            '옹벽', '계단', '배수로', '바닥 포장', '기타'],
+        // 마감재: 부재 칸에 「바탕 부재 + 마감」(벽체 타일·기둥 미장). 맨몸 기둥·보·슬래브는 두지 않음.
+        '마감재': ['천장 마감재', '벽체 타일', '벽체', '바닥', '지붕 마감재', '타일 마감재', '기둥 미장', '기타']
     };
+    const BARE_STRUCTURAL_MEMBER_CHIPS = [
+        '기둥', 'RC기둥', '철골기둥', 'SRC기둥',
+        '보', '보(G)', '보(B)', '철골보', '철골보(G)', '철골보(B)',
+        '슬래브', '데크슬래브',
+        'RC벽체', '내력벽', '구조벽'
+    ];
+    const _bareStructuralMemberChipSet = new Set(BARE_STRUCTURAL_MEMBER_CHIPS);
+    function isBareStructuralMemberChipName(name) {
+        const raw = String(name || '').trim();
+        if (!raw) return false;
+        if (_bareStructuralMemberChipSet.has(raw)) return true;
+        return _bareStructuralMemberChipSet.has(raw.replace(/\s+/g, ''));
+    }
+    /** 분류별 기본 부재 칩. 비구조체·마감재에는 맨몸 구조 부재가 끼지 않게 한 번 더 걸러, 구조체 목록으로 폴백하지 않음. */
+    function getDefectComponentPresetForCategory(category) {
+        const cat = String(category || '').trim();
+        if (cat === '비구조체' || cat === '마감재') {
+            return (DEFECT_COMPONENT_PRESET[cat] || []).filter((n) => !isBareStructuralMemberChipName(n));
+        }
+        if (cat === '구조체') return (DEFECT_COMPONENT_PRESET['구조체'] || []).slice();
+        return (DEFECT_COMPONENT_PRESET[cat] || DEFECT_COMPONENT_PRESET['구조체'] || []).slice();
+    }
 
     // 2026-11-03 기본 결함 종류 = 엑셀에서 쓰인 것만(+ 입력칸용 「기타」·「상태양호」). 부재별 목록(getDefectTypePresetFor)에서 이 밖의 이름은 뺀다.
     // 이름이 엑셀 표기와 다른 변형(들뜸/변형↔변형/들뜸 등)은 둘 다 둔다.
@@ -29601,7 +29626,7 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
         if (!window.state.hiddenDefectComponents) window.state.hiddenDefectComponents = { '구조체': [], '비구조체': [], '마감재': [] };
         if (!window.state.customDefectComponents[currentCategory]) window.state.customDefectComponents[currentCategory] = [];
         if (!window.state.hiddenDefectComponents[currentCategory]) window.state.hiddenDefectComponents[currentCategory] = [];
-        const compPreset = DEFECT_COMPONENT_PRESET[currentCategory] || DEFECT_COMPONENT_PRESET['구조체'] || [];
+        const compPreset = getDefectComponentPresetForCategory(currentCategory);
         const compHidden = window.state.hiddenDefectComponents[currentCategory];
         const compCustom = window.state.customDefectComponents[currentCategory];
         let componentOptions = applySavedOptionOrder(
@@ -29685,7 +29710,7 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
         migrateDefectComponentStateShape();
         if (!window.state.customDefectComponents) window.state.customDefectComponents = { '구조체': [], '비구조체': [], '마감재': [] };
         if (!window.state.customDefectComponents[cat]) window.state.customDefectComponents[cat] = [];
-        const preset = DEFECT_COMPONENT_PRESET[cat] || [];
+        const preset = getDefectComponentPresetForCategory(cat);
         if (preset.includes(trimmed) || window.state.customDefectComponents[cat].includes(trimmed)) return false;
         window.state.customDefectComponents[cat].push(trimmed);
         const order = ensureOptionOrderEntry('defectComponentOrder', cat);
@@ -29780,7 +29805,7 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
                     // 기본(이번만 사용): 입력칸 타이핑만으로는 커스텀/칩에 넣지 않음.
                     // 「프리셋에 저장」이면 기존 회사 공통 부재 목록에 중복 없이 넣는다.
                     const cat = document.getElementById('defectCategory')?.value || '구조체';
-                    const preset = DEFECT_COMPONENT_PRESET[cat] || [];
+                    const preset = getDefectComponentPresetForCategory(cat);
                     const customs = (window.state.customDefectComponents && window.state.customDefectComponents[cat]) || [];
                     if (shouldPersistTypedPreset() && !preset.includes(v) && !customs.includes(v)) {
                         persistTypedDefectComponent(v);
@@ -30037,7 +30062,7 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
         if (!window.state.hiddenDefectComponents[cat]) window.state.hiddenDefectComponents[cat] = [];
 
         const hidden = window.state.hiddenDefectComponents[cat];
-        const presetList = (DEFECT_COMPONENT_PRESET[cat] || DEFECT_COMPONENT_PRESET['구조체']).filter(c => !hidden.includes(c));
+        const presetList = getDefectComponentPresetForCategory(cat).filter(c => !hidden.includes(c));
         const customList = window.state.customDefectComponents[cat];
         const ordered = applySavedOptionOrder(
             presetList.concat(customList.filter(item => !presetList.includes(item))),
@@ -33821,7 +33846,7 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
                 title: `부재 명칭 세팅 (${compCat})`,
                 favField: 'component',
                 favBucket: compCat,
-                presetList: DEFECT_COMPONENT_PRESET[compCat] || DEFECT_COMPONENT_PRESET['구조체'],
+                presetList: getDefectComponentPresetForCategory(compCat),
                 hiddenList: window.state.hiddenDefectComponents[compCat],
                 customList: window.state.customDefectComponents[compCat],
                 orderList: ensureOptionOrderEntry('defectComponentOrder', compCat),

@@ -162,7 +162,8 @@ function testEveryTypeHasCause() {
             });
         });
     });
-    assert.ok(n > 400, 'checked combos ' + n);
+    // 2026-11-06 맨몸 기둥·보·슬래브·RC벽체는 구조체 칩만이라 비구조·마감 조합이 줄었다
+    assert.ok(n > 350, 'checked combos ' + n);
     // 원인 이름에는 쉼표가 들어가면 안 됨(저장할 때 쉼표로 이어 붙임)
     Object.keys(api.defectCausePreset).forEach((k) => {
         api.getAllDefaultCausesForKey(k).forEach((c) => {

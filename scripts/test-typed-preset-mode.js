@@ -100,14 +100,15 @@ function extractFunction(name) {
         extractFunction('persistTypedDefectType'),
         'return { knownDefectCategoryOrEmpty, persistTypedDefectComponent, persistTypedDefectType };'
     ].join('\n');
+    const presetMap = { '구조체': ['벽체'], '비구조체': [], '마감재': [] };
     const api = new Function(
         'document', 'window', 'migrateDefectComponentStateShape', 'DEFECT_COMPONENT_PRESET',
         'ensureOptionOrderEntry', 'saveStateToLocalStorage', 'isTransientDefectTypeValue',
-        'getDefectComboValue', 'getDefectTypePresetFor',
+        'getDefectComboValue', 'getDefectTypePresetFor', 'getDefectComponentPresetForCategory',
         fns
     )(
         document, window, () => {},
-        { '구조체': ['벽체'], '비구조체': [], '마감재': [] },
+        presetMap,
         (bucket, key) => {
             if (!env.state[bucket]) env.state[bucket] = {};
             if (!Array.isArray(env.state[bucket][key])) env.state[bucket][key] = [];
@@ -116,7 +117,8 @@ function extractFunction(name) {
         () => { env.saved++; },
         (v) => /[,]/.test(v),
         () => '벽체',
-        (cat) => (cat === '구조체' ? ['균열'] : [])
+        (cat) => (cat === '구조체' ? ['균열'] : []),
+        (cat) => (presetMap[cat] || []).slice()
     );
 
     assert.strictEqual(api.knownDefectCategoryOrEmpty(''), '');
