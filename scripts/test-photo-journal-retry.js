@@ -7,7 +7,7 @@ const path = require('path');
 const vm = require('vm');
 const R = require('../js/core/sync-retry.js');
 const app = fs.readFileSync(path.join(__dirname, '..', 'app.js'), 'utf8').replace(/\r\n/g, '\n');
-const start = app.indexOf('    async function uploadPendingJournalPhotos() {');
+const start = app.indexOf("    const MISSING_PHOTO_REASON =");
 const end = app.indexOf('    async function runPhotoJobsInBatches(', start);
 assert.ok(start > 0 && end > start);
 const a = app.indexOf('const photoFailedFloors = await uploadInlineDefectPhotosForSync(');
@@ -18,11 +18,12 @@ async function run(cfg) {
     const marked = new Set(cfg.marked || []);
     const store = {};
     const tracker = R.createItemTracker({ storage: { getItem: (k) => store[k] || null, setItem: (k, v) => { store[k] = v; } }, storageKey: () => 'k', maxAttempts: 5, baseMs: 0 });
+    let runs = 0;
     const reads = [];
     const uploads = [];
     const sb = {
         console: { warn() {} }, navigator: { onLine: true }, Promise,
-        syncJournal: () => ({ summary() {}, pendingEntries: () => cfg.entries }),
+        syncJournal: () => ({ summary() { runs += 1; }, pendingEntries: () => (cfg.laterEntries && runs > 1 ? cfg.laterEntries : cfg.entries) }),
         syncProgressCtx: () => ({}),
         getCompanyPhotosCollection: () => ({ doc: (id) => ({ get: async () => { reads.push(id); if (cfg.readError) throw cfg.readError; const d = (cfg.server || {})[id]; return { exists: !!d, data: () => d }; } }) }),
         isPhotoMarkedOnStorage: (id) => marked.has(id),
@@ -68,5 +69,9 @@ async function run(cfg) {
 
     r = await run({ entries: [e('p6')], marked: ['p6'] });
     assert.strictEqual(r.uploads.length + r.reads.length, 0, '이미 올라간 사진은 건드리지 않음');
+    r = await run({ entries: [e('p7')], laterEntries: [], times: 2 });
+    assert.strictEqual(r.parked.length, 0, '원본 없는 사진을 지워 일지에서 빠지면 멈춤도 풀림');
+    r = await run({ entries: [e('p8')], local: { p8: 'data:image/jpeg;base64,xx' }, uploadOk: false, times: 5, laterEntries: [e('p8')] });
+    assert.strictEqual(r.parked.length, 1, '통신 실패로 멈춘 사진은 그대로 유지');
     console.log('test-photo-journal-retry: ok');
 })().catch((err) => { console.error(err); process.exit(1); });

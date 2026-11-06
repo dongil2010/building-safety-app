@@ -63809,14 +63809,23 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
      * 기기에 원본이 없으면 서버를 한 번만 본다: 서버에 있으면 올라간 것으로, 없으면 멈춤 목록에 남겨 다시 촬영하게 한다.
      * 일지에 남은 사진만 보므로 전 사진 문서를 읽지 않는다. 아무것도 지우지 않는다.
      */
+    const MISSING_PHOTO_REASON = '이 기기에 원본 없음';
     async function uploadPendingJournalPhotos() {
         const j = typeof syncJournal === 'function' ? syncJournal() : null;
         const collection = getCompanyPhotosCollection();
         if (!j || !collection || navigator.onLine === false) return;
         j.summary(syncProgressCtx());   // 결함에서 빠진 사진을 먼저 정리
         const ids = j.pendingEntries().filter((e) => e.k === 'photo' && !isPhotoMarkedOnStorage(e.id)).map((e) => e.id);
-        if (!ids.length) return;
         const tracker = photoRetryTracker();
+        // 원본 없는 사진을 결함에서 지웠으면(중복 촬영 정리 등) 일지에서 빠졌으니 멈춤 표시도 푼다
+        if (tracker) {
+            tracker.parked().filter((x) => String(x.reason || '').indexOf(MISSING_PHOTO_REASON) === 0 && !ids.includes(x.id))
+                .forEach((x) => tracker.ok(x.id));
+        }
+        if (!ids.length) {
+            if (typeof scheduleSyncProgressRender === 'function') scheduleSyncProgressRender();
+            return;
+        }
         await runPhotoJobsInBatches(ids, async (id) => {
             if (tracker && !tracker.shouldTry(id)) return;
             let failure = null;
@@ -63835,7 +63844,7 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
                     if (data && (hasFirebaseStorageMeta(data) || (typeof data.dataUrl === 'string' && data.dataUrl.length > 32))) {
                         markPhotoOnStorage(id);
                     } else {
-                        failure = { code: 'missing-local-blob', message: '이 기기에 원본 없음·서버에도 없음 — 찍은 기기에서 올리거나 다시 촬영' };
+                        failure = { code: 'missing-local-blob', message: `${MISSING_PHOTO_REASON}·서버에도 없음 — 찍은 기기에서 올리거나, 중복이면 지우고, 필요하면 다시 촬영` };
                     }
                 }
             } catch (e) {
