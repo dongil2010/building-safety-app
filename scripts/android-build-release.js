@@ -43,6 +43,10 @@ function ensureKey() {
     fs.mkdirSync(HOME, { recursive: true });
     if (!fs.existsSync(PASS_FILE)) {
         if (fs.existsSync(KS)) throw new Error(`비밀번호 파일 없이 키만 있습니다: ${KS}`);
+        // 다른 PC에서 새 키를 만들어 배포하면 설치된 앱이 영영 업데이트를 못 받는다 — 처음 한 번만 --init 으로
+        if (process.argv.indexOf('--init') < 0) {
+            throw new Error(`릴리스 키가 이 PC에 없습니다(${HOME}). 새로 만들면 안 됩니다. 키를 만든 PC에서 빌드하거나 백업한 폴더를 복사하세요.`);
+        }
         fs.writeFileSync(PASS_FILE, crypto.randomBytes(24).toString('hex'), { mode: 0o600 });
     }
     process.env.BSA_RELEASE_PASS = fs.readFileSync(PASS_FILE, 'utf8').trim();

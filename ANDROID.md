@@ -6,7 +6,7 @@
 - 서버에서 받는 것: **로그인, Firestore 점검 데이터, 사진, 올린 도면**
 - **화면을 바꾸려면 APK를 다시 빌드해 설치**해야 합니다. 브라우저용 사이트만 GitHub Pages로 배포됩니다.
 - **설치 파일(APK) 업데이트**는 Firebase Storage `releases/latest.json` 을 본다 (`js/core/mobile-app-update.js`). `versionCode`가 설치된 앱보다 크면 받아서 설치 화면을 연다.
-- `npm run android:build:debug` 가 끝나면 APK와 `releases/latest.json` 을 Storage에 올린다. 앱 번호(`app.js`의 `BSA_APP_BUILD`)를 1 올린 뒤 그 번호로 올린다. 이 PC에서 한 번 `npx firebase-tools login` 이 되어 있어야 한다. APK만 다시 올리려면 `npm run android:upload`.
+- `npm run android:deploy` 가 끝나면 정식 서명 APK와 `releases/latest.json` 을 Storage에 올린다. 앱 번호(`app.js`의 `BSA_APP_BUILD`)를 1 올린 뒤 그 번호로 올린다. 이 PC에서 한 번 `npx firebase-tools login` 이 되어 있어야 한다. APK만 다시 올리려면 `npm run android:upload`.
 
 화면·네이티브 플러그인을 반영할 때는 아래처럼 APK를 다시 빌드·설치합니다.
 ## 필요 환경
@@ -62,8 +62,8 @@ Android Studio에서 **Run** (실기기 또는 에뮬레이터).
 
 ## 정식 서명 APK (2026-11-06, Play 프로텍트 유해 앱 경고 대응)
 
-`npm run android:build:release` — 디버그 표시 없는 릴리스 APK를 `android/app/build/outputs/apk/release/app-release.apk`로 만든다. **업로드는 하지 않는다.**
+배포는 `npm run android:deploy`(번호 올림 → 정식 서명 빌드 → 인증서 확인 → 업로드). `npm run android:build:release`는 올리지 않고 `android/app/build/outputs/apk/release/app-release.apk`만 만든다. `npm run android:build:debug`는 개발용이고 올리지 않는다.
 
 - 키는 저장소 밖 `~/.bsa-release/`(이 PC)에만 있다. `release.jks`·`release.pass`·`debug-to-release.lineage` 셋 다 따로 백업한다. 잃어버리면 앱을 더 업데이트할 수 없다.
 - 서명 키 교체(APK v3 rotation)라서 Android 9 이상은 앱을 지우지 않고 덮어쓴다. 앱을 지우면 기기의 오프라인 데이터도 지워지므로, 설치 실패 시 지우지 말 것.
-- 전환 뒤 `npm run android:build:debug`로 업로드하면 옛 키로 내려가 업데이트가 막힌다. `scripts/upload-mobile-release.js`를 릴리스 APK로 바꾼 뒤 배포할 것.
+- 2026-11-06 전환 완료. 업로드 스크립트가 다른 키·디버그 빌드를 막는다. 키가 없는 PC에서는 빌드가 멈춘다(새 키를 만들면 설치된 앱이 업데이트를 못 받는다). 처음 만들 때만 `--init`.

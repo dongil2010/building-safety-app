@@ -10,11 +10,14 @@ const fs = require('fs');
 const os = require('os');
 const path = require('path');
 const crypto = require('crypto');
+const { execSync } = require('child_process');
 const lib = require('./mobile-release-lib');
 const updateApi = require('../js/core/mobile-app-update.js');
 
 const ROOT = path.join(__dirname, '..');
-const APK_PATH = path.join(ROOT, 'android', 'app', 'build', 'outputs', 'apk', 'debug', 'app-debug.apk');
+const APK_PATH = path.join(ROOT, 'android', 'app', 'build', 'outputs', 'apk', 'release', 'app-release.apk');
+// 2026-11-06 정식 서명 인증서. 다른 키로 서명한 APK를 올리면 설치된 앱이 업데이트를 못 받으므로 올리기 전에 막는다.
+const RELEASE_CERT_SHA256 = 'e5e32688f8c10ec954b0b497db723f9dc20b28cdbc12d885bfde5aafdd00f57d';
 const BUCKET = updateApi.BUCKET;
 
 // Firebase CLI가 공개로 쓰는 설치형 앱 OAuth 클라이언트. 사용자 비밀이 아니다.
@@ -147,10 +150,23 @@ async function uploadObject(token, objectName, body, contentType) {
     }
 }
 
+/** 올리려는 APK가 정식 키로 서명됐고 디버그 빌드가 아닌지 확인한다 */
+function assertReleaseSigned(apkPath) {
+    const sdk = process.env.ANDROID_HOME || path.join(process.env.LOCALAPPDATA || '', 'Android', 'Sdk');
+    const btRoot = path.join(sdk, 'build-tools');
+    const versions = fs.readdirSync(btRoot).sort((a, b) => a.localeCompare(b, undefined, { numeric: true }));
+    const bt = path.join(btRoot, versions[versions.length - 1]);
+    const certs = execSync(`"${path.join(bt, 'apksigner.bat')}" verify --print-certs "${apkPath}"`, { encoding: 'utf8', stdio: ['ignore', 'pipe', 'ignore'] });
+    if (certs.indexOf(RELEASE_CERT_SHA256) < 0) fail('정식 키로 서명된 APK가 아니라 올리지 않습니다: ' + apkPath);
+    const badging = execSync(`"${path.join(bt, 'aapt2.exe')}" dump badging "${apkPath}"`, { encoding: 'utf8', stdio: ['ignore', 'pipe', 'ignore'], maxBuffer: 1 << 26 });
+    if (badging.indexOf('application-debuggable') >= 0) fail('디버그 빌드라 올리지 않습니다: ' + apkPath);
+}
+
 async function main() {
     if (!fs.existsSync(APK_PATH)) {
-        fail('APK가 없습니다. 먼저 npm run android:build:debug 를 실행하세요.\n' + APK_PATH);
+        fail('APK가 없습니다. 먼저 npm run android:deploy 를 실행하세요.\n' + APK_PATH);
     }
+    assertReleaseSigned(APK_PATH);
     const build = lib.readWebBuild(fs.readFileSync(path.join(ROOT, 'app.js'), 'utf8'));
     if (!build) fail('app.js 에서 앱 번호를 읽지 못했습니다.');
     const notes = process.env.BSA_RELEASE_NOTES || '';
