@@ -8615,6 +8615,10 @@ body:not(.bsa-tab-home) .home-fab-add-building {
     flex-direction: column;
     gap: 0.18rem;
 }
+.defect-quick-group[hidden],
+#defectTypedPresetMode[hidden] {
+    display: none !important;
+}
 
 .defect-quick-label {
     font-size: 0.7rem;

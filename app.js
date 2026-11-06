@@ -27421,14 +27421,14 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
         if (_bareStructuralMemberChipSet.has(raw)) return true;
         return _bareStructuralMemberChipSet.has(raw.replace(/\s+/g, ''));
     }
-    /** 분류별 기본 부재 칩. 비구조체·마감재에는 맨몸 구조 부재가 끼지 않게 한 번 더 걸러, 구조체 목록으로 폴백하지 않음. */
+    /** 분류별 기본 부재 칩. 비구조체·마감재에는 맨몸 구조 부재가 끼지 않게 한 번 더 걸러, 미선택은 구조체로 폴백하지 않음. */
     function getDefectComponentPresetForCategory(category) {
         const cat = String(category || '').trim();
         if (cat === '비구조체' || cat === '마감재') {
             return (DEFECT_COMPONENT_PRESET[cat] || []).filter((n) => !isBareStructuralMemberChipName(n));
         }
         if (cat === '구조체') return (DEFECT_COMPONENT_PRESET['구조체'] || []).slice();
-        return (DEFECT_COMPONENT_PRESET[cat] || DEFECT_COMPONENT_PRESET['구조체'] || []).slice();
+        return [];
     }
     function finishMemberChooserApi() {
         return (typeof window !== 'undefined' && ((window.BSA && window.BSA.finishMemberChooser) || window.BsaFinishMemberChooser)) || null;
@@ -29821,6 +29821,57 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
         fillDefectJointSelects();
     }
 
+    /**
+     * 단계 선택: 대분류가 있어야 부재, 실제 부재가 있어야 결함내용.
+     * 마감재 바탕(기둥/벽체/보/슬래브)만 고른 상태는 부재 완료가 아님(재료 팝업 확정 후).
+     * 숨겨도 입력값은 지우지 않는다.
+     */
+    function isCompletedDefectMember(component, category) {
+        const name = String(component == null ? '' : component).trim();
+        if (!name) return false;
+        const cat = typeof readDefectCategoryUi === 'function' ? readDefectCategoryUi(category) : String(category || '').trim();
+        if (cat === '마감재' && typeof isFinishMemberBaseName === 'function'
+            && isFinishMemberBaseName(name)
+            && !(typeof isFinishCombinedMemberName === 'function' && isFinishCombinedMemberName(name))) {
+            return false;
+        }
+        return true;
+    }
+
+    function setDefectProgressiveGroupOpen(el, open) {
+        if (!el) return;
+        el.hidden = !open;
+        if (open) {
+            el.removeAttribute('aria-hidden');
+            if (el.style && el.style.display === 'none') el.style.display = '';
+        } else {
+            el.setAttribute('aria-hidden', 'true');
+            if (el.style) el.style.display = 'none';
+        }
+    }
+
+    function syncDefectProgressiveSections() {
+        const cat = typeof readDefectCategoryUi === 'function'
+            ? readDefectCategoryUi(document.getElementById('defectCategory')?.value)
+            : '';
+        const catOn = !!cat;
+        const member = (typeof getDefectComboValue === 'function')
+            ? getDefectComboValue(document.getElementById('defectComponent'), document.getElementById('defectComponentInput'))
+            : String(document.getElementById('defectComponentInput')?.value || '').trim();
+        const memberOn = catOn && isCompletedDefectMember(member, cat);
+        const typeVal = (typeof getDefectComboValue === 'function')
+            ? getDefectComboValue(document.getElementById('defectType'), document.getElementById('defectTypeInput'))
+            : String(document.getElementById('defectTypeInput')?.value || '').trim();
+        const good = typeof isGoodDefectType === 'function' && isGoodDefectType(typeVal);
+        const causeOn = memberOn && !good && typeof hasActionableDefectType === 'function' && hasActionableDefectType(typeVal);
+        setDefectProgressiveGroupOpen(document.getElementById('defectTypedPresetMode'), catOn);
+        setDefectProgressiveGroupOpen(document.getElementById('quickComponentGroup'), catOn);
+        setDefectProgressiveGroupOpen(document.getElementById('quickTypeGroup'), memberOn);
+        setDefectProgressiveGroupOpen(document.getElementById('quickCauseGroup'), causeOn);
+    }
+    window.isCompletedDefectMember = isCompletedDefectMember;
+    window.syncDefectProgressiveSections = syncDefectProgressiveSections;
+
     function refreshDefectQuickPickBar() {
         bindDefectJointComposer();
         const categoryEl = document.getElementById('defectCategory');
@@ -29831,6 +29882,7 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
         const currentCategory = readDefectCategoryUi(categoryEl?.value);
         const currentComponent = getDefectComboValue(componentSelect, componentInput);
         const currentType = getDefectComboValue(typeSelect, typeInput);
+        const memberChosen = isCompletedDefectMember(currentComponent, currentCategory);
 
         renderQuickPickChipGroup('quickCategoryChips', ['구조체', '비구조체', '마감재'], currentCategory, (value) => {
             if (!categoryEl) return;
@@ -29840,6 +29892,22 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
             if (value !== '구조체') window._defectComponentJointMode = false;
             if (typeof scheduleDefectAutoApply === 'function') scheduleDefectAutoApply();
         });
+
+        if (!currentCategory) {
+            const finishBaseHost = document.getElementById('quickFinishBaseChips');
+            if (finishBaseHost) {
+                finishBaseHost.style.display = 'none';
+                finishBaseHost.innerHTML = '';
+            }
+            const jointToolbarOff = document.getElementById('defectJointToolbar');
+            if (jointToolbarOff) jointToolbarOff.style.display = 'none';
+            const typeHost = document.getElementById('quickDefectTypeChips');
+            if (typeHost) typeHost.innerHTML = '';
+            const compHost = document.getElementById('quickComponentChips');
+            if (compHost) compHost.innerHTML = '';
+            syncDefectProgressiveSections();
+            return;
+        }
 
         const jointToolbar = document.getElementById('defectJointToolbar');
         const jointComposer = document.getElementById('defectJointComposer');
@@ -29938,24 +30006,28 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
         }
 
         renderMemberGbHint(jointMode ? '' : currentComponent, onComponentPick);
-        const selectedTypeParts = parseDefectTypeList(currentType);
-        const selectedTypeSet = new Set(selectedTypeParts);
-        const typeChipOptions = getPinnedDefectTypeChips(currentCategory, currentComponent);
-        const typeSplit = computeDefectVisibleChips('type', currentCategory, typeChipOptions, selectedTypeParts, ['상태양호']);
-        renderDefectChipsWithMore('quickDefectTypeChips', typeSplit, (v) => selectedTypeSet.has(v), (value) => {
-            if (value && value !== '상태양호' && !selectedTypeSet.has(value)) {
-                recordDefectPickUsage('type', currentCategory, value);
-            }
-            toggleDefectTypeChip(value);
-        }, 'type', refreshDefectQuickPickBar);
+        if (memberChosen) {
+            const selectedTypeParts = parseDefectTypeList(currentType);
+            const selectedTypeSet = new Set(selectedTypeParts);
+            const typeChipOptions = getPinnedDefectTypeChips(currentCategory, currentComponent);
+            const typeSplit = computeDefectVisibleChips('type', currentCategory, typeChipOptions, selectedTypeParts, ['상태양호']);
+            renderDefectChipsWithMore('quickDefectTypeChips', typeSplit, (v) => selectedTypeSet.has(v), (value) => {
+                if (value && value !== '상태양호' && !selectedTypeSet.has(value)) {
+                    recordDefectPickUsage('type', currentCategory, value);
+                }
+                toggleDefectTypeChip(value);
+            }, 'type', refreshDefectQuickPickBar);
+        } else {
+            const typeHost = document.getElementById('quickDefectTypeChips');
+            if (typeHost) typeHost.innerHTML = '';
+        }
 
-        const causeGroup = document.getElementById('quickCauseGroup');
-        if (causeGroup) causeGroup.style.display = hasActionableDefectType(currentType) ? '' : 'none';
         const causeChipHost = document.getElementById('quickCauseChips');
         if (causeChipHost) {
             causeChipHost.style.display = 'none';
             causeChipHost.innerHTML = '';
         }
+        syncDefectProgressiveSections();
     }
 
     function shouldPersistTypedPreset() {
@@ -30319,7 +30391,22 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
     function populateDefectComponentDropdown(category, currentVal = null) {
         const select = document.getElementById('defectComponent');
         if (!select) return;
-        const cat = category || document.getElementById('defectCategory')?.value || '구조체';
+        const cat = knownDefectCategoryOrEmpty(category != null ? category : document.getElementById('defectCategory')?.value);
+        if (!cat) {
+            const keep = (currentVal !== null && currentVal !== undefined) ? currentVal : '';
+            let html = `<option value="" ${!keep ? 'selected' : ''}>—</option>`;
+            select.innerHTML = html;
+            if (keep) {
+                const customOpt = document.createElement('option');
+                customOpt.value = keep;
+                customOpt.textContent = keep;
+                customOpt.selected = true;
+                select.appendChild(customOpt);
+            }
+            syncDefectComboFields(select, document.getElementById('defectComponentInput'), keep);
+            refreshDefectQuickPickBar();
+            return;
+        }
 
         migrateDefectComponentStateShape();
         if (!window.state.customDefectComponents) window.state.customDefectComponents = { '구조체': [], '비구조체': [], '마감재': [] };
@@ -31162,7 +31249,6 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
         const freeLabel = document.getElementById('defectSizeFreeLabel');
         const sizeGroup = document.getElementById('defectSizeFreeGroup');
         const causeGroup = document.getElementById('defectCauseGroup');
-        const quickCauseGroup = document.getElementById('quickCauseGroup');
         if (crackGroup) crackGroup.style.display = (isCrack && !isGood) ? '' : 'none';
         if (measureGroup) measureGroup.style.display = isGood ? 'none' : '';
         if (freeLabel) {
@@ -31172,7 +31258,7 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
         }
         if (sizeGroup) sizeGroup.style.display = isGood ? 'none' : '';
         if (causeGroup) causeGroup.style.display = isGood ? 'none' : '';
-        if (quickCauseGroup) quickCauseGroup.style.display = isGood ? 'none' : '';
+        if (typeof syncDefectProgressiveSections === 'function') syncDefectProgressiveSections();
     }
 
     function normalizeMeasureJoin(join) {
