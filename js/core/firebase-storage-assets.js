@@ -399,6 +399,49 @@
         }
     }
 
+    // 2026-11-07 전송이 이 시간 동안 1바이트도 늘지 않으면 끊고 다음 동기화에 맡긴다.
+    // SDK 기본값은 최대 10분까지 재시도라, 약한 신호에서 업로드 칸 4개가 그대로 묶였다.
+    const UPLOAD_STALL_MS = 60 * 1000;
+    const UPLOAD_STALL_CHECK_MS = 5 * 1000;
+
+    /** 끝날 때까지 기다린다. 전송이 멈추면 취소하고 code 'upload-stalled'로 실패한다. 화면이 꺼진 동안은 멈춤으로 세지 않는다. */
+    function waitForUploadWithStallGuard(task, opts) {
+        if (!task || typeof task.on !== 'function') return Promise.resolve(task);
+        const stallMs = (opts && opts.stallMs) || UPLOAD_STALL_MS;
+        const checkMs = (opts && opts.checkMs) || UPLOAD_STALL_CHECK_MS;
+        const isHidden = () => typeof document !== 'undefined' && document.visibilityState === 'hidden';
+        return new Promise(function (resolve, reject) {
+            let lastProgressAt = Date.now();
+            let bytes = 0;
+            let stallError = null;
+            const timer = setInterval(function () {
+                if (isHidden()) {
+                    lastProgressAt = Date.now();
+                    return;
+                }
+                if (Date.now() - lastProgressAt < stallMs) return;
+                clearInterval(timer);
+                stallError = new Error('업로드가 ' + Math.round(stallMs / 1000) + '초 동안 진행되지 않아 다음 동기화로 미룸');
+                stallError.code = 'upload-stalled';
+                try { task.cancel(); } catch (_e) { /* ignore */ }
+                reject(stallError);
+            }, checkMs);
+            task.on('state_changed', function (snap) {
+                const now = (snap && snap.bytesTransferred) || 0;
+                if (now > bytes) {
+                    bytes = now;
+                    lastProgressAt = Date.now();
+                }
+            }, function (err) {
+                clearInterval(timer);
+                reject(stallError || err);
+            }, function () {
+                clearInterval(timer);
+                resolve(task.snapshot);
+            });
+        });
+    }
+
     async function uploadBlobToFirebaseStorage(storagePath, blob, contentType) {
         const storage = getFirebaseStorage();
         if (!storage) throw new Error('Firebase Storage unavailable');
@@ -406,10 +449,10 @@
         const path = String(storagePath).replace(/^\/+/, '');
         const ref = storage.ref().child(path);
         const type = contentType || blob.type || 'application/octet-stream';
-        const snap = await ref.put(blob, {
+        const snap = await waitForUploadWithStallGuard(ref.put(blob, {
             contentType: type,
             cacheControl: 'public, max-age=31536000'
-        });
+        }));
         const downloadURL = await ref.getDownloadURL();
         const size = (typeof blob.size === 'number')
             ? blob.size
@@ -706,6 +749,7 @@
         firestoreStorageMetaFields: firestoreStorageMetaFields,
         getFirebaseStorage: getFirebaseStorage,
         uploadBlobToFirebaseStorage: uploadBlobToFirebaseStorage,
+        waitForUploadWithStallGuard: waitForUploadWithStallGuard,
         deleteFirebaseStoragePath: deleteFirebaseStoragePath,
         resolveCloudAssetUrlFromSnapData: resolveCloudAssetUrlFromSnapData,
         blobToDataUrl: blobToDataUrl,

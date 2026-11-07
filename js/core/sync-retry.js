@@ -21,6 +21,8 @@
         'missing-local-blob', 'oversized'
     ];
     var QUOTA_CODES = ['resource-exhausted', 'storage/quota-exceeded', 'storage/retry-limit-exceeded'];
+    // 2026-11-07 신호가 약해 응답이 없어 끊은 것 — 사진·데이터 문제가 아니므로 「멈춤」까지의 실패 횟수에 세지 않는다
+    var NETWORK_STALL_CODES = ['upload-stalled', 'write-timeout'];
 
     function codeOf(err) { return String((err && err.code) || '').toLowerCase(); }
     function msgOf(err) { return String((err && err.message) || (typeof err === 'string' ? err : '') || ''); }
@@ -122,6 +124,9 @@
             },
             fail: function (id, err) {
                 load();
+                if (NETWORK_STALL_CODES.indexOf(codeOf(err)) >= 0) {
+                    return { parked: false, kind: 'transient', n: (map[id] && map[id].n) || 0 };
+                }
                 var kind = classify(err);
                 var r = map[id] || { n: 0 };
                 r.n += 1;

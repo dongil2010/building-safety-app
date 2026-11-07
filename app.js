@@ -64381,12 +64381,76 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
     }
 
     async function runPhotoJobsInBatches(items, worker, batchSize) {
+        // 2026-11-07 묶음이 다 끝나길 기다리지 않는다 — 느린 사진 한 장이 나머지 칸을 놀리지 않게 끝나는 대로 다음 사진을 시작
         const size = batchSize || PHOTO_STORAGE_UPLOAD_MAX;
-        const list = Array.isArray(items) ? items : [];
-        for (let i = 0; i < list.length; i += size) {
-            const slice = list.slice(i, i + size);
-            await yieldToUiGesture();
-            await Promise.all(slice.map((item) => worker(item)));
+        const queue = Array.isArray(items) ? items.slice() : [];
+        await Promise.all(Array.from({ length: Math.min(size, queue.length) }, async () => {
+            while (queue.length) {
+                const item = queue.shift();
+                await yieldToUiGesture();
+                await worker(item);
+            }
+        }));
+    }
+
+    // 2026-11-07 ① 동기화가 사진을 기다리는 최대 시간. 넘으면 사진은 뒤에서 계속 올리고 마킹·건물 정보부터 올린다.
+    // 예전엔 밀린 사진이 다 올라갈 때까지 글자 데이터가 못 올라가고 층 잠금도 그동안 계속 잡혀 있었다.
+    const PHOTO_SYNC_WAIT_MS = 15000;
+    let _photoDrain = null;
+
+    /**
+     * uploadPhotos를 돌리되 PHOTO_SYNC_WAIT_MS까지만 기다린다. 반환: 사진을 못 올린 층 Set.
+     * 시간 안에 끝나면 예전과 같다. 넘으면 빈 Set을 돌려주고, 사진이 끝난 뒤 finishDetachedPhotoDrain이 층을 다시 올린다.
+     * 뒤에서 돌고 있으면 새로 시작하지 않고 층만 맡긴다 — 새 사진은 그 층을 다시 올리는 다음 회차가 올린다.
+     */
+    async function runPhotoPhaseWithinBudget(floorKeys, uploadPhotos) {
+        if (_photoDrain) {
+            (floorKeys || []).forEach((k) => _photoDrain.floors.add(k));
+            return new Set();
+        }
+        const drain = { floors: new Set(floorKeys || []), failedFloors: new Set(), error: null, done: false, detached: false };
+        _photoDrain = drain;
+        const finished = (async () => {
+            try {
+                const failed = await uploadPhotos();
+                if (failed) failed.forEach((k) => drain.failedFloors.add(k));
+            } catch (e) {
+                drain.error = e;
+            }
+            drain.done = true;
+            _photoDrain = null;
+            if (drain.detached) finishDetachedPhotoDrain(drain);
+        })();
+        await Promise.race([finished, sleepMs(PHOTO_SYNC_WAIT_MS)]);
+        if (drain.done) {
+            if (drain.error) throw drain.error;
+            return drain.failedFloors;
+        }
+        drain.detached = true;
+        console.info('[사진] 업로드가 길어져 뒤에서 계속 올리고, 층 데이터부터 올립니다.');
+        return new Set();
+    }
+
+    /** 뒤에서 돌던 사진이 끝났다 — 맡은 층을 한 번 더 올려 사진 주소를 싣는다. 실패가 있으면 평소처럼 백오프로 재시도. */
+    function finishDetachedPhotoDrain(drain) {
+        // 층 쓰기가 끝나면 「올릴 것」 표시를 지우므로, 동기화 중에 표시하면 사라진다 — 끝난 뒤에 표시
+        if (_syncInFlight) {
+            setTimeout(() => finishDetachedPhotoDrain(drain), 1000);
+            return;
+        }
+        try {
+            const floors = new Set(drain.floors);
+            drain.failedFloors.forEach((k) => floors.add(k));
+            floors.forEach((k) => markFloorKeyDirty(k));
+            if (typeof syncProgressFail === 'function') drain.failedFloors.forEach((k) => syncProgressFail(k, '사진 업로드 실패 — 다시 시도'));
+            if (isSyncParked()) return;
+            if (drain.error || drain.failedFloors.size) {
+                scheduleSyncRetryAfterError(drain.error || { code: 'partial-failure', message: `사진 업로드 실패(${drain.failedFloors.size}개 층)` });
+            } else if (floors.size) {
+                scheduleSyncToFirebase({ skipMarkCurrent: true });
+            }
+        } catch (e) {
+            console.warn('[사진] 뒤에서 올린 뒤 처리 실패:', e);
         }
     }
 
@@ -65396,12 +65460,27 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
     function pauseFirestoreWrites(ms) {
         _fsWritePausedUntil = Math.max(_fsWritePausedUntil, Date.now() + Math.max(0, ms || 0));
     }
-    function enqueueFirestoreWrite(task) {
+    // 2026-11-07 서버 응답 없이 멈춘 쓰기 하나가 뒤의 쓰기를 전부 막지 않게 기다리는 시간을 제한한다.
+    // SDK는 끊겨도 쓰기를 실패시키지 않고 붙들고 있다. 시간이 지나도 그 쓰기는 SDK 대기열에 남아 연결되면 순서대로 올라간다.
+    const FS_WRITE_TIMEOUT_MS = 120000;
+    const FS_WRITE_PARTS_TIMEOUT_MS = 300000;
+    function withFirestoreWriteTimeout(task, timeoutMs) {
+        let timer = null;
+        const timeout = new Promise((_, reject) => {
+            timer = setTimeout(() => {
+                const e = new Error('서버 쓰기 응답 없음 — 다음 동기화에서 다시');
+                e.code = 'write-timeout';
+                reject(e);
+            }, timeoutMs);
+        });
+        return Promise.race([Promise.resolve().then(task), timeout]).finally(() => clearTimeout(timer));
+    }
+    function enqueueFirestoreWrite(task, timeoutMs) {
         const run = async () => {
             while (Date.now() < _fsWritePausedUntil) {
                 await new Promise((r) => setTimeout(r, Math.min(1000, Math.max(50, _fsWritePausedUntil - Date.now()))));
             }
-            return task();
+            return withFirestoreWriteTimeout(task, timeoutMs || FS_WRITE_TIMEOUT_MS);
         };
         const p = _fsWriteChain.then(run, run);
         _fsWriteChain = p.then(() => undefined, () => undefined);
@@ -65481,7 +65560,7 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
                         });
                     }
                     await batch.commit();
-                });
+                }, FS_WRITE_PARTS_TIMEOUT_MS);
                 if (end < parts.length) await sleep(80);
             }
 
@@ -65500,6 +65579,8 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
             scheduleChunkPartsCleanup(docRef, writeId, { writeId: prevWriteId, chunkCount: prevChunkCount });
             return { writeId, chunked: true, chunkCount: parts.length };
         } catch (e) {
+            // 응답만 늦은 쓰기를 「실패」로 적으면 멀쩡한 층을 다른 기기가 못 읽는다(failed는 읽기 오류로 처리됨)
+            if (e && e.code === 'write-timeout') throw e;
             try {
                 await enqueueFirestoreWrite(() =>
                     docRef.set({
@@ -65576,7 +65657,7 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
     // 「업데이트 받기」(js/shared/app-update-button.js)가 새로고침 전에 부른다 — 기기 저장 마무리·못 올린 변경 수
     window.BSA_appUpdateHooks = {
         pendingCount() {
-            return _dirtyFloorKeys.size + ((window._defectPhotoSaves && window._defectPhotoSaves.size) || 0);
+            return _dirtyFloorKeys.size + ((window._defectPhotoSaves && window._defectPhotoSaves.size) || 0) + (_photoDrain ? 1 : 0);
         },
         async flushLocal() {
             const saves = Array.from(window._defectPhotoSaves || []);
@@ -67584,7 +67665,10 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
             // 오프라인을 겪은 적이 없으면(준비만 해 둔 상태) 비울지 묻지 않는다 — 현장 가기 전 준비가 지워지면 안 된다
             const statuses = offlineWorked ? (await prep.listStatuses()).filter(Boolean) : [];
             // 2026-11-06 올릴 층이 없어도 일지에 남은 사진은 올린다(동기화가 안 돌면 영영 안 올라감)
-            try { await uploadPendingJournalPhotos(); } catch (e) { console.warn('[오프라인 복귀] 남은 사진 올리기 실패', e); }
+            // 2026-11-07 밀린 사진이 많아도 아래 층 올리기를 막지 않는다(길어지면 뒤에서 계속)
+            try {
+                await runPhotoPhaseWithinBudget([], async () => { await uploadPendingJournalPhotos(); return new Set(); });
+            } catch (e) { console.warn('[오프라인 복귀] 남은 사진 올리기 실패', e); }
             const hadPending = _dirtyFloorKeys.size > 0 || ((window._defectPhotoSaves && window._defectPhotoSaves.size) || 0) > 0;
             if (!statuses.length && !hadPending) return;
             if (typeof syncProgressBegin === 'function') syncProgressBegin();
@@ -71377,8 +71461,11 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
             }
 
             // 사진/도면 업로드 (잠금 유지 + heartbeat)
-            const photoFailedFloors = await uploadInlineDefectPhotosForSync(subsetDefectsMap(window.state.defects, Array.from(floorsToSync)));
-            await uploadPendingJournalPhotos();
+            const photoFailedFloors = await runPhotoPhaseWithinBudget(Array.from(floorsToSync), async () => {
+                const failed = await uploadInlineDefectPhotosForSync(subsetDefectsMap(window.state.defects, Array.from(floorsToSync)));
+                await uploadPendingJournalPhotos();
+                return failed;
+            });
             const fieldRasterOnly = typeof isNativeAndroidApp === 'function' && isNativeAndroidApp() && !layoutIsPcLike();
             if (!fieldRasterOnly) {
                 await uploadFloorDrawingPdfsForSync(window.state.buildings);

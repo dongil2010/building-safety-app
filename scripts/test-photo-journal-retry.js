@@ -10,8 +10,8 @@ const app = fs.readFileSync(path.join(__dirname, '..', 'app.js'), 'utf8').replac
 const start = app.indexOf('    async function uploadPendingJournalPhotos() {');
 const end = app.indexOf('    async function runPhotoJobsInBatches(', start);
 assert.ok(start > 0 && end > start);
-const a = app.indexOf('const photoFailedFloors = await uploadInlineDefectPhotosForSync(');
-assert.ok(app.slice(a, a + 200).includes('await uploadPendingJournalPhotos();'), '동기화 때 함께 돈다');
+const a = app.indexOf('const photoFailedFloors = await runPhotoPhaseWithinBudget(');
+assert.ok(a > 0 && app.slice(a, a + 300).includes('await uploadPendingJournalPhotos();'), '동기화 때 함께 돈다');
 assert.ok(app.indexOf('await uploadPendingJournalPhotos()', app.indexOf('async function runOfflineReturnSync')) < app.indexOf('const hadPending = _dirtyFloorKeys.size > 0', app.indexOf('async function runOfflineReturnSync')), '오프라인 복귀: 올릴 층이 없어도 돈다');
 
 async function run(cfg) {
