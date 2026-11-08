@@ -2997,9 +2997,15 @@ ${roundMobile ? '' : `<button type="button" class="icon-btn icon-btn-trash" titl
     }
 
     /**
-     * 2026-11-06 파일명이 「외부」인 도면 한 장만 등록하면 층 이름은 「외부1」이 아니라 「외부」.
-     * 등록할 때 이름만 정한다(코드는 EXT_1 그대로). 이미 등록된 층의 이름·출력은 건드리지 않는다.
-     * 저장 전에 외부 도면이 더 들어오면 번호를 붙여 외부1·외부2로 돌려놓는다.
+     * 외부 도면을 등록할 때 층 이름 정하기(코드는 EXT_1·EXT_2… 그대로, 이름만).
+     *
+     * 2026-11-08 파일 이름에 번호가 없는 외부 도면(「건축물 외부.pdf」「본관동 외부 입면도.pdf」)은
+     * 파일 이름을 버리고 무조건 「외부1」로 잡혀, 한글 위치도 캡션도 「외부1 상태조사위치도」로 나왔다.
+     * 이제 파일 이름(확장자 뺀 것)을 층 이름으로 쓴다. 다만
+     *  - 파일 이름에 번호가 있으면(외부2.pdf·EXT_3.pdf) 예전처럼 외부2·외부3
+     *  - 이름이 다른 층·같이 넣은 도면과 겹치거나, 40자를 넘으면 외부N 그대로
+     *  - 파일 이름이 딱 「외부」: 한 장만이면 「외부」(2026-11-06), 외부 도면이 여럿이면 외부1·외부2
+     * 이미 등록된 층의 이름은 건드리지 않는다(바꾸려면 「층 이름 바꾸기」).
      */
     function applySoleExteriorFileLabel(items, usedCodes) {
         const fi = window.BSA && window.BSA.floorIdentity;
@@ -3007,7 +3013,33 @@ ${roundMobile ? '' : `<button type="button" class="icon-btn icon-btn-trash" titl
         const isSerial = (it) => /^EXT_\d+$/i.test(String((it && it.floorCode) || ''));
         const newExt = (items || []).filter((it) => isExt(it.floorCode));
         if (!newExt.length) return;
-        const stem = String(newExt[0].fileName || '').replace(/\.[^.]+$/, '').trim();
+        const stemOf = (it) => String((it && it.fileName) || '').replace(/\.[^.]+$/, '').replace(/\s+/g, ' ').trim();
+        const squash = (t) => String(t || '').replace(/[\s\-_·.\/]/g, '').toLowerCase();
+        const nameHasSerial = (s) => ((fi && typeof fi.parseExteriorSerialNumber === 'function')
+            ? fi.parseExteriorSerialNumber(s) != null
+            : /외부\s*[_\-]?\s*\d|EXT[_\s\-]*\d/i.test(s));
+        const pending = [].concat(window.selectedUploadedDrawings || [], window.selectedEditUploadedDrawings || []);
+        // 이미 쓰인 이름: 넘겨받은 층 코드, 그 코드의 건물 층 이름, 저장 전 목록, 이번에 넣은 다른 도면
+        const usedSet = new Set((usedCodes || []).map(String));
+        const taken = new Set();
+        usedSet.forEach((c) => taken.add(squash(c)));
+        const bldg = window.currentEditingBuilding;
+        ((bldg && bldg.floorsList) || []).forEach((f) => {
+            if (f && usedSet.has(String(f.floorCode)) && f.floorLabel) taken.add(squash(f.floorLabel));
+        });
+        pending.forEach((it) => { if (it && it.floorLabel) taken.add(squash(it.floorLabel)); });
+        const named = newExt.filter((it) => {
+            const s = stemOf(it);
+            return isSerial(it) && s && s.length <= 40 && squash(s) !== '외부' && !nameHasSerial(s);
+        });
+        (items || []).forEach((it) => { if (it && named.indexOf(it) < 0 && it.floorLabel) taken.add(squash(it.floorLabel)); });
+        named.forEach((it) => {
+            const s = stemOf(it);
+            if (taken.has(squash(s))) return;
+            it.floorLabel = s;
+            taken.add(squash(s));
+        });
+        const stem = stemOf(newExt[0]);
         if (newExt.length === 1 && !(usedCodes || []).some(isExt) && isSerial(newExt[0]) && stem === '외부') {
             newExt[0].floorLabel = '외부';
             return;

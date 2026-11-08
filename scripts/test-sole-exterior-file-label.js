@@ -1,6 +1,7 @@
 #!/usr/bin/env node
 'use strict';
-/** 2026-11-06 파일명 「외부」 한 장 등록 → 층 이름 「외부」. 등록할 때만, 다른 경우는 그대로 */
+/** 2026-11-06 파일명 「외부」 한 장 등록 → 층 이름 「외부」.
+ * 2026-11-08 번호 없는 외부 파일(「건축물 외부.pdf」)은 파일 이름이 층 이름(예전엔 무조건 외부1 → 한글 위치도도 「외부1」) */
 const assert = require('assert');
 const fs = require('fs');
 const path = require('path');
@@ -20,12 +21,12 @@ assert.strictEqual(a.floorCode, 'EXT_1', '코드는 그대로');
 a = item('외부.pdf', 2);
 ctx.f([a], ['EXT_1']);
 assert.strictEqual(a.floorLabel, '외부2', '이미 외부가 있으면 번호');
-const x = item('외부.pdf', 1), y = item('외부2.pdf', 2);
+let x = item('외부.pdf', 1), y = item('외부2.pdf', 2);
 ctx.f([x, y], []);
 assert.deepStrictEqual([x.floorLabel, y.floorLabel], ['외부1', '외부2'], '두 장이면 번호');
 a = item('외벽 입면.pdf', 1);
 ctx.f([a], []);
-assert.strictEqual(a.floorLabel, '외부1', '파일명이 외부가 아니면 그대로');
+assert.strictEqual(a.floorLabel, '외벽 입면', '파일 이름이 층 이름');
 const first = item('외부.pdf', 1);
 ctx.f([first], []);
 win.selectedUploadedDrawings = [first];
@@ -35,4 +36,36 @@ assert.strictEqual(first.floorLabel, '외부1', '저장 전에 하나 더 넣으
 const pick = { fileName: '1층.pdf', floorCode: '1F', floorLabel: '지상1층' };
 ctx.f([pick], []);
 assert.strictEqual(pick.floorLabel, '지상1층');
+// --- 2026-11-08 재현: 「건축물 외부.pdf」가 외부1로 잡히던 문제 ---
+win.selectedUploadedDrawings = [];
+a = item('건축물 외부.pdf', 1);
+ctx.f([a], ['1F', '2F']);
+assert.deepStrictEqual([a.floorCode, a.floorLabel], ['EXT_1', '건축물 외부'], '파일 이름 그대로, 코드는 EXT_1');
+a = item('건축물 외부.pdf', 2);
+ctx.f([a], ['EXT_1']);
+assert.strictEqual(a.floorLabel, '건축물 외부', '외부가 이미 있어도 이름이 다르면 파일 이름');
+x = item('본관동 외부.pdf', 1); y = item('신관동 외부.pdf', 2);
+ctx.f([x, y], []);
+assert.deepStrictEqual([x.floorLabel, y.floorLabel], ['본관동 외부', '신관동 외부'], '여러 장도 각자 이름');
+x = item('외부 입면.pdf', 1); y = item('외부  입면.PDF', 2);
+ctx.f([x, y], []);
+assert.deepStrictEqual([x.floorLabel, y.floorLabel], ['외부 입면', '외부2'], '같은 이름 두 장이면 뒤엣것은 번호');
+win.currentEditingBuilding = { floorsList: [{ floorCode: 'EXT_1', floorLabel: '건축물 외부' }] };
+a = item('건축물외부.pdf', 2);
+ctx.f([a], ['1F', 'EXT_1']);
+assert.strictEqual(a.floorLabel, '외부2', '건물에 같은 이름 층이 있으면 번호');
+win.currentEditingBuilding = { floorsList: [{ floorCode: 'EXT_9', floorLabel: '건축물 외부' }] };
+a = item('건축물 외부.pdf', 1);
+ctx.f([a], ['1F']);
+assert.strictEqual(a.floorLabel, '건축물 외부', '이번 목록에 없는 옛 건물 객체는 안 봄');
+win.currentEditingBuilding = null;
+a = item('외부 3.pdf', 3);
+ctx.f([a], []);
+assert.strictEqual(a.floorLabel, '외부3', '파일 이름에 번호가 있으면 외부3');
+a = item('가'.repeat(41) + ' 외부.pdf', 1);
+ctx.f([a], []);
+assert.strictEqual(a.floorLabel, '외부1', '40자 넘으면 번호');
+a = { fileName: '외부 정면.pdf', floorCode: 'EXT_S', floorLabel: '정면' };
+ctx.f([a], []);
+assert.strictEqual(a.floorLabel, '정면', '방향 코드(EXT_S)는 그대로');
 console.log('test-sole-exterior-file-label: ok');
