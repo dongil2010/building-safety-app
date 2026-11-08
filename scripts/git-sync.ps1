@@ -101,8 +101,22 @@ function Invoke-GitPullAlways {
     }
 }
 
+# app.js = app/ 조각을 이은 파일 (2026-11-08). 커밋 전에 한쪽만 바뀐 조각은 자동으로 맞추고
+# (app.js만 고쳤으면 조각으로, 조각만 고쳤으면 app.js로), 같은 조각을 양쪽에서 다르게 고쳤으면 멈춘다.
+function Invoke-AppParts {
+    param([Parameter(Mandatory = $true)][string]$Command)
+    & node (Join-Path $repoRoot "scripts/app-parts.js") $Command
+    if ($LASTEXITCODE -ne 0) {
+        Write-Host "app-parts $Command 실패 — 위 안내대로 맞춘 뒤 다시 실행하세요. (커밋하지 않았습니다)"
+        exit 1
+    }
+}
+
 # 푸시 전/커밋 전: 원격이 앞서지 않아도 항상 pull로 확인
 Invoke-GitPullAlways -Reason "before commit"
+
+Invoke-AppParts -Command "sync"
+Invoke-AppParts -Command "check"
 
 $status = git status --porcelain
 if (-not $status) {
@@ -113,7 +127,7 @@ if (-not $status) {
 $label = Get-Date -Format "yyyyMMdd_HHmmss"
 Update-CacheBustTokens -Label $label
 
-git add .gitignore app.js index.html photo-capture.html report-summary.html struct-plan.html styles.css js/ sw.js manifest.json web-version.json templates/ scripts/ docs/ CLAUDE.md CURSOR_CHANNEL.md ANDROID.md capacitor.config.json package.json package-lock.json electron/ branding/ android/app/src/main/java/ android/app/src/main/res/ android/app/src/main/AndroidManifest.xml .cursor/rules/antigravity-bridge.mdc firestore.rules storage.rules firebase.json functions/ cloudflare-worker
+git add .gitignore app.js app/ index.html photo-capture.html report-summary.html struct-plan.html styles.css js/ sw.js manifest.json web-version.json templates/ scripts/ docs/ CLAUDE.md CURSOR_CHANNEL.md ANDROID.md capacitor.config.json package.json package-lock.json electron/ branding/ android/app/src/main/java/ android/app/src/main/res/ android/app/src/main/AndroidManifest.xml .cursor/rules/antigravity-bridge.mdc .cursor/rules/app-parts.mdc .cursorignore firestore.rules storage.rules firebase.json functions/ cloudflare-worker
 $staged = git diff --cached --name-only
 if (-not $staged) {
     Write-Host "No staged changes to commit."

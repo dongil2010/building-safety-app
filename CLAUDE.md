@@ -10,7 +10,7 @@
    - 로컬에 미커밋 수정이 있으면 `git stash push -u` → `git pull origin main` → `git stash pop`
    - 충돌이 나면 자동으로 풀지 말고, 충돌 파일/내용을 보여주고 사용자에게 물어봄
 3. 커밋 전에도 동일하게 pull 1회로 원격과 맞춘다
-4. 변경 파일을 지정해서 `git add` (예: `app.js index.html styles.css js/`, `-A` 금지)
+4. 변경 파일을 지정해서 `git add` (예: `app.js app/ index.html styles.css js/`, `-A` 금지)
 5. 의미 있는 메시지로 `git commit`
 6. **`git push` 직전에 다시 `git pull origin main`으로 확인**한 뒤 `git push origin main`
 7. **브라우저 배포는 GitHub Pages** — push 후 Actions가 사이트를 갱신한다.
@@ -19,6 +19,23 @@
    (2026-09-16부터: Pages Source가 "Deploy from a branch"가 아니라 **GitHub Actions**로
    바뀜 — `.github/workflows/deploy-web.yml`이 `scripts/prepare-pages.py`로 `_site/`를
    만들어 배포한다. push하면 자동으로 이 워크플로가 돌아가는 건 그대로 동일하다.)
+
+## app.js 조각 (2026-11-08)
+
+`app.js`는 **자동 생성 파일**이다. 실제 원본은 `app/01-base.js` … `app/16-backup-auth-init.js` 조각이고,
+`node scripts/app-parts.js join`이 이걸 이어 `app.js`를 만든다. 브라우저·테스트(`lib-extract-fn.js`)·
+배포(`prepare-pages.py`·`prepare-www.ps1`·`sw.js`)는 지금처럼 `app.js` 하나만 쓴다.
+
+- **코드는 `app/` 조각에서 고치고 `join`** 한다. `app.js`를 직접 고치지 않는다.
+- 병합 충돌은 **조각만 푼다.** `app.js` 충돌은 손대지 말고 조각을 다 푼 뒤 `join --force`로 다시 만든다.
+- `npm test`·배포 워크플로가 `check`로 어긋남을 잡는다. `git-sync.ps1`은 커밋 전에 `sync`(한쪽만 바뀐 조각을
+  자동으로 맞춤) + `check`를 돌고, `app/`도 같이 `git add` 한다.
+- 콘솔 오류 줄 → 조각: `node scripts/app-parts.js where <app.js 줄>`.
+- app.js 1번 줄과 각 조각 앞의 `// @@app-part …` 줄은 경계 표시(주석)다. 이 줄들을 빼면 나누기 전 app.js와
+  바이트까지 같다. 코드에 `// @@app-part`로 시작하는 줄을 새로 쓰지 않는다.
+- 한글 출력 고정 구간(`test-pdf-preview-hwpx-layout.js`의 해시 구간)은 `app/13-report-export.js` 한 조각 안에
+  있어야 한다 — 경계를 그 안에 넣으면 `check`가 실패한다.
+- 자세한 사용법은 `scripts/app-parts.js` 머리 주석, Cursor 쪽 규칙은 `.cursor/rules/app-parts.mdc`.
 
 ## ⚠️ Gemini API 키 — 공개 배포 전 반드시 다시 볼 것
 

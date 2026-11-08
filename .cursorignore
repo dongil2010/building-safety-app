@@ -1,0 +1,4 @@
+# app.js는 app/ 조각을 이어 만든 자동 생성 파일이다(2026-11-08, .cursor/rules/app-parts.mdc).
+# Cursor AI가 검색·색인·수정할 때 app.js 대신 app/ 조각을 보게 숨긴다.
+# 앞의 /는 저장소 맨 위 app.js만 뜻한다(app/*.js 조각은 숨기지 않음).
+/app.js
