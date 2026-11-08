@@ -90,6 +90,10 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
+      # app.js는 app/ 조각을 이어 만든 파일이다(2026-11-08). 조각만 고치고 join을 안 했거나
+      # app.js만 직접 고쳤으면 여기서 세운다 — 배포본과 조각이 다른 채로 나가지 않게.
+      - name: app.js와 app/ 조각 일치 확인
+        run: node scripts/app-parts.js check
       - name: Prepare static site
         run: python3 scripts/prepare-pages.py
         env:
