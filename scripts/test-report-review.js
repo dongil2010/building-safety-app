@@ -175,4 +175,25 @@ const overZ = +((css.match(/\.report-review-panel\.is-over-modal\{z-index:(\d+)\
 const baseZ = +((css.match(/\.report-review-panel\{position:fixed;[^}]*z-index:(\d+)/) || [])[1] || 0);
 assert.ok(openZ > 0 && overZ > openZ && baseZ > 0 && baseZ < openZ, `z-index 모달 ${openZ} / 위 ${overZ} / 평소 ${baseZ}`);
 
+// 2026-11-08 구조 부재인데 비구조체(해양교육원 2F NO.47 슬래브 균열·미장균열, 3F NO.94 슬래브 누수)
+const SM = 'struct-member-nonstructural';
+const sm = (o) => rules([row(Object.assign({ category: '비구조체', widths: [], crackLength: '' }, o))]).includes(SM);
+assert.ok(sm({ component: '슬래브', defectType: '균열, 미장균열' }), '미장균열이 섞여도 균열이 있으면 잡는다');
+assert.ok(sm({ component: '슬래브', defectType: '누수 및 결로수 발생' }));
+assert.ok(sm({ component: '보-슬래브 접합부', defectType: '누수흔적 및 백태' }), '보-슬래브 접합부는 구조 부재');
+assert.ok(sm({ component: '기둥', defectType: '수평균열' }));
+assert.ok(sm({ component: '데크 슬래브', defectType: '상태양호', good: true, cause: '' }), '상태양호도 조사표 체크가 틀리게 나간다');
+assert.ok(!sm({ component: '슬래브', defectType: '균열', category: '구조체' }), '구조체는 그대로');
+assert.ok(!sm({ component: '슬래브', defectType: '균열', category: '마감재' }), '마감재로 고른 것은 사람이 정한 것');
+assert.ok(!sm({ component: '기둥-벽체 접합부', defectType: '수직이격' }), '기둥-벽체 접합부는 비구조체(사용자 규칙)');
+assert.ok(!sm({ component: '보 보수부위', defectType: '미장 수직균열' }), '미장 균열만 있으면 비구조체');
+assert.ok(!sm({ component: '보(B)', defectType: '미장균열' }));
+assert.ok(!sm({ component: '슬래브 단열재', defectType: '상태양호', good: true, cause: '' }));
+assert.ok(!sm({ component: '기둥-보 접합부', defectType: '뿜칠 상태양호', good: true, cause: '' }));
+assert.ok(!sm({ component: '천장 텍스', defectType: '오염 및 파손' }));
+assert.ok(!sm({ component: '조적기둥', defectType: '수직,수평균열' }), '조적은 비구조체');
+assert.ok(!sm({ component: '보도블록', defectType: '파손' }), '보도블록은 보가 아니다');
+assert.ok(!sm({ component: '벽체', defectType: '균열' }), '벽체는 RC인지 조적인지 몰라 보지 않는다');
+assert.ok(app.includes("category: d.category == null ? '구조체' : String(d.category)"), '검토 행에 구분을 넘긴다');
+
 console.log('test-report-review: ok');

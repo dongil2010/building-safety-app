@@ -106,4 +106,23 @@ assert.deepStrictEqual(widths({ size: '0.2~0.5/4.0', crackMeasures: [{ width: '0
 assert.strictEqual(bin(widths({ size: '0.2~0.5/4.0', crackWidth: '0.2~0.5' })), 'ge05', '범위의 큰 값으로 구간을 정한다');
 assert.deepStrictEqual(widths({ size: '0.3mm', crackWidth: '0.3mm' }), [0.3], '단위가 붙어 있어도 읽는다');
 
+// 2026-11-08 망상균열: 범위(가로×세로, m)를 균열폭으로 잡지 않는다
+const mesh = (d) => widths(Object.assign({ defectType: '망상균열' }, d));
+assert.deepStrictEqual(mesh({
+    size: 'Cw:0.2, 2.0x2.0', crackWidth: '0.2 / 2.0', crackLength: '2.0',
+    crackMeasures: [{ width: '0.2', length: '', join: '/' }, { width: '2.0', length: '2.0', join: '/' }]
+}), [0.2], '규모 글자가 면적이면 구분이 /로 남아 있어도 면적');
+assert.deepStrictEqual(mesh({
+    size: '2.0x2.0', crackWidth: '2.0', crackLength: '2.0',
+    crackMeasures: [{ width: '2.0', length: '2.0', join: '/' }]
+}), [], '면적 글자 하나뿐인데 구분이 /로 남은 경우');
+assert.strictEqual(bin(mesh({ size: '2.0*2.0', crackMeasures: [{ width: '2.0', length: '2.0', join: '/' }] })), 'none');
+// 「폭/길이」로 적은 값은 숫자가 커도 그대로 둔다(사용자: 1.5/3.0 같은 건 냅둘 것)
+assert.deepStrictEqual(mesh({ size: '1.5/3.0', crackMeasures: [{ width: '1.5', length: '3.0', join: '/' }] }), [1.5], '폭/길이 1.5/3.0은 폭 1.5');
+assert.deepStrictEqual(mesh({ size: '1.5/3.0', crackWidth: '1.5', crackLength: '3.0' }), [1.5], '측정 행 없는 옛 데이터도 같다');
+assert.deepStrictEqual(mesh({ size: '1.5/3.0' }), [1.5], '규모 글자만 있는 데이터도 같다');
+assert.deepStrictEqual(mesh({ size: 'Cw:0.3', crackMeasures: [{ width: '0.3', length: '', join: '/' }] }), [0.3], '망상균열의 진짜 폭은 그대로');
+// 망상균열이 아닌 균열은 구분이 /로 저장돼 있으면 예전 그대로(규모 글자보다 저장된 구분을 따른다)
+assert.deepStrictEqual(widths({ defectType: '수직균열', size: '2.0x2.0', crackMeasures: [{ width: '2.0', length: '2.0', join: '/' }] }), [2]);
+
 console.log('test-stats-crack-width-area: ok');

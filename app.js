@@ -51489,7 +51489,7 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
         }
     }
 
-// @@app-part 13-report-export.js sha=cca7b5f6cc24 — 원본은 app/13-report-export.js (여기 말고 거기서 고칠 것)
+// @@app-part 13-report-export.js sha=cb82e883c172 — 원본은 app/13-report-export.js (여기 말고 거기서 고칠 것)
     // --- REPORT PREVIEW MODAL (Instant Modal Open & Pure White Paper Theme) ---
     window.openReportPreviewModalFunc = async function(opts) {
         const manageLoading = !(opts && opts.skipLoading);
@@ -59857,6 +59857,8 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
                     component: d.component || '',
                     defectType: d.defectType || '',
                     cause: d.cause || '',
+                    // 2026-11-08 「구조 부재인데 비구조체」 검토용 — 필드 없는 옛 데이터는 구조체(조사표 기본값)
+                    category: d.category == null ? '구조체' : String(d.category),
                     widths: getDefectCrackWidthParts(d),
                     crackLength: ms ? ms.map((m) => (m && m.length != null ? m.length : '')).filter((v) => String(v).trim()).join('/') : (d.crackLength || ''),
                     itemCount: ms ? ms.map((m) => (m && m.count != null ? m.count : '')).filter((v) => String(v).trim()).join('/') : (d.itemCount || ''),

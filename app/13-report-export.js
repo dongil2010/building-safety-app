@@ -8366,6 +8366,8 @@
                     component: d.component || '',
                     defectType: d.defectType || '',
                     cause: d.cause || '',
+                    // 2026-11-08 「구조 부재인데 비구조체」 검토용 — 필드 없는 옛 데이터는 구조체(조사표 기본값)
+                    category: d.category == null ? '구조체' : String(d.category),
                     widths: getDefectCrackWidthParts(d),
                     crackLength: ms ? ms.map((m) => (m && m.length != null ? m.length : '')).filter((v) => String(v).trim()).join('/') : (d.crackLength || ''),
                     itemCount: ms ? ms.map((m) => (m && m.count != null ? m.count : '')).filter((v) => String(v).trim()).join('/') : (d.itemCount || ''),

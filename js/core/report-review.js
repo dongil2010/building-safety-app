@@ -54,6 +54,24 @@
         return '';
     }
 
+    /**
+     * 비구조체로 체크된 행이 구조 부재(슬래브·보·기둥·거더·옹벽)의 결함이면 그 부재 이름, 아니면 ''.
+     * 원래 비구조체인 것은 뺀다: 기둥-벽체 같은 부재-벽 접합부(사용자 규칙), 미장·뿜칠·내화·단열·도장·텍스·마감·타일·조적.
+     * 결함 종류가 「균열, 미장균열」처럼 섞여 있으면 미장 쪽을 빼고도 결함 낱말이 남을 때만 잡는다.
+     */
+    function structuralMemberOf(r) {
+        if (!r || trim(r.category) !== '비구조체') return '';
+        var comp = squash(r.component);
+        var m = comp.match(/슬래브|기둥|거더|옹벽|보(?=\(|[GB]|-|$|보수|접합)/);
+        if (!m) return '';
+        if (/벽/.test(comp) && /접합|-|·|와|과/.test(comp)) return '';      // 기둥-벽체·보-벽체 접합부
+        if (/미장|뿜칠|내화|단열|도장|텍스|마감|타일|조적|블록|ALC|벽돌|천장/i.test(comp)) return '';
+        if (r.good && /미장|뿜칠|내화|단열|도장/.test(squash(r.defectType))) return '';   // 「뿜칠 상태양호」
+        var dt = squash(r.defectType).replace(/미장\S*?(?=[,·및]|$)|뿜칠\S*?(?=[,·및]|$)|도장\S*?(?=[,·및]|$)|단열\S*?(?=[,·및]|$)|내화\S*?(?=[,·및]|$)/g, '');
+        if (!r.good && !/균열|누수|백태|박락|박리|철근|들뜸|파손|처짐|이격|부식|탈락|파취|변형|재료분리|곰보|녹/.test(dt)) return '';
+        return m[0];
+    }
+
     function push(out, r, level, rule, msg) {
         out.push({ level: level, rule: rule, floorCode: r.floorCode || '', floorLabel: r.floorLabel || r.floorCode || '', no: s(r.no), id: r.id || '', msg: msg });
     }
@@ -149,6 +167,10 @@
                 var dot = v.match(/[․•∙]/);
                 if (dot) push(out, r, 'info', 'dot', f[1] + '에 가운뎃점이 「' + dot[0] + '」입니다 — 「·」로 맞추세요.');
             });
+            // 구조 부재인데 비구조체(2026-11-08 사용자: 해양교육원 슬래브 균열·누수가 보고서 요약 비구조체에 잡힘).
+            // 한글 조사표 「비구조부재」 ○와 보고서 요약 분류가 이 체크를 그대로 따른다.
+            var structMember = structuralMemberOf(r);
+            if (structMember) push(out, r, 'warn', 'struct-member-nonstructural', '구조 부재(' + structMember + ')인데 비구조체로 체크되어 있습니다 — 한글 조사표·보고서 요약에 비구조체로 나갑니다.');
             // 칸 섞임: 부재 칸에 결함 글(「슬래브 콘크리트 파취 및…」「철골보 이음부 상태양호」)
             var comp = trim(r.component);
             var cm = comp.match(/상태양호|보수완료|균열|파취|박락|박리|탈락|누수|들뜸|파손|녹\s?발생/);

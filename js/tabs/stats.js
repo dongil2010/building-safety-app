@@ -1364,12 +1364,17 @@
             return nums.length ? Math.max.apply(null, nums) : null;
         };
         var sizeSegs = String(d && d.size != null ? d.size : '').split(/\s*,\s*/).filter(Boolean);
+        // 2026-11-08 사용자: 망상균열은 범위(가로×세로, m)로 적을 때가 있는데 그걸 균열폭으로 잡지 말 것.
+        // 규모 글자가 면적(2.0x2.0)이면 측정 구분이 '/'로 남아 있어도 면적으로 본다(망상균열만).
+        // 「폭/길이」로 적은 값(1.5/3.0 등)은 숫자가 커도 그대로 폭으로 센다(사용자: 면적으로 잡힌 것만 뺄 것).
+        var mesh = /망상/.test(String(d && d.defectType != null ? d.defectType : ''));
         var measures = d && Array.isArray(d.crackMeasures) ? d.crackMeasures : null;
         if (measures && measures.length) {
             return measures.map(function (m, i) {
                 if (!m) return null;
+                var seg = sizeSegs.length === measures.length ? sizeSegs[i] : sizeSegs.join(',');
                 var area = m.join === 'x'
-                    || (m.join !== '/' && isAreaSizeSegment(sizeSegs.length === measures.length ? sizeSegs[i] : sizeSegs.join(',')));
+                    || ((m.join !== '/' || mesh) && isAreaSizeSegment(seg));
                 if (area) return null;
                 return toNum(m.width);
             }).filter(function (n) { return n != null; });
