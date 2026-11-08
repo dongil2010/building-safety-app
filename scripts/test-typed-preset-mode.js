@@ -3,7 +3,7 @@
 
 /**
  * 직접 입력 「프리셋에 저장」/「이번만 사용」토글.
- * 기본(선호 없음)은 예전처럼 이번만. 저장 모드는 회사 공통 목록에 중복 없이 넣고,
+ * 기본은 이번만이고 기기에 기억하지 않는다. 저장은 입력 한 번에만 쓰인다. 저장 모드는 회사 공통 목록에 중복 없이 넣고,
  * 이번만은 이 결함 값만 남긴다. 기존 프리셋·옛 기록은 지우지 않는다.
  */
 const assert = require('assert');
@@ -36,24 +36,31 @@ function extractFunction(name) {
 }
 
 (function moduleDefaults() {
-    const mem = {};
-    const prev = global.localStorage;
-    global.localStorage = {
-        getItem: (k) => (k in mem ? mem[k] : null),
-        setItem: (k, v) => { mem[k] = String(v); }
-    };
-    const fresh = require(path.join(root, 'js', 'shared', 'typed-preset-mode.js'));
-    assert.strictEqual(fresh.getMode(), 'once', '선호 없으면 이번만 사용');
+    const mem = { [TPM.LEGACY_KEY]: 'save' };
+    const desc = Object.getOwnPropertyDescriptor(global, 'localStorage');
+    Object.defineProperty(global, 'localStorage', {
+        configurable: true,
+        value: {
+            getItem: (k) => (k in mem ? mem[k] : null),
+            setItem: (k, v) => { mem[k] = String(v); },
+            removeItem: (k) => { delete mem[k]; }
+        }
+    });
+    const file = require.resolve(path.join(root, 'js', 'shared', 'typed-preset-mode.js'));
+    delete require.cache[file];
+    const fresh = require(file);
+    assert.strictEqual(fresh.getMode(), 'once', '예전에 저장을 눌렀던 기기도 이번만 사용으로 시작');
     assert.strictEqual(fresh.shouldPersist(), false);
-    assert.strictEqual(fresh.hasStoredPreference(), false);
+    assert.ok(!(fresh.LEGACY_KEY in mem), '예전 기억값을 지운다');
     fresh.setMode('save');
     assert.strictEqual(fresh.getMode(), 'save');
     assert.strictEqual(fresh.shouldPersist(), true);
-    assert.strictEqual(mem[fresh.KEY], 'save');
+    assert.deepStrictEqual(mem, {}, '기기에 기억하지 않는다');
     fresh.setMode('once');
     assert.strictEqual(fresh.shouldPersist(), false);
-    assert.strictEqual(mem[fresh.KEY], 'once');
-    global.localStorage = prev;
+    delete require.cache[file];
+    if (desc) Object.defineProperty(global, 'localStorage', desc);
+    else delete global.localStorage;
 })();
 
 (function wiring() {
@@ -75,6 +82,57 @@ function extractFunction(name) {
     assert.ok(/commitDefectCauseDirectInput\(true\)/.test(cause), '추가 버튼은 항상 목록 저장');
     const joint = extractFunction('applyJointComponentFromComposer');
     assert.ok(!/persistTypedDefectComponent/.test(joint), '접합부 조합은 목록에 안 넣음');
+})();
+
+function typedInputRig() {
+    const listeners = {};
+    const makeEl = (id) => ({
+        id, dataset: {}, hidden: true, placeholder: '', value: '',
+        addEventListener(ev, fn) { (listeners[id + ':' + ev] = listeners[id + ':' + ev] || []).push(fn); },
+        closest: () => null,
+        after() {}
+    });
+    const els = {};
+    ['defectTypedPresetMode', 'defectComponentInput', 'defectTypeInput', 'defectCauseInput', 'btnAddCustomCause'].forEach((id) => { els[id] = makeEl(id); });
+    TPM.setMode('once');
+    const document = { getElementById: (id) => els[id] || null, querySelectorAll: () => [], activeElement: null };
+    const window = { BSA: { typedPresetMode: TPM } };
+    const commits = [];
+    new Function('document', 'window', 'commitDefectCauseDirectInput', 'setTimeout', [
+        extractFunction('syncTypedPresetModeUi'),
+        extractFunction('resetTypedPresetModeToOnce'),
+        extractFunction('bindTypedPresetModeToggle'),
+        extractFunction('bindDefectCauseDirectInput'),
+        'bindTypedPresetModeToggle(); bindDefectCauseDirectInput();'
+    ].join('\n'))(document, window, (persist) => commits.push(persist), () => {});
+    const fire = (id, ev, arg) => (listeners[id + ':' + ev] || []).forEach((fn) => fn(arg));
+    const pressSave = () => fire('defectTypedPresetMode', 'click', {
+        target: { closest: () => ({ getAttribute: () => 'save' }) }
+    });
+    return { fire, pressSave, commits };
+}
+
+(function saveAppliesToOneEntryOnly() {
+    let rig = typedInputRig();
+    rig.pressSave();
+    assert.strictEqual(TPM.getMode(), 'save', '누르면 이번 입력은 저장');
+    rig.fire('defectTypeInput', 'blur');
+    assert.strictEqual(TPM.getMode(), 'once', '칸을 벗어나면 다시 이번만');
+
+    rig = typedInputRig();
+    rig.pressSave();
+    rig.fire('defectCauseInput', 'keydown', { key: 'Enter', preventDefault() {} });
+    assert.deepStrictEqual(rig.commits, [true], '저장 모드로 확정');
+    assert.strictEqual(TPM.getMode(), 'once', '원인 Enter 뒤 칸에 머물러도 다시 이번만');
+    rig.fire('defectCauseInput', 'keydown', { key: 'Enter', preventDefault() {} });
+    assert.deepStrictEqual(rig.commits, [true, false], '다음 입력은 목록에 안 넣음');
+
+    const combo = extractFunction('bindDefectComboInputs');
+    assert.ok(combo.indexOf("addEventListener('blur', () => commitTypedComboValue())") < combo.indexOf('bindTypedPresetModeToggle()'),
+        '값 확정이 초기화보다 먼저 등록된다');
+    assert.ok(/if \(mode === 'cancel'\) resetPresetMode\(\);\s+applyCommit\(a, mode\);\s+resetPresetMode\(\);/.test(popup),
+        '팝업: 취소는 확정 전에, 완료는 확정 뒤에 다시 이번만');
+    TPM.setMode('once');
 })();
 
 (function persistHelpers() {

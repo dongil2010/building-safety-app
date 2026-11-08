@@ -1,42 +1,27 @@
 /**
  * 결함 직접 입력(부재·결함내용·원인)을 프리셋에 넣을지, 이번 결함만 쓸지.
- * 기기 localStorage 선호값. 값 없으면 예전과 같이 이번만 사용(목록에 안 넣음).
+ * 기본은 이번만 사용(목록에 안 넣음). 「프리셋에 저장」은 그 입력 한 번에만 쓰이고 다시 이번만으로 돌아간다.
+ * 기기에 기억하지 않는다 — 저장을 한 번 누른 뒤로 입력이 전부 공용 목록에 쌓이던 문제(2026-11-08).
  */
 (function (root) {
     'use strict';
 
-    var KEY = 'bsa_typed_preset_mode_v1';
+    var LEGACY_KEY = 'bsa_typed_preset_mode_v1';
     var SAVE = 'save';
     var ONCE = 'once';
-    var EMPTY_DEFAULT = ONCE;
+    var current = ONCE;
 
-    function normalize(raw) {
-        return raw === SAVE ? SAVE : (raw === ONCE ? ONCE : '');
-    }
-
-    function readStored() {
-        try {
-            if (!root.localStorage) return '';
-            return normalize(root.localStorage.getItem(KEY));
-        } catch (e) {
-            return '';
-        }
-    }
+    try {
+        if (root.localStorage) root.localStorage.removeItem(LEGACY_KEY);
+    } catch (e) { /* 지우지 못해도 더는 읽지 않는다 */ }
 
     function getMode() {
-        return readStored() || EMPTY_DEFAULT;
-    }
-
-    function hasStoredPreference() {
-        return !!readStored();
+        return current;
     }
 
     function setMode(mode) {
-        var next = mode === SAVE ? SAVE : ONCE;
-        try {
-            if (root.localStorage) root.localStorage.setItem(KEY, next);
-        } catch (e) { /* 기기 저장 실패해도 화면은 바뀜 */ }
-        return next;
+        current = mode === SAVE ? SAVE : ONCE;
+        return current;
     }
 
     function shouldPersist() {
@@ -44,15 +29,12 @@
     }
 
     var api = {
-        KEY: KEY,
+        LEGACY_KEY: LEGACY_KEY,
         SAVE: SAVE,
         ONCE: ONCE,
-        EMPTY_DEFAULT: EMPTY_DEFAULT,
         getMode: getMode,
         setMode: setMode,
-        shouldPersist: shouldPersist,
-        hasStoredPreference: hasStoredPreference,
-        normalize: normalize
+        shouldPersist: shouldPersist
     };
     root.BSA = root.BSA || {};
     root.BSA.typedPresetMode = api;

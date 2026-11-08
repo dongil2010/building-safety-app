@@ -27987,7 +27987,7 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
         ctx.restore();
     }
 
-// @@app-part 07-defect-component.js sha=0345da0e4631 — 원본은 app/07-defect-component.js (여기 말고 거기서 고칠 것)
+// @@app-part 07-defect-component.js sha=fecf284a4b7c — 원본은 app/07-defect-component.js (여기 말고 거기서 고칠 것)
     // --- Dynamic Defect Component(부재 명칭) — 분류별 플랫 프리셋 ---
     // 2026-09-28 접합부는 거더/빔 구분이 필요 없음 — 큰보·작은보 → 보, 철골거더·철골빔 → 철골보
     // 2026-11-04 보(G)·보(B) 다시 넣음(사용자) — 통계 평가 표가 접합부 결함을 맞닿은 부재 줄(큰보·작은보·슬래브…)에 같이 세서
@@ -30675,6 +30675,12 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
     }
     window.syncTypedPresetModeUi = syncTypedPresetModeUi;
 
+    function resetTypedPresetModeToOnce() {
+        const TPM = window.BSA && window.BSA.typedPresetMode;
+        if (TPM && typeof TPM.setMode === 'function') TPM.setMode('once');
+        syncTypedPresetModeUi();
+    }
+
     function bindTypedPresetModeToggle() {
         const host = document.getElementById('defectTypedPresetMode');
         if (!host || host.dataset.bound) return;
@@ -30700,7 +30706,11 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
                     host.hidden = false;
                 }, 0);
             });
-            input.addEventListener('blur', () => { host.hidden = true; });
+            // 값 확정(bindDefectComboInputs의 blur)이 먼저 돌고 난 뒤라, 「프리셋에 저장」은 이 칸 한 번에만 쓰인다.
+            input.addEventListener('blur', () => {
+                host.hidden = true;
+                resetTypedPresetModeToOnce();
+            });
         });
         syncTypedPresetModeUi();
     }
@@ -30973,6 +30983,7 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
                         && typeof window.BSA.typedPresetMode.shouldPersist === 'function'
                         && window.BSA.typedPresetMode.shouldPersist());
                     commitDefectCauseDirectInput(persistTyped);
+                    resetTypedPresetModeToOnce();   // 포커스가 칸에 남아도 다음 입력은 다시 이번만 사용
                 }
             });
         }

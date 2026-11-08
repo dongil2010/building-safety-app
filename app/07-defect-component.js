@@ -2686,6 +2686,12 @@
     }
     window.syncTypedPresetModeUi = syncTypedPresetModeUi;
 
+    function resetTypedPresetModeToOnce() {
+        const TPM = window.BSA && window.BSA.typedPresetMode;
+        if (TPM && typeof TPM.setMode === 'function') TPM.setMode('once');
+        syncTypedPresetModeUi();
+    }
+
     function bindTypedPresetModeToggle() {
         const host = document.getElementById('defectTypedPresetMode');
         if (!host || host.dataset.bound) return;
@@ -2711,7 +2717,11 @@
                     host.hidden = false;
                 }, 0);
             });
-            input.addEventListener('blur', () => { host.hidden = true; });
+            // 값 확정(bindDefectComboInputs의 blur)이 먼저 돌고 난 뒤라, 「프리셋에 저장」은 이 칸 한 번에만 쓰인다.
+            input.addEventListener('blur', () => {
+                host.hidden = true;
+                resetTypedPresetModeToOnce();
+            });
         });
         syncTypedPresetModeUi();
     }
@@ -2984,6 +2994,7 @@
                         && typeof window.BSA.typedPresetMode.shouldPersist === 'function'
                         && window.BSA.typedPresetMode.shouldPersist());
                     commitDefectCauseDirectInput(persistTyped);
+                    resetTypedPresetModeToOnce();   // 포커스가 칸에 남아도 다음 입력은 다시 이번만 사용
                 }
             });
         }

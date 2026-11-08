@@ -146,6 +146,12 @@
         });
     }
 
+    function resetPresetMode() {
+        var TPM = root.BSA && root.BSA.typedPresetMode;
+        if (TPM && typeof TPM.setMode === 'function') TPM.setMode('once');
+        if (typeof root.syncTypedPresetModeUi === 'function') root.syncTypedPresetModeUi();
+    }
+
     function applyCommit(a, mode) {
         if (mode === 'cancel') {
             if (a.input.value !== a.initial) {
@@ -181,7 +187,10 @@
             root.visualViewport.removeEventListener('resize', positionCard);
             root.visualViewport.removeEventListener('scroll', positionCard);
         }
+        // 취소는 원래 값을 확정 코드로 다시 돌리므로 저장 모드를 먼저 끈다(취소했는데 프리셋에 들어가지 않게).
+        if (mode === 'cancel') resetPresetMode();
         applyCommit(a, mode);
+        resetPresetMode();
         try { a.proxy.blur(); } catch (e) { /* ignore */ }
         // 닫는 탭·지연 클릭이 뒤쪽 수정창 취소/닫기·도면 빈곳(부모 닫기)으로 새지 않게 덮개를 잠시 남긴다.
         removeOverlayLater(a.overlay);

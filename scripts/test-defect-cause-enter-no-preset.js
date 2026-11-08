@@ -89,6 +89,7 @@ function makeEnv() {
         extractFunction('addCustomDefectCause'),
         extractFunction('commitDefectCauseDirectInput'),
         extractFunction('bindDefectCauseDirectInput'),
+        'function resetTypedPresetModeToOnce() {}',
         'return { selectDefectCauseForCurrentDefect, addCustomDefectCause, commitDefectCauseDirectInput, bindDefectCauseDirectInput };'
     ].join('\n');
     const names = Object.keys(deps);
