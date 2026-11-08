@@ -18155,6 +18155,10 @@ input.ndt-mo-locked { background: var(--bg-secondary, #f2f2f2); color: var(--tex
 .report-review-list .rr-check{display:flex;align-items:center;padding:0 .25rem;cursor:pointer}
 .report-review-list li.is-done button{opacity:.45;text-decoration:line-through}
 .report-review-list li.is-active button{border-color:#2563eb;background:#eff6ff}
+/* 2026-11-08 표기 통일 단추(다른 곳에 맞추기 / 이것으로 통일) */
+.report-review-list .rr-fix{display:flex;flex-direction:column;gap:2px;flex:0 0 auto}
+.report-review-list .rr-fix button{width:auto;white-space:nowrap;padding:.15rem .4rem;font-size:.74rem;border:1px solid #cbd5e1;background:#f8fafc;color:#1e40af}
+.report-review-list .rr-fix button:hover{border-color:#2563eb;background:#eff6ff}
 @media print{.report-review-panel{display:none!important}}
 .report-review-panel[hidden]{display:none}
 .report-review-head{display:flex;align-items:center;gap:.35rem;flex-wrap:wrap;margin-bottom:.3rem}

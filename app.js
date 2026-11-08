@@ -51511,7 +51511,7 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
         }
     }
 
-// @@app-part 13-report-export.js sha=cb82e883c172 — 원본은 app/13-report-export.js (여기 말고 거기서 고칠 것)
+// @@app-part 13-report-export.js sha=5f497af0c756 — 원본은 app/13-report-export.js (여기 말고 거기서 고칠 것)
     // --- REPORT PREVIEW MODAL (Instant Modal Open & Pure White Paper Theme) ---
     window.openReportPreviewModalFunc = async function(opts) {
         const manageLoading = !(opts && opts.skipLoading);
@@ -59948,7 +59948,13 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
                     + '<label class="rr-check" title="다 봤으면 체크"><input type="checkbox" data-rr-check="' + esc(k) + '"' + (done ? ' checked' : '') + '></label>'
                     + '<button type="button" data-rr-id="' + esc(it.id) + '" data-rr-key="' + esc(k) + '" title="결함위치도에서 이 결함 보기(이 창은 그대로)">'
                     + '<span class="rr-icon">' + icon[it.level] + '</span><span class="rr-where">' + esc(it.floorLabel) + ' ' + esc(it.no) + (it.no ? '번' : '') + '</span>'
-                    + '<span class="rr-msg">' + esc(it.msg) + '</span></button></li>';
+                    + '<span class="rr-msg">' + esc(it.msg) + '</span></button>'
+                    // 2026-11-08 표기 통일: 이 표기를 다른 곳에 맞추기 / 다른 곳을 이 표기로 통일(건물 전체 층, 결함 값을 바로 고침)
+                    + (it.fix && !done ? '<span class="rr-fix">'
+                        + '<button type="button" data-rr-fix="match" data-rr-key="' + esc(k) + '" title="「' + esc(it.fix.from) + '」 ' + it.fix.fromCount + '곳을 「' + esc(it.fix.to) + '」로 바꿉니다">다른 곳에 맞추기</button>'
+                        + '<button type="button" data-rr-fix="unify" data-rr-key="' + esc(k) + '" title="다른 표기 ' + it.fix.toCount + '곳을 「' + esc(it.fix.from) + '」로 바꿉니다">이것으로 통일</button>'
+                        + '</span>' : '')
+                    + '</li>';
             }).join('') + '</ul>';
         }
         html += '<div class="report-review-foot">규칙으로만 훑습니다(오타·문맥은 못 잡음). 상태양호·보수완료 행은 원인·균열폭 검사에서 뺍니다. 줄을 누르면 그 결함으로 가고 이 창은 남습니다 — 고친 뒤 「다시 검사」.</div>';
@@ -59957,6 +59963,40 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
         syncReportReviewLayer();
         const btn = document.getElementById('btnModalReportReview');
         if (btn) btn.innerHTML = '<i class="fa-solid fa-list-check"></i> 검토' + (cnt.error + cnt.warn ? ' <b class="rr-badge">' + (cnt.error + cnt.warn) + '</b>' : '');
+    }
+    /**
+     * 2026-11-08 「표기 통일」 단추: 띄어쓰기만 다른 같은 말(보수 시공 미흡 / 보수 시공미흡)을 건물 전체 층에서 바로 고친다.
+     *   match — 이 표기(fix.from)를 쓴 결함을 모두 다른 곳 표기(fix.to)로
+     *   unify — 같은 말의 다른 표기를 모두 이 표기(fix.from)로
+     * 칸 전체 글자가 같은 것만 바꾼다(부분 치환 안 함). 결함 수정 시각을 올려 동기화에서 이기게 한다.
+     */
+    async function rrApplyFix(fix, mode) {
+        const bldg = state.currentBuilding;
+        if (!bldg || !fix || ['defectType', 'cause', 'component'].indexOf(fix.field) < 0) return 0;
+        const bId = bldg.id || state.currentBuildingId;
+        const sq = (v) => String(v == null ? '' : v).replace(/\s+/g, '');
+        const key = sq(fix.from);
+        const target = mode === 'match' ? fix.to : fix.from;
+        const hit = mode === 'match' ? (v) => v === fix.from : (v) => v !== fix.from && sq(v) === key;
+        const found = [];
+        reportReviewFloorCodes(bldg).forEach((fc) => {
+            (state.defects[`${bId}_${fc}`] || []).forEach((d) => {
+                if (d && hit(String(d[fix.field] == null ? '' : d[fix.field]).trim())) found.push(d);
+            });
+        });
+        if (!found.length) { window.showToast?.('바꿀 결함을 찾지 못했습니다. 「다시 검사」를 눌러 주세요.', 'info', 3000); return 0; }
+        const msg = mode === 'match'
+            ? fix.label + ' 「' + fix.from + '」 ' + found.length + '곳을 「' + fix.to + '」로 바꿀까요?'
+            : fix.label + '을(를) 「' + fix.from + '」로 통일합니다 — 다른 표기 ' + found.length + '곳을 바꿀까요?';
+        const ok = await window.appConfirm(msg);
+        if (!ok) return 0;
+        found.forEach((d) => { d[fix.field] = target; touchDefectUpdatedAt(d); });
+        saveStateToLocalStorage();
+        if (typeof renderSurveyTable === 'function') renderSurveyTable();
+        if (typeof renderDefectListPanel === 'function') renderDefectListPanel();
+        if (typeof drawCanvas === 'function') drawCanvas();
+        window.showToast?.(fix.label + ' ' + found.length + '곳을 「' + target + '」로 바꿨습니다.', 'success', 2500);
+        return found.length;
     }
     (function bindReportReview() {
         const btn = document.getElementById('btnModalReportReview');
@@ -59978,6 +60018,12 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
             drawReportReview();
         });
         panel.addEventListener('click', (e) => {
+            const fixBtn = e.target.closest('[data-rr-fix]');
+            if (fixBtn) {
+                const it = rrIssues.find((x) => rrKey(x) === fixBtn.dataset.rrKey);
+                if (it && it.fix) rrApplyFix(it.fix, fixBtn.dataset.rrFix).then((n) => { if (n) safeRun(); });
+                return;
+            }
             const act = e.target.closest('[data-rr-act]');
             if (act) {
                 const a = act.dataset.rrAct;

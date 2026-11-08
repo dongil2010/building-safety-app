@@ -84,8 +84,10 @@
         return !/균열|누수|백태|박락|박리|철근|들뜸|파손|처짐|이격|부식|탈락|파취|변형|재료분리|곰보/.test(rest);
     }
 
-    function push(out, r, level, rule, msg) {
-        out.push({ level: level, rule: rule, floorCode: r.floorCode || '', floorLabel: r.floorLabel || r.floorCode || '', no: s(r.no), id: r.id || '', msg: msg });
+    function push(out, r, level, rule, msg, extra) {
+        var it = { level: level, rule: rule, floorCode: r.floorCode || '', floorLabel: r.floorLabel || r.floorCode || '', no: s(r.no), id: r.id || '', msg: msg };
+        if (extra) it.fix = extra;   // 2026-11-08 표기 통일 단추용 { field, from, to, fromCount, toCount }
+        out.push(it);
     }
 
     // 자주 틀리는 표기 [찾을 말, 바꿀 말, 설명] — 2026-10-20 성광교회 검토에서 나온 것
@@ -243,7 +245,9 @@
                 var main = vars[0];
                 rows.forEach(function (r) {
                     var v = trim(r && r[f[0]]);
-                    if (v && v !== main && squash(v) === k) push(out, r, 'info', 'variant', f[1] + ' 「' + v + '」 — 다른 곳은 「' + main + '」(' + g[main] + '곳)로 썼습니다.');
+                    // 2026-11-08 위치는 한글 칸 글자(행·열 포함)라 결함 값과 달라 바로 고치기 단추를 달지 않는다
+                    if (v && v !== main && squash(v) === k) push(out, r, 'info', 'variant', f[1] + ' 「' + v + '」 — 다른 곳은 「' + main + '」(' + g[main] + '곳)로 썼습니다.',
+                        f[0] === 'location' ? null : { field: f[0], label: f[1], from: v, to: main, fromCount: g[v], toCount: vars.reduce(function (a, x) { return x === v ? a : a + g[x]; }, 0) });
                 });
             });
         });

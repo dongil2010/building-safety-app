@@ -196,6 +196,21 @@ assert.ok(!sm({ component: '보도블록', defectType: '파손' }), '보도블�
 assert.ok(!sm({ component: '벽체', defectType: '균열' }), '벽체는 RC인지 조적인지 몰라 보지 않는다');
 assert.ok(app.includes("category: d.category == null ? '구조체' : String(d.category)"), '검토 행에 구분을 넘긴다');
 
+// 2026-11-08 표기 통일 결과에 바로 고치기 정보(fix)를 담는다 — 위치는 한글 칸 글자라 빼고
+{
+    const res = R.reviewRows([
+        row({ cause: '보수 시공미흡' }), row({ cause: '보수 시공미흡' }), row({ cause: '보수 시공 미흡' }),
+        row({ location: 'X1 / Y1' })
+    ]);
+    const v = res.filter((x) => x.rule === 'variant' && /원인/.test(x.msg));
+    assert.strictEqual(v.length, 1);
+    assert.deepStrictEqual(v[0].fix, { field: 'cause', label: '원인', from: '보수 시공 미흡', to: '보수 시공미흡', fromCount: 1, toCount: 2 });
+    const loc = res.find((x) => x.rule === 'variant' && /위치/.test(x.msg));
+    assert.ok(loc && !loc.fix, '위치 표기는 단추 없음');
+}
+assert.ok(app.includes('async function rrApplyFix(fix, mode)') && app.includes('data-rr-fix="match"') && app.includes('data-rr-fix="unify"'), '맞추기·통일 단추');
+assert.ok(/found\.forEach\(\(d\) => \{ d\[fix\.field\] = target; touchDefectUpdatedAt\(d\); \}\)/.test(app), '고친 결함은 수정 시각을 올린다');
+
 // 2026-11-08 미장 결함인데 구조체(미장 강제를 풀고 검토에서 잡는다)
 const PL = 'plaster-structural';
 const pl = (o) => rules([row(Object.assign({ category: '구조체', widths: [], crackLength: '' }, o))]).includes(PL);
