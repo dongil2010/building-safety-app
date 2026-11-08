@@ -649,13 +649,21 @@
         return String(label || '').replace(/\s+/g, '').includes('미장');
     }
 
-    /** 미장 관련 결함(미장균열·미장들뜸·미장 박락 등, 공백 무시)은 구조체가 아니라 비구조체 — 모든 저장·가져오기 경로 공통 */
-    function bsaPlasterNonStructCategory(category, defectType) {
+    /**
+     * 미장 관련 결함(미장균열·미장들뜸·미장 박락 등, 공백 무시)은 대부분 비구조체.
+     * 2026-11-08 사용자: 「균열, 미장균열」처럼 구조체인 경우가 있어 강제를 푼다 —
+     *   저장 경로(수정창·일괄수정·조사표 편집)는 분류가 비었을 때('')만 비구조체로 채우고, 사람이 고른 구조체는 그대로 둔다.
+     *   가져오기(CAD·엑셀)처럼 사람이 분류를 고르지 않은 기본값 「구조체」는 opts.force로 예전처럼 비구조체로 바꾼다.
+     *   미장인데 구조체로 남은 것은 미리보기 「검토」가 짚는다(js/core/report-review.js plaster-structural).
+     */
+    function bsaPlasterNonStructCategory(category, defectType, opts) {
         const c = String(category || '').trim();
-        if ((c === '' || c === '구조체') && isPlasterCrackDefectType(defectType)) return '비구조체';
+        const force = !!(opts && opts.force);
+        if ((c === '' || (force && c === '구조체')) && isPlasterCrackDefectType(defectType)) return '비구조체';
         return category;
     }
     window.bsaPlasterNonStructCategory = bsaPlasterNonStructCategory;
+    window.bsaIsPlasterDefectType = isPlasterCrackDefectType;
 
     function defectTypeListHasPlasterCrack(typeVal) {
         return parseDefectTypeList(typeVal).some((t) => isPlasterCrackDefectType(t));
@@ -671,7 +679,10 @@
         const typeSelect = document.getElementById('defectType');
         const typeInput = document.getElementById('defectTypeInput');
         const typeVal = getDefectComboValue(typeSelect, typeInput);
-        if (!defectTypeListHasPlasterCrack(typeVal)) return false;
+        if (window._defectFormHydrating) return false;   // 저장된 값을 채우는 중에는 몰래 바꾸지 않는다
+        if (!defectTypeListHasPlasterCrack(typeVal)) { window._plasterKeepStructural = false; return false; }
+        // 2026-11-08 사용자가 일부러 구조체로 되돌렸으면 그대로 둔다(접합부 이격과 같은 방식)
+        if (window._plasterKeepStructural) return false;
 
         const compSelect = document.getElementById('defectComponent');
         const compInput = document.getElementById('defectComponentInput');
@@ -684,10 +695,15 @@
 
         window._preserveDefectTypeOnCategoryChange = typeVal;
         window._preserveDefectComponentOnCategoryChange = compVal || '';
-        catEl.value = '비구조체';
-        catEl.dispatchEvent(new Event('change', { bubbles: true }));
+        window._plasterAutoSwitching = true;
+        try {
+            catEl.value = '비구조체';
+            catEl.dispatchEvent(new Event('change', { bubbles: true }));
+        } finally {
+            window._plasterAutoSwitching = false;
+        }
         if (typeof window.showToast === 'function') {
-            window.showToast('미장 관련 결함은 비구조체로 분류됩니다.', 'info', 2500);
+            window.showToast('미장 관련 결함은 대부분 비구조체라 비구조체로 옮겼어요. 구조체이면 구조체를 다시 눌러 주세요.', 'info', 3500);
         }
         return true;
     }
@@ -3482,9 +3498,11 @@
                 }
             }
             toggleDefectSizeInputMode();
-            // 미장 결함은 구조체로 저장되지 않는다(저장 시 비구조체로 바뀜) → 구조체를 눌렀는데 미장 종류가 남아 있으면 바로 비구조체로 되돌리고 알린다
-            if (cat === '구조체' && typeof maybeReclassifyPlasterCrackToNonStructural === 'function') {
-                maybeReclassifyPlasterCrackToNonStructural();
+            // 2026-11-08 미장 결함도 사용자가 구조체를 누르면 그 선택을 존중(같은 종류인 동안 다시 옮기지 않음, 「검토」가 짚는다).
+            // 예전(10-28~11-08)에는 바로 비구조체로 되돌려 「균열, 미장균열」 슬래브를 구조체로 고칠 수 없었다.
+            if (cat === '구조체' && !window._plasterAutoSwitching && !window._defectFormHydrating) {
+                const pt = getDefectComboValue(document.getElementById('defectType'), document.getElementById('defectTypeInput'));
+                if (defectTypeListHasPlasterCrack(pt)) window._plasterKeepStructural = true;
             }
             // 접합부 이격: 자동으로 옮긴 게 아니라 사용자가 구조체를 눌렀다면 그 선택을 존중(같은 부재·종류인 동안)
             if (cat === '구조체' && !window._jointGapAutoSwitching && !window._defectFormHydrating) {

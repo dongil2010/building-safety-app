@@ -134,7 +134,10 @@ function plasterSwitch(state) {
 // 1) 이 결함은 비구조체로 옮기고 부재·종류를 유지
 {
     const t = plasterSwitch({ cat: '구조체', comp: '기둥', type: '미장균열' });
-    assert.strictEqual(t.api.bsaPlasterNonStructCategory('구조체', '미장균열'), '비구조체');
+    // 2026-11-08 저장 경로는 사람이 고른 구조체를 그대로 둔다(빈 분류만 채움), 가져오기는 force로 예전처럼
+    assert.strictEqual(t.api.bsaPlasterNonStructCategory('구조체', '미장균열'), '구조체');
+    assert.strictEqual(t.api.bsaPlasterNonStructCategory('', '미장균열'), '비구조체');
+    assert.strictEqual(t.api.bsaPlasterNonStructCategory('구조체', '미장균열', { force: true }), '비구조체');
     assert.strictEqual(t.api.maybeReclassifyPlasterCrackToNonStructural(), true);
     assert.strictEqual(t.els.defectCategory.value, '비구조체');
     assert.deepStrictEqual(t.els.defectCategory.events, ['change']);
@@ -142,6 +145,24 @@ function plasterSwitch(state) {
     assert.strictEqual(t.win._preserveDefectComponentOnCategoryChange, '기둥');
     assert.ok(t.toasts.length >= 1);
 }
+
+// 1-1) 2026-11-08 사용자가 구조체를 다시 눌렀으면(_plasterKeepStructural) 다시 옮기지 않는다, 저장값 채우는 중에도 안 옮긴다
+{
+    const t = plasterSwitch({ cat: '구조체', comp: '슬래브', type: '균열, 미장균열' });
+    t.win._plasterKeepStructural = true;
+    assert.strictEqual(t.api.maybeReclassifyPlasterCrackToNonStructural(), false);
+    assert.strictEqual(t.els.defectCategory.value, '구조체');
+    const h = plasterSwitch({ cat: '구조체', comp: '기둥', type: '미장균열' });
+    h.win._defectFormHydrating = true;
+    assert.strictEqual(h.api.maybeReclassifyPlasterCrackToNonStructural(), false);
+    const r = plasterSwitch({ cat: '구조체', comp: '기둥', type: '수직균열' });
+    r.win._plasterKeepStructural = true;
+    r.api.maybeReclassifyPlasterCrackToNonStructural();
+    assert.strictEqual(r.win._plasterKeepStructural, false, '미장이 빠지면 존중 표시를 푼다');
+}
+assert.ok(/if \(cat === '구조체' && !window\._plasterAutoSwitching && !window\._defectFormHydrating\)/.test(app), '구조체를 누르면 존중');
+assert.ok(/bsaPlasterNonStructCategory\(\(cadItem\.category \|\| '구조체'\), \(cadItem\.defectType \|\| '균열'\), \{ force: true \}\)/.test(app), 'CAD 가져오기는 예전처럼');
+assert.ok(/bsaPlasterNonStructCategory\(fromCol, defectTypeRaw, \{ force: true \}\)/.test(app), '엑셀 가져오기는 예전처럼');
 
 // 2) 프리셋에 저장 모드에서도 비구조체 재사용 목록에 기둥을 넣지 않음
 {

@@ -31013,7 +31013,7 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
         refreshDefectQuickPickBar();
     }
 
-// @@app-part 08-defect-presets.js sha=f1ed0dbe702d — 원본은 app/08-defect-presets.js (여기 말고 거기서 고칠 것)
+// @@app-part 08-defect-presets.js sha=2f98d5e3e162 — 원본은 app/08-defect-presets.js (여기 말고 거기서 고칠 것)
     // --- Dynamic Defect Type Presets & Custom Adding ---
     const STEEL_MEMBER_DEFECTS = [
         '상태양호',
@@ -31664,13 +31664,21 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
         return String(label || '').replace(/\s+/g, '').includes('미장');
     }
 
-    /** 미장 관련 결함(미장균열·미장들뜸·미장 박락 등, 공백 무시)은 구조체가 아니라 비구조체 — 모든 저장·가져오기 경로 공통 */
-    function bsaPlasterNonStructCategory(category, defectType) {
+    /**
+     * 미장 관련 결함(미장균열·미장들뜸·미장 박락 등, 공백 무시)은 대부분 비구조체.
+     * 2026-11-08 사용자: 「균열, 미장균열」처럼 구조체인 경우가 있어 강제를 푼다 —
+     *   저장 경로(수정창·일괄수정·조사표 편집)는 분류가 비었을 때('')만 비구조체로 채우고, 사람이 고른 구조체는 그대로 둔다.
+     *   가져오기(CAD·엑셀)처럼 사람이 분류를 고르지 않은 기본값 「구조체」는 opts.force로 예전처럼 비구조체로 바꾼다.
+     *   미장인데 구조체로 남은 것은 미리보기 「검토」가 짚는다(js/core/report-review.js plaster-structural).
+     */
+    function bsaPlasterNonStructCategory(category, defectType, opts) {
         const c = String(category || '').trim();
-        if ((c === '' || c === '구조체') && isPlasterCrackDefectType(defectType)) return '비구조체';
+        const force = !!(opts && opts.force);
+        if ((c === '' || (force && c === '구조체')) && isPlasterCrackDefectType(defectType)) return '비구조체';
         return category;
     }
     window.bsaPlasterNonStructCategory = bsaPlasterNonStructCategory;
+    window.bsaIsPlasterDefectType = isPlasterCrackDefectType;
 
     function defectTypeListHasPlasterCrack(typeVal) {
         return parseDefectTypeList(typeVal).some((t) => isPlasterCrackDefectType(t));
@@ -31686,7 +31694,10 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
         const typeSelect = document.getElementById('defectType');
         const typeInput = document.getElementById('defectTypeInput');
         const typeVal = getDefectComboValue(typeSelect, typeInput);
-        if (!defectTypeListHasPlasterCrack(typeVal)) return false;
+        if (window._defectFormHydrating) return false;   // 저장된 값을 채우는 중에는 몰래 바꾸지 않는다
+        if (!defectTypeListHasPlasterCrack(typeVal)) { window._plasterKeepStructural = false; return false; }
+        // 2026-11-08 사용자가 일부러 구조체로 되돌렸으면 그대로 둔다(접합부 이격과 같은 방식)
+        if (window._plasterKeepStructural) return false;
 
         const compSelect = document.getElementById('defectComponent');
         const compInput = document.getElementById('defectComponentInput');
@@ -31699,10 +31710,15 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
 
         window._preserveDefectTypeOnCategoryChange = typeVal;
         window._preserveDefectComponentOnCategoryChange = compVal || '';
-        catEl.value = '비구조체';
-        catEl.dispatchEvent(new Event('change', { bubbles: true }));
+        window._plasterAutoSwitching = true;
+        try {
+            catEl.value = '비구조체';
+            catEl.dispatchEvent(new Event('change', { bubbles: true }));
+        } finally {
+            window._plasterAutoSwitching = false;
+        }
         if (typeof window.showToast === 'function') {
-            window.showToast('미장 관련 결함은 비구조체로 분류됩니다.', 'info', 2500);
+            window.showToast('미장 관련 결함은 대부분 비구조체라 비구조체로 옮겼어요. 구조체이면 구조체를 다시 눌러 주세요.', 'info', 3500);
         }
         return true;
     }
@@ -34497,9 +34513,11 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
                 }
             }
             toggleDefectSizeInputMode();
-            // 미장 결함은 구조체로 저장되지 않는다(저장 시 비구조체로 바뀜) → 구조체를 눌렀는데 미장 종류가 남아 있으면 바로 비구조체로 되돌리고 알린다
-            if (cat === '구조체' && typeof maybeReclassifyPlasterCrackToNonStructural === 'function') {
-                maybeReclassifyPlasterCrackToNonStructural();
+            // 2026-11-08 미장 결함도 사용자가 구조체를 누르면 그 선택을 존중(같은 종류인 동안 다시 옮기지 않음, 「검토」가 짚는다).
+            // 예전(10-28~11-08)에는 바로 비구조체로 되돌려 「균열, 미장균열」 슬래브를 구조체로 고칠 수 없었다.
+            if (cat === '구조체' && !window._plasterAutoSwitching && !window._defectFormHydrating) {
+                const pt = getDefectComboValue(document.getElementById('defectType'), document.getElementById('defectTypeInput'));
+                if (defectTypeListHasPlasterCrack(pt)) window._plasterKeepStructural = true;
             }
             // 접합부 이격: 자동으로 옮긴 게 아니라 사용자가 구조체를 눌렀다면 그 선택을 존중(같은 부재·종류인 동안)
             if (cat === '구조체' && !window._jointGapAutoSwitching && !window._defectFormHydrating) {
@@ -35184,7 +35202,7 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
         }
     }
 
-// @@app-part 09-settings-input-camera.js sha=a2648bd4f002 — 원본은 app/09-settings-input-camera.js (여기 말고 거기서 고칠 것)
+// @@app-part 09-settings-input-camera.js sha=c34ed7d71862 — 원본은 app/09-settings-input-camera.js (여기 말고 거기서 고칠 것)
     // --- 카테고리별 핀/박스 색상 설정 모달 ---
     // 결함 색상은 getDefectColor()가 쓰는 등급·상태 키와 맞춰야 도면에 바로 반영됨
     const STYLE_COLOR_FIELDS = [
@@ -39035,6 +39053,7 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
 
         window._defectFormHydrating = true;
         window._jointGapKeepStructural = false; // 새로 연 창이면 접합부 이격 자동 전환을 다시 켠다
+        window._plasterKeepStructural = false; // 2026-11-08 미장 → 비구조체 자동 전환도 새 창마다 다시 켠다
         window.clearTimeout(window._defectAutoApplyTimer);
         window._defectAutoApplyTimer = null;
         window._defectBulkEditIds = ids.slice();
@@ -39175,6 +39194,8 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
         if (typeof bindDefectHandwriteTabOrder === 'function') bindDefectHandwriteTabOrder();
         window._defectFormHydrating = true;
         window._jointGapKeepStructural = false; // 새로 연 창이면 접합부 이격 자동 전환을 다시 켠다
+        // 2026-11-08 미장인데 구조체로 저장된 결함을 열면 그 선택을 존중(종류 칩을 더 눌러도 비구조체로 안 옮김)
+        window._plasterKeepStructural = !!(existingPin && existingPin.category === '구조체' && window.bsaIsPlasterDefectType && window.bsaIsPlasterDefectType(existingPin.defectType));
         { const _oc = document.getElementById('defectOpeningCrackCheck'); if (_oc) delete _oc.dataset.openingManualOff; } // 새 창마다 「직접 끔」 기억 초기화
         // 사진이 다 내려왔는지는 폼을 다 채운 뒤에 판단한다. 그 전에 사진을 바꾸면 시각을 안 찍는다.
         window._defectPhotosComplete = false;
@@ -45795,7 +45816,7 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
         });
     }
 
-// @@app-part 11-cad-import.js sha=c1a560c9c5ee — 원본은 app/11-cad-import.js (여기 말고 거기서 고칠 것)
+// @@app-part 11-cad-import.js sha=5af906219c1c — 원본은 app/11-cad-import.js (여기 말고 거기서 고칠 것)
     // --- 9-1. CAD Defect Pins 2-Point Calibration Engine (v2.0) ---
     window.cadCalibrationState = null;
 
@@ -46143,7 +46164,7 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
                 groupNo: rawNo,
                 cadNo: rawNo,
                 isCadImported: true,
-                category: (window.bsaPlasterNonStructCategory ? window.bsaPlasterNonStructCategory((cadItem.category || '구조체'), (cadItem.defectType || '균열')) : (cadItem.category || '구조체')),
+                category: (window.bsaPlasterNonStructCategory ? window.bsaPlasterNonStructCategory((cadItem.category || '구조체'), (cadItem.defectType || '균열'), { force: true }) : (cadItem.category || '구조체')),
                 component: memberNameOut(cadItem.component) || '',
                 location: defectLocationUsesFloor() ? state.currentFloor : '',
                 defectType: cadItem.defectType || '균열',
@@ -46998,7 +47019,7 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
         inputImportCadPins.addEventListener('change', window.importCadPinsJson);
     }
 
-// @@app-part 12-survey-table.js sha=dd6705b333da — 원본은 app/12-survey-table.js (여기 말고 거기서 고칠 것)
+// @@app-part 12-survey-table.js sha=d204a4ab6a32 — 원본은 app/12-survey-table.js (여기 말고 거기서 고칠 것)
     // --- 10. SURVEY TABLE & ALBUM RENDERING ---
 
     // 상태조사표 컬럼 기본 정의 (화면/PDF/엑셀 공통). size와 crackWidth/crackLength는 상호 배타적으로
@@ -48432,7 +48453,8 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
                 default:
                     break;
             }
-            if (field === 'category' || field === 'defectType') defect.category = (window.bsaPlasterNonStructCategory ? window.bsaPlasterNonStructCategory(defect.category, defect.defectType) : defect.category);
+            // 2026-11-08 종류를 미장으로 바꿀 때만 구조체→비구조체(대부분 비구조체). 분류를 직접 구조체로 고른 것은 그대로 둔다.
+            if (field === 'category' || field === 'defectType') defect.category = (window.bsaPlasterNonStructCategory ? window.bsaPlasterNonStructCategory(defect.category, defect.defectType, { force: field === 'defectType' }) : defect.category);
             if (inlineSig(defect) !== sigBefore) touchDefectUpdatedAt(defect);
             // 행·열: 부재가 바뀌면(거더 ↔ 그 밖) 위치 다시 계산 — 지금 보는 층만(선 데이터가 그 층 것)
             if (field === 'component' && key === `${state.currentBuildingId}_${state.currentFloor}` && typeof applyGridAutoLocationToDefect === 'function') {
@@ -60200,7 +60222,7 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
         }
     });
 
-// @@app-part 14-extras.js sha=b45a4df6757d — 원본은 app/14-extras.js (여기 말고 거기서 고칠 것)
+// @@app-part 14-extras.js sha=ac314114bc75 — 원본은 app/14-extras.js (여기 말고 거기서 고칠 것)
     // ==========================================================================
     // 🛠️ 6대 추천 개선 및 신규 기능 모듈 (100% 한글 주석 & 독립 보조엔진)
     // ==========================================================================
@@ -61165,7 +61187,7 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
         if (looksLikeFinishMaterialText(defectTypeRaw) || looksLikeFinishMaterialText(componentRaw)) {
             return '마감재';
         }
-        return (window.bsaPlasterNonStructCategory ? window.bsaPlasterNonStructCategory(fromCol, defectTypeRaw) : fromCol);
+        return (window.bsaPlasterNonStructCategory ? window.bsaPlasterNonStructCategory(fromCol, defectTypeRaw, { force: true }) : fromCol);
     }
 
     function resolveImportFlag(raw) {

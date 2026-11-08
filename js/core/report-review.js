@@ -72,6 +72,18 @@
         return m[0];
     }
 
+    /**
+     * 2026-11-08 미장 결함인데 구조체(사용자: 미장 강제를 풀고 검토에서 잡기). 미장은 대부분 비구조체라 다시 보게 한다.
+     * 「균열, 미장균열」처럼 미장 아닌 결함이 같이 적혀 있으면 구조체가 맞을 수 있어 잡지 않는다.
+     */
+    function isPlasterOnlyStructural(r) {
+        if (!r || trim(r.category) !== '구조체') return false;
+        var t = squash(r.defectType);
+        if (!/미장/.test(t)) return false;
+        var rest = t.replace(/미장\S*?(?=[,·및]|$)/g, '');
+        return !/균열|누수|백태|박락|박리|철근|들뜸|파손|처짐|이격|부식|탈락|파취|변형|재료분리|곰보/.test(rest);
+    }
+
     function push(out, r, level, rule, msg) {
         out.push({ level: level, rule: rule, floorCode: r.floorCode || '', floorLabel: r.floorLabel || r.floorCode || '', no: s(r.no), id: r.id || '', msg: msg });
     }
@@ -171,6 +183,7 @@
             // 한글 조사표 「비구조부재」 ○와 보고서 요약 분류가 이 체크를 그대로 따른다.
             var structMember = structuralMemberOf(r);
             if (structMember) push(out, r, 'warn', 'struct-member-nonstructural', '구조 부재(' + structMember + ')인데 비구조체로 체크되어 있습니다 — 한글 조사표·보고서 요약에 비구조체로 나갑니다.');
+            if (isPlasterOnlyStructural(r)) push(out, r, 'warn', 'plaster-structural', '미장 결함인데 구조체로 체크되어 있습니다 — 미장은 대부분 비구조체입니다. 맞는지 확인하세요.');
             // 칸 섞임: 부재 칸에 결함 글(「슬래브 콘크리트 파취 및…」「철골보 이음부 상태양호」)
             var comp = trim(r.component);
             var cm = comp.match(/상태양호|보수완료|균열|파취|박락|박리|탈락|누수|들뜸|파손|녹\s?발생/);

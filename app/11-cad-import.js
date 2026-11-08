@@ -346,7 +346,7 @@
                 groupNo: rawNo,
                 cadNo: rawNo,
                 isCadImported: true,
-                category: (window.bsaPlasterNonStructCategory ? window.bsaPlasterNonStructCategory((cadItem.category || '구조체'), (cadItem.defectType || '균열')) : (cadItem.category || '구조체')),
+                category: (window.bsaPlasterNonStructCategory ? window.bsaPlasterNonStructCategory((cadItem.category || '구조체'), (cadItem.defectType || '균열'), { force: true }) : (cadItem.category || '구조체')),
                 component: memberNameOut(cadItem.component) || '',
                 location: defectLocationUsesFloor() ? state.currentFloor : '',
                 defectType: cadItem.defectType || '균열',

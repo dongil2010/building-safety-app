@@ -1432,7 +1432,8 @@
                 default:
                     break;
             }
-            if (field === 'category' || field === 'defectType') defect.category = (window.bsaPlasterNonStructCategory ? window.bsaPlasterNonStructCategory(defect.category, defect.defectType) : defect.category);
+            // 2026-11-08 종류를 미장으로 바꿀 때만 구조체→비구조체(대부분 비구조체). 분류를 직접 구조체로 고른 것은 그대로 둔다.
+            if (field === 'category' || field === 'defectType') defect.category = (window.bsaPlasterNonStructCategory ? window.bsaPlasterNonStructCategory(defect.category, defect.defectType, { force: field === 'defectType' }) : defect.category);
             if (inlineSig(defect) !== sigBefore) touchDefectUpdatedAt(defect);
             // 행·열: 부재가 바뀌면(거더 ↔ 그 밖) 위치 다시 계산 — 지금 보는 층만(선 데이터가 그 층 것)
             if (field === 'component' && key === `${state.currentBuildingId}_${state.currentFloor}` && typeof applyGridAutoLocationToDefect === 'function') {

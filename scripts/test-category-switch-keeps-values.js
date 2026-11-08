@@ -30,8 +30,9 @@ assert.ok(/getSelectedCausesFromUi\(\)/.test(handler) && /updateDefectCauseDropd
 assert.ok(/if \(preserveType\) \{\s*populateDefectComponentDropdown\(cat, preserveComp \|\| ''\);\s*updateDefectTypeDropdown\(cat, preserveType\);/.test(handler));
 const maybe = extractFunction(app, 'function maybeReclassifyPlasterCrackToNonStructural(');
 assert.ok(/_preserveDefectTypeOnCategoryChange = typeVal/.test(maybe) && /_preserveDefectComponentOnCategoryChange = compVal/.test(maybe));
-// 구조체를 눌렀는데 미장 종류가 남아 있으면 저장 때 어차피 비구조체가 되므로 바로 되돌리고 알린다
-assert.ok(/if \(cat === '구조체' && typeof maybeReclassifyPlasterCrackToNonStructural === 'function'\)/.test(handler));
+// 2026-11-08 구조체를 눌렀는데 미장 종류가 남아 있으면 그 선택을 존중한다(예전엔 바로 비구조체로 되돌렸다)
+assert.ok(/if \(cat === '구조체' && !window\._plasterAutoSwitching && !window\._defectFormHydrating\)/.test(handler));
+assert.ok(!/maybeReclassifyPlasterCrackToNonStructural\(\);\s*\}\s*\/\/ 접합부/.test(handler), '구조체 클릭 때 다시 옮기지 않음');
 assert.ok(/bsaPlasterNonStructCategory/.test(app), '저장 시 미장→비구조체 규칙 그대로');
 
 // 4) 분류 칩 클릭은 같은 change 핸들러를 거친다

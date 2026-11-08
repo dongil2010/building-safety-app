@@ -196,4 +196,16 @@ assert.ok(!sm({ component: '보도블록', defectType: '파손' }), '보도블�
 assert.ok(!sm({ component: '벽체', defectType: '균열' }), '벽체는 RC인지 조적인지 몰라 보지 않는다');
 assert.ok(app.includes("category: d.category == null ? '구조체' : String(d.category)"), '검토 행에 구분을 넘긴다');
 
+// 2026-11-08 미장 결함인데 구조체(미장 강제를 풀고 검토에서 잡는다)
+const PL = 'plaster-structural';
+const pl = (o) => rules([row(Object.assign({ category: '구조체', widths: [], crackLength: '' }, o))]).includes(PL);
+assert.ok(pl({ component: '기둥', defectType: '미장균열' }));
+assert.ok(pl({ component: '벽체', defectType: '미장 들뜸' }));
+assert.ok(pl({ component: '기둥', defectType: '미장 상태양호', good: true, cause: '' }));
+assert.ok(!pl({ component: '슬래브', defectType: '균열, 미장균열' }), '미장 아닌 결함이 같이 있으면 구조체가 맞을 수 있다');
+assert.ok(!pl({ component: '기둥', defectType: '미장균열', category: '비구조체' }));
+assert.ok(!pl({ component: '기둥', defectType: '수직균열' }));
+// 「균열, 미장균열」 슬래브는 구조체면 두 경고 다 없음, 비구조체면 구조 부재 경고
+assert.deepStrictEqual(rules([row({ component: '슬래브', defectType: '균열, 미장균열', category: '구조체', widths: [], crackLength: '' })]).filter((x) => x === SM || x === PL), []);
+
 console.log('test-report-review: ok');

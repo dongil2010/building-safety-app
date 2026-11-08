@@ -963,7 +963,7 @@
         if (looksLikeFinishMaterialText(defectTypeRaw) || looksLikeFinishMaterialText(componentRaw)) {
             return '마감재';
         }
-        return (window.bsaPlasterNonStructCategory ? window.bsaPlasterNonStructCategory(fromCol, defectTypeRaw) : fromCol);
+        return (window.bsaPlasterNonStructCategory ? window.bsaPlasterNonStructCategory(fromCol, defectTypeRaw, { force: true }) : fromCol);
     }
 
     function resolveImportFlag(raw) {

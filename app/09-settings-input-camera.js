@@ -3849,6 +3849,7 @@
 
         window._defectFormHydrating = true;
         window._jointGapKeepStructural = false; // 새로 연 창이면 접합부 이격 자동 전환을 다시 켠다
+        window._plasterKeepStructural = false; // 2026-11-08 미장 → 비구조체 자동 전환도 새 창마다 다시 켠다
         window.clearTimeout(window._defectAutoApplyTimer);
         window._defectAutoApplyTimer = null;
         window._defectBulkEditIds = ids.slice();
@@ -3989,6 +3990,8 @@
         if (typeof bindDefectHandwriteTabOrder === 'function') bindDefectHandwriteTabOrder();
         window._defectFormHydrating = true;
         window._jointGapKeepStructural = false; // 새로 연 창이면 접합부 이격 자동 전환을 다시 켠다
+        // 2026-11-08 미장인데 구조체로 저장된 결함을 열면 그 선택을 존중(종류 칩을 더 눌러도 비구조체로 안 옮김)
+        window._plasterKeepStructural = !!(existingPin && existingPin.category === '구조체' && window.bsaIsPlasterDefectType && window.bsaIsPlasterDefectType(existingPin.defectType));
         { const _oc = document.getElementById('defectOpeningCrackCheck'); if (_oc) delete _oc.dataset.openingManualOff; } // 새 창마다 「직접 끔」 기억 초기화
         // 사진이 다 내려왔는지는 폼을 다 채운 뒤에 판단한다. 그 전에 사진을 바꾸면 시각을 안 찍는다.
         window._defectPhotosComplete = false;
