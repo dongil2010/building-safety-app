@@ -824,4 +824,85 @@ if (fs.existsSync(appPath)) {
     assert.strictEqual(G2.lineAngleFromZoneAngle(120), -60);
 }
 
+// 2026-11-09 다각형 구역 (ㄴ자)
+{
+    const G3 = require(path.join(__dirname, '..', 'js', 'shared', 'grid-lines.js'));
+    const near = (a, b, m) => assert.ok(Math.abs(a - b) < 1e-6, `${m}: ${a} != ${b}`);
+    const L = [{ x: 0, y: 0 }, { x: 100, y: 0 }, { x: 100, y: 50 }, { x: 50, y: 50 }, { x: 50, y: 100 }, { x: 0, y: 100 }];
+    const z = G3.createZone({ id: 'p1', name: 'ㄴ', poly: L });
+    assert.deepStrictEqual(z.rect, { x1: 0, y1: 0, x2: 100, y2: 100 }, 'rect는 감싼 사각형');
+    const g = { groups: [], zones: [z] };
+    assert.strictEqual(G3.zoneAt(g, { x: 25, y: 75 }), z, '안');
+    assert.strictEqual(G3.zoneAt(g, { x: 75, y: 75 }), null, '감싼 사각형 안이어도 움푹 들어간 곳은 밖');
+
+    // 위치 계산은 구역별 그룹만
+    const inGrp = G3.createGroup('col', { zoneId: 'p1' });
+    const outGrp = G3.createGroup('col', {});
+    const rg = { groups: [inGrp, outGrp], zones: [z] };
+    assert.deepStrictEqual(G3.restrictGridToZone(rg, [{ x: 25, y: 75 }]).groups, [inGrp]);
+    assert.deepStrictEqual(G3.restrictGridToZone(rg, [{ x: 75, y: 75 }]).groups, [outGrp]);
+
+    // 새 선은 다각형 경계까지, 오목한 곳을 넘지 않는다
+    const ctx3 = { rot: 0, w: 1000, h: 1000 };
+    const bounds = Object.assign({}, z.rect, { angle: 0, poly: z.poly });
+    const len = (ln) => Math.hypot(ln.pts[1].x - ln.pts[0].x, ln.pts[1].y - ln.pts[0].y);
+    near(len(G3.makeLineThrough({ x: 25, y: 25 }, 'col', 0, ctx3, bounds)), 100, '왼쪽 열은 전체 높이');
+    near(len(G3.makeLineThrough({ x: 75, y: 25 }, 'col', 0, ctx3, bounds)), 50, '오른쪽 열은 윗부분만');
+
+    // 꼭짓점·변 판정, 옮기기
+    assert.strictEqual(G3.hitZone(g, { x: 50, y: 50 }, 3).corner, 3);
+    assert.strictEqual(G3.hitZone(g, { x: 75, y: 50 }, 3).corner, null);
+    assert.strictEqual(G3.hitZone(g, { x: 75, y: 75 }, 3), null, '감싼 사각형 테두리는 안 잡힘(오목한 곳)');
+    const orig = Object.assign({}, z.rect);
+    const origPoly = z.poly.map((p) => ({ x: p.x, y: p.y }));
+    G3.moveZone(z, orig, origPoly, 10, 20);
+    near(z.poly[0].x, 10, '옮기기');
+    near(z.rect.y2, 120, '옮기기');
+    G3.moveZone(z, orig, origPoly, 0, 0);
+
+    // 돌린 뒤 꼭짓점을 옮겨도 다른 꼭짓점은 도면 위 그 자리
+    G3.rotateZone(g, z, 30);
+    assert.strictEqual(G3.zoneAt(g, G3.zoneWorldPoint(z, { x: 25, y: 75 })), z, '돌린 뒤에도 안');
+    assert.strictEqual(G3.zoneAt(g, G3.zoneWorldPoint(z, { x: 75, y: 75 })), null, '돌린 뒤에도 밖');
+    const before = G3.zoneWorldPoly(z);
+    G3.zoneSetVertex(z, 1, { x: 200, y: 40 });
+    const after = G3.zoneWorldPoly(z);
+    near(after[1].x, 200, '끈 꼭짓점');
+    near(after[1].y, 40, '끈 꼭짓점');
+    [0, 2, 3, 4, 5].forEach((i) => {
+        near(after[i].x, before[i].x, `꼭짓점 ${i} 그대로`);
+        near(after[i].y, before[i].y, `꼭짓점 ${i} 그대로`);
+    });
+    assert.strictEqual(z.angle, 30, '각도 유지');
+
+    // 추가·삭제(3개는 남김)
+    const t = G3.createZone({ id: 't', name: 't', poly: [{ x: 0, y: 0 }, { x: 100, y: 0 }, { x: 100, y: 100 }] });
+    assert.strictEqual(G3.zoneRemoveVertex(t, 0), false, '삼각형은 못 줄임');
+    assert.strictEqual(G3.zoneInsertVertex(t, { x: 50, y: 0 }), 1, '가까운 변에 끼움');
+    assert.strictEqual(t.poly.length, 4);
+    assert.strictEqual(G3.zoneRemoveVertex(t, 1), true);
+
+    // 사각형 → 다각형: 같은 자리
+    const r = G3.createZone({ id: 'r', name: 'r', rect: { x1: 10, y1: 10, x2: 60, y2: 30 }, angle: 45 });
+    const corner = G3.zoneWorldPoint(r, { x: 10, y: 10 });
+    G3.zoneToPolygon(r);
+    assert.strictEqual(r.poly.length, 4);
+    near(G3.zoneWorldPoly(r)[0].x, corner.x, '변환해도 같은 자리');
+
+    // 저장·복사·크기 변경·지문
+    const saved = G3.normalizeGrid({ groups: [], zones: [t] });
+    assert.strictEqual(saved.zones[0].poly.length, 3, '저장 형식 정리해도 꼭짓점 유지');
+    assert.strictEqual(G3.cloneGridForFloor({ groups: [], zones: [t] }).zones[0].poly.length, 3, '다른 층 복사');
+    const sigA = G3.gridSignature({ groups: [], zones: [t] });
+    const t2 = JSON.parse(JSON.stringify(t));
+    t2.poly[1].y = 40;
+    assert.notStrictEqual(sigA, G3.gridSignature({ groups: [], zones: [t2] }), '모양이 바뀌면 지문도');
+    const scaled = { groups: [], zones: [JSON.parse(JSON.stringify(t))] };
+    G3.scaleGridInPlace(scaled, 100, 100, 200, 200);
+    near(scaled.zones[0].poly[1].x, 200, '도면 크기 변경');
+    near(scaled.zones[0].rect.x2, 200, '도면 크기 변경');
+    // 사각형 구역은 키가 안 생긴다
+    assert.ok(!('poly' in G3.createZone({ id: 'q', name: 'q', rect: { x1: 0, y1: 0, x2: 10, y2: 10 } })));
+}
+
 console.log('test-grid-lines: OK');

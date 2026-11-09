@@ -41850,7 +41850,7 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
         });
     }
 
-// @@app-part 10-marking.js sha=82d826b63815 — 원본은 app/10-marking.js (여기 말고 거기서 고칠 것)
+// @@app-part 10-marking.js sha=3344316481c2 — 원본은 app/10-marking.js (여기 말고 거기서 고칠 것)
     // --- 9. BUTTON CONTROLS & LISTENERS ---
 
     // Main Navigation Tabs Click Listener
@@ -42650,6 +42650,7 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
                 editGroupId: null,
                 zoneId: null, // 고른 구역(null = 구역 밖)
                 zoneRedrawId: null, // 「범위 다시 그리기」 중인 구역
+                polyDraft: null, // 찍고 있는 다각형 구역의 꼭짓점들
                 drag: null,
                 bendArmed: false,
                 lastAddAt: 0,
@@ -42701,6 +42702,7 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
             ge.bendArmed = false;
             ge.zoneId = null;
             ge.zoneRedrawId = null;
+            ge.polyDraft = null;
             setTimeout(renderGridPanel, 0);
         }
         const grid = getCurrentFloorGrid(false);
@@ -42709,7 +42711,8 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
         if (!editing) return;
         // 구역 사각형(설정 중에만) — 선보다 먼저(아래)
         const zoneDraft = (ge.drag && ge.drag.kind === 'zoneNew' && ge.drag.moved && ge.drag.cur) ? ge.drag : null;
-        if (zoneDraft || (grid && (grid.zones || []).length)) drawGridZones(ctx, grid, zoneDraft);
+        const polyDrafting = !!(ge.polyDraft && ge.polyDraft.length);
+        if (zoneDraft || polyDrafting || (grid && (grid.zones || []).length)) drawGridZones(ctx, grid, zoneDraft);
         drawGridAutoPreview(ctx);
         if (!grid || !gridHasLines(grid)) return;
         const gctx = { rot: state.rotationAngle || 0, w: imgW, h: imgH };
@@ -43009,7 +43012,7 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
         const zone = G.zoneAt(grid, p);
         gridEditState().zoneId = zone ? zone.id : null;
         const g = gridEnsureGroup(grid, axis, zone ? zone.id : null);
-        const ln = G.makeLineThrough(p, axis, g.angle, getGridCtx(), zone ? Object.assign({}, zone.rect, { angle: zone.angle || 0 }) : null);
+        const ln = G.makeLineThrough(p, axis, g.angle, getGridCtx(), zone ? Object.assign({}, zone.rect, { angle: zone.angle || 0, poly: zone.poly || null }) : null);
         G.addLineToGroup(g, ln); // 번호 = 그은 순서(먼저 그은 선이 작은 번호)
         gridSelectLine(grid, ln.id, null);
         gridEditState().lastAddAt = Date.now();
@@ -43037,6 +43040,10 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
                 }
             }
             renderGridPanel();
+        }
+        if (ge.tool === 'zonePoly') {
+            gridStartDrag({ kind: 'empty', start: p, clientX, clientY, isTouch, offX: state.view.offsetX, offY: state.view.offsetY });
+            return;
         }
         // 고른 구역의 회전 손잡이가 선·테두리보다 먼저
         if ((ge.tool === 'select' || ge.tool === 'zone') && ge.zoneId) {
@@ -43075,6 +43082,7 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
                     zoneId: z.id,
                     corner: zh.corner,
                     orig: { x1: z.rect.x1, y1: z.rect.y1, x2: z.rect.x2, y2: z.rect.y2 },
+                    origPoly: z.poly ? z.poly.map((q) => ({ x: q.x, y: q.y })) : null,
                     start: p,
                     clientX,
                     clientY,
@@ -43140,7 +43148,9 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
                 d.cur = zp;
             } else {
                 const z = G.findZone(getCurrentFloorGrid(true), d.zoneId);
-                if (z) z.rect = d.kind === 'zoneMove' ? G.moveRect(d.orig, zp.x - d.start.x, zp.y - d.start.y) : G.resizeZoneCorner(d.orig, z.angle || 0, d.corner, zp);
+                if (z && d.kind === 'zoneMove') G.moveZone(z, d.orig, d.origPoly, zp.x - d.start.x, zp.y - d.start.y);
+                else if (z && z.poly) G.zoneSetVertex(z, d.corner, zp);
+                else if (z) z.rect = G.resizeZoneCorner(d.orig, z.angle || 0, d.corner, zp);
             }
             drawCanvas();
             return;
@@ -43174,7 +43184,9 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
                 if (typeof shouldUseViewportTilesForCurrentFloor === 'function' && shouldUseViewportTilesForCurrentFloor() && typeof scheduleViewportHiPatchSync === 'function') scheduleViewportHiPatchSync();
                 return;
             }
-            if (ge.tool === 'col' || ge.tool === 'row') {
+            if (ge.tool === 'zonePoly') {
+                gridPolyAddPoint(gridSnap(d.start), d.isTouch);
+            } else if (ge.tool === 'col' || ge.tool === 'row') {
                 gridAddLineAt(ge.tool, gridSnap(d.start));
             } else {
                 ge.sel = null;
@@ -43243,9 +43255,28 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
     function gridDblClick(clientX, clientY) {
         const G = gridLib();
         const ge = gridEditState();
+        if (G && ge.tool === 'zonePoly') {
+            gridPolyFinish();
+            return;
+        }
         if (!G || Date.now() - ge.lastAddAt < 700) return;
         const p = clientToImgCoords(clientX, clientY);
         const grid = getCurrentFloorGrid(true);
+        // 고른 다각형 구역: 꼭짓점 더블클릭 = 삭제, 변 더블클릭 = 꼭짓점 추가
+        const polyZone = ge.zoneId ? G.findZone(grid, ge.zoneId) : null;
+        if (polyZone && polyZone.poly && (ge.tool === 'select' || ge.tool === 'zone')) {
+            const zh = G.hitZone({ zones: [polyZone] }, p, 8 / (state.view.scale || 1));
+            if (zh) {
+                if (zh.corner != null) {
+                    if (G.zoneRemoveVertex(polyZone, zh.corner)) gridChanged();
+                    else window.showToast?.('다각형 구역은 꼭짓점이 3개 이상이어야 합니다.', 'info', 2000);
+                } else {
+                    G.zoneInsertVertex(polyZone, p);
+                    gridChanged();
+                }
+                return;
+            }
+        }
         const hit = G.hitTest(grid, p, 8 / (state.view.scale || 1));
         if (!hit) return;
         const f = G.findLine(grid, hit.lineId);
@@ -43356,7 +43387,9 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
             const ang = Math.abs(g.angle) > 0.01 ? ` · ${g.angle}°` : '';
             return `<option value="${gridEsc(g.id)}"${eg && g.id === eg.id ? ' selected' : ''}>${gridEsc(zoneTag(g))}${axisKo(g.axis)} ${gridEsc(names)} (${od.items.length}개${ang})</option>`;
         }).join('');
-        const hint = ge.tool === 'zone'
+        const hint = ge.tool === 'zonePoly'
+            ? `도면을 눌러 꼭짓점을 찍으세요${(ge.polyDraft || []).length ? ` (${ge.polyDraft.length}개)` : ''}. 첫 점을 다시 누르거나 더블클릭·Enter로 완성, Backspace는 한 점 취소, Esc는 그만두기. 빈 곳을 끌면 화면 이동.`
+            : ge.tool === 'zone'
             ? (ge.zoneRedrawId
                 ? '구역의 새 범위를 도면에서 사각형으로 끌어 그리세요.'
                 : '도면에서 사각형을 끌어 구역을 만드세요(예: 한 장에 그린 1층·2층). 구역마다 선 번호가 따로 매겨집니다. 구역 모서리를 끌면 크기, 테두리를 끌면 이동.')
@@ -43515,6 +43548,8 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
                     </div>
                     <div class="grid-panel-row">
                         <button type="button" data-act="zoneAdd">+ 구역 추가</button>
+                        <button type="button" data-act="zonePolyAdd" title="꼭짓점을 찍어 ㄱ자·ㄷ자 같은 모양의 구역을 만듭니다">+ 다각형 구역</button>
+                        ${ez && !ez.poly ? '<button type="button" data-act="zoneToPoly" title="이 구역을 꼭짓점 4개 다각형으로 바꿉니다. 변을 더블클릭하면 꼭짓점이 늘어납니다">다각형으로 바꾸기</button>' : ''}
                         ${ez ? '<button type="button" data-act="zoneRedraw">범위 다시 그리기</button><button type="button" data-act="zoneDel" class="danger">구역 삭제</button>' : ''}
                     </div>
                     ${ez ? `
@@ -43608,6 +43643,7 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
         const tool = btn.getAttribute('data-tool');
         if (tool) {
             ge.tool = tool;
+            ge.polyDraft = null;
             ge.bendArmed = false;
             ge.zoneRedrawId = null;
             if (tool === 'col' || tool === 'row') {
@@ -43626,7 +43662,18 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
         if (act === 'autoDetect') { gridAutoDetect().catch((err) => { console.warn('[행열 자동 잡기]', err); window.showToast?.('자동 잡기에 실패했습니다.', 'error', 3000); }); return; }
         if (act === 'autoApply') { await gridAutoApply(); return; }
         if (act === 'autoCancel') { ge.autoPreview = null; renderGridPanel(); drawCanvas(); return; }
+        if (act === 'zonePolyAdd') {
+            ge.tool = 'zonePoly';
+            ge.polyDraft = [];
+            ge.zoneRedrawId = null;
+            ge.bendArmed = false;
+            ge.sel = null;
+            renderGridPanel();
+            window.showToast?.('도면을 눌러 구역의 꼭짓점을 차례로 찍으세요.', 'info', 2200);
+            return;
+        }
         if (act === 'zoneAdd') {
+            ge.polyDraft = null;
             ge.tool = 'zone';
             ge.zoneRedrawId = null;
             ge.bendArmed = false;
@@ -43639,6 +43686,13 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
         const eg = gridFindGroup(grid, ge.editGroupId);
         const selF = ge.sel ? G.findLine(grid, ge.sel.lineId) : null;
         const ez = ge.zoneId ? G.findZone(grid, ge.zoneId) : null;
+        if (act === 'zoneToPoly' && ez) {
+            G.zoneToPolygon(ez);
+            ge.tool = 'select';
+            gridChanged();
+            window.showToast?.('다각형으로 바꿨습니다. 꼭짓점을 끌어 모양을 맞추고, 변을 더블클릭하면 점이 늘어납니다(점 더블클릭은 삭제).', 'success', 3500);
+            return;
+        }
         if (act === 'zoneRedraw' && ez) {
             ge.tool = 'zone';
             ge.zoneRedrawId = ez.id;
@@ -44053,6 +44107,8 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
             return;
         }
         gridCancelDrag();
+        ge.polyDraft = null;
+        if (ge.tool === 'zonePoly') ge.tool = 'select';
         ge.active = !!on;
         ge.bendArmed = false;
         if (!on) ge.sel = null;
@@ -44255,6 +44311,18 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
         const tag = t && t.tagName;
         if (tag === 'INPUT' || tag === 'TEXTAREA' || tag === 'SELECT' || (t && t.isContentEditable)) return;
         if (document.querySelector('.modal-overlay.open')) return;
+        if (ge.tool === 'zonePoly' && (e.key === 'Enter' || e.key === 'Escape' || e.key === 'Backspace' || e.key === 'Delete')) {
+            e.preventDefault();
+            e.stopImmediatePropagation();
+            if (e.key === 'Enter') gridPolyFinish();
+            else if (e.key === 'Escape') gridPolyCancel();
+            else {
+                if (ge.polyDraft && ge.polyDraft.length) ge.polyDraft.pop();
+                renderGridPanel();
+                drawCanvas();
+            }
+            return;
+        }
         if ((e.ctrlKey || e.metaKey) && !e.shiftKey && (e.key === 'z' || e.key === 'Z') && (ge.orderUndo || ge.spacingUndo)) {
             // 행·열 번호 순서(뒤집기·오름/내림) 또는 간격 비율 되돌리기 — 가장 최근 것 하나
             e.preventDefault();
@@ -44951,7 +45019,7 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
         const ge = gridEditState();
         const s = state.view.scale || 1;
         const rotRad = ((state.rotationAngle || 0) * Math.PI) / 180;
-        const drawRect = (r, sel, name, zoneAngle) => {
+        const drawRect = (r, sel, name, zoneAngle, poly) => {
             const w = r.x2 - r.x1;
             const h = r.y2 - r.y1;
             const zoneRad = ((zoneAngle || 0) * Math.PI) / 180;
@@ -44967,12 +45035,20 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
             ctx.lineWidth = (sel ? 2.4 : 1.6) / s;
             ctx.strokeStyle = sel ? '#7c3aed' : 'rgba(124, 58, 237, 0.75)';
             ctx.fillStyle = sel ? 'rgba(124, 58, 237, 0.07)' : 'rgba(124, 58, 237, 0.03)';
-            ctx.fillRect(r.x1, r.y1, w, h);
-            ctx.strokeRect(r.x1, r.y1, w, h);
+            if (poly) {
+                ctx.beginPath();
+                poly.forEach((q, i) => { if (i) ctx.lineTo(q.x, q.y); else ctx.moveTo(q.x, q.y); });
+                ctx.closePath();
+                ctx.fill();
+                ctx.stroke();
+            } else {
+                ctx.fillRect(r.x1, r.y1, w, h);
+                ctx.strokeRect(r.x1, r.y1, w, h);
+            }
             ctx.setLineDash([]);
             if (sel) {
                 const hs = 5 / s;
-                [[r.x1, r.y1], [r.x2, r.y1], [r.x2, r.y2], [r.x1, r.y2]].forEach(([x, y]) => {
+                (poly ? poly.map((q) => [q.x, q.y]) : [[r.x1, r.y1], [r.x2, r.y1], [r.x2, r.y2], [r.x1, r.y2]]).forEach(([x, y]) => {
                     ctx.fillStyle = '#ffffff';
                     ctx.strokeStyle = '#7c3aed';
                     ctx.lineWidth = 1.4 / s;
@@ -44998,7 +45074,8 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
             }
             if (name) {
                 ctx.save();
-                ctx.translate(r.x1, r.y1);
+                // 다각형은 감싼 사각형 모서리가 구역 밖일 수 있어 첫 꼭짓점에 이름을 붙인다
+                ctx.translate(poly ? poly[0].x : r.x1, poly ? poly[0].y : r.y1);
                 ctx.rotate(-rotRad - zoneRad); // 구역을 돌려도 이름은 똑바로
                 const fontPx = 12 / s;
                 ctx.font = `700 ${fontPx}px "Pretendard", "Malgun Gothic", "맑은 고딕", sans-serif`;
@@ -45016,10 +45093,80 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
         };
         ctx.save();
         ((grid && grid.zones) || []).forEach((z) => {
-            if (z && z.rect) drawRect(z.rect, z.id === ge.zoneId, `${z.name}${z.floorLabel ? ` (${z.floorLabel})` : ''}`, z.angle || 0);
+            if (z && z.rect) drawRect(z.rect, z.id === ge.zoneId, `${z.name}${z.floorLabel ? ` (${z.floorLabel})` : ''}`, z.angle || 0, z.poly || null);
         });
         if (draft && G) drawRect(G.rectFromPoints(draft.start, draft.cur), true, '');
+        if (ge.polyDraft && ge.polyDraft.length) {
+            const pts = ge.polyDraft;
+            ctx.strokeStyle = '#7c3aed';
+            ctx.lineWidth = 2 / s;
+            ctx.setLineDash([8 / s, 5 / s]);
+            ctx.beginPath();
+            pts.forEach((q, i) => { if (i) ctx.lineTo(q.x, q.y); else ctx.moveTo(q.x, q.y); });
+            ctx.stroke();
+            ctx.setLineDash([]);
+            pts.forEach((q, i) => {
+                ctx.beginPath();
+                ctx.arc(q.x, q.y, (i === 0 ? 7 : 5) / s, 0, Math.PI * 2);
+                ctx.fillStyle = i === 0 ? '#7c3aed' : '#ffffff';
+                ctx.fill();
+                ctx.strokeStyle = '#7c3aed';
+                ctx.lineWidth = 1.4 / s;
+                ctx.stroke();
+            });
+        }
         ctx.restore();
+    }
+
+    /** 다각형 구역 찍기 — 첫 점을 다시 누르면 완성, 바로 앞 점과 같은 자리(더블클릭의 두 번째 누름)는 무시 */
+    function gridPolyAddPoint(p, isTouch) {
+        const ge = gridEditState();
+        const tol = (isTouch ? 18 : 8) / (state.view.scale || 1);
+        if (!ge.polyDraft) ge.polyDraft = [];
+        const pts = ge.polyDraft;
+        if (pts.length >= 3 && Math.hypot(p.x - pts[0].x, p.y - pts[0].y) <= tol * 1.5) {
+            gridPolyFinish();
+            return;
+        }
+        const last = pts[pts.length - 1];
+        if (last && Math.hypot(p.x - last.x, p.y - last.y) <= tol) return;
+        pts.push({ x: p.x, y: p.y });
+        renderGridPanel();
+        drawCanvas();
+    }
+
+    function gridPolyCancel() {
+        const ge = gridEditState();
+        ge.polyDraft = null;
+        ge.tool = 'select';
+        renderGridPanel();
+        drawCanvas();
+    }
+
+    function gridPolyFinish() {
+        const G = gridLib();
+        const ge = gridEditState();
+        const pts = ge.polyDraft || [];
+        const s = state.view.scale || 1;
+        if (pts.length < 3) {
+            window.showToast?.('꼭짓점을 3개 이상 찍어 주세요.', 'info', 2000);
+            return;
+        }
+        if (G.polyArea(pts) < (12 / s) * (12 / s)) {
+            window.showToast?.('구역이 너무 작습니다. 꼭짓점을 넓게 찍어 주세요.', 'info', 2000);
+            return;
+        }
+        const grid = getCurrentFloorGrid(true);
+        if (!Array.isArray(grid.zones)) grid.zones = [];
+        const z = G.createZone({ name: `구역 ${grid.zones.length + 1}`, poly: pts });
+        if (!z) return;
+        grid.zones.push(z);
+        ge.polyDraft = null;
+        ge.zoneId = z.id;
+        ge.tool = 'col';
+        ge.sel = null;
+        gridChanged();
+        window.showToast?.(`「${z.name}」을 만들었습니다. 이름(예: 1F)을 바꾸고 구역 안에 선을 그으세요.`, 'success', 3500);
     }
 
     /** 끌어 그린 사각형 → 새 구역(또는 「범위 다시 그리기」 중인 구역의 새 범위) */
@@ -45043,6 +45190,7 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
         if (z) {
             z.rect = rect;
             delete z.angle; // 새로 끌어 그린 범위는 돌리지 않은 사각형
+            delete z.poly;
             window.showToast?.(`구역 「${z.name}」 범위를 다시 그렸습니다.`, 'success', 2000);
         } else {
             z = G.createZone({ name: `구역 ${grid.zones.length + 1}`, rect });

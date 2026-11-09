@@ -203,7 +203,9 @@
 
     function normalizeZone(z) {
         if (!z || typeof z !== 'object') return null;
-        const r = z.rect && typeof z.rect === 'object' ? z.rect : z;
+        const poly = sanitizePts(z.poly);
+        const hasPoly = poly.length >= 3;
+        const r = hasPoly ? polyBBox(poly) : (z.rect && typeof z.rect === 'object' ? z.rect : z);
         const xs = [num(r.x1, NaN), num(r.x2, NaN)];
         const ys = [num(r.y1, NaN), num(r.y2, NaN)];
         if (![...xs, ...ys].every(Number.isFinite)) return null;
@@ -218,12 +220,113 @@
         if (fl) out.floorLabel = fl;
         const ang = normalizeZoneAngle(z.angle);
         if (ang) out.angle = ang; // 돌리지 않은 구역은 예전 모양 그대로(키 없음)
+        if (hasPoly) out.poly = poly; // 사각형 구역은 예전 모양 그대로(키 없음)
         return out;
+    }
+
+    // 2026-11-09 다각형 구역: poly는 돌리기 전 기준의 꼭짓점들, rect는 언제나 그 꼭짓점들을 감싼 사각형(회전 중심·저장 호환용).
+    function polyBBox(pts) {
+        const xs = pts.map((p) => p.x);
+        const ys = pts.map((p) => p.y);
+        return { x1: Math.min(...xs), y1: Math.min(...ys), x2: Math.max(...xs), y2: Math.max(...ys) };
+    }
+
+    function polyArea(pts) {
+        let a = 0;
+        pts.forEach((p, i) => {
+            const q = pts[(i + 1) % pts.length];
+            a += p.x * q.y - q.x * p.y;
+        });
+        return Math.abs(a) / 2;
+    }
+
+    function pointInPoly(p, pts) {
+        let inside = false;
+        for (let i = 0, j = pts.length - 1; i < pts.length; j = i++) {
+            const a = pts[i];
+            const b = pts[j];
+            if (distToSegment(p, a, b).dist < 1e-9) return true; // 경계 위는 안쪽(사각형 판정과 같게)
+            if ((a.y > p.y) !== (b.y > p.y) && p.x < (b.x - a.x) * (p.y - a.y) / (b.y - a.y) + a.x) inside = !inside;
+        }
+        return inside;
+    }
+
+    function zoneArea(z) {
+        if (z.poly && z.poly.length >= 3) return polyArea(z.poly);
+        return (z.rect.x2 - z.rect.x1) * (z.rect.y2 - z.rect.y1);
+    }
+
+    function zoneWorldPoly(z) {
+        return (z.poly || []).map((p) => zoneWorldPoint(z, p));
+    }
+
+    /** 도면 위 꼭짓점들로 모양을 바꾼다. 꼭짓점이 바뀌면 감싼 사각형의 가운데(회전 중심)도 바뀌므로, 각도는 두고 도면 위 자리가 그대로이게 맞춘다 */
+    function setZonePolyWorld(z, world) {
+        const ang = z.angle || 0;
+        const O = { x: 0, y: 0 };
+        const q = world.map((p) => rotatePointDeg(p, O, -ang));
+        const b = polyBBox(q);
+        const qc = rectCenter(b);
+        const wc = rotatePointDeg(qc, O, ang);
+        const dx = wc.x - qc.x;
+        const dy = wc.y - qc.y;
+        z.poly = q.map((p) => ({ x: p.x + dx, y: p.y + dy }));
+        z.rect = polyBBox(z.poly);
+        return z;
+    }
+
+    /** 사각형 구역을 같은 자리·같은 각도의 네 꼭짓점 다각형으로 */
+    function zoneToPolygon(z) {
+        if (!z || !z.rect || z.poly) return z;
+        const r = z.rect;
+        z.poly = [{ x: r.x1, y: r.y1 }, { x: r.x2, y: r.y1 }, { x: r.x2, y: r.y2 }, { x: r.x1, y: r.y2 }];
+        return z;
+    }
+
+    function zoneSetVertex(z, i, pWorld) {
+        if (!z || !z.poly || !z.poly[i]) return false;
+        const w = zoneWorldPoly(z);
+        w[i] = { x: pWorld.x, y: pWorld.y };
+        setZonePolyWorld(z, w);
+        return true;
+    }
+
+    /** 가장 가까운 변에 꼭짓점 추가. 새 꼭짓점 번호 반환 */
+    function zoneInsertVertex(z, pWorld) {
+        if (!z || !z.poly) return -1;
+        const w = zoneWorldPoly(z);
+        let at = 0;
+        let best = Infinity;
+        w.forEach((a, i) => {
+            const d = distToSegment(pWorld, a, w[(i + 1) % w.length]).dist;
+            if (d < best) {
+                best = d;
+                at = i + 1;
+            }
+        });
+        w.splice(at, 0, { x: pWorld.x, y: pWorld.y });
+        setZonePolyWorld(z, w);
+        return at;
+    }
+
+    /** 꼭짓점 삭제(세 개는 남긴다) */
+    function zoneRemoveVertex(z, i) {
+        if (!z || !z.poly || z.poly.length <= 3 || !z.poly[i]) return false;
+        const w = zoneWorldPoly(z);
+        w.splice(i, 1);
+        setZonePolyWorld(z, w);
+        return true;
+    }
+
+    /** 끌어 옮기기 — 사각형과 꼭짓점을 같이(orig: 시작할 때의 rect, origPoly: 시작할 때의 꼭짓점) */
+    function moveZone(z, orig, origPoly, dx, dy) {
+        z.rect = moveRect(orig, dx, dy);
+        if (origPoly) z.poly = origPoly.map((p) => ({ x: p.x + dx, y: p.y + dy }));
     }
 
     function createZone(opts) {
         const o = opts || {};
-        return normalizeZone({ id: o.id || uid('gz'), name: o.name, floorLabel: o.floorLabel, rect: o.rect, angle: o.angle });
+        return normalizeZone({ id: o.id || uid('gz'), name: o.name, floorLabel: o.floorLabel, rect: o.rect, angle: o.angle, poly: o.poly });
     }
 
     // 2026-11-09 구역 회전: rect는 돌리기 전 사각형, angle(도, 화면 시계 방향)은 사각형 가운데를 중심으로 돌린 각도.
@@ -315,8 +418,11 @@
         let best = null;
         let bestA = Infinity;
         ((grid && grid.zones) || []).forEach((z) => {
-            if (!z || !z.rect || !rectContains(z.rect, zoneLocalPoint(z, p))) return;
-            const a = (z.rect.x2 - z.rect.x1) * (z.rect.y2 - z.rect.y1);
+            if (!z || !z.rect) return;
+            const lp = zoneLocalPoint(z, p);
+            if (!rectContains(z.rect, lp)) return;
+            if (z.poly && !pointInPoly(lp, z.poly)) return;
+            const a = zoneArea(z);
             if (a < bestA) {
                 best = z;
                 bestA = a;
@@ -347,6 +453,17 @@
         ((grid && grid.zones) || []).forEach((z) => {
             const r = z.rect;
             const p = zoneLocalPoint(z, pImg); // 돌린 구역은 돌리기 전 사각형에서 판정
+            if (z.poly) {
+                z.poly.forEach((v, i) => {
+                    const d = Math.hypot(p.x - v.x, p.y - v.y);
+                    if (d <= tol * 1.5 && (!best || best.corner == null || d < best.dist)) best = { zoneId: z.id, corner: i, dist: d };
+                });
+                z.poly.forEach((v, i) => {
+                    const de = distToSegment(p, v, z.poly[(i + 1) % z.poly.length]).dist;
+                    if (de <= tol && (!best || (best.corner == null && de < best.dist))) best = { zoneId: z.id, corner: null, dist: de };
+                });
+                return;
+            }
             [[r.x1, r.y1], [r.x2, r.y1], [r.x2, r.y2], [r.x1, r.y2]].forEach(([x, y], i) => {
                 const d = Math.hypot(p.x - x, p.y - y);
                 if (d <= tol * 1.5 && (!best || best.corner == null || d < best.dist)) best = { zoneId: z.id, corner: i, dist: d };
@@ -721,7 +838,7 @@
         const grid = normalizeGrid(rawGrid);
         const parts = [];
         const zones = grid.zones || [];
-        zones.forEach((z) => parts.push(`z|${roundPts([{ x: z.rect.x1, y: z.rect.y1 }, { x: z.rect.x2, y: z.rect.y2 }])}${z.angle ? `|a${z.angle}` : ''}`));
+        zones.forEach((z) => parts.push(`z|${roundPts([{ x: z.rect.x1, y: z.rect.y1 }, { x: z.rect.x2, y: z.rect.y2 }])}${z.angle ? `|a${z.angle}` : ''}${z.poly ? `|p${roundPts(z.poly)}` : ''}`));
         (grid.groups || []).forEach((g) => {
             // 번호 방식은 글자일 때만 붙임(숫자 그룹 지문은 예전과 같아 저장된 위치를 다시 계산하지 않음)
             parts.push(`g${g.axis}|${g.prefix}|${g.start}|${g.band}${g.zoneId ? `|z${zones.findIndex((z) => z.id === g.zoneId)}` : ''}${g.numbering ? `|n${g.numbering}` : ''}${g.reverse ? '|r' : ''}${normalizeSkip(g.skip).length ? `|s${normalizeSkip(g.skip).join('.')}` : ''}`);
@@ -997,6 +1114,28 @@
             t0 = Math.max(t0, Math.min(a, b));
             t1 = Math.min(t1, Math.max(a, b));
         });
+        // 다각형 구역: 누른 점이 든 구간(앞뒤로 가장 가까운 변)까지만 — 오목한 모양의 움푹 들어간 곳을 넘지 않게
+        const clipPoly = bounds && Array.isArray(bounds.poly) && bounds.poly.length >= 3 ? bounds.poly : null;
+        if (clipPoly) {
+            let back = -Infinity;
+            let front = Infinity;
+            clipPoly.forEach((a, i) => {
+                const b = clipPoly[(i + 1) % clipPoly.length];
+                const ex = b.x - a.x;
+                const ey = b.y - a.y;
+                const den = clipD.x * ey - clipD.y * ex;
+                if (Math.abs(den) < 1e-9) return;
+                const t = ((a.x - clipP.x) * ey - (a.y - clipP.y) * ex) / den;
+                const u = ((a.x - clipP.x) * clipD.y - (a.y - clipP.y) * clipD.x) / den;
+                if (u < -1e-9 || u > 1 + 1e-9) return;
+                if (t <= 0 && t > back) back = t;
+                if (t >= 0 && t < front) front = t;
+            });
+            if (Number.isFinite(back) && Number.isFinite(front) && front - back >= 1) {
+                t0 = back;
+                t1 = front;
+            }
+        }
         if (!Number.isFinite(t0) || !Number.isFinite(t1) || t1 - t0 < 1) {
             const L = Math.hypot(w, h) / 2;
             t0 = -L;
@@ -1214,6 +1353,10 @@
                 x2: roundTo(z.rect.x2 * sx, 2),
                 y2: roundTo(z.rect.y2 * sy, 2)
             };
+            if (z.poly) {
+                z.poly = z.poly.map((p) => ({ x: roundTo(p.x * sx, 2), y: roundTo(p.y * sy, 2) }));
+                z.rect = polyBBox(z.poly);
+            }
         });
         (grid.groups || []).forEach((g) => {
             (g.lines || []).forEach((ln) => {
@@ -1243,6 +1386,7 @@
             const nz = { id: uid('gz'), name: z.name, rect: { x1: z.rect.x1, y1: z.rect.y1, x2: z.rect.x2, y2: z.rect.y2 } };
             if (z.floorLabel) nz.floorLabel = z.floorLabel;
             if (z.angle) nz.angle = z.angle;
+            if (z.poly) nz.poly = z.poly.map((p) => ({ x: p.x, y: p.y }));
             zoneMap[z.id] = nz.id;
             return nz;
         });
@@ -1361,6 +1505,13 @@
         moveRect,
         resizeRectCorner,
         resizeZoneCorner,
+        moveZone,
+        polyArea,
+        zoneWorldPoly,
+        zoneToPolygon,
+        zoneSetVertex,
+        zoneInsertVertex,
+        zoneRemoveVertex,
         rotateZone,
         zoneRotateHandle,
         zoneLocalPoint,
