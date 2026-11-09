@@ -620,7 +620,7 @@ if (fs.existsSync(appPath)) {
         };
         vm.createContext(zctx);
         vm.runInContext(['gridLib', 'gridEditState', 'getGridFloorKey', 'getGridCtx', 'getCurrentFloorGrid', 'gridFindGroup', 'gridSelectLine',
-            'gridEnsureGroup', 'gridAddLineAt'].map(takeFn).join('\n')
+            'gridZoneLineAngle', 'gridEnsureGroup', 'gridAddLineAt'].map(takeFn).join('\n')
             + '\nthis.z = { add: gridAddLineAt, grid: () => getCurrentFloorGrid(false), ge: () => gridEditState() };', zctx);
         [[500, 'zA'], [1500, 'zA'], [2500, 'zB'], [3500, 'zB'], [2000, null]].forEach(([x, want]) => {
             zctx.z.add('col', { x, y: 100 });
@@ -759,6 +759,69 @@ if (fs.existsSync(appPath)) {
     assert.deepStrictEqual(zp.zones[1].rect, { x1: 1050, y1: 0, x2: 2000, y2: 3000 }, '열 때 구역도 맞춤');
     const hasUndef = (o) => o && typeof o === 'object' && Object.keys(o).some((k) => o[k] === undefined || hasUndef(o[k]));
     [zoned, zc, zp].forEach((g) => assert.ok(!hasUndef(g), 'Firestore: undefined 없음'));
+}
+
+// 2026-11-09 구역 회전
+{
+    const G2 = require(path.join(__dirname, '..', 'js', 'shared', 'grid-lines.js'));
+    const near = (a, b, m) => assert.ok(Math.abs(a - b) < 1e-6, `${m}: ${a} != ${b}`);
+    const ctx2 = { rot: 0, w: 1000, h: 1000 };
+    const z = G2.createZone({ id: 'z1', name: '구역', rect: { x1: 300, y1: 400, x2: 700, y2: 600 } });
+    const inner = G2.createGroup('col', { zoneId: 'z1' });
+    inner.lines.push({ id: 'l1', seq: 1, pts: [{ x: 500, y: 400 }, { x: 500, y: 600 }] });
+    const grid2 = { groups: [inner], zones: [z] };
+
+    // 돌리기 전: 가로로 긴 사각형
+    assert.strictEqual(G2.zoneAt(grid2, { x: 650, y: 500 }), z);
+    assert.strictEqual(G2.zoneAt(grid2, { x: 500, y: 680 }), null);
+
+    G2.rotateZone(grid2, z, 90);
+    assert.strictEqual(z.angle, 90);
+    assert.strictEqual(G2.zoneAt(grid2, { x: 500, y: 680 }), z, '돌리면 세로로 긴 범위');
+    assert.strictEqual(G2.zoneAt(grid2, { x: 650, y: 500 }), null, '돌리면 옆은 범위 밖');
+    near(inner.lines[0].pts[0].x, 600, '구역 안 선도 같이 돈다');
+    near(inner.lines[0].pts[0].y, 500, '구역 안 선도 같이 돈다');
+    near(inner.lines[0].pts[1].x, 400, '구역 안 선도 같이 돈다');
+    assert.strictEqual(inner.angle, -90, '새 선 각도도 따라간다');
+
+    // 모서리·테두리 판정은 돌아간 자리에서
+    const corner = G2.hitZone(grid2, { x: 600, y: 300 }, 5);
+    assert.ok(corner && corner.corner === 0, '왼위 모서리는 (600,300)으로 옮겨 감');
+    assert.strictEqual(G2.hitZone(grid2, { x: 300, y: 400 }, 5), null, '돌리기 전 모서리 자리는 안 잡힘');
+
+    // 모서리를 끌어도 맞은편 모서리는 그 자리
+    const handle = G2.zoneRotateHandle(z, 20);
+    near(handle.x, 620, '손잡이도 같이 돈다');
+    near(handle.y, 500, '손잡이도 같이 돈다');
+    const oppBefore = G2.zoneWorldPoint(z, { x: z.rect.x2, y: z.rect.y2 });
+    const rr = G2.resizeZoneCorner(z.rect, z.angle, 0, { x: 650, y: 250 });
+    const oppAfter = G2.zoneWorldPoint({ rect: rr, angle: z.angle }, { x: rr.x2, y: rr.y2 });
+    near(oppAfter.x, oppBefore.x, '맞은편 모서리 고정');
+    near(oppAfter.y, oppBefore.y, '맞은편 모서리 고정');
+
+    // 저장·복사·위치 지문
+    assert.strictEqual(G2.normalizeGrid(grid2).zones[0].angle, 90, '저장 형식 정리해도 각도 유지');
+    assert.strictEqual(G2.cloneGridForFloor(grid2).zones[0].angle, 90, '다른 층 복사에도 각도 유지');
+    const sigRot = G2.gridSignature(grid2);
+
+    // 돌린 구역 안에서 새 선은 돌린 경계까지
+    const ln = G2.makeLineThrough({ x: 500, y: 500 }, 'row', 90, ctx2, Object.assign({}, z.rect, { angle: 90 }));
+    near(Math.hypot(ln.pts[1].x - ln.pts[0].x, ln.pts[1].y - ln.pts[0].y), 400, '돌린 구역 긴 변 길이만큼');
+
+    // 0°로 되돌리면 선도 제자리, 각도 키 없음
+    G2.rotateZone(grid2, z, 0);
+    assert.ok(!('angle' in z), '0°면 예전 모양');
+    near(inner.lines[0].pts[0].x, 500, '되돌리면 선도 제자리');
+    near(inner.lines[0].pts[0].y, 400, '되돌리면 선도 제자리');
+    assert.notStrictEqual(sigRot, G2.gridSignature(grid2), '돌리면 위치를 다시 계산하도록 지문이 달라진다');
+
+    // 구역 밖 선은 안 돈다
+    const outer = G2.createGroup('row', {});
+    outer.lines.push({ id: 'o1', seq: 1, pts: [{ x: 0, y: 10 }, { x: 1000, y: 10 }] });
+    grid2.groups.push(outer);
+    G2.rotateZone(grid2, z, 30);
+    near(outer.lines[0].pts[0].y, 10, '구역 밖 선은 그대로');
+    assert.strictEqual(G2.lineAngleFromZoneAngle(120), -60);
 }
 
 console.log('test-grid-lines: OK');

@@ -216,12 +216,89 @@
         };
         const fl = String(z.floorLabel == null ? '' : z.floorLabel).trim();
         if (fl) out.floorLabel = fl;
+        const ang = normalizeZoneAngle(z.angle);
+        if (ang) out.angle = ang; // 돌리지 않은 구역은 예전 모양 그대로(키 없음)
         return out;
     }
 
     function createZone(opts) {
         const o = opts || {};
-        return normalizeZone({ id: o.id || uid('gz'), name: o.name, floorLabel: o.floorLabel, rect: o.rect });
+        return normalizeZone({ id: o.id || uid('gz'), name: o.name, floorLabel: o.floorLabel, rect: o.rect, angle: o.angle });
+    }
+
+    // 2026-11-09 구역 회전: rect는 돌리기 전 사각형, angle(도, 화면 시계 방향)은 사각형 가운데를 중심으로 돌린 각도.
+    /** -180 초과 ~ 180 이하로 */
+    function normalizeZoneAngle(v) {
+        const n = num(v, 0);
+        let a = ((n % 360) + 360) % 360;
+        if (a > 180) a -= 360;
+        return Math.round(a * 100) / 100 || 0;
+    }
+
+    function rectCenter(r) {
+        return { x: (r.x1 + r.x2) / 2, y: (r.y1 + r.y2) / 2 };
+    }
+
+    function rotatePointDeg(p, c, deg) {
+        const rad = num(deg, 0) * Math.PI / 180;
+        const cos = Math.cos(rad);
+        const sin = Math.sin(rad);
+        const dx = p.x - c.x;
+        const dy = p.y - c.y;
+        return { x: c.x + dx * cos - dy * sin, y: c.y + dx * sin + dy * cos };
+    }
+
+    /** 도면 위 점 → 돌리기 전 사각형 기준 점 */
+    function zoneLocalPoint(z, p) {
+        return (z && z.angle) ? rotatePointDeg(p, rectCenter(z.rect), -z.angle) : p;
+    }
+
+    /** 돌리기 전 사각형 기준 점 → 도면 위 점 */
+    function zoneWorldPoint(z, p) {
+        return (z && z.angle) ? rotatePointDeg(p, rectCenter(z.rect), z.angle) : p;
+    }
+
+    /** 선 방향으로 쓰는 각도(180° 돌려도 같은 선) → -90 이상 90 미만 */
+    function lineAngleFromZoneAngle(deg) {
+        const a = (((num(deg, 0) + 90) % 180) + 180) % 180 - 90;
+        return Math.round(a * 100) / 100 || 0;
+    }
+
+    /** 구역을 angleDeg로 돌린다 — 구역에 속한 선도 같이 돌고, 새로 긋는 선 각도도 따라간다. 돌린 양(도) 반환 */
+    function rotateZone(grid, zone, angleDeg) {
+        if (!zone || !zone.rect) return 0;
+        const next = normalizeZoneAngle(angleDeg);
+        const delta = next - (zone.angle || 0);
+        if (!delta) return 0;
+        const c = rectCenter(zone.rect);
+        ((grid && grid.groups) || []).forEach((g) => {
+            if (g.zoneId !== zone.id) return;
+            (g.lines || []).forEach((ln) => {
+                ln.pts = (ln.pts || []).map((p) => rotatePointDeg(p, c, delta));
+            });
+            g.angle = lineAngleFromZoneAngle(num(g.angle, 0) + delta);
+        });
+        if (next) zone.angle = next; else delete zone.angle;
+        return delta;
+    }
+
+    /** 고른 구역의 회전 손잡이(윗변 가운데에서 dist만큼 위) 위치 */
+    function zoneRotateHandle(z, dist) {
+        const r = z.rect;
+        return zoneWorldPoint(z, { x: (r.x1 + r.x2) / 2, y: r.y1 - dist });
+    }
+
+    /** 돌린 구역도 맞은편 모서리는 도면 위 그 자리에 그대로 둔다 */
+    function resizeZoneCorner(rect, angleDeg, corner, p) {
+        if (!angleDeg) return resizeRectCorner(rect, corner, p);
+        const zone = { rect, angle: angleDeg };
+        const cs = [{ x: rect.x1, y: rect.y1 }, { x: rect.x2, y: rect.y1 }, { x: rect.x2, y: rect.y2 }, { x: rect.x1, y: rect.y2 }];
+        const opp = zoneWorldPoint(zone, cs[(((Number(corner) || 0) % 4) + 6) % 4]);
+        const c = { x: (opp.x + p.x) / 2, y: (opp.y + p.y) / 2 };
+        const v = rotatePointDeg(p, c, -angleDeg);
+        const hw = Math.abs(v.x - c.x);
+        const hh = Math.abs(v.y - c.y);
+        return { x1: c.x - hw, y1: c.y - hh, x2: c.x + hw, y2: c.y + hh };
     }
 
     function findZone(grid, id) {
@@ -238,7 +315,7 @@
         let best = null;
         let bestA = Infinity;
         ((grid && grid.zones) || []).forEach((z) => {
-            if (!z || !z.rect || !rectContains(z.rect, p)) return;
+            if (!z || !z.rect || !rectContains(z.rect, zoneLocalPoint(z, p))) return;
             const a = (z.rect.x2 - z.rect.x1) * (z.rect.y2 - z.rect.y1);
             if (a < bestA) {
                 best = z;
@@ -265,10 +342,11 @@
     }
 
     /** 구역 모서리(corner 0~3: 왼위·오른위·오른아래·왼아래) 또는 테두리(corner null) 누름 */
-    function hitZone(grid, p, tol) {
+    function hitZone(grid, pImg, tol) {
         let best = null;
         ((grid && grid.zones) || []).forEach((z) => {
             const r = z.rect;
+            const p = zoneLocalPoint(z, pImg); // 돌린 구역은 돌리기 전 사각형에서 판정
             [[r.x1, r.y1], [r.x2, r.y1], [r.x2, r.y2], [r.x1, r.y2]].forEach(([x, y], i) => {
                 const d = Math.hypot(p.x - x, p.y - y);
                 if (d <= tol * 1.5 && (!best || best.corner == null || d < best.dist)) best = { zoneId: z.id, corner: i, dist: d };
@@ -643,7 +721,7 @@
         const grid = normalizeGrid(rawGrid);
         const parts = [];
         const zones = grid.zones || [];
-        zones.forEach((z) => parts.push(`z|${roundPts([{ x: z.rect.x1, y: z.rect.y1 }, { x: z.rect.x2, y: z.rect.y2 }])}`));
+        zones.forEach((z) => parts.push(`z|${roundPts([{ x: z.rect.x1, y: z.rect.y1 }, { x: z.rect.x2, y: z.rect.y2 }])}${z.angle ? `|a${z.angle}` : ''}`));
         (grid.groups || []).forEach((g) => {
             // 번호 방식은 글자일 때만 붙임(숫자 그룹 지문은 예전과 같아 저장된 위치를 다시 계산하지 않음)
             parts.push(`g${g.axis}|${g.prefix}|${g.start}|${g.band}${g.zoneId ? `|z${zones.findIndex((z) => z.id === g.zoneId)}` : ''}${g.numbering ? `|n${g.numbering}` : ''}${g.reverse ? '|r' : ''}${normalizeSkip(g.skip).length ? `|s${normalizeSkip(g.skip).join('.')}` : ''}`);
@@ -897,7 +975,7 @@
 
     // ---- 편집 ----
     /** 점 p를 지나는 선(화면 각도 angle)을 도면 경계까지 */
-    /** bounds(선택): 구역 사각형 { x1, y1, x2, y2 } — 주면 도면 경계 대신 구역 경계까지 */
+    /** bounds(선택): 구역 사각형 { x1, y1, x2, y2, angle? } — 주면 도면 경계 대신 구역 경계까지(angle이 있으면 돌린 사각형 경계) */
     function makeLineThrough(pImg, axis, angleDeg, ctx, bounds) {
         const dDisp = dirFromAngle(axis, angleDeg);
         const d = norm(vecToImage(dDisp, ctx.rot));
@@ -906,9 +984,13 @@
             : { x1: 0, y1: 0, x2: ctx.w, y2: ctx.h };
         const w = bx.x2 - bx.x1;
         const h = bx.y2 - bx.y1;
+        // 돌린 구역: 점·방향을 돌리기 전 사각형 기준으로 옮겨 자른다(회전은 길이를 안 바꾸므로 t는 그대로 쓴다)
+        const clipAngle = bounds ? num(bounds.angle, 0) : 0;
+        const clipP = clipAngle ? rotatePointDeg(pImg, rectCenter(bx), -clipAngle) : pImg;
+        const clipD = clipAngle ? rotatePointDeg(d, { x: 0, y: 0 }, -clipAngle) : d;
         let t0 = -Infinity;
         let t1 = Infinity;
-        [[pImg.x, d.x, bx.x1, bx.x2], [pImg.y, d.y, bx.y1, bx.y2]].forEach(([p0, dv, lo, hi]) => {
+        [[clipP.x, clipD.x, bx.x1, bx.x2], [clipP.y, clipD.y, bx.y1, bx.y2]].forEach(([p0, dv, lo, hi]) => {
             if (Math.abs(dv) < 1e-9) return;
             const a = (lo - p0) / dv;
             const b = (hi - p0) / dv;
@@ -1160,6 +1242,7 @@
         const zones = (src.zones || []).map((z) => {
             const nz = { id: uid('gz'), name: z.name, rect: { x1: z.rect.x1, y1: z.rect.y1, x2: z.rect.x2, y2: z.rect.y2 } };
             if (z.floorLabel) nz.floorLabel = z.floorLabel;
+            if (z.angle) nz.angle = z.angle;
             zoneMap[z.id] = nz.id;
             return nz;
         });
@@ -1276,7 +1359,14 @@
         restrictGridToZone,
         hitZone,
         moveRect,
-        resizeRectCorner
+        resizeRectCorner,
+        resizeZoneCorner,
+        rotateZone,
+        zoneRotateHandle,
+        zoneLocalPoint,
+        zoneWorldPoint,
+        rectCenter,
+        lineAngleFromZoneAngle
     };
     root.BSA = root.BSA || {};
     root.BSA.gridLines = api;

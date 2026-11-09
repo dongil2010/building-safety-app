@@ -41850,7 +41850,7 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
         });
     }
 
-// @@app-part 10-marking.js sha=1252eaa03b75 — 원본은 app/10-marking.js (여기 말고 거기서 고칠 것)
+// @@app-part 10-marking.js sha=82d826b63815 — 원본은 app/10-marking.js (여기 말고 거기서 고칠 것)
     // --- 9. BUTTON CONTROLS & LISTENERS ---
 
     // Main Navigation Tabs Click Listener
@@ -42970,6 +42970,13 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
         return f;
     }
 
+    /** 돌린 구역에 새로 만드는 그룹의 선 각도 */
+    function gridZoneLineAngle(grid, zoneId) {
+        const G = gridLib();
+        const z = zoneId ? G.findZone(grid, zoneId) : null;
+        return (z && z.angle) ? G.lineAngleFromZoneAngle(z.angle) : 0;
+    }
+
     /** 이 축·이 구역(zoneId, null = 구역 밖)의 그룹 — 없으면 새로(구역마다 번호 따로: 머리글 기본값·시작 1) */
     function gridEnsureGroup(grid, axis, zoneId) {
         const G = gridLib();
@@ -42986,8 +42993,8 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
             // 새 구역: 번호는 1부터 따로. 같은 축 다른 그룹이 글자 번호(a, b …)면 번호 방식·머리글을 이어받음
             const tpl = (grid.groups || []).find((x) => x.axis === axis && x.numbering);
             g = G.createGroup(axis, tpl
-                ? { band: G.defaultBand(c.w, c.h), zoneId: zid, numbering: tpl.numbering, prefix: tpl.prefix }
-                : { band: G.defaultBand(c.w, c.h), zoneId: zid });
+                ? { band: G.defaultBand(c.w, c.h), zoneId: zid, numbering: tpl.numbering, prefix: tpl.prefix, angle: gridZoneLineAngle(grid, zid) }
+                : { band: G.defaultBand(c.w, c.h), zoneId: zid, angle: gridZoneLineAngle(grid, zid) });
             grid.groups.push(g);
         }
         ge.activeGroup[axis] = g.id;
@@ -43002,7 +43009,7 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
         const zone = G.zoneAt(grid, p);
         gridEditState().zoneId = zone ? zone.id : null;
         const g = gridEnsureGroup(grid, axis, zone ? zone.id : null);
-        const ln = G.makeLineThrough(p, axis, g.angle, getGridCtx(), zone ? zone.rect : null);
+        const ln = G.makeLineThrough(p, axis, g.angle, getGridCtx(), zone ? Object.assign({}, zone.rect, { angle: zone.angle || 0 }) : null);
         G.addLineToGroup(g, ln); // 번호 = 그은 순서(먼저 그은 선이 작은 번호)
         gridSelectLine(grid, ln.id, null);
         gridEditState().lastAddAt = Date.now();
@@ -43030,6 +43037,30 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
                 }
             }
             renderGridPanel();
+        }
+        // 고른 구역의 회전 손잡이가 선·테두리보다 먼저
+        if ((ge.tool === 'select' || ge.tool === 'zone') && ge.zoneId) {
+            const rz = G.findZone(grid, ge.zoneId);
+            if (rz) {
+                const hp = G.zoneRotateHandle(rz, GRID_ZONE_HANDLE_PX / (state.view.scale || 1));
+                if (Math.hypot(p.x - hp.x, p.y - hp.y) <= tol * 1.5) {
+                    const c = G.rectCenter(rz.rect);
+                    ge.sel = null;
+                    gridStartDrag({
+                        kind: 'zoneRotate',
+                        zoneId: rz.id,
+                        center: c,
+                        startAngle: rz.angle || 0,
+                        startPointer: Math.atan2(p.y - c.y, p.x - c.x),
+                        clientX,
+                        clientY,
+                        isTouch
+                    });
+                    renderGridPanel();
+                    drawCanvas();
+                    return;
+                }
+            }
         }
         const hit = G.hitTest(grid, p, tol);
         // 구역: 「선택·이동」·「구역」 도구에서만 모서리(크기)·테두리(옮기기)를 끔. 선 꼭짓점이 먼저
@@ -43092,13 +43123,24 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
             if (typeof updateMapZoomOverlay === 'function') updateMapZoomOverlay();
             return;
         }
+        if (d.kind === 'zoneRotate') {
+            const rg = getCurrentFloorGrid(true);
+            const rz = G.findZone(rg, d.zoneId);
+            if (rz) {
+                const q = clientToImgCoords(clientX, clientY);
+                const deg = d.startAngle + (Math.atan2(q.y - d.center.y, q.x - d.center.x) - d.startPointer) * 180 / Math.PI;
+                G.rotateZone(rg, rz, Math.round(deg * 2) / 2); // 0.5° 단위
+            }
+            drawCanvas();
+            return;
+        }
         if (d.kind === 'zoneNew' || d.kind === 'zoneCorner' || d.kind === 'zoneMove') {
             const zp = gridSnap(clientToImgCoords(clientX, clientY));
             if (d.kind === 'zoneNew') {
                 d.cur = zp;
             } else {
                 const z = G.findZone(getCurrentFloorGrid(true), d.zoneId);
-                if (z) z.rect = d.kind === 'zoneMove' ? G.moveRect(d.orig, zp.x - d.start.x, zp.y - d.start.y) : G.resizeRectCorner(d.orig, d.corner, zp);
+                if (z) z.rect = d.kind === 'zoneMove' ? G.moveRect(d.orig, zp.x - d.start.x, zp.y - d.start.y) : G.resizeZoneCorner(d.orig, z.angle || 0, d.corner, zp);
             }
             drawCanvas();
             return;
@@ -43479,6 +43521,9 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
                     <div class="grid-panel-row">
                         <label>이름 <input type="text" data-f="zname" value="${gridEsc(ez.name)}" maxlength="20" style="width:80px"></label>
                         <label>층 <input type="text" data-f="zfloor" value="${gridEsc(ez.floorLabel || '')}" placeholder="예: 2F" maxlength="12" style="width:56px" title="이 구역이 어느 층인지(저장만 — 위치 글자는 아직 안 바뀜)"></label>
+                    </div>
+                    <div class="grid-panel-row">
+                        <label title="구역과 구역 안의 선이 같이 돕니다. 도면의 구역 위 동그란 손잡이를 끌어도 됩니다">각도 <input type="number" data-f="zangle" value="${ez.angle || 0}" min="-180" max="180" step="0.5" style="width:60px">°</label>
                     </div>` : ''}`;
         const autoBody = `
                     <div class="grid-panel-row">
@@ -43611,7 +43656,7 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
             const zid = ez ? ez.id : null; // 고른 구역에 그룹 추가(구역마다 번호 따로)
             const same = grid.groups.filter((g) => g.axis === axis && (g.zoneId || null) === zid).length;
             const base = G.DEFAULT_PREFIX[axis];
-            const g = G.createGroup(axis, { prefix: same ? `${String.fromCharCode(65 + same)}${base}` : base, band: G.defaultBand(gctx.w, gctx.h), zoneId: zid });
+            const g = G.createGroup(axis, { prefix: same ? `${String.fromCharCode(65 + same)}${base}` : base, band: G.defaultBand(gctx.w, gctx.h), zoneId: zid, angle: gridZoneLineAngle(grid, zid) });
             grid.groups.push(g);
             ge.activeGroup[axis] = g.id;
             ge.editGroupId = g.id;
@@ -43884,6 +43929,11 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
                 renderGridPanel();
                 drawCanvas();
                 return;
+            }
+            case 'zangle': {
+                const z = G.findZone(grid, ge.zoneId);
+                if (z) G.rotateZone(grid, z, numOr(el.value, z.angle || 0));
+                break;
             }
             case 'zname': {
                 const z = G.findZone(grid, ge.zoneId);
@@ -44893,15 +44943,26 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
         return gridHasLines(grid) || !!(grid && (grid.zones || []).length);
     }
 
+    const GRID_ZONE_HANDLE_PX = 26; // 회전 손잡이 — 윗변에서 화면 픽셀만큼 위
+
     /** 구역 사각형·이름(설정 중에만). draft: 끌어 그리는 중인 새 사각형 */
     function drawGridZones(ctx, grid, draft) {
         const G = gridLib();
         const ge = gridEditState();
         const s = state.view.scale || 1;
         const rotRad = ((state.rotationAngle || 0) * Math.PI) / 180;
-        const drawRect = (r, sel, name) => {
+        const drawRect = (r, sel, name, zoneAngle) => {
             const w = r.x2 - r.x1;
             const h = r.y2 - r.y1;
+            const zoneRad = ((zoneAngle || 0) * Math.PI) / 180;
+            ctx.save();
+            if (zoneRad) {
+                const cx = (r.x1 + r.x2) / 2;
+                const cy = (r.y1 + r.y2) / 2;
+                ctx.translate(cx, cy);
+                ctx.rotate(zoneRad);
+                ctx.translate(-cx, -cy);
+            }
             ctx.setLineDash([8 / s, 5 / s]);
             ctx.lineWidth = (sel ? 2.4 : 1.6) / s;
             ctx.strokeStyle = sel ? '#7c3aed' : 'rgba(124, 58, 237, 0.75)';
@@ -44918,11 +44979,27 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
                     ctx.fillRect(x - hs, y - hs, hs * 2, hs * 2);
                     ctx.strokeRect(x - hs, y - hs, hs * 2, hs * 2);
                 });
+                if (name) { // 회전 손잡이(그리는 중인 새 사각형에는 없음)
+                    const mx = (r.x1 + r.x2) / 2;
+                    const hy = r.y1 - GRID_ZONE_HANDLE_PX / s;
+                    ctx.strokeStyle = '#7c3aed';
+                    ctx.lineWidth = 1.4 / s;
+                    ctx.beginPath();
+                    ctx.moveTo(mx, r.y1);
+                    ctx.lineTo(mx, hy);
+                    ctx.stroke();
+                    ctx.beginPath();
+                    ctx.arc(mx, hy, 6 / s, 0, Math.PI * 2);
+                    ctx.fillStyle = '#7c3aed';
+                    ctx.fill();
+                    ctx.strokeStyle = '#ffffff';
+                    ctx.stroke();
+                }
             }
             if (name) {
                 ctx.save();
                 ctx.translate(r.x1, r.y1);
-                ctx.rotate(-rotRad);
+                ctx.rotate(-rotRad - zoneRad); // 구역을 돌려도 이름은 똑바로
                 const fontPx = 12 / s;
                 ctx.font = `700 ${fontPx}px "Pretendard", "Malgun Gothic", "맑은 고딕", sans-serif`;
                 const tw = ctx.measureText(name).width;
@@ -44935,10 +45012,11 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
                 ctx.fillText(name, pad * 2, pad * 2);
                 ctx.restore();
             }
+            ctx.restore();
         };
         ctx.save();
         ((grid && grid.zones) || []).forEach((z) => {
-            if (z && z.rect) drawRect(z.rect, z.id === ge.zoneId, `${z.name}${z.floorLabel ? ` (${z.floorLabel})` : ''}`);
+            if (z && z.rect) drawRect(z.rect, z.id === ge.zoneId, `${z.name}${z.floorLabel ? ` (${z.floorLabel})` : ''}`, z.angle || 0);
         });
         if (draft && G) drawRect(G.rectFromPoints(draft.start, draft.cur), true, '');
         ctx.restore();
@@ -44964,6 +45042,7 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
         let z = ge.zoneRedrawId ? G.findZone(grid, ge.zoneRedrawId) : null;
         if (z) {
             z.rect = rect;
+            delete z.angle; // 새로 끌어 그린 범위는 돌리지 않은 사각형
             window.showToast?.(`구역 「${z.name}」 범위를 다시 그렸습니다.`, 'success', 2000);
         } else {
             z = G.createZone({ name: `구역 ${grid.zones.length + 1}`, rect });
