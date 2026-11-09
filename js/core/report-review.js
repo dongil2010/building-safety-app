@@ -84,6 +84,16 @@
         return !/균열|누수|백태|박락|박리|철근|들뜸|파손|처짐|이격|부식|탈락|파취|변형|재료분리|곰보/.test(rest);
     }
 
+    /**
+     * 2026-11-10 조적·블록·ALC·벽돌 벽체인데 구조체(사용자: 검토에서 조적벽체가 구조체로 된 것을 잡기).
+     * 통계 탭 「입력 확인」(js/core/defect-lint.js isMasonryName)과 같은 판정 — 보도블록·점자블록·경계석·포장·바닥은 뺀다.
+     */
+    function isMasonryStructural(r) {
+        if (!r || trim(r.category) !== '구조체') return false;
+        var comp = squash(r.component);
+        return /조적|ALC|블록|블럭|벽돌/i.test(comp) && !/보도|점자|경계|포장|바닥/.test(comp);
+    }
+
     function push(out, r, level, rule, msg, extra) {
         var it = { level: level, rule: rule, floorCode: r.floorCode || '', floorLabel: r.floorLabel || r.floorCode || '', no: s(r.no), id: r.id || '', msg: msg };
         if (extra) it.fix = extra;   // 2026-11-08 표기 통일 단추용 { field, from, to, fromCount, toCount }
@@ -185,7 +195,8 @@
             // 한글 조사표 「비구조부재」 ○와 보고서 요약 분류가 이 체크를 그대로 따른다.
             var structMember = structuralMemberOf(r);
             if (structMember) push(out, r, 'warn', 'struct-member-nonstructural', '구조 부재(' + structMember + ')인데 비구조체로 체크되어 있습니다 — 한글 조사표·보고서 요약에 비구조체로 나갑니다.');
-            if (isPlasterOnlyStructural(r)) push(out, r, 'warn', 'plaster-structural', '미장 결함인데 구조체로 체크되어 있습니다 — 미장은 대부분 비구조체입니다. 맞는지 확인하세요.');
+            if (isMasonryStructural(r)) push(out, r, 'warn', 'masonry-structural', '조적·블록·ALC 벽체(「' + trim(r.component) + '」)인데 구조체로 체크되어 있습니다 — 한글 조사표·보고서 요약에 구조체로 나갑니다. 비구조체로 바꿔 주세요.');
+            else if (isPlasterOnlyStructural(r)) push(out, r, 'warn', 'plaster-structural', '미장 결함인데 구조체로 체크되어 있습니다 — 미장은 대부분 비구조체입니다. 맞는지 확인하세요.');
             // 칸 섞임: 부재 칸에 결함 글(「슬래브 콘크리트 파취 및…」「철골보 이음부 상태양호」)
             var comp = trim(r.component);
             var cm = comp.match(/상태양호|보수완료|균열|파취|박락|박리|탈락|누수|들뜸|파손|녹\s?발생/);

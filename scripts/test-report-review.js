@@ -223,4 +223,23 @@ assert.ok(!pl({ component: '기둥', defectType: '수직균열' }));
 // 「균열, 미장균열」 슬래브는 구조체면 두 경고 다 없음, 비구조체면 구조 부재 경고
 assert.deepStrictEqual(rules([row({ component: '슬래브', defectType: '균열, 미장균열', category: '구조체', widths: [], crackLength: '' })]).filter((x) => x === SM || x === PL), []);
 
+// 2026-11-10 조적·블록·ALC 벽체인데 구조체(통계 탭 입력 확인과 같은 판정)
+const MS = 'masonry-structural';
+const ms = (o) => rules([row(Object.assign({ category: '구조체', defectType: '균열', widths: [], crackLength: '' }, o))]);
+assert.ok(ms({ component: '조적벽체' }).includes(MS));
+assert.ok(ms({ component: '조적 벽체' }).includes(MS), '띄어쓰기');
+assert.ok(ms({ component: 'ALC 벽체' }).includes(MS));
+assert.ok(ms({ component: '블럭벽체' }).includes(MS));
+assert.ok(ms({ component: '벽돌벽' }).includes(MS));
+assert.ok(ms({ component: '조적벽체', defectType: '조적벽체 상태양호', good: true, cause: '' }).includes(MS), '상태양호 행도 조사표 구분은 틀림');
+assert.ok(!ms({ component: '조적벽체', category: '비구조체' }).includes(MS));
+assert.ok(!ms({ component: 'RC벽체' }).includes(MS));
+assert.ok(!ms({ component: '보도블록' }).includes(MS), '보도블록은 벽체가 아님');
+assert.ok(!ms({ component: '경계블록' }).includes(MS));
+const msPl = ms({ component: '조적벽체', defectType: '미장균열' });
+assert.ok(msPl.includes(MS) && !msPl.includes(PL), '조적벽체 미장균열은 조적 경고 하나만');
+const msHit = R.reviewRows([row({ component: '조적벽체', category: '구조체', defectType: '균열', widths: [], crackLength: '' })]).find((x) => x.rule === MS);
+assert.strictEqual(msHit.level, 'warn');
+assert.ok(/조적벽체/.test(msHit.msg) && /비구조체로 바꿔/.test(msHit.msg));
+
 console.log('test-report-review: ok');

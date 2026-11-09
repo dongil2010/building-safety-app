@@ -35,6 +35,7 @@ vm.createContext(sandbox);
 vm.runInContext([
     extractFunction(statsSrc, 'function extractWidthFromSegment('),
     extractFunction(statsSrc, 'function isAreaSizeSegment('),
+    extractFunction(statsSrc, 'function measureMatchesAreaSegment('),
     extractFunction(statsSrc, 'function getCrackWidthNumbers('),
     extractFunction(statsSrc, 'function classifyCrackWidthBin('),
     'this.binOf = function (ws) { return classifyCrackWidthBin(ws); };',
@@ -122,7 +123,25 @@ assert.deepStrictEqual(mesh({ size: '1.5/3.0', crackMeasures: [{ width: '1.5', l
 assert.deepStrictEqual(mesh({ size: '1.5/3.0', crackWidth: '1.5', crackLength: '3.0' }), [1.5], '측정 행 없는 옛 데이터도 같다');
 assert.deepStrictEqual(mesh({ size: '1.5/3.0' }), [1.5], '규모 글자만 있는 데이터도 같다');
 assert.deepStrictEqual(mesh({ size: 'Cw:0.3', crackMeasures: [{ width: '0.3', length: '', join: '/' }] }), [0.3], '망상균열의 진짜 폭은 그대로');
-// 망상균열이 아닌 균열은 구분이 /로 저장돼 있으면 예전 그대로(규모 글자보다 저장된 구분을 따른다)
-assert.deepStrictEqual(widths({ defectType: '수직균열', size: '2.0x2.0', crackMeasures: [{ width: '2.0', length: '2.0', join: '/' }] }), [2]);
+// 2026-11-10 망상균열이 아니어도 규모 글자가 면적이면 뺀다(농협광주농산물종합유통센터 2층 NO.22 「균열 및 백태」)
+assert.deepStrictEqual(widths({ defectType: '수직균열', size: '2.0x2.0', crackMeasures: [{ width: '2.0', length: '2.0', join: '/' }] }), []);
+const efflo = (d) => widths(Object.assign({ defectType: '균열 및 백태' }, d));
+assert.deepStrictEqual(efflo({
+    size: '2.0x3.0', crackWidth: '2.0', crackLength: '3.0',
+    crackMeasures: [{ width: '2.0', length: '3.0', join: '/' }]
+}), [], '백태 범위(면적)만 적은 균열 및 백태는 폭 없음');
+assert.strictEqual(bin(efflo({ size: '2.0x3.0', crackMeasures: [{ width: '2.0', length: '3.0', join: '/' }] })), 'none');
+assert.deepStrictEqual(efflo({
+    size: 'Cw:0.3, 2.0x3.0', crackWidth: '0.3 / 2.0',
+    crackMeasures: [{ width: '0.3', length: '', join: '/' }, { width: '2.0', length: '3.0', join: '/' }]
+}), [0.3], '균열폭 행은 잡고 면적 행만 뺀다');
+assert.deepStrictEqual(efflo({
+    size: '0.2/1.5, 1.0x1.0', crackMeasures: [{ width: '0.2', length: '1.5', join: '/' }, { width: '1.0', length: '1.0', join: '/' }]
+}), [0.2]);
+assert.deepStrictEqual(efflo({ size: '0.3/2.0 -2EA', crackMeasures: [{ width: '0.3', length: '2.0', count: '2', join: '/' }] }), [0.3], '개수 붙은 폭/길이는 그대로');
+// 손으로 고쳐 규모 조각 수가 측정 행 수와 다를 때: 그 행의 폭·길이로 된 면적 조각만 뺀다
+assert.deepStrictEqual(efflo({
+    size: 'Cw:0.3 / 백태 2.0x3.0', crackMeasures: [{ width: '0.3', length: '', join: '/' }, { width: '2.0', length: '3.0', join: '/' }]
+}), [0.3], '규모 조각 수가 달라도 진짜 폭 행은 남긴다');
 
 console.log('test-stats-crack-width-area: ok');

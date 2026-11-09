@@ -1349,6 +1349,22 @@
     }
 
     /**
+     * 규모 글자 조각 수와 측정 행 수가 다를 때(손으로 고친 규모): 이 측정 행의 폭·길이 숫자로 된 면적 조각이 있는가.
+     * 예전엔 규모 글자 전체에 x가 하나라도 있으면 모든 행을 면적으로 봐서 진짜 폭 행까지 빠질 수 있었다.
+     */
+    function measureMatchesAreaSegment(m, sizeSegs) {
+        var w = parseFloat(String((m && m.width) || '').replace(/^\s*Cw\s*[:=]\s*/i, ''));
+        var l = parseFloat(String((m && m.length) || ''));
+        if (isNaN(w)) return false;
+        return (sizeSegs || []).some(function (seg) {
+            if (!isAreaSizeSegment(seg)) return false;
+            var mm = String(seg).match(/(\d+(?:\.\d+)?)\s*[x×*]\s*(\d+(?:\.\d+)?)/i);
+            if (!mm) return false;
+            return parseFloat(mm[1]) === w && (isNaN(l) || parseFloat(mm[2]) === l);
+        });
+    }
+
+    /**
      * 2026-10-08: 면적으로 적은 측정값(가로×세로, m)은 균열폭이 아니다. 망상균열·박락을 "2.0×2.0"으로
      * 적으면 crackWidth에 앞 숫자(2.0)가 그대로 들어가 최대 균열폭이 2.0mm로 찍혔다.
      * 측정 행(crackMeasures)의 구분(join 'x')으로 가르고, 구분이 없는 옛 데이터는 규모 글자의
@@ -1365,16 +1381,17 @@
         };
         var sizeSegs = String(d && d.size != null ? d.size : '').split(/\s*,\s*/).filter(Boolean);
         // 2026-11-08 사용자: 망상균열은 범위(가로×세로, m)로 적을 때가 있는데 그걸 균열폭으로 잡지 말 것.
-        // 규모 글자가 면적(2.0x2.0)이면 측정 구분이 '/'로 남아 있어도 면적으로 본다(망상균열만).
+        // 2026-11-10 망상균열만이 아니다 — 「균열 및 백태」처럼 백태 범위를 면적(2.0x2.0)으로 적은 행도 최대 균열폭·
+        // 균열폭 분류에 잡혔다(농협광주농산물종합유통센터 2층 NO.22). 규모 글자가 면적이면 결함 종류와 상관없이,
+        // 측정 구분이 '/'로 남아 있어도 면적으로 본다. 「폭/길이」 행은 규모 글자에 x가 안 생기므로(-2EA는 붙임표) 그대로 센다.
         // 「폭/길이」로 적은 값(1.5/3.0 등)은 숫자가 커도 그대로 폭으로 센다(사용자: 면적으로 잡힌 것만 뺄 것).
-        var mesh = /망상/.test(String(d && d.defectType != null ? d.defectType : ''));
         var measures = d && Array.isArray(d.crackMeasures) ? d.crackMeasures : null;
         if (measures && measures.length) {
+            var aligned = sizeSegs.length === measures.length;
             return measures.map(function (m, i) {
                 if (!m) return null;
-                var seg = sizeSegs.length === measures.length ? sizeSegs[i] : sizeSegs.join(',');
                 var area = m.join === 'x'
-                    || ((m.join !== '/' || mesh) && isAreaSizeSegment(seg));
+                    || (aligned ? isAreaSizeSegment(sizeSegs[i]) : measureMatchesAreaSegment(m, sizeSegs));
                 if (area) return null;
                 return toNum(m.width);
             }).filter(function (n) { return n != null; });
