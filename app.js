@@ -35282,7 +35282,7 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
         }
     }
 
-// @@app-part 09-settings-input-camera.js sha=c34ed7d71862 — 원본은 app/09-settings-input-camera.js (여기 말고 거기서 고칠 것)
+// @@app-part 09-settings-input-camera.js sha=aee8f4680f84 — 원본은 app/09-settings-input-camera.js (여기 말고 거기서 고칠 것)
     // --- 카테고리별 핀/박스 색상 설정 모달 ---
     // 결함 색상은 getDefectColor()가 쓰는 등급·상태 키와 맞춰야 도면에 바로 반영됨
     const STYLE_COLOR_FIELDS = [
@@ -39311,7 +39311,10 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
         let photoHydratePromise = Promise.resolve();
         if (existingPin) {
             if (pinIdEl) pinIdEl.value = existingPin.id;
-            if (noEl) noEl.value = existingPin.no || 'NO.01';
+            if (noEl) {
+                noEl.value = existingPin.no || 'NO.01';
+                noEl.dataset.autoNo = '';
+            }
             if (catEl) catEl.value = existingPin.category === '' ? '' : resolveDefectCategory(existingPin.category);
             const compCatExisting = existingPin.category === '' ? '' : resolveDefectCategory(existingPin.category);
             // 저장된 부재가 비어 있으면 공란 유지(과거처럼 기둥으로 채우지 않음)
@@ -39413,7 +39416,11 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
                 || (pendingGrp && pendingGrp.groupId ? pendingGrp : null);
 
             if (pinIdEl) pinIdEl.value = '';
-            if (noEl) noEl.value = (tmpl && tmpl.groupId) ? (tmpl.groupNo || defectNoStr) : defectNoStr;
+            if (noEl) {
+                noEl.value = (tmpl && tmpl.groupId) ? (tmpl.groupNo || defectNoStr) : defectNoStr;
+                // 외부 면을 서버에서 늦게 받아 오면 이 값 그대로일 때만 다시 매긴다(refreshNewDefectAutoNo)
+                noEl.dataset.autoNo = (tmpl && tmpl.groupId) ? '' : defectNoStr;
+            }
             const defaultCat = tmpl ? inheritDefectCategory(tmpl) : '';
             if (catEl) catEl.value = defaultCat;
             populateDefectComponentDropdown(defaultCat, tmpl ? (memberNameOut(tmpl.component) || '') : '');
@@ -62073,7 +62080,7 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
         btnDownloadImportTemplate.addEventListener('click', window.downloadImportDefectExcelTemplate);
     }
 
-// @@app-part 15-firebase-sync.js sha=36358462157c — 원본은 app/15-firebase-sync.js (여기 말고 거기서 고칠 것)
+// @@app-part 15-firebase-sync.js sha=4d6a67cf5ac9 — 원본은 app/15-firebase-sync.js (여기 말고 거기서 고칠 것)
     // ==========================================================================
     // 🌐 FIREBASE REALTIME SYNC ENGINE (구글 파이어베이스 실시간 1초 동기화)
     // ==========================================================================
@@ -67006,8 +67013,44 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
             }
         }, onFloorErr);
         currentFloorUnsubs.push(unsub);
+        pullExteriorPeerFloorsInBackground(bldg, floorCode);
     }
     window.subscribeCurrentFloorSync = subscribeCurrentFloorSync;
+
+    /** 외부 면을 열면 나머지 외부 면을 받아 번호 공간을 채운다(refreshExteriorPeerFloorsFromServer, 2026-11-09). */
+    function pullExteriorPeerFloorsInBackground(bldg, floorCode) {
+        if (typeof refreshExteriorPeerFloorsFromServer !== 'function' || !bldg || !floorCode) return;
+        const bldgId = bldg.id;
+        refreshExteriorPeerFloorsFromServer(bldg, floorCode).then((res) => {
+            if (!res || !res.merged) return;
+            if (window.state.currentBuildingId !== bldgId) return;
+            refreshNewDefectAutoNo();
+            const activeTab = (window.state && window.state.currentTab) || '';
+            if (activeTab === 'tab-map') {
+                if (typeof drawCanvas === 'function') drawCanvas();
+                if (typeof renderDefectListPanel === 'function') renderDefectListPanel();
+            } else if (activeTab === 'tab-survey') {
+                if (typeof renderSurveyTable === 'function') renderSurveyTable();
+            }
+        }).catch((e) => console.warn('[외부 번호] 다른 외부 면 받기 실패:', e));
+    }
+
+    /** 새 결함 창이 열려 있고 번호를 자동으로 채운 그대로면, 받아 온 외부 면까지 보고 다시 매긴다. */
+    function refreshNewDefectAutoNo() {
+        const noEl = document.getElementById('defectNo');
+        if (!noEl || !noEl.dataset.autoNo || noEl.value !== noEl.dataset.autoNo) return;
+        if (document.getElementById('defectPinId')?.value) return;
+        if (typeof getActiveMarkingGroup === 'function') {
+            const grp = getActiveMarkingGroup();
+            if (grp && grp.groupId) return;
+        }
+        const key = `${window.state.currentBuildingId}_${window.state.currentFloor}`;
+        const next = getNextDefectNoStr(getFloorDefectsForNumbering(key));
+        if (next === noEl.value) return;
+        noEl.value = next;
+        noEl.dataset.autoNo = next;
+        if (typeof drawCanvas === 'function') drawCanvas();
+    }
 
     /* ------------------------------------------------------------------
      * 일괄 작업 전 자동 백업 (1단계: 조사표 가져오기)
@@ -67495,7 +67538,7 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
         }
     };
 
-// @@app-part 16-backup-auth-init.js sha=f15ac7e5a5a6 — 원본은 app/16-backup-auth-init.js (여기 말고 거기서 고칠 것)
+// @@app-part 16-backup-auth-init.js sha=ea0dc18c36ec — 원본은 app/16-backup-auth-init.js (여기 말고 거기서 고칠 것)
     // ==========================================================================
     // 건물 백업(체크포인트) — 2026-09-27
     // safety_app/{회사}/buildingCheckpoints/{id}          요약 + 이 백업이 쓰는 사진 id(photoIds)
@@ -67642,6 +67685,56 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
         return { ok: !failed.length, skipped: null, failed };
     }
     window.refreshBuildingFloorsFromServer = refreshBuildingFloorsFromServer;
+
+    /**
+     * 2026-11-09 외부 면(정면·배면·좌측·우측…)은 상태조사표가 하나라 결함 번호도 한 공간이다
+     * (getFloorDefectsForNumbering). 그런데 동기화는 지금 보는 층만 서버에서 받아서, 이 기기에서
+     * 안 열어 본(또는 다른 사람이 찍은) 배면의 NO.01을 몰라 정면 새 결함이 또 NO.01이 됐다(영광군청 본관).
+     * 외부 면을 열면 나머지 외부 면을 서버에서 받아 합친다. 읽기만 하고, 이 기기의 안 올라간 수정은
+     * 동기화와 같은 합치기라 그대로 남는다.
+     * 반환: { ok, merged, skipped, failed }
+     */
+    const _exteriorPeersFreshAt = new Map();
+    const EXTERIOR_PEERS_FRESH_MS = 60 * 1000;
+    async function refreshExteriorPeerFloorsFromServer(bldg, currentCode, opts) {
+        const o = opts || {};
+        if (!bldg || !bldg.id) return { ok: false, merged: 0, skipped: 'nobuilding', failed: [] };
+        if (!db || !window.state.companyId) return { ok: false, merged: 0, skipped: 'nologin', failed: [] };
+        if (typeof navigator !== 'undefined' && navigator.onLine === false) return { ok: false, merged: 0, skipped: 'offline', failed: [] };
+        const labelOf = (code) => {
+            const f = (bldg.floorsList || []).find((x) => x && String(x.floorCode) === String(code));
+            return f ? (f.floorLabel || '') : undefined;
+        };
+        const isExt = (code) => typeof window.isExteriorFloorCode === 'function'
+            && !!window.isExteriorFloorCode(code, labelOf(code));
+        if (!isExt(currentCode)) return { ok: true, merged: 0, skipped: 'notexterior', failed: [] };
+        const codes = buildingFloorCodesForBackup(bldg).filter((c) => c !== currentCode && isExt(c));
+        if (!codes.length) return { ok: true, merged: 0, skipped: 'nopeers', failed: [] };
+        if (!o.force && Date.now() - (_exteriorPeersFreshAt.get(bldg.id) || 0) < EXTERIOR_PEERS_FRESH_MS) {
+            return { ok: true, merged: 0, skipped: 'recent', failed: [] };
+        }
+        for (let i = 0; i < 10 && (_syncInFlight || isRemoteSyncing); i++) {
+            await new Promise((r) => setTimeout(r, 500));
+        }
+        const failed = [];
+        let merged = 0;
+        await runPool(codes, FLOOR_READ_CONCURRENCY, async (code) => {
+            try {
+                const bundle = await readFloorBundleStrict(bldg, code);
+                if (bundle) {
+                    mergeFloorBundleIntoState(bldg, code, bundle);
+                    merged++;
+                }
+            } catch (e) {
+                console.warn(`[외부 번호] ${code} 면을 받지 못함:`, e);
+                failed.push(code);
+            }
+        });
+        if (merged && typeof saveStateToLocalStorage === 'function') saveStateToLocalStorage();
+        if (!failed.length) _exteriorPeersFreshAt.set(bldg.id, Date.now());
+        return { ok: !failed.length, merged, skipped: null, failed };
+    }
+    window.refreshExteriorPeerFloorsFromServer = refreshExteriorPeerFloorsFromServer;
 
     /**
      * 오프라인 준비(2026-10-07) — 이 건물의 모든 층을 미리 받아 IndexedDB에 둔다.

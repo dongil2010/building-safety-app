@@ -4027,7 +4027,10 @@
         let photoHydratePromise = Promise.resolve();
         if (existingPin) {
             if (pinIdEl) pinIdEl.value = existingPin.id;
-            if (noEl) noEl.value = existingPin.no || 'NO.01';
+            if (noEl) {
+                noEl.value = existingPin.no || 'NO.01';
+                noEl.dataset.autoNo = '';
+            }
             if (catEl) catEl.value = existingPin.category === '' ? '' : resolveDefectCategory(existingPin.category);
             const compCatExisting = existingPin.category === '' ? '' : resolveDefectCategory(existingPin.category);
             // 저장된 부재가 비어 있으면 공란 유지(과거처럼 기둥으로 채우지 않음)
@@ -4129,7 +4132,11 @@
                 || (pendingGrp && pendingGrp.groupId ? pendingGrp : null);
 
             if (pinIdEl) pinIdEl.value = '';
-            if (noEl) noEl.value = (tmpl && tmpl.groupId) ? (tmpl.groupNo || defectNoStr) : defectNoStr;
+            if (noEl) {
+                noEl.value = (tmpl && tmpl.groupId) ? (tmpl.groupNo || defectNoStr) : defectNoStr;
+                // 외부 면을 서버에서 늦게 받아 오면 이 값 그대로일 때만 다시 매긴다(refreshNewDefectAutoNo)
+                noEl.dataset.autoNo = (tmpl && tmpl.groupId) ? '' : defectNoStr;
+            }
             const defaultCat = tmpl ? inheritDefectCategory(tmpl) : '';
             if (catEl) catEl.value = defaultCat;
             populateDefectComponentDropdown(defaultCat, tmpl ? (memberNameOut(tmpl.component) || '') : '');

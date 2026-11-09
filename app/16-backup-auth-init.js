@@ -147,6 +147,56 @@
     window.refreshBuildingFloorsFromServer = refreshBuildingFloorsFromServer;
 
     /**
+     * 2026-11-09 외부 면(정면·배면·좌측·우측…)은 상태조사표가 하나라 결함 번호도 한 공간이다
+     * (getFloorDefectsForNumbering). 그런데 동기화는 지금 보는 층만 서버에서 받아서, 이 기기에서
+     * 안 열어 본(또는 다른 사람이 찍은) 배면의 NO.01을 몰라 정면 새 결함이 또 NO.01이 됐다(영광군청 본관).
+     * 외부 면을 열면 나머지 외부 면을 서버에서 받아 합친다. 읽기만 하고, 이 기기의 안 올라간 수정은
+     * 동기화와 같은 합치기라 그대로 남는다.
+     * 반환: { ok, merged, skipped, failed }
+     */
+    const _exteriorPeersFreshAt = new Map();
+    const EXTERIOR_PEERS_FRESH_MS = 60 * 1000;
+    async function refreshExteriorPeerFloorsFromServer(bldg, currentCode, opts) {
+        const o = opts || {};
+        if (!bldg || !bldg.id) return { ok: false, merged: 0, skipped: 'nobuilding', failed: [] };
+        if (!db || !window.state.companyId) return { ok: false, merged: 0, skipped: 'nologin', failed: [] };
+        if (typeof navigator !== 'undefined' && navigator.onLine === false) return { ok: false, merged: 0, skipped: 'offline', failed: [] };
+        const labelOf = (code) => {
+            const f = (bldg.floorsList || []).find((x) => x && String(x.floorCode) === String(code));
+            return f ? (f.floorLabel || '') : undefined;
+        };
+        const isExt = (code) => typeof window.isExteriorFloorCode === 'function'
+            && !!window.isExteriorFloorCode(code, labelOf(code));
+        if (!isExt(currentCode)) return { ok: true, merged: 0, skipped: 'notexterior', failed: [] };
+        const codes = buildingFloorCodesForBackup(bldg).filter((c) => c !== currentCode && isExt(c));
+        if (!codes.length) return { ok: true, merged: 0, skipped: 'nopeers', failed: [] };
+        if (!o.force && Date.now() - (_exteriorPeersFreshAt.get(bldg.id) || 0) < EXTERIOR_PEERS_FRESH_MS) {
+            return { ok: true, merged: 0, skipped: 'recent', failed: [] };
+        }
+        for (let i = 0; i < 10 && (_syncInFlight || isRemoteSyncing); i++) {
+            await new Promise((r) => setTimeout(r, 500));
+        }
+        const failed = [];
+        let merged = 0;
+        await runPool(codes, FLOOR_READ_CONCURRENCY, async (code) => {
+            try {
+                const bundle = await readFloorBundleStrict(bldg, code);
+                if (bundle) {
+                    mergeFloorBundleIntoState(bldg, code, bundle);
+                    merged++;
+                }
+            } catch (e) {
+                console.warn(`[외부 번호] ${code} 면을 받지 못함:`, e);
+                failed.push(code);
+            }
+        });
+        if (merged && typeof saveStateToLocalStorage === 'function') saveStateToLocalStorage();
+        if (!failed.length) _exteriorPeersFreshAt.set(bldg.id, Date.now());
+        return { ok: !failed.length, merged, skipped: null, failed };
+    }
+    window.refreshExteriorPeerFloorsFromServer = refreshExteriorPeerFloorsFromServer;
+
+    /**
      * 오프라인 준비(2026-10-07) — 이 건물의 모든 층을 미리 받아 IndexedDB에 둔다.
      * 인터넷이 끊겨도 층 전환·도면·사진이 열리게. 서버에는 아무것도 쓰지 않는다(읽기만).
      *  1) 층 데이터: 층마다 묶음 1회 읽기 → 동기화와 같은 합치기(안 올라간 내 수정은 그대로)

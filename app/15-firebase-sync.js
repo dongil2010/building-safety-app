@@ -4931,8 +4931,44 @@
             }
         }, onFloorErr);
         currentFloorUnsubs.push(unsub);
+        pullExteriorPeerFloorsInBackground(bldg, floorCode);
     }
     window.subscribeCurrentFloorSync = subscribeCurrentFloorSync;
+
+    /** 외부 면을 열면 나머지 외부 면을 받아 번호 공간을 채운다(refreshExteriorPeerFloorsFromServer, 2026-11-09). */
+    function pullExteriorPeerFloorsInBackground(bldg, floorCode) {
+        if (typeof refreshExteriorPeerFloorsFromServer !== 'function' || !bldg || !floorCode) return;
+        const bldgId = bldg.id;
+        refreshExteriorPeerFloorsFromServer(bldg, floorCode).then((res) => {
+            if (!res || !res.merged) return;
+            if (window.state.currentBuildingId !== bldgId) return;
+            refreshNewDefectAutoNo();
+            const activeTab = (window.state && window.state.currentTab) || '';
+            if (activeTab === 'tab-map') {
+                if (typeof drawCanvas === 'function') drawCanvas();
+                if (typeof renderDefectListPanel === 'function') renderDefectListPanel();
+            } else if (activeTab === 'tab-survey') {
+                if (typeof renderSurveyTable === 'function') renderSurveyTable();
+            }
+        }).catch((e) => console.warn('[외부 번호] 다른 외부 면 받기 실패:', e));
+    }
+
+    /** 새 결함 창이 열려 있고 번호를 자동으로 채운 그대로면, 받아 온 외부 면까지 보고 다시 매긴다. */
+    function refreshNewDefectAutoNo() {
+        const noEl = document.getElementById('defectNo');
+        if (!noEl || !noEl.dataset.autoNo || noEl.value !== noEl.dataset.autoNo) return;
+        if (document.getElementById('defectPinId')?.value) return;
+        if (typeof getActiveMarkingGroup === 'function') {
+            const grp = getActiveMarkingGroup();
+            if (grp && grp.groupId) return;
+        }
+        const key = `${window.state.currentBuildingId}_${window.state.currentFloor}`;
+        const next = getNextDefectNoStr(getFloorDefectsForNumbering(key));
+        if (next === noEl.value) return;
+        noEl.value = next;
+        noEl.dataset.autoNo = next;
+        if (typeof drawCanvas === 'function') drawCanvas();
+    }
 
     /* ------------------------------------------------------------------
      * 일괄 작업 전 자동 백업 (1단계: 조사표 가져오기)
