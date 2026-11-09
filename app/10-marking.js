@@ -2603,7 +2603,9 @@
 
     /** 결함의 행·열 칸 이름(없으면 '') — 화면 표시용 */
     function getDefectGridLocText(d) {
-        return String((d && d.gridLoc) || '').trim();
+        const t = String((d && d.gridLoc) || '').trim();
+        const G = gridLib();
+        return (G && G.compactGridLoc) ? G.compactGridLoc(t) : t;
     }
     window.getDefectGridLocText = getDefectGridLocText;
 
@@ -2650,7 +2652,8 @@
             hint.className = 'defect-grid-loc-hint';
             locEl.insertAdjacentElement('afterend', hint);
         }
-        const t = String(text || '').trim();
+        const G = gridLib();
+        const t = (G && G.compactGridLoc) ? G.compactGridLoc(String(text || '').trim()) : String(text || '').trim();
         hint.textContent = t ? `행·열: ${t}` : '';
         hint.hidden = !t;
     }

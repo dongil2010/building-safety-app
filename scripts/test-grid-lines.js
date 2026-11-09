@@ -398,8 +398,8 @@ if (fs.existsSync(appPath)) {
     vm.createContext(sandbox);
     vm.runInContext(`${takeFn('getDefectGridRoomForReport')}\n${takeFn('surveyContentComponentText')}\n${takeFn('getReportSurveyRowValues')}\nthis.rowVals = getReportSurveyRowValues;`, sandbox);
     const locCell = (d) => sandbox.rowVals(d, { floorCode: '1F' }, false)[1];
-    assert.strictEqual(locCell({ location: '1F 거실', gridLoc: 'X1~X2/Y2' }), 'X1~X2/Y2\n거실', '한글/PDF: 행·열 다음 줄 실 이름');
-    assert.strictEqual(locCell({ location: '1F', gridLoc: 'X1~X2/Y2' }), 'X1~X2/Y2', '실 이름 없으면 행·열 한 줄');
+    assert.strictEqual(locCell({ location: '1F 거실', gridLoc: 'X1~X2/Y2' }), 'X1~2/Y2\n거실', '한글/PDF: 행·열 다음 줄 실 이름');
+    assert.strictEqual(locCell({ location: '1F', gridLoc: 'X1~X2/Y2' }), 'X1~2/Y2', '실 이름 없으면 행·열 한 줄');
     assert.strictEqual(locCell({ location: '1F 거실' }), '거실', '행·열 없으면 예전 그대로');
     assert.strictEqual(locCell({ location: '1F X2, Y3 거실', gridLocAuto: 'X2, Y3' }), 'X2, Y3\n거실', '예전 실험 데이터도 두 줄');
 
@@ -905,4 +905,19 @@ if (fs.existsSync(appPath)) {
     assert.ok(!('poly' in G3.createZone({ id: 'q', name: 'q', rect: { x1: 0, y1: 0, x2: 10, y2: 10 } })));
 }
 
+// 2026-11-06 행·열 표기: X01 → X1, X1~X2 → X1~2 (저장값은 그대로)
+{
+    const c = G.compactGridLoc;
+    assert.strictEqual(c('X01'), 'X1');
+    assert.strictEqual(c('X1~X2'), 'X1~2');
+    assert.strictEqual(c('X01~X02/Y1~Y10'), 'X1~2/Y1~10');
+    assert.strictEqual(c('X10'), 'X10', '뒤의 0은 그대로');
+    assert.strictEqual(c('x0~x1'), 'x0~1', '0번 선');
+    assert.strictEqual(c('~X01/Y7~'), '~X1/Y7~');
+    assert.strictEqual(c('A1~B2'), 'A1~B2', '머리글자가 다르면 그대로');
+    assert.strictEqual(c('x1~X3a'), 'x1~X3a');
+    assert.strictEqual(c('X1~X2/Y2, X3/Y1~Y2'), 'X1~2/Y2, X3/Y1~2', '묶음');
+    assert.strictEqual(c(''), '');
+    assert.strictEqual(G.reportLocationCell({ gridLoc: 'X01~X02/Y1', detail: '거실' }), 'X1~2/Y1\n거실', '한글·PDF 위치 칸');
+}
 console.log('test-grid-lines: OK');

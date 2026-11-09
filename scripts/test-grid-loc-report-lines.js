@@ -4,7 +4,7 @@
 /**
  * 2026-09-28 한글/PDF 위치 칸 행·열 줄나눔 회귀 테스트
  *  - 칸 폭(cellSz − 여백) ÷ 글자 크기(charPr height) × 0.92 = 한 줄 폭(em)
- *  - 들어가면 한 줄, 넘치면 '/' 뒤(여러 쌍이면 ', ' 뒤 먼저)에서 줄바꿈, 토큰(A1~A2) 중간은 안 자름
+ *  - 들어가면 한 줄, 넘치면 '/' 뒤(여러 쌍이면 ', ' 뒤 먼저)에서 줄바꿈, 토큰(A1~B2) 중간은 안 자름
  *  - 실 이름은 다음 줄, 빈 줄·중복 줄 없음
  *  - 한글 사진표 위치 칸도 같은 규칙(예전엔 d.location만 읽어서 행·열이 빈칸으로 나옴)
  */
@@ -33,12 +33,12 @@ assert.ok(Math.abs(G.gridLocTextEm('A1~/') - (0.62 + 0.55 * 3)) < 1e-9, '대문�
 
 // ---- 들어가면 한 줄 ----
 assert.deepStrictEqual(G.splitGridLocLines('X1~2/Y3', surveyUnits), ['X1~2/Y3'], '짧으면 한 줄');
-assert.deepStrictEqual(G.splitGridLocLines('A1~A2/Y1', surveyUnits), ['A1~A2/Y1']);
-assert.deepStrictEqual(G.splitGridLocLines('A1~A2/Y1~Y2', 0), ['A1~A2/Y1~Y2'], '폭 모르면 그대로');
+assert.deepStrictEqual(G.splitGridLocLines('A1~B2/Y1', surveyUnits), ['A1~B2/Y1']);
+assert.deepStrictEqual(G.splitGridLocLines('A1~B2/Y1~Z2', 0), ['A1~B2/Y1~Z2'], '폭 모르면 그대로');
 assert.deepStrictEqual(G.splitGridLocLines('', surveyUnits), []);
 
 // ---- 넘치면 '/' 뒤에서 ----
-assert.deepStrictEqual(G.splitGridLocLines('A1~A2/Y1~Y2', surveyUnits), ['A1~A2/', 'Y1~Y2'], "넘치면 '/' 뒤에서, '/'는 윗줄 끝");
+assert.deepStrictEqual(G.splitGridLocLines('A1~B2/Y1~Z2', surveyUnits), ['A1~B2/', 'Y1~Z2'], "넘치면 '/' 뒤에서, '/'는 윗줄 끝");
 assert.deepStrictEqual(G.splitGridLocLines('A12~A13/Y10~Y11', surveyUnits), ['A12~A13/', 'Y10~Y11']);
 assert.deepStrictEqual(G.splitGridLocLines('~X1/Y5', surveyUnits), ['~X1/Y5'], "바깥 범위 '~X1'도 한 토큰");
 // 토큰 하나가 폭보다 길어도 토큰 중간은 안 자름
@@ -46,12 +46,12 @@ assert.deepStrictEqual(G.splitGridLocLines('AB12~AB13/Y1', 3), ['AB12~AB13/', 'Y
 assert.deepStrictEqual(G.splitGridLocLines('AB12~AB13', 2), ['AB12~AB13'], "'/' 없으면 나누지 않음");
 
 // ---- 여러 쌍: ', ' 뒤 먼저 ----
-assert.deepStrictEqual(G.splitGridLocLines('A1~A2/Y1, A3/Y2~', surveyUnits), ['A1~A2/Y1,', 'A3/Y2~'], "쌍 사이(', ') 먼저, 쉼표는 윗줄 끝");
-assert.deepStrictEqual(G.splitGridLocLines('A1~A2/Y1~Y2, A3/Y4', surveyUnits), ['A1~A2/', 'Y1~Y2,', 'A3/Y4'], '혼자 넘치는 쌍만 / 뒤에서');
+assert.deepStrictEqual(G.splitGridLocLines('A1~B2/Y1, A3/Y2~', surveyUnits), ['A1~B2/Y1,', 'A3/Y2~'], "쌍 사이(', ') 먼저, 쉼표는 윗줄 끝");
+assert.deepStrictEqual(G.splitGridLocLines('A1~B2/Y1~Z2, A3/Y4', surveyUnits), ['A1~B2/', 'Y1~Z2,', 'A3/Y4'], '혼자 넘치는 쌍만 / 뒤에서');
 assert.deepStrictEqual(G.splitGridLocLines('A1/Y1, A2/Y2, A3/Y3', 9), ['A1/Y1, A2/Y2,', 'A3/Y3'], '들어가는 만큼 한 줄에');
 assert.deepStrictEqual(G.splitGridLocLines('A1/Y1, A2/Y2', photoUnits), ['A1/Y1, A2/Y2'], '넓은 칸은 한 줄');
 // 어느 결과에도 빈 줄 없음
-['A1~A2/Y1~Y2', 'A1~A2/Y1, A3/Y2~', 'A1/, /Y2', ' A1~A2 / Y1 '].forEach((s) => {
+['A1~B2/Y1~Z2', 'A1~B2/Y1, A3/Y2~', 'A1/, /Y2', ' A1~B2 / Y1 '].forEach((s) => {
     [1, 3, surveyUnits, 99].forEach((u) => {
         const lines = G.splitGridLocLines(s, u);
         assert.ok(lines.length >= 1 && lines.every((l) => l && l.trim() === l), `빈 줄 없음: ${s} @${u} → ${JSON.stringify(lines)}`);
@@ -62,17 +62,17 @@ assert.deepStrictEqual(G.splitGridLocLines('A1/Y1, A2/Y2', photoUnits), ['A1/Y1,
 // ---- 위치 칸 전체(행·열 + 실 이름) ----
 const cell = (gridLoc, detail, maxUnits) => G.reportLocationCell({ gridLoc, detail, maxUnits });
 assert.strictEqual(cell('X1~2/Y3', '거실', surveyUnits), 'X1~2/Y3\n거실', '한 줄 + 다음 줄 실 이름');
-assert.strictEqual(cell('A1~A2/Y1~Y2', '거실', surveyUnits), 'A1~A2/\nY1~Y2\n거실', '넘치면 / 뒤 + 실 이름 다음 줄');
-assert.strictEqual(cell('A1~A2/Y1~Y2', '', surveyUnits), 'A1~A2/\nY1~Y2', '실 이름 없음');
+assert.strictEqual(cell('A1~B2/Y1~Z2', '거실', surveyUnits), 'A1~B2/\nY1~Z2\n거실', '넘치면 / 뒤 + 실 이름 다음 줄');
+assert.strictEqual(cell('A1~B2/Y1~Z2', '', surveyUnits), 'A1~B2/\nY1~Z2', '실 이름 없음');
 assert.strictEqual(cell('', '거실', surveyUnits), '', '실 이름만 → 빈 값(부르는 쪽이 예전 출력)');
-assert.strictEqual(cell('A1~A2/Y1~Y2', '거실'), 'A1~A2/Y1~Y2\n거실', '폭을 안 주면 예전과 같음');
+assert.strictEqual(cell('A1~B2/Y1~Z2', '거실'), 'A1~B2/Y1~Z2\n거실', '폭을 안 주면 예전과 같음');
 assert.strictEqual(G.reportLocationCell({ detail: 'X2, Y3 거실', legacyAuto: 'X2, Y3', maxUnits: surveyUnits }), 'X2, Y3\n거실', '예전 실험 데이터');
 
 // 공용 한글 래퍼(fillCellParas)가 나눈 줄을 다시 쪼개거나 빈 줄을 만들지 않음 — 같은 최소 폭을 넘겨줌
 {
     const estimate = Math.max(4, Math.floor(4695 / Math.max(700, Math.round(800 * 0.95))));
     const maxChars = Math.max(estimate, surveyUnits);
-    ['A1~A2/\nY1~Y2\n거실', 'A1~A2/Y1,\nA3/Y2~\n거실', 'X1~2/Y3\n거실', 'A1~A2/\nY1~Y2'].forEach((txt) => {
+    ['A1~B2/\nY1~Z2\n거실', 'A1~B2/Y1,\nA3/Y2~\n거실', 'X1~2/Y3\n거실', 'A1~B2/\nY1~Z2'].forEach((txt) => {
         const out = KW.wrapHwpxCellText(txt, maxChars, KW.defaultCharWidthUnits);
         assert.strictEqual(out, txt, `래퍼가 줄 수를 바꾸지 않음: ${JSON.stringify(txt)} → ${JSON.stringify(out)}`);
     });
@@ -80,9 +80,9 @@ assert.strictEqual(G.reportLocationCell({ detail: 'X2, Y3 거실', legacyAuto: '
 
 // ---- PDF(HTML) 위치 칸 첫 줄 ----
 const esc = (s) => String(s).replace(/&/g, '&amp;').replace(/</g, '&lt;');
-assert.strictEqual(G.gridLocBreakableHtml('A1~A2/Y1~Y2', esc), '<span style="display:inline-block;">A1~A2/<wbr>Y1~Y2</span>');
-assert.strictEqual(G.gridLocBreakableHtml('A1~A2/Y1, A3/Y2~', esc),
-    '<span style="display:inline-block;">A1~A2/<wbr>Y1,</span> <span style="display:inline-block;">A3/<wbr>Y2~</span>');
+assert.strictEqual(G.gridLocBreakableHtml('A1~B2/Y1~Z2', esc), '<span style="display:inline-block;">A1~B2/<wbr>Y1~Z2</span>');
+assert.strictEqual(G.gridLocBreakableHtml('A1~B2/Y1, A3/Y2~', esc),
+    '<span style="display:inline-block;">A1~B2/<wbr>Y1,</span> <span style="display:inline-block;">A3/<wbr>Y2~</span>');
 assert.strictEqual(G.gridLocBreakableHtml('', esc), '');
 
 // ---- 앱 연결(한글 1·2종 내보내기) ----
@@ -110,10 +110,10 @@ assert.ok(!t12.includes("setTcText(capTcs[2], getSurveyCellText('location'"), '�
     vm.createContext(ctx);
     vm.runInContext(`${fn}\nthis.f = setHwpxPhotoLocText;`, ctx);
     const tc = { getElementsByTagNameNS: () => [] };
-    ctx.f(tc, { location: '', gridLoc: 'A1~A2/Y1~Y2' }, '1F');
+    ctx.f(tc, { location: '', gridLoc: 'A1~B2/Y1~Z2' }, '1F');
     ctx.f(tc, { location: '1F 거실', gridLoc: 'X1/Y2' }, '1F');
     ctx.f(tc, { location: '1F 거실' }, '1F');
-    assert.deepStrictEqual(written, [['A1~A2/\nY1~Y2', 3], ['X1/Y2\n거실', 3], ['1F 거실', 0]], '사진표 위치: 행·열(+실 이름), 없으면 예전 위치 그대로');
+    assert.deepStrictEqual(written, [['A1~B2/\nY1~Z2', 3], ['X1/Y2\n거실', 3], ['1F 거실', 0]], '사진표 위치: 행·열(+실 이름), 없으면 예전 위치 그대로');
 }
 // 3종 사진표는 위치 칸을 쓰지 않음(새 서식에는 칸이 없음) — 그대로
 const t3 = app.slice(app.indexOf('async function exportHwpxSurveyTable3('), app.indexOf('async function exportHwpxSurveyTable12('));

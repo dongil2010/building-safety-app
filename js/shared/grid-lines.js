@@ -971,6 +971,23 @@
             .trim();
     }
 
+    /**
+     * 2026-11-06 행·열 표기만 짧게: X01 → X1, X1~X2 → X1~2. 저장값은 그대로(바꾸면 전 마킹이 수정된 것으로 올라간다).
+     * 머리글자가 다른 범위(A1~B2)·글자가 붙은 이름(X3a)·숫자뿐인 범위(1~2)는 그대로.
+     */
+    function compactGridLoc(text) {
+        const trimZero = (name) => name.replace(/^([^\d~]*)0+(\d+)$/, '$1$2');
+        return String(text == null ? '' : text).replace(/[^,/\s]+/g, (seg) => {
+            const parts = seg.split('~');
+            if (parts.length !== 2) return trimZero(seg);
+            const a = trimZero(parts[0]);
+            const b = trimZero(parts[1]);
+            const ma = a.match(/^([^\d]+)(\d+)$/);
+            const mb = b.match(/^([^\d]+)(\d+)$/);
+            return (ma && mb && ma[1] === mb[1]) ? `${a}~${mb[2]}` : `${a}~${b}`;
+        });
+    }
+
     /** 위치 칸 두 줄: 행·열 → 다음 줄 실 이름. 하나만 있으면 한 줄 */
     // roomFirst: 실 이름 → 다음 줄 행·열 (2026-10-30 1·2종 한글 출력 요청)
     function formatLocationCell(grid, room, roomFirst) {
@@ -996,6 +1013,7 @@
             }
         }
         if (!grid) return '';
+        grid = compactGridLoc(grid);
         if (Number(x.maxUnits) > 0) grid = splitGridLocLines(grid, x.maxUnits, x.measure).join('\n');
         return formatLocationCell(grid, room, !!x.roomFirst);
     }
@@ -1474,6 +1492,7 @@
         gridLocTextEm,
         cellTextUnits,
         stripGridTextFromDetail,
+        compactGridLoc,
         splitGridLocLines,
         gridLocBreakableHtml,
         makeLineThrough,

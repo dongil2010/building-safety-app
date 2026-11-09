@@ -41865,7 +41865,7 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
         });
     }
 
-// @@app-part 10-marking.js sha=3344316481c2 — 원본은 app/10-marking.js (여기 말고 거기서 고칠 것)
+// @@app-part 10-marking.js sha=e57abe88e200 — 원본은 app/10-marking.js (여기 말고 거기서 고칠 것)
     // --- 9. BUTTON CONTROLS & LISTENERS ---
 
     // Main Navigation Tabs Click Listener
@@ -44470,7 +44470,9 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
 
     /** 결함의 행·열 칸 이름(없으면 '') — 화면 표시용 */
     function getDefectGridLocText(d) {
-        return String((d && d.gridLoc) || '').trim();
+        const t = String((d && d.gridLoc) || '').trim();
+        const G = gridLib();
+        return (G && G.compactGridLoc) ? G.compactGridLoc(t) : t;
     }
     window.getDefectGridLocText = getDefectGridLocText;
 
@@ -44517,7 +44519,8 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
             hint.className = 'defect-grid-loc-hint';
             locEl.insertAdjacentElement('afterend', hint);
         }
-        const t = String(text || '').trim();
+        const G = gridLib();
+        const t = (G && G.compactGridLoc) ? G.compactGridLoc(String(text || '').trim()) : String(text || '').trim();
         hint.textContent = t ? `행·열: ${t}` : '';
         hint.hidden = !t;
     }
