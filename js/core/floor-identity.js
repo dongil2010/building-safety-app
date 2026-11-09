@@ -330,7 +330,7 @@
         const map = {};
         const add = function (code, label) {
             const c = asText(code);
-            if (!c) return;
+            if (!c || c === 'ROUND_SKETCH_MEMO') return; // 회차 손글씨 메모 자리는 층이 아님
             if (!map[c]) {
                 map[c] = {
                     floorCode: c,

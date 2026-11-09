@@ -1,5 +1,5 @@
 // @@app-parts 자동 생성 파일 — 여기를 고치지 말고 app/ 조각을 고친 뒤 `node scripts/app-parts.js join` (CLAUDE.md 「app.js 조각」)
-// @@app-part 01-base.js sha=f7091ffa32ba — 원본은 app/01-base.js (여기 말고 거기서 고칠 것)
+// @@app-part 01-base.js sha=8f33d14fada1 — 원본은 app/01-base.js (여기 말고 거기서 고칠 것)
 /* ==========================================================================
    스마트 건축물 안전점검 현장점검 시스템 — UI 부트스트랩
    전역 상태·IndexedDB·이미지 헬퍼: js/core/state.js
@@ -2151,6 +2151,16 @@ document.addEventListener('DOMContentLoaded', () => {
     }
 
     function stripDeletedDrawingFloorsFromBuilding(bldg) {
+        if (bldg) {
+            // 2026-11-10 회차 손글씨 메모 자리가 층으로 잘못 기록된 흔적 정리(층 정보만 — 메모는 sketchMemos에 따로 있어 안 건드림)
+            const memoCode = 'ROUND_SKETCH_MEMO';
+            if (Array.isArray(bldg.floorsList)) bldg.floorsList = bldg.floorsList.filter((f) => !f || f.floorCode !== memoCode);
+            if (Array.isArray(bldg.drawingFloorCodes)) bldg.drawingFloorCodes = bldg.drawingFloorCodes.filter((c) => c !== memoCode);
+            if (Array.isArray(bldg.deletedDrawingFloorCodes)) bldg.deletedDrawingFloorCodes = bldg.deletedDrawingFloorCodes.filter((c) => c !== memoCode);
+            if (bldg.deletedDrawingFloorAt) delete bldg.deletedDrawingFloorAt[memoCode];
+            [bldg.floorDrawings, bldg.floorDrawingPdfs, bldg.floorDrawingTiers, bldg.floorDrawingSources].forEach((m) => { if (m) delete m[memoCode]; });
+            if (bldg.id && _sessionDeletedDrawingKeys) _sessionDeletedDrawingKeys.delete(`${bldg.id}_${memoCode}`);
+        }
         if (typeof _drawingFloorTombstone.stripDeletedDrawingFloorsFromBuilding === 'function') {
             _drawingFloorTombstone.stripDeletedDrawingFloorsFromBuilding(bldg, _sessionDeletedDrawingKeys);
         }
@@ -2232,6 +2242,7 @@ document.addEventListener('DOMContentLoaded', () => {
         Array.from(codes).forEach((fc) => {
             if (isDeletedDrawingFloor(bldg, fc)) codes.delete(fc);
         });
+        codes.delete('ROUND_SKETCH_MEMO'); // 회차 손글씨 메모 자리는 층이 아님
         return codes;
     }
 
@@ -2255,7 +2266,7 @@ document.addEventListener('DOMContentLoaded', () => {
         if (!bldg.floorsList) bldg.floorsList = [];
         const existing = new Set(bldg.floorsList.map((f) => f.floorCode));
         floorCodes.forEach((fc) => {
-            if (!fc || isDeletedDrawingFloor(bldg, fc) || existing.has(fc)) return;
+            if (!fc || fc === 'ROUND_SKETCH_MEMO' || isDeletedDrawingFloor(bldg, fc) || existing.has(fc)) return;
             existing.add(fc);
             const fi = window.BSA && window.BSA.floorIdentity;
             bldg.floorsList.push({
@@ -5621,7 +5632,7 @@ document.addEventListener('DOMContentLoaded', () => {
         }
     }
 
-// @@app-part 02-buildings.js sha=4d3866c68c7d — 원본은 app/02-buildings.js (여기 말고 거기서 고칠 것)
+// @@app-part 02-buildings.js sha=8cd86213fbee — 원본은 app/02-buildings.js (여기 말고 거기서 고칠 것)
     // --- 5. TAB MANAGER (진입 로직은 js/tabs/*.js) ---
     // ---- 마지막 작업 위치 기억·복원 (js/core/last-location.js, 2026-10-28) ----
     // 로그인 직후 복원 시도가 끝나기 전에는 기록·삭제를 하지 않는다(부팅 중 switchTab('tab-home')이 기록을 지우지 않게).
@@ -9655,6 +9666,8 @@ ${roundMobile ? '' : `<button type="button" class="icon-btn icon-btn-trash" titl
         if (!bldg || !floorCode) return;
         if (bldg.floorsList) bldg.floorsList = bldg.floorsList.filter((f) => f && f.floorCode !== floorCode);
         if (Array.isArray(bldg.drawingFloorCodes)) bldg.drawingFloorCodes = bldg.drawingFloorCodes.filter((c) => c !== floorCode);
+        const tiers = bldg.floorDrawingTiers && bldg.floorDrawingTiers[floorCode];
+        if (tiers && !Object.values(tiers).some(Boolean)) delete bldg.floorDrawingTiers[floorCode]; // 빈 칸이 남으면 층 목록이 바로 다시 읽는다
     }
 
     /** 방금 넣은 도면 중 서버에 못 올라간 층 이름 목록 */
@@ -62091,7 +62104,7 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
         btnDownloadImportTemplate.addEventListener('click', window.downloadImportDefectExcelTemplate);
     }
 
-// @@app-part 15-firebase-sync.js sha=c39e27c785c5 — 원본은 app/15-firebase-sync.js (여기 말고 거기서 고칠 것)
+// @@app-part 15-firebase-sync.js sha=bbf5fe8e5cfe — 원본은 app/15-firebase-sync.js (여기 말고 거기서 고칠 것)
     // ==========================================================================
     // 🌐 FIREBASE REALTIME SYNC ENGINE (구글 파이어베이스 실시간 1초 동기화)
     // ==========================================================================
@@ -66440,7 +66453,9 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
             }
         }
         const tiers = drawing.tiers;
-        if (tiers && typeof tiers === 'object') {
+        // 2026-11-10 받을 도면이 하나도 없으면 칸을 만들지 않는다. 빈 칸 {}도 층 목록에는 「이 층이 있다」로 읽혀
+        // 회차 손글씨 메모 자리(ROUND_SKETCH_MEMO)가 층으로 들어갔다가 「도면 없는 층」으로 빠지기를 반복했다.
+        if (tiers && typeof tiers === 'object' && Object.keys(tiers).some((dim) => isLightweightCloudPhotoRef(tiers[dim]))) {
             if (!bldg.floorDrawingTiers) bldg.floorDrawingTiers = {};
             if (!bldg.floorDrawingTiers[floorCode] || typeof bldg.floorDrawingTiers[floorCode] !== 'object') {
                 bldg.floorDrawingTiers[floorCode] = {};
@@ -66759,7 +66774,7 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
         const ndt = bundle.ndt || empty.ndt;
         if (typeof noteServerDefectIds === 'function') noteServerDefectIds(floorKey, markings.items || []);
         seedPhotoCacheFromUrlMap(bundle.photos && bundle.photos.urlsById);
-        applyFloorDrawingPayload(bldg, floorCode, bundle.drawing || empty.drawing);
+        if (floorCode !== 'ROUND_SKETCH_MEMO') applyFloorDrawingPayload(bldg, floorCode, bundle.drawing || empty.drawing); // 메모 자리는 층이 아님
         const defectMerge = mergeDefectsMaps(
             { [floorKey]: markings.items || [] },
             window.state.defects || {},

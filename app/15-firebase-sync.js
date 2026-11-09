@@ -4347,7 +4347,9 @@
             }
         }
         const tiers = drawing.tiers;
-        if (tiers && typeof tiers === 'object') {
+        // 2026-11-10 받을 도면이 하나도 없으면 칸을 만들지 않는다. 빈 칸 {}도 층 목록에는 「이 층이 있다」로 읽혀
+        // 회차 손글씨 메모 자리(ROUND_SKETCH_MEMO)가 층으로 들어갔다가 「도면 없는 층」으로 빠지기를 반복했다.
+        if (tiers && typeof tiers === 'object' && Object.keys(tiers).some((dim) => isLightweightCloudPhotoRef(tiers[dim]))) {
             if (!bldg.floorDrawingTiers) bldg.floorDrawingTiers = {};
             if (!bldg.floorDrawingTiers[floorCode] || typeof bldg.floorDrawingTiers[floorCode] !== 'object') {
                 bldg.floorDrawingTiers[floorCode] = {};
@@ -4666,7 +4668,7 @@
         const ndt = bundle.ndt || empty.ndt;
         if (typeof noteServerDefectIds === 'function') noteServerDefectIds(floorKey, markings.items || []);
         seedPhotoCacheFromUrlMap(bundle.photos && bundle.photos.urlsById);
-        applyFloorDrawingPayload(bldg, floorCode, bundle.drawing || empty.drawing);
+        if (floorCode !== 'ROUND_SKETCH_MEMO') applyFloorDrawingPayload(bldg, floorCode, bundle.drawing || empty.drawing); // 메모 자리는 층이 아님
         const defectMerge = mergeDefectsMaps(
             { [floorKey]: markings.items || [] },
             window.state.defects || {},

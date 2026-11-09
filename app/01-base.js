@@ -2150,6 +2150,16 @@ document.addEventListener('DOMContentLoaded', () => {
     }
 
     function stripDeletedDrawingFloorsFromBuilding(bldg) {
+        if (bldg) {
+            // 2026-11-10 회차 손글씨 메모 자리가 층으로 잘못 기록된 흔적 정리(층 정보만 — 메모는 sketchMemos에 따로 있어 안 건드림)
+            const memoCode = 'ROUND_SKETCH_MEMO';
+            if (Array.isArray(bldg.floorsList)) bldg.floorsList = bldg.floorsList.filter((f) => !f || f.floorCode !== memoCode);
+            if (Array.isArray(bldg.drawingFloorCodes)) bldg.drawingFloorCodes = bldg.drawingFloorCodes.filter((c) => c !== memoCode);
+            if (Array.isArray(bldg.deletedDrawingFloorCodes)) bldg.deletedDrawingFloorCodes = bldg.deletedDrawingFloorCodes.filter((c) => c !== memoCode);
+            if (bldg.deletedDrawingFloorAt) delete bldg.deletedDrawingFloorAt[memoCode];
+            [bldg.floorDrawings, bldg.floorDrawingPdfs, bldg.floorDrawingTiers, bldg.floorDrawingSources].forEach((m) => { if (m) delete m[memoCode]; });
+            if (bldg.id && _sessionDeletedDrawingKeys) _sessionDeletedDrawingKeys.delete(`${bldg.id}_${memoCode}`);
+        }
         if (typeof _drawingFloorTombstone.stripDeletedDrawingFloorsFromBuilding === 'function') {
             _drawingFloorTombstone.stripDeletedDrawingFloorsFromBuilding(bldg, _sessionDeletedDrawingKeys);
         }
@@ -2231,6 +2241,7 @@ document.addEventListener('DOMContentLoaded', () => {
         Array.from(codes).forEach((fc) => {
             if (isDeletedDrawingFloor(bldg, fc)) codes.delete(fc);
         });
+        codes.delete('ROUND_SKETCH_MEMO'); // 회차 손글씨 메모 자리는 층이 아님
         return codes;
     }
 
@@ -2254,7 +2265,7 @@ document.addEventListener('DOMContentLoaded', () => {
         if (!bldg.floorsList) bldg.floorsList = [];
         const existing = new Set(bldg.floorsList.map((f) => f.floorCode));
         floorCodes.forEach((fc) => {
-            if (!fc || isDeletedDrawingFloor(bldg, fc) || existing.has(fc)) return;
+            if (!fc || fc === 'ROUND_SKETCH_MEMO' || isDeletedDrawingFloor(bldg, fc) || existing.has(fc)) return;
             existing.add(fc);
             const fi = window.BSA && window.BSA.floorIdentity;
             bldg.floorsList.push({

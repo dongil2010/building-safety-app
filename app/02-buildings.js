@@ -4032,6 +4032,8 @@ ${roundMobile ? '' : `<button type="button" class="icon-btn icon-btn-trash" titl
         if (!bldg || !floorCode) return;
         if (bldg.floorsList) bldg.floorsList = bldg.floorsList.filter((f) => f && f.floorCode !== floorCode);
         if (Array.isArray(bldg.drawingFloorCodes)) bldg.drawingFloorCodes = bldg.drawingFloorCodes.filter((c) => c !== floorCode);
+        const tiers = bldg.floorDrawingTiers && bldg.floorDrawingTiers[floorCode];
+        if (tiers && !Object.values(tiers).some(Boolean)) delete bldg.floorDrawingTiers[floorCode]; // 빈 칸이 남으면 층 목록이 바로 다시 읽는다
     }
 
     /** 방금 넣은 도면 중 서버에 못 올라간 층 이름 목록 */
