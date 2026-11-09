@@ -1471,25 +1471,31 @@ document.addEventListener('DOMContentLoaded', () => {
         if (!bldg) return;
         const keepFloor = opts && opts.keepFloor;
         const keepDim = opts && opts.keepDim != null ? String(opts.keepDim) : null;
+        // 2026-11-09 기기(IndexedDB)에도 서버에도 없는 도면은 비우지 않는다. 예전엔 기기 저장이 실패해도(저장 공간 부족 등)
+        // 무조건 비워서, 서버 업로드까지 실패하면 도면이 어디에도 안 남고 「저장 완료」 뒤 통째로 사라졌다.
+        const safe = (persisted, cloud, key) => !!((persisted && persisted.has(key)) || (cloud && cloud.has(key)));
+        const floorKey = (fc) => `${bldg.id}_${fc}`;
         Object.keys(bldg.floorDrawingPdfs || {}).forEach((fc) => {
-            delete bldg.floorDrawingPdfs[fc];
+            if (safe(_idbPersistedPdfKeys, window._cloudSyncedPdfKeys, floorKey(fc))) delete bldg.floorDrawingPdfs[fc];
         });
         Object.keys(bldg.floorDrawingSources || {}).forEach((fc) => {
-            delete bldg.floorDrawingSources[fc];
+            if (safe(_idbPersistedSourceKeys, null, floorKey(fc))) delete bldg.floorDrawingSources[fc];
         });
         Object.keys(bldg.floorDrawings || {}).forEach((fc) => {
             if (keepFloor && fc === keepFloor) return;
-            delete bldg.floorDrawings[fc];
+            if (safe(_idbPersistedDrawingKeys, window._cloudSyncedDrawingKeys, floorKey(fc))) delete bldg.floorDrawings[fc];
         });
         Object.keys(bldg.floorDrawingTiers || {}).forEach((fc) => {
             const tiers = bldg.floorDrawingTiers[fc];
             if (!tiers) return;
+            const tierSafe = (d) => safe(_idbPersistedTierKeys, window._cloudSyncedTierKeys, `${bldg.id}_${fc}_${d}`);
             if (keepFloor && fc === keepFloor) {
                 Object.keys(tiers).forEach((d) => {
-                    if (keepDim && d !== keepDim && d !== '4000') delete tiers[d];
+                    if (keepDim && d !== keepDim && d !== '4000' && tierSafe(d)) delete tiers[d];
                 });
             } else {
-                delete bldg.floorDrawingTiers[fc];
+                Object.keys(tiers).forEach((d) => { if (tierSafe(d)) delete tiers[d]; });
+                if (!Object.keys(tiers).length) delete bldg.floorDrawingTiers[fc];
             }
         });
     }

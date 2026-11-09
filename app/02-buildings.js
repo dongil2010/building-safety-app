@@ -3516,7 +3516,9 @@ ${roundMobile ? '' : `<button type="button" class="icon-btn icon-btn-trash" titl
                 ? ' · 다른 점검 데이터 반영'
                 : '';
             const extraNote = extraDongBldgs.length ? ` · 동 ${extraDongBldgs.length + 1}개 등록` : '';
-            window.showToast(`'${name}' 건축물이 등록되었습니다${importNote}${extraNote}.`, 'success');
+            const notOnServer = floorsNotYetOnServer(newBldg, safeUploadedDrawings);
+            if (notOnServer.length) showDrawingsNotOnServerWarning(name, notOnServer);
+            else window.showToast(`'${name}' 건축물이 등록되었습니다${importNote}${extraNote}.`, 'success');
         });
     }
 
@@ -4020,6 +4022,35 @@ ${roundMobile ? '' : `<button type="button" class="icon-btn icon-btn-trash" titl
         if (typeof markBuildingMetaDirty === 'function') markBuildingMetaDirty(bldg);
     }
 
+    /**
+     * 2026-11-09 자동 정리 전용: 이 기기의 층 목록에서만 뺀다. 묘비를 남기지 않고 서버에도 안 올린다.
+     * 「지금 서버에 도면이 없다」는 건 다른 기기가 아직 올리는 중(약한 신호·업로드 실패 재시도)일 수도 있다.
+     * 예전엔 여기서 묘비를 남겨 동기화로 퍼졌고, 도면을 넣은 기기까지 그 층을 지워 「저장했는데 다 사라짐」이 됐다.
+     * 도면이 나중에 올라오면 서버 층 목록과 합쳐져 다시 보인다. 진짜로 지우는 건 사용자가 누르는 「빈 층 정리」뿐.
+     */
+    function hideDrawinglessFloorOnThisDevice(bldg, floorCode) {
+        if (!bldg || !floorCode) return;
+        if (bldg.floorsList) bldg.floorsList = bldg.floorsList.filter((f) => f && f.floorCode !== floorCode);
+        if (Array.isArray(bldg.drawingFloorCodes)) bldg.drawingFloorCodes = bldg.drawingFloorCodes.filter((c) => c !== floorCode);
+    }
+
+    /** 방금 넣은 도면 중 서버에 못 올라간 층 이름 목록 */
+    function floorsNotYetOnServer(bldg, items) {
+        const synced = ensureCloudSyncedDrawingKeys();
+        const seen = new Set();
+        const out = [];
+        (items || []).forEach((it) => {
+            if (!it || !it.file || !it.floorCode || seen.has(it.floorCode)) return;
+            seen.add(it.floorCode);
+            if (!synced.has(`${bldg.id}_${it.floorCode}`)) out.push(it.floorLabel || it.floorCode);
+        });
+        return out;
+    }
+
+    function showDrawingsNotOnServerWarning(name, floors) {
+        window.showToast(`'${name}' 도면 ${floors.length}개 층이 서버에 아직 안 올라갔습니다: ${floors.join(', ')}\n이 기기에 보관 중이며 인터넷이 되면 자동으로 다시 올립니다.`, 'warning', 9000);
+    }
+
     /** 클라우드 도면 확인: true(있음) / false(확실히 없음) / null(모름 — 오프라인·오류). 모르면 지우지 않는다 */
     async function probeFloorDrawingOnCloud(bldg, floorCode) {
         if (!db || !window.state.companyId || !bldg || !bldg.id) return null;
@@ -4085,12 +4116,10 @@ ${roundMobile ? '' : `<button type="button" class="icon-btn icon-btn-trash" titl
         if (!Array.isArray(empty)) return [];
         const removable = empty.filter((e) => !e.defects && !e.ndt);
         if (!removable.length) return [];
-        removable.forEach((e) => removeDrawinglessFloorFromBuilding(bldg, e.floorCode));
+        removable.forEach((e) => hideDrawinglessFloorOnThisDevice(bldg, e.floorCode));
         if (state.currentBuildingId === bldg.id && removable.some((e) => e.floorCode === state.currentFloor)) {
             state.currentFloor = '';
         }
-        if (typeof saveStateToLocalStorage === 'function') saveStateToLocalStorage();
-        if (typeof scheduleSyncToFirebase === 'function') scheduleSyncToFirebase();
         console.info('[floor] 도면 없는 층 자동 정리:', bldg.id, removable.map((e) => e.floorCode));
         if (!o.silent && typeof window.showToast === 'function') {
             window.showToast(`도면 없는 층을 목록에서 뺐습니다: ${removable.map((e) => e.label).join(', ')}`, 'info', 4000);
@@ -4671,7 +4700,9 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
             const floorCount = (bldg.floorsList && bldg.floorsList.length)
                 || (bldg.drawingFloorCodes && bldg.drawingFloorCodes.length)
                 || 0;
-            window.showToast(`'${bldg.name}' 명칭 및 도면 저장이 완료되었습니다. (총 ${floorCount}개 층)`, 'success');
+            const notOnServer = floorsNotYetOnServer(bldg, newFiles);
+            if (notOnServer.length) showDrawingsNotOnServerWarning(bldg.name, notOnServer);
+            else window.showToast(`'${bldg.name}' 명칭 및 도면 저장이 완료되었습니다. (총 ${floorCount}개 층)`, 'success');
         });
     }
 

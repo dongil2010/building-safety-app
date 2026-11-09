@@ -1,5 +1,5 @@
 // @@app-parts 자동 생성 파일 — 여기를 고치지 말고 app/ 조각을 고친 뒤 `node scripts/app-parts.js join` (CLAUDE.md 「app.js 조각」)
-// @@app-part 01-base.js sha=3abc690ae001 — 원본은 app/01-base.js (여기 말고 거기서 고칠 것)
+// @@app-part 01-base.js sha=ea1ef094f101 — 원본은 app/01-base.js (여기 말고 거기서 고칠 것)
 /* ==========================================================================
    스마트 건축물 안전점검 현장점검 시스템 — UI 부트스트랩
    전역 상태·IndexedDB·이미지 헬퍼: js/core/state.js
@@ -1472,25 +1472,31 @@ document.addEventListener('DOMContentLoaded', () => {
         if (!bldg) return;
         const keepFloor = opts && opts.keepFloor;
         const keepDim = opts && opts.keepDim != null ? String(opts.keepDim) : null;
+        // 2026-11-09 기기(IndexedDB)에도 서버에도 없는 도면은 비우지 않는다. 예전엔 기기 저장이 실패해도(저장 공간 부족 등)
+        // 무조건 비워서, 서버 업로드까지 실패하면 도면이 어디에도 안 남고 「저장 완료」 뒤 통째로 사라졌다.
+        const safe = (persisted, cloud, key) => !!((persisted && persisted.has(key)) || (cloud && cloud.has(key)));
+        const floorKey = (fc) => `${bldg.id}_${fc}`;
         Object.keys(bldg.floorDrawingPdfs || {}).forEach((fc) => {
-            delete bldg.floorDrawingPdfs[fc];
+            if (safe(_idbPersistedPdfKeys, window._cloudSyncedPdfKeys, floorKey(fc))) delete bldg.floorDrawingPdfs[fc];
         });
         Object.keys(bldg.floorDrawingSources || {}).forEach((fc) => {
-            delete bldg.floorDrawingSources[fc];
+            if (safe(_idbPersistedSourceKeys, null, floorKey(fc))) delete bldg.floorDrawingSources[fc];
         });
         Object.keys(bldg.floorDrawings || {}).forEach((fc) => {
             if (keepFloor && fc === keepFloor) return;
-            delete bldg.floorDrawings[fc];
+            if (safe(_idbPersistedDrawingKeys, window._cloudSyncedDrawingKeys, floorKey(fc))) delete bldg.floorDrawings[fc];
         });
         Object.keys(bldg.floorDrawingTiers || {}).forEach((fc) => {
             const tiers = bldg.floorDrawingTiers[fc];
             if (!tiers) return;
+            const tierSafe = (d) => safe(_idbPersistedTierKeys, window._cloudSyncedTierKeys, `${bldg.id}_${fc}_${d}`);
             if (keepFloor && fc === keepFloor) {
                 Object.keys(tiers).forEach((d) => {
-                    if (keepDim && d !== keepDim && d !== '4000') delete tiers[d];
+                    if (keepDim && d !== keepDim && d !== '4000' && tierSafe(d)) delete tiers[d];
                 });
             } else {
-                delete bldg.floorDrawingTiers[fc];
+                Object.keys(tiers).forEach((d) => { if (tierSafe(d)) delete tiers[d]; });
+                if (!Object.keys(tiers).length) delete bldg.floorDrawingTiers[fc];
             }
         });
     }
@@ -5611,7 +5617,7 @@ document.addEventListener('DOMContentLoaded', () => {
         }
     }
 
-// @@app-part 02-buildings.js sha=2b710b31c52a — 원본은 app/02-buildings.js (여기 말고 거기서 고칠 것)
+// @@app-part 02-buildings.js sha=4d3866c68c7d — 원본은 app/02-buildings.js (여기 말고 거기서 고칠 것)
     // --- 5. TAB MANAGER (진입 로직은 js/tabs/*.js) ---
     // ---- 마지막 작업 위치 기억·복원 (js/core/last-location.js, 2026-10-28) ----
     // 로그인 직후 복원 시도가 끝나기 전에는 기록·삭제를 하지 않는다(부팅 중 switchTab('tab-home')이 기록을 지우지 않게).
@@ -9129,7 +9135,9 @@ ${roundMobile ? '' : `<button type="button" class="icon-btn icon-btn-trash" titl
                 ? ' · 다른 점검 데이터 반영'
                 : '';
             const extraNote = extraDongBldgs.length ? ` · 동 ${extraDongBldgs.length + 1}개 등록` : '';
-            window.showToast(`'${name}' 건축물이 등록되었습니다${importNote}${extraNote}.`, 'success');
+            const notOnServer = floorsNotYetOnServer(newBldg, safeUploadedDrawings);
+            if (notOnServer.length) showDrawingsNotOnServerWarning(name, notOnServer);
+            else window.showToast(`'${name}' 건축물이 등록되었습니다${importNote}${extraNote}.`, 'success');
         });
     }
 
@@ -9633,6 +9641,35 @@ ${roundMobile ? '' : `<button type="button" class="icon-btn icon-btn-trash" titl
         if (typeof markBuildingMetaDirty === 'function') markBuildingMetaDirty(bldg);
     }
 
+    /**
+     * 2026-11-09 자동 정리 전용: 이 기기의 층 목록에서만 뺀다. 묘비를 남기지 않고 서버에도 안 올린다.
+     * 「지금 서버에 도면이 없다」는 건 다른 기기가 아직 올리는 중(약한 신호·업로드 실패 재시도)일 수도 있다.
+     * 예전엔 여기서 묘비를 남겨 동기화로 퍼졌고, 도면을 넣은 기기까지 그 층을 지워 「저장했는데 다 사라짐」이 됐다.
+     * 도면이 나중에 올라오면 서버 층 목록과 합쳐져 다시 보인다. 진짜로 지우는 건 사용자가 누르는 「빈 층 정리」뿐.
+     */
+    function hideDrawinglessFloorOnThisDevice(bldg, floorCode) {
+        if (!bldg || !floorCode) return;
+        if (bldg.floorsList) bldg.floorsList = bldg.floorsList.filter((f) => f && f.floorCode !== floorCode);
+        if (Array.isArray(bldg.drawingFloorCodes)) bldg.drawingFloorCodes = bldg.drawingFloorCodes.filter((c) => c !== floorCode);
+    }
+
+    /** 방금 넣은 도면 중 서버에 못 올라간 층 이름 목록 */
+    function floorsNotYetOnServer(bldg, items) {
+        const synced = ensureCloudSyncedDrawingKeys();
+        const seen = new Set();
+        const out = [];
+        (items || []).forEach((it) => {
+            if (!it || !it.file || !it.floorCode || seen.has(it.floorCode)) return;
+            seen.add(it.floorCode);
+            if (!synced.has(`${bldg.id}_${it.floorCode}`)) out.push(it.floorLabel || it.floorCode);
+        });
+        return out;
+    }
+
+    function showDrawingsNotOnServerWarning(name, floors) {
+        window.showToast(`'${name}' 도면 ${floors.length}개 층이 서버에 아직 안 올라갔습니다: ${floors.join(', ')}\n이 기기에 보관 중이며 인터넷이 되면 자동으로 다시 올립니다.`, 'warning', 9000);
+    }
+
     /** 클라우드 도면 확인: true(있음) / false(확실히 없음) / null(모름 — 오프라인·오류). 모르면 지우지 않는다 */
     async function probeFloorDrawingOnCloud(bldg, floorCode) {
         if (!db || !window.state.companyId || !bldg || !bldg.id) return null;
@@ -9698,12 +9735,10 @@ ${roundMobile ? '' : `<button type="button" class="icon-btn icon-btn-trash" titl
         if (!Array.isArray(empty)) return [];
         const removable = empty.filter((e) => !e.defects && !e.ndt);
         if (!removable.length) return [];
-        removable.forEach((e) => removeDrawinglessFloorFromBuilding(bldg, e.floorCode));
+        removable.forEach((e) => hideDrawinglessFloorOnThisDevice(bldg, e.floorCode));
         if (state.currentBuildingId === bldg.id && removable.some((e) => e.floorCode === state.currentFloor)) {
             state.currentFloor = '';
         }
-        if (typeof saveStateToLocalStorage === 'function') saveStateToLocalStorage();
-        if (typeof scheduleSyncToFirebase === 'function') scheduleSyncToFirebase();
         console.info('[floor] 도면 없는 층 자동 정리:', bldg.id, removable.map((e) => e.floorCode));
         if (!o.silent && typeof window.showToast === 'function') {
             window.showToast(`도면 없는 층을 목록에서 뺐습니다: ${removable.map((e) => e.label).join(', ')}`, 'info', 4000);
@@ -10284,7 +10319,9 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
             const floorCount = (bldg.floorsList && bldg.floorsList.length)
                 || (bldg.drawingFloorCodes && bldg.drawingFloorCodes.length)
                 || 0;
-            window.showToast(`'${bldg.name}' 명칭 및 도면 저장이 완료되었습니다. (총 ${floorCount}개 층)`, 'success');
+            const notOnServer = floorsNotYetOnServer(bldg, newFiles);
+            if (notOnServer.length) showDrawingsNotOnServerWarning(bldg.name, notOnServer);
+            else window.showToast(`'${bldg.name}' 명칭 및 도면 저장이 완료되었습니다. (총 ${floorCount}개 층)`, 'success');
         });
     }
 

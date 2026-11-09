@@ -11,7 +11,7 @@ function sliceFn(name) {
     assert.ok(start >= 0, name);
     return app.slice(start, app.indexOf('\n    }\n', start) + 6);
 }
-const src = ['countFloorMarkings', 'removeDrawinglessFloorFromBuilding', 'probeFloorDrawingOnCloud', 'findDrawinglessFloors', 'autoRemoveDrawinglessFloors'].map(sliceFn).join('\n');
+const src = ['countFloorMarkings', 'hideDrawinglessFloorOnThisDevice', 'removeDrawinglessFloorFromBuilding', 'probeFloorDrawingOnCloud', 'findDrawinglessFloors', 'autoRemoveDrawinglessFloors'].map(sliceFn).join('\n');
 
 function makeEnv({ cloud, idb, online = true, failCloud = false, markings = {} }) {
     const B = 'goheung';
@@ -19,6 +19,7 @@ function makeEnv({ cloud, idb, online = true, failCloud = false, markings = {} }
     const state = { companyId: 'c', currentBuildingId: B, currentFloor: '본관 지하 1층', defects: {}, ndtData: {} };
     Object.entries(markings).forEach(([fc, n]) => { state.defects[`${B}_${fc}`] = new Array(n).fill({ id: 'x' }); });
     const tomb = new Set();
+    const synced = { n: 0 };
     const doc = (col, id) => ({ get: async () => { if (failCloud) throw new Error('net'); return { exists: cloud.has(`${col}/${id}`) }; } });
     const db = { collection: () => ({ doc: () => ({ collection: (col) => ({ doc: (id) => doc(col, id) }) }) }) };
     const win = {
@@ -35,11 +36,11 @@ function makeEnv({ cloud, idb, online = true, failCloud = false, markings = {} }
         isUsableRasterDrawingUrl: (u) => typeof u === 'string' && u.length > 32,
         rememberDeletedDrawingFloor: (b, f) => tomb.add(f),
         stripDeletedDrawingFloorsFromBuilding: (b) => { b.floorsList = b.floorsList.filter((f) => !tomb.has(f.floorCode)); },
-        markBuildingMetaDirty() {}, saveStateToLocalStorage() {}, scheduleSyncToFirebase() {}, console: { info() {}, warn() {} }
+        markBuildingMetaDirty() { synced.n += 1; }, saveStateToLocalStorage() {}, scheduleSyncToFirebase() { synced.n += 1; }, console: { info() {}, warn() {} }
     };
     const names = Object.keys(deps);
     const api = new Function(...names, src + '; return { autoRemoveDrawinglessFloors };')(...names.map((k) => deps[k]));
-    return { api, bldg, state };
+    return { api, bldg, state, tomb, synced };
 }
 
 (async () => {
@@ -51,6 +52,8 @@ function makeEnv({ cloud, idb, online = true, failCloud = false, markings = {} }
     assert.deepStrictEqual(removed, ['본관 지하 1층'], '도면 없는 새어 들어온 층만 뺀다');
     assert.deepStrictEqual(env.bldg.floorsList.map((f) => f.floorCode), ['2F', '3F', 'ROOF', 'EXT', '1F'], '실제 층은 그대로');
     assert.strictEqual(env.state.currentFloor, '', '지금 층이 빠졌으면 비워서 실제 첫 층을 고르게 한다');
+    assert.strictEqual(env.tomb.size, 0, '자동 정리는 묘비를 남기지 않는다(다른 기기가 올리는 중일 수 있음)');
+    assert.strictEqual(env.synced.n, 0, '자동 정리는 서버에 올리지 않는다');
 
     // 마킹이 있으면 안 지운다
     env = makeEnv({ cloud, idb, markings: { '본관 지하 1층': 2 } });
