@@ -1,5 +1,5 @@
 // @@app-parts 자동 생성 파일 — 여기를 고치지 말고 app/ 조각을 고친 뒤 `node scripts/app-parts.js join` (CLAUDE.md 「app.js 조각」)
-// @@app-part 01-base.js sha=ea1ef094f101 — 원본은 app/01-base.js (여기 말고 거기서 고칠 것)
+// @@app-part 01-base.js sha=f7091ffa32ba — 원본은 app/01-base.js (여기 말고 거기서 고칠 것)
 /* ==========================================================================
    스마트 건축물 안전점검 현장점검 시스템 — UI 부트스트랩
    전역 상태·IndexedDB·이미지 헬퍼: js/core/state.js
@@ -823,6 +823,10 @@ document.addEventListener('DOMContentLoaded', () => {
     function noteServerDefectIds(floorKey, items) {
         if (!floorKey) return;
         _serverDefectIdsByFloor.set(floorKey, new Set((items || []).filter((d) => d && d.id).map((d) => String(d.id))));
+    }
+    /** 서버에 있다고 확인된 이 층 마킹 id(Set). 아직 서버에서 읽거나 올린 적이 없으면 null — 모를 때는 「새 것」으로 치지 않는다 */
+    function serverDefectIdsOfFloor(floorKey) {
+        return _serverDefectIdsByFloor.get(floorKey) || null;
     }
     let _jFkCache = new Map();
     let _jFkCacheAt = 0;
@@ -35282,7 +35286,7 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
         }
     }
 
-// @@app-part 09-settings-input-camera.js sha=aee8f4680f84 — 원본은 app/09-settings-input-camera.js (여기 말고 거기서 고칠 것)
+// @@app-part 09-settings-input-camera.js sha=7b5b9a51a785 — 원본은 app/09-settings-input-camera.js (여기 말고 거기서 고칠 것)
     // --- 카테고리별 핀/박스 색상 설정 모달 ---
     // 결함 색상은 getDefectColor()가 쓰는 등급·상태 키와 맞춰야 도면에 바로 반영됨
     const STYLE_COLOR_FIELDS = [
@@ -39420,6 +39424,10 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
                 noEl.value = (tmpl && tmpl.groupId) ? (tmpl.groupNo || defectNoStr) : defectNoStr;
                 // 외부 면을 서버에서 늦게 받아 오면 이 값 그대로일 때만 다시 매긴다(refreshNewDefectAutoNo)
                 noEl.dataset.autoNo = (tmpl && tmpl.groupId) ? '' : defectNoStr;
+                // 외부 면: 그사이 다른 사람이 다른 외부 면에 올린 번호까지 받아 다시 매긴다(두 사람이 동시에 찍을 때 겹침, 2026-11-09)
+                if (noEl.dataset.autoNo && typeof window.pullExteriorPeersForNewDefect === 'function') {
+                    try { window.pullExteriorPeersForNewDefect(); } catch (_e) { /* 번호는 지금 값 그대로 */ }
+                }
             }
             const defaultCat = tmpl ? inheritDefectCategory(tmpl) : '';
             if (catEl) catEl.value = defaultCat;
@@ -62080,7 +62088,7 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
         btnDownloadImportTemplate.addEventListener('click', window.downloadImportDefectExcelTemplate);
     }
 
-// @@app-part 15-firebase-sync.js sha=4d6a67cf5ac9 — 원본은 app/15-firebase-sync.js (여기 말고 거기서 고칠 것)
+// @@app-part 15-firebase-sync.js sha=c39e27c785c5 — 원본은 app/15-firebase-sync.js (여기 말고 거기서 고칠 것)
     // ==========================================================================
     // 🌐 FIREBASE REALTIME SYNC ENGINE (구글 파이어베이스 실시간 1초 동기화)
     // ==========================================================================
@@ -67017,11 +67025,101 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
     }
     window.subscribeCurrentFloorSync = subscribeCurrentFloorSync;
 
+    /**
+     * 다른 외부 면 층 묶음에서 **결함만** 합친다(refreshExteriorPeerFloorsFromServer 전용, 2026-11-09).
+     * 번호 공간만 채우면 된다 — 도면·비파괴·메모는 그 면을 열 때 실시간 동기화가 받는다.
+     * 반환: 합쳤으면 true
+     */
+    function mergeFloorDefectsOnlyIntoState(bldg, floorCode, bundle) {
+        if (!bldg || !bldg.id || !floorCode || !bundle) return false;
+        if (bundle.buildingId && bundle.buildingId !== bldg.id) return false;   // 다른 동이 쓴 층 묶음
+        const floorKey = `${bldg.id}_${floorCode}`;
+        const markings = bundle.markings || emptyFloorBundle().markings;
+        if (typeof noteServerDefectIds === 'function') noteServerDefectIds(floorKey, markings.items || []);
+        seedPhotoCacheFromUrlMap(bundle.photos && bundle.photos.urlsById);
+        const defectMerge = mergeDefectsMaps(
+            { [floorKey]: markings.items || [] },
+            window.state.defects || {},
+            { [floorKey]: markings.deletedIds || [] },
+            window.state.deletedDefectIds || {},
+            { [floorKey]: markings.deletedAt || {} },
+            window.state.deletedDefectAt || {}
+        );
+        window.state.defects = defectMerge.defects;
+        window.state.deletedDefectIds = defectMerge.deletedDefectIds;
+        window.state.deletedDefectAt = defectMerge.deletedDefectAt || {};
+        return true;
+    }
+
+    /**
+     * 외부 면들을 받은 뒤: 이 기기가 새로 만들어 아직 서버에 없는 결함이 다른 외부 면 번호와 겹치면 옮긴다.
+     * 서버에 있다고 확인된 결함(먼저 올린 사람 것)은 그대로. 서버 확인을 아직 못 한 면은 건너뛴다(전부 새 것으로 보면 안 됨).
+     * codes: 지금 면 + 다른 외부 면. 반환: 바뀐 목록(js/core/no-conflict.js 모양)
+     */
+    function resolveExteriorDefectNoConflicts(bldg, codes, isExt) {
+        const api = window.BSA && window.BSA.noConflict;
+        if (!api || !bldg || !bldg.id || typeof serverDefectIdsOfFloor !== 'function') return [];
+        const prefix = `${bldg.id}_`;
+        const now = Date.now();
+        const all = [];
+        try {
+            (codes || []).forEach((code) => {
+                const floorKey = prefix + code;
+                const serverIds = serverDefectIdsOfFloor(floorKey);
+                const floorDefects = (window.state.defects || {})[floorKey];
+                if (!serverIds || !Array.isArray(floorDefects) || !floorDefects.length) return;
+                const pool = [];
+                Object.keys(window.state.defects || {}).forEach((k) => {
+                    if (k === floorKey || !k.startsWith(prefix) || !isExt(k.slice(prefix.length))) return;
+                    (window.state.defects[k] || []).forEach((d) => pool.push(d));
+                });
+                // 수정창에 열려 있는 결함은 옮기지 않는다(창의 옛 번호로 다시 저장된다) — 번호만 「쓰는 중」으로 친다
+                const openId = (elements && elements.defectModal && elements.defectModal.classList.contains('open'))
+                    ? (document.getElementById('defectPinId')?.value || '') : '';
+                const movable = floorDefects.filter((d) => {
+                    if (!openId || !d || String(d.id) !== String(openId)) return true;
+                    pool.push(d);
+                    return false;
+                });
+                const changes = api.resolveDefectNoConflicts(movable, pool, serverIds, now);
+                if (!changes.length) return;
+                if (typeof markFloorKeyDirty === 'function') markFloorKeyDirty(floorKey);
+                changes.forEach((c) => all.push(Object.assign({ floorCode: code }, c)));
+            });
+        } catch (e) {
+            console.warn('[외부 번호] 겹침 정리 실패(번호는 그대로 둠):', e);
+            return [];
+        }
+        if (all.length) {
+            const text = api.describeChanges(all);
+            console.info(`[외부 번호] ${bldg.name || bldg.id}: 다른 외부 면에 먼저 올라온 번호와 겹쳐 옮김 — ${text}`, all);
+            if (typeof window.showToast === 'function') {
+                window.showToast(`외부: 다른 면에 먼저 올라온 번호와 겹쳐 바꿨습니다 — ${text}`, 'warning', 12000);
+            }
+        }
+        return all;
+    }
+
+    /** 외부 면에서 새 결함 창을 열 때 — 그사이 다른 사람이 다른 외부 면에 올린 번호까지 보고 매긴다(5초에 한 번) */
+    const EXTERIOR_PEERS_ON_NEW_MS = 5000;
+    let _exteriorPeersOnNewAt = 0;
+    function pullExteriorPeersForNewDefect() {
+        const floorCode = window.state.currentFloor;
+        const bldg = window.state.currentBuilding
+            || (window.state.buildings || []).find((b) => b && b.id === window.state.currentBuildingId);
+        if (!bldg || !floorCode || typeof isExteriorFloorCode !== 'function' || !isExteriorFloorCode(floorCode)) return;
+        const now = Date.now();
+        if (now - _exteriorPeersOnNewAt < EXTERIOR_PEERS_ON_NEW_MS) return;
+        _exteriorPeersOnNewAt = now;
+        pullExteriorPeerFloorsInBackground(bldg, floorCode, { force: true });
+    }
+    window.pullExteriorPeersForNewDefect = pullExteriorPeersForNewDefect;
+
     /** 외부 면을 열면 나머지 외부 면을 받아 번호 공간을 채운다(refreshExteriorPeerFloorsFromServer, 2026-11-09). */
-    function pullExteriorPeerFloorsInBackground(bldg, floorCode) {
+    function pullExteriorPeerFloorsInBackground(bldg, floorCode, opts) {
         if (typeof refreshExteriorPeerFloorsFromServer !== 'function' || !bldg || !floorCode) return;
         const bldgId = bldg.id;
-        refreshExteriorPeerFloorsFromServer(bldg, floorCode).then((res) => {
+        refreshExteriorPeerFloorsFromServer(bldg, floorCode, opts).then((res) => {
             if (!res || !res.merged) return;
             if (window.state.currentBuildingId !== bldgId) return;
             refreshNewDefectAutoNo();
@@ -67039,6 +67137,7 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
     function refreshNewDefectAutoNo() {
         const noEl = document.getElementById('defectNo');
         if (!noEl || !noEl.dataset.autoNo || noEl.value !== noEl.dataset.autoNo) return;
+        if (!(elements && elements.defectModal && elements.defectModal.classList.contains('open'))) return;
         if (document.getElementById('defectPinId')?.value) return;
         if (typeof getActiveMarkingGroup === 'function') {
             const grp = getActiveMarkingGroup();
@@ -67538,7 +67637,7 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
         }
     };
 
-// @@app-part 16-backup-auth-init.js sha=ea0dc18c36ec — 원본은 app/16-backup-auth-init.js (여기 말고 거기서 고칠 것)
+// @@app-part 16-backup-auth-init.js sha=659fcecaaa6f — 원본은 app/16-backup-auth-init.js (여기 말고 거기서 고칠 것)
     // ==========================================================================
     // 건물 백업(체크포인트) — 2026-09-27
     // safety_app/{회사}/buildingCheckpoints/{id}          요약 + 이 백업이 쓰는 사진 id(photoIds)
@@ -67692,11 +67791,25 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
      * 안 열어 본(또는 다른 사람이 찍은) 배면의 NO.01을 몰라 정면 새 결함이 또 NO.01이 됐다(영광군청 본관).
      * 외부 면을 열면 나머지 외부 면을 서버에서 받아 합친다. 읽기만 하고, 이 기기의 안 올라간 수정은
      * 동기화와 같은 합치기라 그대로 남는다.
-     * 반환: { ok, merged, skipped, failed }
+     * 2026-11-09 저녁: 면을 열 때 한 번만 받으면 두 사람이 동시에 다른 면을 찍을 때 또 겹쳤다 → 새 결함 창을 열 때도 받는다
+     * (opts.force, 15-firebase-sync pullExteriorPeersForNewDefect). 번호 공간만 채우면 되므로 **결함만** 합친다
+     * (도면·비파괴·메모까지 합치면 이 기기에서 바꾸고 아직 못 올린 다른 면 도면 주소를 서버의 옛 주소로 덮을 수 있다).
+     * 받은 뒤 이 기기가 새로 만들어 아직 서버에 없는 결함이 다른 면 번호와 겹치면 옮긴다(먼저 올린 사람 번호는 그대로).
+     * 반환: { ok, merged, skipped, failed, changes }
      */
     const _exteriorPeersFreshAt = new Map();
+    const _exteriorPeersInFlight = new Map();
     const EXTERIOR_PEERS_FRESH_MS = 60 * 1000;
-    async function refreshExteriorPeerFloorsFromServer(bldg, currentCode, opts) {
+    function refreshExteriorPeerFloorsFromServer(bldg, currentCode, opts) {
+        const id = bldg && bldg.id;
+        const key = `${id}|${currentCode}`;
+        if (id && _exteriorPeersInFlight.has(key)) return _exteriorPeersInFlight.get(key);
+        const p = refreshExteriorPeerFloorsOnce(bldg, currentCode, opts)
+            .finally(() => { if (_exteriorPeersInFlight.get(key) === p) _exteriorPeersInFlight.delete(key); });
+        if (id) _exteriorPeersInFlight.set(key, p);
+        return p;
+    }
+    async function refreshExteriorPeerFloorsOnce(bldg, currentCode, opts) {
         const o = opts || {};
         if (!bldg || !bldg.id) return { ok: false, merged: 0, skipped: 'nobuilding', failed: [] };
         if (!db || !window.state.companyId) return { ok: false, merged: 0, skipped: 'nologin', failed: [] };
@@ -67721,18 +67834,19 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
         await runPool(codes, FLOOR_READ_CONCURRENCY, async (code) => {
             try {
                 const bundle = await readFloorBundleStrict(bldg, code);
-                if (bundle) {
-                    mergeFloorBundleIntoState(bldg, code, bundle);
-                    merged++;
-                }
+                if (bundle && mergeFloorDefectsOnlyIntoState(bldg, code, bundle)) merged++;
             } catch (e) {
                 console.warn(`[외부 번호] ${code} 면을 받지 못함:`, e);
                 failed.push(code);
             }
         });
-        if (merged && typeof saveStateToLocalStorage === 'function') saveStateToLocalStorage();
+        let changes = [];
+        if (merged && typeof resolveExteriorDefectNoConflicts === 'function') {
+            changes = resolveExteriorDefectNoConflicts(bldg, [currentCode].concat(codes), isExt);
+        }
+        if ((merged || changes.length) && typeof saveStateToLocalStorage === 'function') saveStateToLocalStorage();
         if (!failed.length) _exteriorPeersFreshAt.set(bldg.id, Date.now());
-        return { ok: !failed.length, merged, skipped: null, failed };
+        return { ok: !failed.length, merged, skipped: null, failed, changes };
     }
     window.refreshExteriorPeerFloorsFromServer = refreshExteriorPeerFloorsFromServer;
 
@@ -71056,6 +71170,34 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
         if (!api || !store || !docRef) return { writes: 0, adopted: 0 };
         trackCompanySettingsLocal();
         const plan = api.planWrite(store, api.flatten(window.state), serverData || {});
+        // 2026-11-09 층별 설정(행·열 등)을 한 번에 여러 층 지우는 쓰기는 사고로 보고 올리지 않는다 — 서버 값으로 기기를 되돌림
+        // (11-06 53개 건물 행·열 일괄 소실). js/core/company-settings-merge.js holdMassDeletes
+        if (typeof api.holdMassDeletes === 'function') {
+            const guard = api.holdMassDeletes(plan, serverData || {});
+            if (guard.held.length) {
+                plan.writes = guard.writes;
+                guard.held.forEach((h) => api.setPath(window.state, h.key, h.sub, h.value));
+                api.afterHold(store, guard.held);
+                saveCompanySettingsStore();
+                const paths = guard.held.map((h) => h.path);
+                console.error('[설정 병합] 층별 설정 대량 삭제를 막고 서버 값으로 되돌림:', paths);
+                try {
+                    if (window.BSA && window.BSA.errorLog && typeof window.BSA.errorLog.record === 'function') {
+                        window.BSA.errorLog.record({
+                            message: `[설정 병합] 층별 설정 대량 삭제 차단 ${paths.length}칸`,
+                            stack: paths.slice(0, 40).join('\n'),
+                            source: 'company-settings-mass-delete'
+                        });
+                    }
+                } catch (_e) { /* 기록 실패는 무시 */ }
+                if (typeof window.showToast === 'function') {
+                    window.showToast(`이 기기에서 행·열 등 층 설정 ${paths.length}칸이 한꺼번에 비어 서버에 올리지 않고 서버 값으로 되돌렸습니다.`, 'warning', 9000);
+                }
+                _suppressSyncOnSave = true;
+                if (typeof saveStateToLocalStorage === 'function') saveStateToLocalStorage();
+                _suppressSyncOnSave = false;
+            }
+        }
         if (plan.adopt.length) {
             // 다른 기기가 같은 칸을 더 나중에 바꿨다 — 내 값은 버리고 서버 값을 따른다
             plan.adopt.forEach((a) => api.setPath(window.state, a.key, a.sub, a.value));

@@ -4136,6 +4136,10 @@
                 noEl.value = (tmpl && tmpl.groupId) ? (tmpl.groupNo || defectNoStr) : defectNoStr;
                 // 외부 면을 서버에서 늦게 받아 오면 이 값 그대로일 때만 다시 매긴다(refreshNewDefectAutoNo)
                 noEl.dataset.autoNo = (tmpl && tmpl.groupId) ? '' : defectNoStr;
+                // 외부 면: 그사이 다른 사람이 다른 외부 면에 올린 번호까지 받아 다시 매긴다(두 사람이 동시에 찍을 때 겹침, 2026-11-09)
+                if (noEl.dataset.autoNo && typeof window.pullExteriorPeersForNewDefect === 'function') {
+                    try { window.pullExteriorPeersForNewDefect(); } catch (_e) { /* 번호는 지금 값 그대로 */ }
+                }
             }
             const defaultCat = tmpl ? inheritDefectCategory(tmpl) : '';
             if (catEl) catEl.value = defaultCat;

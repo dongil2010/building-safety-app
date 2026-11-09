@@ -184,6 +184,78 @@
         return { writes: writes, adopt: adopt };
     }
 
+    /**
+     * 2026-11-09 층별 설정 대량 삭제 보류.
+     * 이 모듈은 「기준에는 있는데 지금 기기에 없는 칸」을 삭제로 올린다. 그래서 기기의 층별 설정 맵이 어떤 이유로든
+     * 통째로 비거나 키가 빠진 채 저장이 한 번 돌면, 빠진 칸 전부가 같은 시각의 삭제로 서버에 올라가 모든 기기가 따라 지웠다
+     * (11-06 18:00:33 53개 건물 행·열 floorGridLines 일괄 소실과 같은 모양).
+     * 층별 설정은 화면에서 한 번에 한 층씩만 지운다 — 한 설정에서 서버에 실제로 있는 칸을 한 번에 LIMIT개 이상 지우거나,
+     * 맵 전체를 맵이 아닌 값(null 등)으로 바꾸는 쓰기는 사고로 보고 쓰지 않는다. 대신 서버 값으로 기기를 되돌린다.
+     * (부재·결함 프리셋 「앱 기본 세팅으로 복원」처럼 일부러 여러 칸을 지우는 설정은 대상이 아니다.)
+     */
+    var MASS_DELETE_KEYS = ['grids', 'floorGridLines', 'floorPrintCrops', 'floorDrawingRotations',
+        'floorDrawingDarken', 'floorMapStyleSettings'];
+    var MASS_DELETE_LIMIT = 3;
+
+    /**
+     * plan(planWrite 결과)에서 대량 삭제 쓰기를 빼낸다.
+     * 반환: { writes: 남은 쓰기, held: [{path, key, sub, value(서버 값), serverAt, wipe}] }
+     */
+    function holdMassDeletes(plan, serverData, opts) {
+        var o = opts || {};
+        var limit = Number(o.limit) > 0 ? Number(o.limit) : MASS_DELETE_LIMIT;
+        var writes = (plan && plan.writes) || [];
+        var serverFlat = flatten(serverData || {});
+        var guarded = function (key) { return MASS_DELETE_KEYS.indexOf(key) >= 0; };
+        var serverMapHasSubs = function (key) {
+            var sv = serverData && serverData[key];
+            return isPlainObject(sv) && Object.keys(sv).some(function (s) { return s !== '' && sv[s] !== undefined; });
+        };
+        var holdPath = {};
+        var delByKey = {};
+        writes.forEach(function (w) {
+            if (!guarded(w.key)) return;
+            if (w.sub == null) {
+                // 맵 전체를 맵이 아닌 값으로 — 서버의 층 설정 전부가 사라진다
+                if (!isPlainObject(w.value) && serverMapHasSubs(w.key)) holdPath[w.path] = 'wipe';
+                return;
+            }
+            if (w.value === undefined && serverFlat[w.path] !== undefined) {
+                (delByKey[w.key] = delByKey[w.key] || []).push(w.path);
+            }
+        });
+        Object.keys(delByKey).forEach(function (key) {
+            // 맵 전체를 지우려던 설정이면 칸 삭제도 개수와 상관없이 같이 막는다(되돌린 칸을 서버에서만 지우지 않게)
+            var wiped = holdPath[pathOf(key, null)] === 'wipe';
+            if (wiped || delByKey[key].length >= limit) delByKey[key].forEach(function (p) { holdPath[p] = 'del'; });
+        });
+        var kept = [];
+        var held = [];
+        writes.forEach(function (w) {
+            var why = holdPath[w.path];
+            if (!why) { kept.push(w); return; }
+            held.push({
+                path: w.path,
+                key: w.key,
+                sub: w.sub,
+                value: why === 'wipe' ? clone(serverData[w.key]) : clone(serverFlat[w.path]),
+                serverAt: serverStampOf(serverData, w.path),
+                wipe: why === 'wipe'
+            });
+        });
+        return { writes: kept, held: held };
+    }
+
+    /** 보류한 삭제: 올릴 칸에서 빼고 기준을 서버 값으로(기기 state는 호출한 쪽이 held[].value로 되돌린다) */
+    function afterHold(store, held) {
+        (held || []).forEach(function (h) {
+            delete store.dirty[h.path];
+            // 맵 전체 칸은 서버에서 칸별로 나뉘어 있으므로 기준은 「없음」 — 되돌린 뒤 이 칸이 다시 삭제로 잡히지 않게
+            store.base[h.path] = h.wipe ? ABSENT : hashOf(h.value);
+            if (h.serverAt) store.at[h.path] = h.serverAt;
+        });
+    }
+
     /** 서버 칸이 더 나중이라 내 값을 버리고 서버 값을 따를 때 — 기록 정리 */
     function afterAdopt(store, adopt) {
         (adopt || []).forEach(function (a) {
@@ -312,6 +384,8 @@
         SPEC: SPEC, KEYS: KEYS, hashOf: hashOf, flatten: flatten, hashes: hashes,
         initStore: initStore, normalizeStore: normalizeStore, trackLocal: trackLocal,
         planWrite: planWrite, afterWrite: afterWrite, afterAdopt: afterAdopt, applyIncoming: applyIncoming,
+        holdMassDeletes: holdMassDeletes, afterHold: afterHold,
+        MASS_DELETE_KEYS: MASS_DELETE_KEYS, MASS_DELETE_LIMIT: MASS_DELETE_LIMIT,
         buildUpdateArgs: buildUpdateArgs, setPath: setPath, splitPath: splitPath
     };
     if (root) {

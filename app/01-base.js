@@ -823,6 +823,10 @@ document.addEventListener('DOMContentLoaded', () => {
         if (!floorKey) return;
         _serverDefectIdsByFloor.set(floorKey, new Set((items || []).filter((d) => d && d.id).map((d) => String(d.id))));
     }
+    /** 서버에 있다고 확인된 이 층 마킹 id(Set). 아직 서버에서 읽거나 올린 적이 없으면 null — 모를 때는 「새 것」으로 치지 않는다 */
+    function serverDefectIdsOfFloor(floorKey) {
+        return _serverDefectIdsByFloor.get(floorKey) || null;
+    }
     let _jFkCache = new Map();
     let _jFkCacheAt = 0;
     function journalFloorKeyOfDefect(id) {

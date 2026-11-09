@@ -152,11 +152,25 @@
      * 안 열어 본(또는 다른 사람이 찍은) 배면의 NO.01을 몰라 정면 새 결함이 또 NO.01이 됐다(영광군청 본관).
      * 외부 면을 열면 나머지 외부 면을 서버에서 받아 합친다. 읽기만 하고, 이 기기의 안 올라간 수정은
      * 동기화와 같은 합치기라 그대로 남는다.
-     * 반환: { ok, merged, skipped, failed }
+     * 2026-11-09 저녁: 면을 열 때 한 번만 받으면 두 사람이 동시에 다른 면을 찍을 때 또 겹쳤다 → 새 결함 창을 열 때도 받는다
+     * (opts.force, 15-firebase-sync pullExteriorPeersForNewDefect). 번호 공간만 채우면 되므로 **결함만** 합친다
+     * (도면·비파괴·메모까지 합치면 이 기기에서 바꾸고 아직 못 올린 다른 면 도면 주소를 서버의 옛 주소로 덮을 수 있다).
+     * 받은 뒤 이 기기가 새로 만들어 아직 서버에 없는 결함이 다른 면 번호와 겹치면 옮긴다(먼저 올린 사람 번호는 그대로).
+     * 반환: { ok, merged, skipped, failed, changes }
      */
     const _exteriorPeersFreshAt = new Map();
+    const _exteriorPeersInFlight = new Map();
     const EXTERIOR_PEERS_FRESH_MS = 60 * 1000;
-    async function refreshExteriorPeerFloorsFromServer(bldg, currentCode, opts) {
+    function refreshExteriorPeerFloorsFromServer(bldg, currentCode, opts) {
+        const id = bldg && bldg.id;
+        const key = `${id}|${currentCode}`;
+        if (id && _exteriorPeersInFlight.has(key)) return _exteriorPeersInFlight.get(key);
+        const p = refreshExteriorPeerFloorsOnce(bldg, currentCode, opts)
+            .finally(() => { if (_exteriorPeersInFlight.get(key) === p) _exteriorPeersInFlight.delete(key); });
+        if (id) _exteriorPeersInFlight.set(key, p);
+        return p;
+    }
+    async function refreshExteriorPeerFloorsOnce(bldg, currentCode, opts) {
         const o = opts || {};
         if (!bldg || !bldg.id) return { ok: false, merged: 0, skipped: 'nobuilding', failed: [] };
         if (!db || !window.state.companyId) return { ok: false, merged: 0, skipped: 'nologin', failed: [] };
@@ -181,18 +195,19 @@
         await runPool(codes, FLOOR_READ_CONCURRENCY, async (code) => {
             try {
                 const bundle = await readFloorBundleStrict(bldg, code);
-                if (bundle) {
-                    mergeFloorBundleIntoState(bldg, code, bundle);
-                    merged++;
-                }
+                if (bundle && mergeFloorDefectsOnlyIntoState(bldg, code, bundle)) merged++;
             } catch (e) {
                 console.warn(`[외부 번호] ${code} 면을 받지 못함:`, e);
                 failed.push(code);
             }
         });
-        if (merged && typeof saveStateToLocalStorage === 'function') saveStateToLocalStorage();
+        let changes = [];
+        if (merged && typeof resolveExteriorDefectNoConflicts === 'function') {
+            changes = resolveExteriorDefectNoConflicts(bldg, [currentCode].concat(codes), isExt);
+        }
+        if ((merged || changes.length) && typeof saveStateToLocalStorage === 'function') saveStateToLocalStorage();
         if (!failed.length) _exteriorPeersFreshAt.set(bldg.id, Date.now());
-        return { ok: !failed.length, merged, skipped: null, failed };
+        return { ok: !failed.length, merged, skipped: null, failed, changes };
     }
     window.refreshExteriorPeerFloorsFromServer = refreshExteriorPeerFloorsFromServer;
 
@@ -3516,6 +3531,34 @@
         if (!api || !store || !docRef) return { writes: 0, adopted: 0 };
         trackCompanySettingsLocal();
         const plan = api.planWrite(store, api.flatten(window.state), serverData || {});
+        // 2026-11-09 층별 설정(행·열 등)을 한 번에 여러 층 지우는 쓰기는 사고로 보고 올리지 않는다 — 서버 값으로 기기를 되돌림
+        // (11-06 53개 건물 행·열 일괄 소실). js/core/company-settings-merge.js holdMassDeletes
+        if (typeof api.holdMassDeletes === 'function') {
+            const guard = api.holdMassDeletes(plan, serverData || {});
+            if (guard.held.length) {
+                plan.writes = guard.writes;
+                guard.held.forEach((h) => api.setPath(window.state, h.key, h.sub, h.value));
+                api.afterHold(store, guard.held);
+                saveCompanySettingsStore();
+                const paths = guard.held.map((h) => h.path);
+                console.error('[설정 병합] 층별 설정 대량 삭제를 막고 서버 값으로 되돌림:', paths);
+                try {
+                    if (window.BSA && window.BSA.errorLog && typeof window.BSA.errorLog.record === 'function') {
+                        window.BSA.errorLog.record({
+                            message: `[설정 병합] 층별 설정 대량 삭제 차단 ${paths.length}칸`,
+                            stack: paths.slice(0, 40).join('\n'),
+                            source: 'company-settings-mass-delete'
+                        });
+                    }
+                } catch (_e) { /* 기록 실패는 무시 */ }
+                if (typeof window.showToast === 'function') {
+                    window.showToast(`이 기기에서 행·열 등 층 설정 ${paths.length}칸이 한꺼번에 비어 서버에 올리지 않고 서버 값으로 되돌렸습니다.`, 'warning', 9000);
+                }
+                _suppressSyncOnSave = true;
+                if (typeof saveStateToLocalStorage === 'function') saveStateToLocalStorage();
+                _suppressSyncOnSave = false;
+            }
+        }
         if (plan.adopt.length) {
             // 다른 기기가 같은 칸을 더 나중에 바꿨다 — 내 값은 버리고 서버 값을 따른다
             plan.adopt.forEach((a) => api.setPath(window.state, a.key, a.sub, a.value));
