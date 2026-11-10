@@ -4434,12 +4434,14 @@
         syncCrackWidthBadgeUi();
         if (typeof drawCanvas === 'function') drawCanvas();
     }
+    // 2026-11-10 「글자 폰트를 좀 더 얇은 폰트로」 900 → 500 (중요 글자는 그대로 900)
+    const CRACK_WIDTH_BADGE_FONT_WEIGHT = 500;
     function measureCrackWidthBadgeText(text, glyphH) {
         const family = '"Pretendard", "Malgun Gothic", "맑은 고딕", "Apple SD Gothic Neo", "Noto Sans KR", sans-serif';
         const ctx = state && state.ctx;
         if (!ctx || !text) return 0;
         ctx.save();
-        ctx.font = `900 ${glyphH}px ${family}`;
+        ctx.font = `${CRACK_WIDTH_BADGE_FONT_WEIGHT} ${glyphH}px ${family}`;
         let w = 0;
         try { w = ctx.measureText(text).width; } catch (_e) { w = 0; }
         ctx.restore();
@@ -4454,13 +4456,13 @@
             ? getBookmarkChromeGlyphHeight(scale)
             : (2 * Math.max(8, 10 * Math.max(0.85, Number(scale) || 1)) / 3);
         let fontPx = glyphH;
-        ctx.font = `900 ${fontPx}px ${family}`;
+        ctx.font = `${CRACK_WIDTH_BADGE_FONT_WEIGHT} ${fontPx}px ${family}`;
         try {
             const m = ctx.measureText(text);
             const mh = (m.actualBoundingBoxAscent || 0) + (m.actualBoundingBoxDescent || 0);
             if (mh > 0) fontPx = fontPx * glyphH / mh;
         } catch (_e) { /* 옛 브라우저 */ }
-        ctx.font = `900 ${fontPx}px ${family}`;
+        ctx.font = `${CRACK_WIDTH_BADGE_FONT_WEIGHT} ${fontPx}px ${family}`;
         ctx.textAlign = 'center';
         ctx.textBaseline = 'middle';
         let textW = 0;
@@ -4477,7 +4479,7 @@
             }
         } catch (_e) { /* ignore */ }
         ctx.lineJoin = 'round';
-        ctx.lineWidth = Math.max(0.5, fontPx * 0.11);
+        ctx.lineWidth = Math.max(0.4, fontPx * 0.07); // 얇은 글자라 테두리도 얇게
         ctx.strokeStyle = '#0c4a6e';
         ctx.strokeText(text, cx, cy);
         ctx.fillStyle = '#38bdf8';

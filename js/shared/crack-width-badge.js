@@ -2,7 +2,8 @@
  * 도면 마킹 균열폭 배지 — 순수 계산 (DOM 없음, 2026-11-06 t592u)
  *
  * 화면 번호칸에만 쓴다. 저장값·PDF/한글 레이아웃은 바꾸지 않는다.
- * 균열 계열 + 파싱된 폭 ≥ 0.3mm 만 "0.3mm" / "0.3mm / 0.5mm" 형태로.
+ * 균열 계열 + 파싱된 폭 ≥ 0.3mm 만 "0.3" / "0.3 / 0.5" 형태로.
+ * 2026-11-10 「mm는 자르고」 — 배지에는 숫자만(단위 mm 생략).
  */
 (function (root) {
     'use strict';
@@ -54,7 +55,7 @@
             t = n.toFixed(3);
         }
         if (t.indexOf('.') >= 0) t = t.replace(/0+$/, '').replace(/\.$/, '');
-        return t + 'mm';
+        return t; // 배지에는 숫자만(mm 생략)
     }
 
     function meetsMinWidth(n) {

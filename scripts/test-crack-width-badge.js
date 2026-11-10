@@ -41,29 +41,29 @@ function testParseAndBoundary() {
 }
 
 function testFormatUnits() {
-    assert.strictEqual(api.formatWidthMm(0.3), '0.3mm');
-    assert.strictEqual(api.formatWidthMm(0.5), '0.5mm');
-    assert.strictEqual(api.formatWidthMm(0.31), '0.31mm');
-    assert.strictEqual(api.formatWidthMm(1), '1mm');
-    assert.strictEqual(api.formatWidthMm(0.30000000000000004), '0.3mm');
+    assert.strictEqual(api.formatWidthMm(0.3), '0.3');
+    assert.strictEqual(api.formatWidthMm(0.5), '0.5');
+    assert.strictEqual(api.formatWidthMm(0.31), '0.31');
+    assert.strictEqual(api.formatWidthMm(1), '1');
+    assert.strictEqual(api.formatWidthMm(0.30000000000000004), '0.3');
     assert.strictEqual(api.formatBadgeText(crack({ crackWidth: '0.29' })), '');
-    assert.strictEqual(api.formatBadgeText(crack({ crackWidth: '0.3' })), '0.3mm');
-    assert.strictEqual(api.formatBadgeText(crack({ crackWidth: '0.31' })), '0.31mm');
-    assert.strictEqual(api.formatBadgeText(crack({ crackWidth: '0.3mm' })), '0.3mm');
-    assert.strictEqual(api.formatBadgeText(crack({ crackWidth: '0.3 / 0.5' })), '0.3mm / 0.5mm');
-    assert.strictEqual(api.formatBadgeText(crack({ crackWidth: '0.2 / 0.5' })), '0.5mm');
-    assert.strictEqual(api.formatBadgeText(crack({ crackWidth: '0.29, 0.3' })), '0.3mm');
+    assert.strictEqual(api.formatBadgeText(crack({ crackWidth: '0.3' })), '0.3');
+    assert.strictEqual(api.formatBadgeText(crack({ crackWidth: '0.31' })), '0.31');
+    assert.strictEqual(api.formatBadgeText(crack({ crackWidth: '0.3mm' })), '0.3');
+    assert.strictEqual(api.formatBadgeText(crack({ crackWidth: '0.3 / 0.5' })), '0.3 / 0.5');
+    assert.strictEqual(api.formatBadgeText(crack({ crackWidth: '0.2 / 0.5' })), '0.5');
+    assert.strictEqual(api.formatBadgeText(crack({ crackWidth: '0.29, 0.3' })), '0.3');
     assert.strictEqual(api.formatBadgeText(crack({
         crackMeasures: [{ width: '0.3' }, { width: '0.5' }]
-    })), '0.3mm / 0.5mm');
-    assert.strictEqual(api.formatBadgeText(crack({ size: 'Cw:0.3' })), '0.3mm');
-    assert.strictEqual(api.formatBadgeText(crack({ size: '0.5mm' })), '0.5mm');
-    assert.strictEqual(api.formatBadgeText(crack({ size: '0.3/1.5' })), '0.3mm');
+    })), '0.3 / 0.5');
+    assert.strictEqual(api.formatBadgeText(crack({ size: 'Cw:0.3' })), '0.3');
+    assert.strictEqual(api.formatBadgeText(crack({ size: '0.5mm' })), '0.5');
+    assert.strictEqual(api.formatBadgeText(crack({ size: '0.3/1.5' })), '0.3');
     assert.strictEqual(api.formatBadgeText(crack({ crackWidth: '' })), '');
     assert.strictEqual(api.formatBadgeText(crack({ crackWidth: 'abc' })), '');
     assert.strictEqual(api.formatBadgeText({ defectType: '박리/박락', crackWidth: '0.5' }), '');
     assert.strictEqual(api.formatBadgeText({ defectType: '누수', crackWidth: '0.3' }), '');
-    assert.strictEqual(api.formatBadgeText(crack({ crackWidth: '0.5' })), '0.5mm');
+    assert.strictEqual(api.formatBadgeText(crack({ crackWidth: '0.5' })), '0.5');
 }
 
 function testTogglePref() {
@@ -91,14 +91,14 @@ function testTogglePref() {
 
 function testImportanceCoexistence() {
     const d = crack({ crackWidth: '0.3', isBookmark: true });
-    assert.strictEqual(api.formatBadgeText(d), '0.3mm', '중요여부와 무관하게 폭 텍스트');
-    const wide = api.layout(80, 24, 1, '0.3mm', true);
-    const narrow = api.layout(18, 24, 1, '0.3mm / 0.5mm', true);
-    const widthOnly = api.layout(18, 24, 1, '0.3mm', false);
+    assert.strictEqual(api.formatBadgeText(d), '0.3', '중요여부와 무관하게 폭 텍스트');
+    const wide = api.layout(80, 24, 1, '0.3', true);
+    const narrow = api.layout(18, 24, 1, '0.3 / 0.5', true);
+    const widthOnly = api.layout(18, 24, 1, '0.3', false);
     assert.ok(wide.cx > 0, '중요+폭: 폭은 우측');
     assert.ok(narrow.outsideRight, '좁은 박스에서 폭을 오른쪽 바깥으로');
     assert.ok(!widthOnly.outsideRight, '중요 없으면 우측 모서리(중요 자리 유지)');
-    const extra = api.badgeExtentExtra(18, 1, '0.3mm / 0.5mm', true);
+    const extra = api.badgeExtentExtra(18, 1, '0.3 / 0.5', true);
     assert.ok(extra.w > 0 && extra.right > extra.w / 4, '둘 다 있으면 왼쪽 중요 폭 + 오른쪽 균열폭 여유');
     const ext = boxLayout.boxExtent(60, 24, 0, extra);
     const bookmarkOnly = boxLayout.boxExtent(60, 24, 0, { w: 20, h: 8 });
@@ -141,8 +141,8 @@ function testNoSavedMutation() {
     assert.strictEqual(api.formatBadgeText(crack({ crackMeasures: [{ width: '0.3', length: '0.5', join: 'x' }], size: '0.3x0.5' })), '', 'x 행은 면적');
     assert.strictEqual(api.formatBadgeText(crack({ crackMeasures: [{ width: '0.3', length: '0.5', join: '/' }], size: '0.3x0.5' })), '', '규모 글자가 면적');
     assert.strictEqual(api.formatBadgeText(crack({ crackWidth: '0.3', size: '0.3x0.5' })), '', '옛 자료(측정 행 없음)');
-    assert.strictEqual(api.formatBadgeText(crack({ crackMeasures: [{ width: '0.4', length: '2', join: '/' }, { width: '0.3', length: '0.5', join: 'x' }], size: '0.4/2, 0.3x0.5' })), '0.4mm', '폭 행은 그대로');
-    assert.strictEqual(api.formatBadgeText(crack({ crackMeasures: [{ width: '0.3', length: '1.5', join: '/' }], size: '0.3/1.5' })), '0.3mm');
+    assert.strictEqual(api.formatBadgeText(crack({ crackMeasures: [{ width: '0.4', length: '2', join: '/' }, { width: '0.3', length: '0.5', join: 'x' }], size: '0.4/2, 0.3x0.5' })), '0.4', '폭 행은 그대로');
+    assert.strictEqual(api.formatBadgeText(crack({ crackMeasures: [{ width: '0.3', length: '1.5', join: '/' }], size: '0.3/1.5' })), '0.3');
 })();
 testParseAndBoundary();
 testFormatUnits();
