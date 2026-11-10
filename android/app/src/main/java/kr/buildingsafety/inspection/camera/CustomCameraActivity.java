@@ -52,7 +52,6 @@ import androidx.camera.camera2.interop.ExperimentalCamera2Interop;
 import androidx.camera.core.Camera;
 import androidx.camera.core.CameraInfo;
 import androidx.camera.core.CameraSelector;
-import androidx.camera.core.ExperimentalZeroShutterLag;
 import androidx.camera.core.FocusMeteringAction;
 import androidx.camera.core.ImageCapture;
 import androidx.camera.core.ImageCaptureException;
@@ -92,6 +91,7 @@ import java.util.concurrent.Executors;
  * - 모양: 검정 바탕 + 흰 선 아이콘 + 노란 포인트(ACCENT) 하나. 위쪽은 닫기(X) · 플래시 · 설정(톱니바퀴) 선 아이콘,
  *   배율 버튼은 반투명 캡슐 안의 작은 원(지금 구간만 노란 글자로 실제 배율 표시), 줌 막대는 눈금자 + 노란 바늘,
  *   촬영 버튼은 흰 고리 + 흰 원, 찍은 뒤에는 흰 원의 체크(확인) · 테두리 원의 되돌리기(다시 찍기).
+ * - 촬영 방식: 화질 우선이 기본. 설정 창에서 속도 우선으로 바꿀 수 있다(기기에 기억).
  * - 초점: 기본은 화면 정중앙(계속 맞춤). 화면을 누르면 그 자리에 고정되고, 다시 찍기·렌즈 바꿈·새로 열 때 중앙으로 돌아온다.
  * - 촬영 버튼 자리는 위 「설정」 창에서 끌어 옮긴다(기기에 기억). 평소에는 안 움직인다.
  * - 찍은 뒤 「확인」은 촬영 버튼이 있는 쪽에 크게, 「다시 찍기」는 반대쪽. 음량 버튼으로도 찍는다.
@@ -107,6 +107,7 @@ public class CustomCameraActivity extends AppCompatActivity {
     private static final String KEY_SHUTTER_X = "shutterFx2"; // 촬영 버튼 자리(화면 너비·높이에 대한 비율)
     private static final String KEY_SHUTTER_Y = "shutterFy2";
     private static final String KEY_FLASH = "flashState";
+    private static final String KEY_FAST = "fastCapture";
     private static final int FLASH_OFF = 0, FLASH_ON = 1, FLASH_AUTO = 2, FLASH_TORCH = 3;
     private static final int ICON_CLOSE = 0, ICON_GEAR = 1, ICON_BOLT = 2, ICON_BOLT_SLASH = 3, ICON_BOLT_A = 4, ICON_TORCH = 5,
         ICON_CHECK = 6, ICON_RETRY = 7;
@@ -180,6 +181,7 @@ public class CustomCameraActivity extends AppCompatActivity {
     private boolean busy;
     private int flashMode = FLASH_OFF;
     private boolean settingsMode;
+    private boolean fastCapture;
     private boolean portraitHeld;
     private TextView portraitWarning;
     private float shutterFx = DEF_FX;
@@ -200,6 +202,7 @@ public class CustomCameraActivity extends AppCompatActivity {
         quality = Math.max(50, Math.min(100, getIntent().getIntExtra(EXTRA_QUALITY, 90)));
         shutterFx = Math.max(0f, Math.min(1f, prefs().getFloat(KEY_SHUTTER_X, DEF_FX)));
         shutterFy = Math.max(0f, Math.min(1f, prefs().getFloat(KEY_SHUTTER_Y, DEF_FY)));
+        fastCapture = prefs().getBoolean(KEY_FAST, false);
         int fm = prefs().getInt(KEY_FLASH, FLASH_OFF);
         flashMode = (fm == FLASH_ON || fm == FLASH_AUTO) ? fm : FLASH_OFF;
         io = Executors.newSingleThreadExecutor();
@@ -417,6 +420,17 @@ public class CustomCameraActivity extends AppCompatActivity {
         LinearLayout.LayoutParams ilp = new LinearLayout.LayoutParams(dp(236), -2);
         ilp.topMargin = dp(10);
         settingsBox.addView(settingsText, ilp);
+        // 촬영 방식: 화질 우선(기본) ↔ 속도 우선
+        TextView modeButton = pillButton(captureModeText(), 0xFF3A3A3C, Color.WHITE);
+        modeButton.setOnClickListener(v -> {
+            fastCapture = !fastCapture;
+            prefs().edit().putBoolean(KEY_FAST, fastCapture).apply();
+            modeButton.setText(captureModeText());
+            if (provider != null) bind();
+        });
+        LinearLayout.LayoutParams mlp = new LinearLayout.LayoutParams(dp(226), dp(44));
+        mlp.topMargin = dp(16);
+        settingsBox.addView(modeButton, mlp);
         LinearLayout settingsButtons = new LinearLayout(this);
         settingsButtons.setOrientation(LinearLayout.HORIZONTAL);
         settingsButtons.setGravity(Gravity.CENTER);
@@ -434,7 +448,7 @@ public class CustomCameraActivity extends AppCompatActivity {
         doneButton.setOnClickListener(v -> setSettingsMode(false));
         settingsButtons.addView(doneButton, new LinearLayout.LayoutParams(dp(108), dp(44)));
         LinearLayout.LayoutParams blp = new LinearLayout.LayoutParams(-2, -2);
-        blp.topMargin = dp(18);
+        blp.topMargin = dp(10);
         settingsBox.addView(settingsButtons, blp);
         settingsPanel.addView(settingsBox, new FrameLayout.LayoutParams(-2, -2, Gravity.CENTER));
         root.addView(settingsPanel, new FrameLayout.LayoutParams(-1, -1));
@@ -700,12 +714,16 @@ public class CustomCameraActivity extends AppCompatActivity {
     }
 
     /**
-     * 누르는 순간의 화면을 그대로 쓰는 촬영(셔터 지연 없음). 못 쓰는 기기와 플래시 켬·자동일 때는
-     * CameraX 가 알아서 빠른 촬영으로 바꾼다. 물리 렌즈를 직접 걸었을 때는 안전하게 빠른 촬영만 쓴다.
+     * 기본은 화질 우선(기기가 주는 가장 좋은 처리 — 색·노이즈·선명도). 설정에서 「속도 우선」을 고르면 처리를 줄여
+     * 빨리 찍는다(색이 옅고 거칠어질 수 있음). 2026-11-10: 지연 없는 촬영(ZSL)은 미리보기 화면을 그대로 써서
+     * 색감이 눈에 띄게 나빠져 뺐다.
      */
-    @OptIn(markerClass = ExperimentalZeroShutterLag.class)
     private int captureMode() {
-        return lens.physicalId != null ? ImageCapture.CAPTURE_MODE_MINIMIZE_LATENCY : ImageCapture.CAPTURE_MODE_ZERO_SHUTTER_LAG;
+        return fastCapture ? ImageCapture.CAPTURE_MODE_MINIMIZE_LATENCY : ImageCapture.CAPTURE_MODE_MAXIMIZE_QUALITY;
+    }
+
+    private String captureModeText() {
+        return fastCapture ? "촬영 방식: 속도 우선" : "촬영 방식: 화질 우선";
     }
 
     private void dropLens(Lens l) {
