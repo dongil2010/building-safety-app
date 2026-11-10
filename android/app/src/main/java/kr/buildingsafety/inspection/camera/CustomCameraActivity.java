@@ -84,7 +84,7 @@ import java.util.concurrent.Executors;
  * - 줌: 줌 막대를 끌면 부드럽게(초광각 ~ 15배), 배율 버튼, 두 손가락 벌리기. 화면을 누르면 그 자리에 초점.
  *   렌즈(초광각·망원·잠망경)는 배율에 맞춰 바꿔 건다 — 따로 열리는 뒤쪽 카메라와, 기본 카메라에 묶인 물리 렌즈를 다 찾는다.
  *   렌즈가 못 내는 배율은 가운데를 잘라 맞춘다(보이는 대로 찍힘). 안 열리는 렌즈는 빼고 기본 렌즈로 찍는다.
- *   세로로 세운 채 찍으려 하면 찍지 않고 「가로로 돌려서 찍으세요」 경고를 띄운다. 바닥·천장을 향해 눕혀 들면
+ *   세로로 세우면 「가로로 돌려서 찍어 주세요」 경고를 띄우지만 찍히기는 한다(세로 사진으로 저장). 바닥·천장을 향해 눕혀 들면
  *   방향을 알 수 없으므로 오른손으로 든 방향(왼쪽으로 눕힘)으로 저장한다.
  * - 플래시(아이콘, 누를 때마다 바뀜): 끔(번개에 빗금) → 켬(번개) → 자동(번개 A) → 손전등(계속 켜 둠).
  *   끔·켬·자동은 기기에 기억하고 손전등은 다음에 열면 끔으로 돌아온다. 불이 없는 렌즈에서는 버튼을 숨긴다.
@@ -214,6 +214,7 @@ public class CustomCameraActivity extends AppCompatActivity {
     private TextView zoomInButton;
     private TextView zoomOutButton;
     private boolean portraitHeld;
+    private int portraitRotation = Surface.ROTATION_0; // 세로로 세웠을 때 사진 방향(거꾸로 들면 180)
     private TextView portraitWarning;
     private float shutterFx = DEF_FX;
     private float shutterFy = DEF_FY;
@@ -254,8 +255,9 @@ public class CustomCameraActivity extends AppCompatActivity {
                 } else if (o >= 225 && o < 315) {
                     rot = Surface.ROTATION_90;      // 왼쪽으로 눕힘(오른손)
                 } else {
-                    rot = landRotation;             // 세로로 세움: 찍지 않고 경고
+                    rot = landRotation;             // 세로로 세움: 경고는 띄우되 찍히면 세로 사진으로 저장
                     portrait = true;
+                    portraitRotation = o >= 135 && o < 225 ? Surface.ROTATION_180 : Surface.ROTATION_0;
                 }
                 if (portrait != portraitHeld) {
                     portraitHeld = portrait;
@@ -1513,20 +1515,13 @@ public class CustomCameraActivity extends AppCompatActivity {
 
     private void shoot() {
         if (imageCapture == null || busy || settingsMode || reviewBar.getVisibility() == View.VISIBLE) return;
-        if (portraitHeld) {
-            // 세로로는 찍지 않는다: 경고를 한 번 크게 튕겨 보여 준다
-            updatePortraitWarning();
-            portraitWarning.animate().cancel();
-            portraitWarning.setScaleX(1.25f);
-            portraitWarning.setScaleY(1.25f);
-            portraitWarning.animate().scaleX(1f).scaleY(1f).setDuration(350).start();
-            return;
-        }
         busy = true;
         extraCropAtShot = extraCrop;
-        final float displayAngle = uiAngle();
-        // 화면은 세로로 고정이라, 사진 방향은 폰을 눕힌 쪽(가로 두 방향 중 하나)으로 직접 정한다
-        imageCapture.setTargetRotation(landRotation);
+        // 세로로 세워 찍으면 옆으로 눕지 않게 세로 사진으로 저장한다(경고는 떠 있어도 막지 않는다)
+        final boolean upright = portraitHeld;
+        final float displayAngle = upright ? (portraitRotation == Surface.ROTATION_180 ? 180f : 0f) : uiAngle();
+        // 화면은 세로로 고정이라, 사진 방향은 폰을 든 쪽으로 직접 정한다
+        imageCapture.setTargetRotation(upright ? portraitRotation : landRotation);
         shutter.setAlpha(0.4f);
         shotBlink.animate().cancel();
         shotBlink.setAlpha(0.75f);
