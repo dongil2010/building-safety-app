@@ -4952,6 +4952,28 @@
     async function pickImageFromDevice(mode) {
         const wantCamera = mode === 'camera';
         const Camera = window.Capacitor?.Plugins?.Camera;
+        // 2026-11-10 앱 전용 촬영 화면(줌·촬영 버튼 자리·확인 버튼). 없거나(옛 APK) 못 열면 아래 순정 카메라로.
+        const BsaCamera = window.Capacitor?.Plugins?.BsaCamera;
+        if (wantCamera && BsaCamera && window.Capacitor?.isNativePlatform?.()
+            && window.Capacitor?.isPluginAvailable?.('BsaCamera')) {
+            try {
+                const shot = await BsaCamera.takePhoto({
+                    quality: 90,
+                    longEdge: (typeof window.getPhotoLongEdge === 'function') ? window.getPhotoLongEdge() : 2000
+                });
+                if (shot?.cancelled) return null;
+                if (shot?.dataUrl) {
+                    // 순정 카메라 경로(saveToGallery)와 같이 휴대폰 갤러리에도 남긴다. 실패해도 첨부는 된다.
+                    try {
+                        const saving = window.Capacitor?.Plugins?.BsaGallery?.saveImage?.({ data: shot.dataUrl, fileName: `photo_${Date.now()}.jpg` });
+                        if (saving && typeof saving.catch === 'function') saving.catch(() => {});
+                    } catch (_e) { /* ignore */ }
+                    return dataUrlToJpegFile(shot.dataUrl, `photo_${Date.now()}.jpg`);
+                }
+            } catch (err) {
+                console.warn('BsaCamera.takePhoto fallback to stock camera:', err);
+            }
+        }
         if (Camera && window.Capacitor?.isNativePlatform?.()) {
             try {
                 const result = await Camera.getPhoto({

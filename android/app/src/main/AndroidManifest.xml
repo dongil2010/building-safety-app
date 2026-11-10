@@ -30,6 +30,13 @@
             android:exported="false"
             android:theme="@style/AppTheme.NoActionBar" />
 
+        <!-- 2026-11-10 앱 전용 촬영 화면(줌·촬영 버튼 자리·확인 버튼) -->
+        <activity
+            android:name=".camera.CustomCameraActivity"
+            android:exported="false"
+            android:screenOrientation="portrait"
+            android:theme="@style/AppTheme.NoActionBar" />
+
         <service
             android:name=".relay.PhotoRelayService"
             android:exported="false"

@@ -35545,7 +35545,7 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
         }
     }
 
-// @@app-part 09-settings-input-camera.js sha=04ae81b3b8a2 — 원본은 app/09-settings-input-camera.js (여기 말고 거기서 고칠 것)
+// @@app-part 09-settings-input-camera.js sha=cb2664f135a9 — 원본은 app/09-settings-input-camera.js (여기 말고 거기서 고칠 것)
     // --- 카테고리별 핀/박스 색상 설정 모달 ---
     // 결함 색상은 getDefectColor()가 쓰는 등급·상태 키와 맞춰야 도면에 바로 반영됨
     const STYLE_COLOR_FIELDS = [
@@ -40499,6 +40499,28 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
     async function pickImageFromDevice(mode) {
         const wantCamera = mode === 'camera';
         const Camera = window.Capacitor?.Plugins?.Camera;
+        // 2026-11-10 앱 전용 촬영 화면(줌·촬영 버튼 자리·확인 버튼). 없거나(옛 APK) 못 열면 아래 순정 카메라로.
+        const BsaCamera = window.Capacitor?.Plugins?.BsaCamera;
+        if (wantCamera && BsaCamera && window.Capacitor?.isNativePlatform?.()
+            && window.Capacitor?.isPluginAvailable?.('BsaCamera')) {
+            try {
+                const shot = await BsaCamera.takePhoto({
+                    quality: 90,
+                    longEdge: (typeof window.getPhotoLongEdge === 'function') ? window.getPhotoLongEdge() : 2000
+                });
+                if (shot?.cancelled) return null;
+                if (shot?.dataUrl) {
+                    // 순정 카메라 경로(saveToGallery)와 같이 휴대폰 갤러리에도 남긴다. 실패해도 첨부는 된다.
+                    try {
+                        const saving = window.Capacitor?.Plugins?.BsaGallery?.saveImage?.({ data: shot.dataUrl, fileName: `photo_${Date.now()}.jpg` });
+                        if (saving && typeof saving.catch === 'function') saving.catch(() => {});
+                    } catch (_e) { /* ignore */ }
+                    return dataUrlToJpegFile(shot.dataUrl, `photo_${Date.now()}.jpg`);
+                }
+            } catch (err) {
+                console.warn('BsaCamera.takePhoto fallback to stock camera:', err);
+            }
+        }
         if (Camera && window.Capacitor?.isNativePlatform?.()) {
             try {
                 const result = await Camera.getPhoto({
