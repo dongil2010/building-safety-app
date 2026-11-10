@@ -55,6 +55,7 @@
             t = n.toFixed(3);
         }
         if (t.indexOf('.') >= 0) t = t.replace(/0+$/, '').replace(/\.$/, '');
+        if (t.indexOf('.') < 0) t += '.0'; // 2026-11-10 「1은 1.0으로」 — 정수는 소수 한 자리
         return t; // 배지에는 숫자만(mm 생략)
     }
 

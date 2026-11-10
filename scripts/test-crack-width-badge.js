@@ -44,7 +44,10 @@ function testFormatUnits() {
     assert.strictEqual(api.formatWidthMm(0.3), '0.3');
     assert.strictEqual(api.formatWidthMm(0.5), '0.5');
     assert.strictEqual(api.formatWidthMm(0.31), '0.31');
-    assert.strictEqual(api.formatWidthMm(1), '1');
+    assert.strictEqual(api.formatWidthMm(1), '1.0');
+    assert.strictEqual(api.formatWidthMm(2), '2.0');
+    assert.strictEqual(api.formatWidthMm(1.5), '1.5');
+    assert.strictEqual(api.formatBadgeText(crack({ crackWidth: '1 / 0.5' })), '1.0 / 0.5');
     assert.strictEqual(api.formatWidthMm(0.30000000000000004), '0.3');
     assert.strictEqual(api.formatBadgeText(crack({ crackWidth: '0.29' })), '');
     assert.strictEqual(api.formatBadgeText(crack({ crackWidth: '0.3' })), '0.3');
