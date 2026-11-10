@@ -21,6 +21,7 @@ import android.view.KeyEvent;
 import android.view.MotionEvent;
 import android.view.ScaleGestureDetector;
 import android.view.View;
+import android.view.ViewConfiguration;
 import android.widget.FrameLayout;
 import android.widget.ImageView;
 import android.widget.LinearLayout;
@@ -62,8 +63,9 @@ import java.util.concurrent.Executors;
  * - 줌: 줌 막대를 끌면 부드럽게(초광각 ~ 15배), 배율 버튼, 두 손가락 벌리기. 화면을 누르면 그 자리에 초점.
  *   기기 줌 한계를 넘는 배율은 가운데를 잘라 맞춘다(보이는 대로 찍힘). 초광각은 기기가 1배 미만 줌을 주면 그대로,
  *   아니면 따로 달린 초광각 렌즈로 바꿔 건다. 플래시(손전등)는 지금 렌즈에 불이 있으면 초광각에서도 켠다.
- * - 촬영 버튼 자리: 왼쪽 / 가운데 / 오른쪽 (위 「촬영 버튼」을 눌러 바꾸고, 기기에 기억).
- * - 찍은 뒤 「확인」은 촬영 버튼과 같은 쪽(가운데면 오른쪽)에 크게, 「다시 찍기」는 반대쪽.
+ * - 가로로만 찍는다(왼쪽으로 눕힘 / 오른쪽으로 눕힘 두 방향). 줌 버튼·줌 막대는 오른쪽 아래(오른손 엄지 자리).
+ * - 촬영 버튼은 끌어서 아무 데나 옮기고 위 「셔터 고정」을 누르면 그 자리에 고정(기기에 기억). 「셔터 옮기기」로 다시 푼다.
+ * - 찍은 뒤 「확인」은 촬영 버튼이 있는 쪽에 크게, 「다시 찍기」는 반대쪽.
  * - 음량 버튼으로도 찍는다.
  * 결과: 긴 변을 줄이고 바로 세운 JPEG 를 앱 캐시에 두고 그 경로(EXTRA_PATH)를 돌려준다.
  */
@@ -74,10 +76,11 @@ public class CustomCameraActivity extends AppCompatActivity {
     public static final String EXTRA_QUALITY = "quality";
 
     private static final String PREFS = "bsa_camera";
-    private static final String KEY_SHUTTER_POS = "shutterPos"; // 0 왼쪽, 1 가운데, 2 오른쪽
+    private static final String KEY_SHUTTER_X = "shutterFx"; // 촬영 버튼 자리(화면 너비·높이에 대한 비율)
+    private static final String KEY_SHUTTER_Y = "shutterFy";
+    private static final String KEY_SHUTTER_LOCKED = "shutterLocked";
     private static final float MAX_ZOOM = 15f;
     private static final float[] ZOOM_STEPS = { 1f, 2f, 5f, 10f, 15f };
-    private static final String[] POS_LABEL = { "왼쪽", "가운데", "오른쪽" };
 
     private PreviewView previewView;
     private ImageView reviewImage;
@@ -85,7 +88,8 @@ public class CustomCameraActivity extends AppCompatActivity {
     private TextView zoomLabel;
     private TextView posButton;
     private TextView torchButton;
-    private FrameLayout captureBar;
+    private FrameLayout rootView;
+    private GradientDrawable shutterRing;
     private FrameLayout reviewBar;
     private View shutter;
     private TextView closeButton;
@@ -113,7 +117,12 @@ public class CustomCameraActivity extends AppCompatActivity {
     private ImageCapture imageCapture;
     private boolean busy;
     private boolean torchOn;
-    private int shutterPos = 1;
+    private float shutterFx = 0.97f;
+    private float shutterFy = 0.3f;
+    private boolean shutterLocked;
+    private boolean shutterDragging;
+    private float downRawX, downRawY, downViewX, downViewY;
+    private Boolean confirmOnLeft;
     private int longEdge = 2000;
     private int quality = 90;
     private File shotFile;
@@ -124,7 +133,9 @@ public class CustomCameraActivity extends AppCompatActivity {
         super.onCreate(savedInstanceState);
         longEdge = Math.max(640, Math.min(6000, getIntent().getIntExtra(EXTRA_LONG_EDGE, 2000)));
         quality = Math.max(50, Math.min(100, getIntent().getIntExtra(EXTRA_QUALITY, 90)));
-        shutterPos = Math.max(0, Math.min(2, prefs().getInt(KEY_SHUTTER_POS, 1)));
+        shutterFx = Math.max(0f, Math.min(1f, prefs().getFloat(KEY_SHUTTER_X, 0.97f)));
+        shutterFy = Math.max(0f, Math.min(1f, prefs().getFloat(KEY_SHUTTER_Y, 0.3f)));
+        shutterLocked = prefs().getBoolean(KEY_SHUTTER_LOCKED, false);
         io = Executors.newSingleThreadExecutor();
         buildUi();
         startCamera();
@@ -139,6 +150,7 @@ public class CustomCameraActivity extends AppCompatActivity {
     @SuppressLint("ClickableViewAccessibility")
     private void buildUi() {
         FrameLayout root = new FrameLayout(this);
+        rootView = root;
         root.setBackgroundColor(Color.BLACK);
 
         previewView = new PreviewView(this);
@@ -170,14 +182,14 @@ public class CustomCameraActivity extends AppCompatActivity {
         top.addView(torchButton, tlp);
         posButton = pill("", 15);
         posButton.setOnClickListener(v -> {
-            shutterPos = (shutterPos + 1) % 3;
-            prefs().edit().putInt(KEY_SHUTTER_POS, shutterPos).apply();
-            applyShutterPos();
+            shutterLocked = !shutterLocked;
+            prefs().edit().putBoolean(KEY_SHUTTER_LOCKED, shutterLocked).apply();
+            applyShutterLock();
         });
         top.addView(posButton);
         root.addView(top, new FrameLayout.LayoutParams(-1, -2, Gravity.TOP));
 
-        // 아래: 줌 줄 + 촬영 줄
+        // 아래 오른쪽: 배율 글자 · 배율 버튼 · 줌 막대(맨 아래) — 가로로 든 오른손 엄지가 닿는 자리
         LinearLayout bottom = new LinearLayout(this);
         bottom.setOrientation(LinearLayout.VERTICAL);
 
@@ -188,27 +200,17 @@ public class CustomCameraActivity extends AppCompatActivity {
         zoomLabel.setShadowLayer(4f, 0f, 0f, Color.BLACK);
         bottom.addView(zoomLabel, new LinearLayout.LayoutParams(-1, -2));
 
-        zoomSlider = new ZoomSlider();
-        bottom.addView(zoomSlider, new LinearLayout.LayoutParams(-1, dp(58)));
-
         zoomRow = new LinearLayout(this);
         zoomRow.setOrientation(LinearLayout.HORIZONTAL);
         zoomRow.setGravity(Gravity.CENTER);
-        zoomRow.setPadding(0, dp(6), 0, dp(6));
+        zoomRow.setPadding(0, dp(4), 0, dp(4));
         bottom.addView(zoomRow, new LinearLayout.LayoutParams(-1, -2));
 
-        captureBar = new FrameLayout(this);
-        shutter = new View(this);
-        GradientDrawable ring = new GradientDrawable();
-        ring.setShape(GradientDrawable.OVAL);
-        ring.setColor(Color.WHITE);
-        ring.setStroke(dp(5), Color.argb(170, 0, 0, 0));
-        shutter.setBackground(ring);
-        shutter.setContentDescription("촬영");
-        shutter.setOnClickListener(v -> shoot());
-        captureBar.addView(shutter, new FrameLayout.LayoutParams(dp(84), dp(84)));
-        bottom.addView(captureBar, new LinearLayout.LayoutParams(-1, dp(124)));
+        zoomSlider = new ZoomSlider();
+        bottom.addView(zoomSlider, new LinearLayout.LayoutParams(-1, dp(58)));
+        root.addView(bottom, new FrameLayout.LayoutParams(dp(390), -2, Gravity.BOTTOM | Gravity.RIGHT));
 
+        // 찍은 뒤: 확인 · 다시 찍기
         reviewBar = new FrameLayout(this);
         reviewBar.setVisibility(View.GONE);
         confirmButton = bigButton("확인", Color.rgb(22, 163, 74), 22);
@@ -217,9 +219,18 @@ public class CustomCameraActivity extends AppCompatActivity {
         retakeButton = bigButton("다시 찍기", Color.argb(200, 60, 60, 60), 17);
         retakeButton.setOnClickListener(v -> retake());
         reviewBar.addView(retakeButton, new FrameLayout.LayoutParams(dp(130), dp(64)));
-        bottom.addView(reviewBar, new LinearLayout.LayoutParams(-1, dp(124)));
+        root.addView(reviewBar, new FrameLayout.LayoutParams(-1, dp(100), Gravity.BOTTOM));
 
-        root.addView(bottom, new FrameLayout.LayoutParams(-1, -2, Gravity.BOTTOM));
+        // 촬영 버튼: 화면 어디든 끌어 놓을 수 있다(고정하면 안 움직임)
+        shutter = new View(this);
+        shutterRing = new GradientDrawable();
+        shutterRing.setShape(GradientDrawable.OVAL);
+        shutterRing.setColor(Color.WHITE);
+        shutter.setBackground(shutterRing);
+        shutter.setContentDescription("촬영");
+        shutter.setOnTouchListener(this::onShutterTouch);
+        root.addView(shutter, new FrameLayout.LayoutParams(dp(84), dp(84)));
+        root.addOnLayoutChangeListener((v, l, t, r, b, ol, ot, or, ob) -> placeShutter());
 
         // 상태 표시줄·하단 버튼 자리만큼 안쪽으로
         ViewCompat.setOnApplyWindowInsetsListener(root, (v, insets) -> {
@@ -249,7 +260,7 @@ public class CustomCameraActivity extends AppCompatActivity {
             return true;
         });
 
-        applyShutterPos();
+        applyShutterLock();
         setContentView(root);
     }
 
@@ -282,15 +293,80 @@ public class CustomCameraActivity extends AppCompatActivity {
         return t;
     }
 
-    /** 촬영 버튼 자리에 맞춰 촬영·확인·다시 찍기 버튼을 놓는다. */
-    private void applyShutterPos() {
-        posButton.setText("촬영 버튼: " + POS_LABEL[shutterPos]);
-        int side = shutterPos == 0 ? Gravity.LEFT : shutterPos == 2 ? Gravity.RIGHT : Gravity.CENTER_HORIZONTAL;
-        place(shutter, side, dp(36));
-        // 확인은 엄지가 있는 쪽(가운데면 오른쪽), 다시 찍기는 반대쪽
-        boolean confirmLeft = shutterPos == 0;
-        place(confirmButton, confirmLeft ? Gravity.LEFT : Gravity.RIGHT, dp(20));
-        place(retakeButton, confirmLeft ? Gravity.RIGHT : Gravity.LEFT, dp(20));
+    private void applyShutterLock() {
+        posButton.setText(shutterLocked ? "셔터 옮기기" : "셔터 고정");
+        // 옮길 수 있을 때는 노란 테두리
+        shutterRing.setStroke(dp(5), shutterLocked ? Color.argb(170, 0, 0, 0) : Color.rgb(250, 204, 21));
+    }
+
+    private int shutterRangeX() {
+        return rootView.getWidth() - rootView.getPaddingLeft() - rootView.getPaddingRight() - dp(84);
+    }
+
+    private int shutterRangeY() {
+        return rootView.getHeight() - rootView.getPaddingTop() - rootView.getPaddingBottom() - dp(84);
+    }
+
+    /** 기억한 자리에 촬영 버튼을 놓고, 확인 버튼을 촬영 버튼이 있는 쪽에 둔다. */
+    private void placeShutter() {
+        int w = shutterRangeX();
+        int h = shutterRangeY();
+        if (w <= 0 || h <= 0) return;
+        if (!shutterDragging) {
+            shutter.setX(rootView.getPaddingLeft() + shutterFx * w);
+            shutter.setY(rootView.getPaddingTop() + shutterFy * h);
+        }
+        boolean left = shutterFx < 0.5f;
+        if (confirmOnLeft == null || confirmOnLeft != left) {
+            confirmOnLeft = left;
+            place(confirmButton, left ? Gravity.LEFT : Gravity.RIGHT, dp(20));
+            place(retakeButton, left ? Gravity.RIGHT : Gravity.LEFT, dp(20));
+        }
+    }
+
+    /** 누르면 촬영. 고정하지 않았으면 끌어서 옮긴다. */
+    private boolean onShutterTouch(View v, MotionEvent e) {
+        switch (e.getActionMasked()) {
+            case MotionEvent.ACTION_DOWN:
+                downRawX = e.getRawX();
+                downRawY = e.getRawY();
+                downViewX = v.getX();
+                downViewY = v.getY();
+                shutterDragging = false;
+                return true;
+            case MotionEvent.ACTION_MOVE: {
+                if (shutterLocked) return true;
+                float dx = e.getRawX() - downRawX;
+                float dy = e.getRawY() - downRawY;
+                if (!shutterDragging && Math.hypot(dx, dy) > ViewConfiguration.get(this).getScaledTouchSlop()) shutterDragging = true;
+                int w = shutterRangeX();
+                int h = shutterRangeY();
+                if (shutterDragging && w > 0 && h > 0) {
+                    float x = Math.max(rootView.getPaddingLeft(), Math.min(rootView.getPaddingLeft() + w, downViewX + dx));
+                    float y = Math.max(rootView.getPaddingTop(), Math.min(rootView.getPaddingTop() + h, downViewY + dy));
+                    v.setX(x);
+                    v.setY(y);
+                    shutterFx = (x - rootView.getPaddingLeft()) / w;
+                    shutterFy = (y - rootView.getPaddingTop()) / h;
+                }
+                return true;
+            }
+            case MotionEvent.ACTION_UP:
+                if (shutterDragging) {
+                    shutterDragging = false;
+                    prefs().edit().putFloat(KEY_SHUTTER_X, shutterFx).putFloat(KEY_SHUTTER_Y, shutterFy).apply();
+                    placeShutter();
+                } else {
+                    shoot();
+                }
+                return true;
+            case MotionEvent.ACTION_CANCEL:
+                shutterDragging = false;
+                placeShutter();
+                return true;
+            default:
+                return true;
+        }
     }
 
     private void place(View v, int horizontalGravity, int sideMargin) {
@@ -311,7 +387,7 @@ public class CustomCameraActivity extends AppCompatActivity {
                 preview = new Preview.Builder().build();
                 preview.setSurfaceProvider(previewView.getSurfaceProvider());
                 imageCapture = new ImageCapture.Builder()
-                    .setCaptureMode(ImageCapture.CAPTURE_MODE_MAXIMIZE_QUALITY)
+                    .setCaptureMode(ImageCapture.CAPTURE_MODE_MINIMIZE_LATENCY)
                     .build();
                 bind();
             } catch (Exception e) {
@@ -561,6 +637,8 @@ public class CustomCameraActivity extends AppCompatActivity {
         if (imageCapture == null || busy || reviewBar.getVisibility() == View.VISIBLE) return;
         busy = true;
         extraCropAtShot = extraCrop;
+        // 가로 두 방향(180도 뒤집힘)은 화면이 다시 만들어지지 않으므로 찍을 때마다 방향을 맞춘다
+        imageCapture.setTargetRotation(getWindowManager().getDefaultDisplay().getRotation());
         shutter.setAlpha(0.4f);
         imageCapture.takePicture(io, new ImageCapture.OnImageCapturedCallback() {
             @Override
@@ -644,7 +722,7 @@ public class CustomCameraActivity extends AppCompatActivity {
     private void setReviewMode(boolean review) {
         reviewImage.setVisibility(review ? View.VISIBLE : View.GONE);
         reviewBar.setVisibility(review ? View.VISIBLE : View.GONE);
-        captureBar.setVisibility(review ? View.GONE : View.VISIBLE);
+        shutter.setVisibility(review ? View.GONE : View.VISIBLE);
         zoomRow.setVisibility(review ? View.GONE : View.VISIBLE);
         zoomLabel.setVisibility(review ? View.GONE : View.VISIBLE);
         zoomSlider.setVisibility(review ? View.GONE : View.VISIBLE);
