@@ -47,6 +47,52 @@
         ['C', '0', '.', 'OK']
     ];
 
+    /**
+     * 방향키 줄(2026-11-10 「그놈들은 방향키도」): 균열 게이지·균열팁 창의 숫자 칸은 키패드 맨 위에 ◀▲▼▶ 한 줄을 더 둔다.
+     * 표(회차별 X/Y·길이·증분)에서 옆 칸·윗줄·아랫줄 숫자 칸으로 바로 옮겨 간다. 다른 창에서 쓰려면 칸에 data-num-keypad-arrows.
+     */
+    var ARROW_SELECTOR = '#ndtCrackMonitorModal input, input[data-num-keypad-arrows]';
+    var ARROW_KEYS = ['LEFT', 'UP', 'DOWN', 'RIGHT'];
+    var LAYOUT_NUM_ARROWS = [ARROW_KEYS].concat(LAYOUT_NUM);
+
+    function hasArrowKeys(el) {
+        return !!(isNumTarget(el) && el.matches(ARROW_SELECTOR));
+    }
+
+    /**
+     * 방향키로 옮겨 갈 칸 고르기 — 화면에 보이는 자리(사각형)만으로 정한다. 없으면 -1.
+     * cur·cands[i]: {left, top, right, bottom}. dir: 'LEFT'|'RIGHT'|'UP'|'DOWN'
+     * 좌우: 같은 줄(세로로 겹치는 칸)에서 가장 가까운 칸. 상하: 가장 가까운 줄에서 가로로 가장 가까운 칸.
+     */
+    function pickArrowTarget(cur, cands, dir) {
+        if (!cur || !cands) return -1;
+        var cx = (cur.left + cur.right) / 2;
+        var cy = (cur.top + cur.bottom) / 2;
+        var best = -1, bestMain = Infinity, bestSide = Infinity;
+        for (var i = 0; i < cands.length; i++) {
+            var r = cands[i];
+            if (!r) continue;
+            var x = (r.left + r.right) / 2;
+            var y = (r.top + r.bottom) / 2;
+            var main, side;
+            if (dir === 'LEFT' || dir === 'RIGHT') {
+                if (Math.min(cur.bottom, r.bottom) - Math.max(cur.top, r.top) <= 0) continue; // 같은 줄만
+                main = dir === 'RIGHT' ? x - cx : cx - x;
+                side = 0;
+            } else if (dir === 'UP' || dir === 'DOWN') {
+                if (Math.min(cur.bottom, r.bottom) - Math.max(cur.top, r.top) > 0) continue; // 같은 줄은 좌우로
+                main = dir === 'DOWN' ? y - cy : cy - y;
+                side = Math.abs(x - cx);
+            } else return -1;
+            if (!(main > 0.5)) continue;
+            // 가까운 줄 먼저(2px 안쪽 차이는 같은 줄로 본다), 그 안에서 가로로 가까운 칸
+            if (main < bestMain - 2 || (Math.abs(main - bestMain) <= 2 && side < bestSide)) {
+                best = i; bestMain = main; bestSide = side;
+            }
+        }
+        return best;
+    }
+
     /** '-' 키: 맨 앞 부호만 바꾼다(커서 위치 상관없이) → { value, caret } */
     function toggleSign(value) {
         value = String(value == null ? '' : value);
@@ -172,6 +218,10 @@
         if (k === ' ') return '␣';
         if (k === 'NEXT') return '다음';
         if (k === '-') return '±';
+        if (k === 'LEFT') return '◀';
+        if (k === 'RIGHT') return '▶';
+        if (k === 'UP') return '▲';
+        if (k === 'DOWN') return '▼';
         return k;
     }
 
@@ -182,6 +232,10 @@
         if (k === 'NEXT') return '다음 칸';
         if (k === '-') return '부호 바꾸기';
         if (k === 'C') return '칸 비우기';
+        if (k === 'LEFT') return '왼쪽 칸';
+        if (k === 'RIGHT') return '오른쪽 칸';
+        if (k === 'UP') return '윗줄 칸';
+        if (k === 'DOWN') return '아랫줄 칸';
         return k;
     }
 
@@ -189,6 +243,10 @@
         TARGET_SELECTOR: TARGET_SELECTOR,
         NUM_SELECTOR: NUM_SELECTOR,
         LAYOUT_NUM: LAYOUT_NUM,
+        LAYOUT_NUM_ARROWS: LAYOUT_NUM_ARROWS,
+        ARROW_SELECTOR: ARROW_SELECTOR,
+        hasArrowKeys: hasArrowKeys,
+        pickArrowTarget: pickArrowTarget,
         toggleSign: toggleSign,
         numAccepts: numAccepts,
         isNumTarget: isNumTarget,
@@ -219,7 +277,8 @@
         repeatDelay: null,
         raf: 0,
         lastPointerType: '',
-        lastPointerAt: 0
+        lastPointerAt: 0,
+        downInPad: false
     };
 
     function prepField(el) {
@@ -318,17 +377,18 @@
         var pad = buildPad();
         // 배열은 늘 4×4. 폰 가로(키 높이가 모자람)만 키를 낮춘다(bsa-mkp-short)
         var numMode = !!(state.field && isNumTarget(state.field));
-        var orient = (isLandscape() ? 'short' : 'grid') + (numMode ? ':num' : '');
+        var arrowMode = numMode && hasArrowKeys(state.field);
+        var orient = (isLandscape() ? 'short' : 'grid') + (numMode ? ':num' : '') + (arrowMode ? ':arrows' : '');
         if (state.orientation === orient && pad.firstChild) return;
         state.orientation = orient;
-        var layout = numMode ? LAYOUT_NUM : LAYOUT_PORTRAIT;
+        var layout = arrowMode ? LAYOUT_NUM_ARROWS : (numMode ? LAYOUT_NUM : LAYOUT_PORTRAIT);
         pad.className = 'bsa-mkp bsa-measure-keypad bsa-mkp-grid' + (orient.indexOf('short') === 0 ? ' bsa-mkp-short' : '') + (numMode ? ' bsa-mkp-numonly' : '');
         pad.style.setProperty('--mkp-cols', String(layout[0].length));
         var html = '';
         layout.forEach(function (row) {
             row.forEach(function (k) {
                 var cls = 'bsa-mkp-key' + (k === 'BS' || k === 'C' ? ' bsa-mkp-bs' : '') + (k === 'OK' || k === 'NEXT' ? ' bsa-mkp-ok' : '') +
-                    (/^[0-9]$/.test(k) ? ' bsa-mkp-num' : ' bsa-mkp-sym');
+                    (/^[0-9]$/.test(k) ? ' bsa-mkp-num' : ' bsa-mkp-sym') + (ARROW_KEYS.indexOf(k) >= 0 ? ' bsa-mkp-arrow' : '');
                 html += '<button type="button" tabindex="-1" class="' + cls + '" data-mkp-key="' +
                     (k === ' ' ? ' ' : k) + '" aria-label="' + keyAria(k) + '">' + keyLabel(k) + '</button>';
             });
@@ -349,6 +409,7 @@
         if (!el || !el.isConnected) { close(false); return; }
         if (k === 'OK') { close(true, true); return; }
         if (k === 'NEXT') { focusNextNum(el); return; }
+        if (ARROW_KEYS.indexOf(k) >= 0) { focusArrowNum(el, k); return; }
         var s = null, e = null;
         try { s = el.selectionStart; e = el.selectionEnd; } catch (_e) { /* 선택 미지원 */ }
         var res;
@@ -368,6 +429,30 @@
         schedulePosition();
     }
 
+    /** 키패드로 다른 숫자 칸에 포커스(OS 키보드 없이) — 떠나는 칸은 focusout에서 change, 새 칸은 focusin에서 열린다 */
+    function moveToNumField(next) {
+        prepField(next); // 포커스 전에 → OS 키보드 안 뜸
+        state.lastPointerType = 'touch';
+        state.lastPointerAt = Date.now();
+        try { next.focus({ preventScroll: true }); } catch (_e) { next.focus(); }
+        if (state.field !== next && wantsKeypadFor(next)) open(next);
+    }
+
+    /** 방향키: 같은 창에서 그 방향의 숫자 칸(보이는 것)으로. 없으면 그대로 */
+    function focusArrowNum(el, dir) {
+        var scope = el.closest('.modal-overlay, .modal-card, form') || document.body;
+        var list = Array.prototype.slice.call(scope.querySelectorAll('input')).filter(function (x) {
+            return x !== el && isNumTarget(x) && x.offsetParent !== null;
+        });
+        var i = pickArrowTarget(el.getBoundingClientRect(), list.map(function (x) { return x.getBoundingClientRect(); }), dir);
+        if (i < 0) return;
+        var next = list[i];
+        // 가로로 넘치는 표·창 밖 줄: 옮겨 갈 칸이 보이게
+        try { next.scrollIntoView({ block: 'nearest', inline: 'nearest' }); } catch (_e) { /* 옛 브라우저 */ }
+        moveToNumField(next);
+        try { next.select(); } catch (_e) { /* ignore */ }
+    }
+
     /** 「다음」: 같은 창의 다음 숫자 칸(보이는 것)으로. 없으면 완료 */
     function focusNextNum(el) {
         var scope = el.closest('.modal-overlay, .modal-card, form') || document.body;
@@ -383,11 +468,7 @@
             else schedulePosition();
             return;
         }
-        prepField(next); // 포커스 전에 → OS 키보드 안 뜸
-        state.lastPointerType = 'touch';
-        state.lastPointerAt = Date.now();
-        try { next.focus({ preventScroll: true }); } catch (_e) { next.focus(); }
-        if (state.field !== next && wantsKeypadFor(next)) open(next);
+        moveToNumField(next);
     }
 
     function startRepeat() {
@@ -498,6 +579,7 @@
         state.lastPointerType = e.pointerType || (e.type === 'touchstart' ? 'touch' : 'mouse');
         state.lastPointerAt = Date.now();
         var t = e.target;
+        state.downInPad = !!(state.pad && t && state.pad.contains(t));
         if (!isTarget(t) && t && t.closest) {
             // 「폭」「mm」 글자(라벨)를 눌러도 칸에 포커스가 가므로 그 칸을 미리 준비
             var lab = t.closest('label');
@@ -525,6 +607,15 @@
 
     function onDocClick(e) {
         var t = e.target;
+        // 키패드 키(방향키·다음)로 칸을 옮기면 키패드도 따라 움직인다. 그러면 그 누르기의 click이 키패드 밖
+        // (아래에 깔린 표·삭제 버튼)에 떨어져 키패드가 닫히거나 엉뚱한 버튼이 눌린다 → 그 click은 버린다.
+        var fromPad = state.downInPad && (Date.now() - state.lastPointerAt) < 1000;
+        state.downInPad = false;
+        if (fromPad && !(state.pad && state.pad.contains(t))) {
+            if (e.cancelable) e.preventDefault();
+            e.stopPropagation();
+            return;
+        }
         // 이미 포커스된 칸을 다시 누르면(엔터로 닫은 뒤 등) 키패드를 다시 연다
         if (isTarget(t) && document.activeElement === t && !api.isOpen() && wantsKeypadFor(t)) { open(t); return; }
         if (!state.field || !state.pad || state.pad.hidden) return;
