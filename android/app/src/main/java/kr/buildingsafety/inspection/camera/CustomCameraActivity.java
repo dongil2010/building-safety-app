@@ -333,7 +333,15 @@ public class CustomCameraActivity extends AppCompatActivity {
         zoomArea.addView(zoomRow, new LinearLayout.LayoutParams(-1, -2));
 
         zoomSlider = new ZoomSlider();
-        zoomArea.addView(zoomSlider, new LinearLayout.LayoutParams(-1, dp(64)));
+        // 줌 막대 폭은 화면의 3/5(가운데) — 엄지가 닿는 범위 안에서 끝까지 끌 수 있게
+        LinearLayout sliderRow = new LinearLayout(this);
+        sliderRow.setOrientation(LinearLayout.HORIZONTAL);
+        sliderRow.setWeightSum(5f);
+        sliderRow.setClipChildren(false);
+        sliderRow.addView(new View(this), new LinearLayout.LayoutParams(0, 1, 1f));
+        sliderRow.addView(zoomSlider, new LinearLayout.LayoutParams(0, dp(64), 3f));
+        sliderRow.addView(new View(this), new LinearLayout.LayoutParams(0, 1, 1f));
+        zoomArea.addView(sliderRow, new LinearLayout.LayoutParams(-1, -2));
         root.addView(zoomArea, new FrameLayout.LayoutParams(-1, -2, Gravity.BOTTOM));
 
         // 찍은 뒤: 확인 · 다시 찍기
@@ -858,7 +866,7 @@ public class CustomCameraActivity extends AppCompatActivity {
             setContentDescription("줌 막대");
         }
 
-        private float pad() { return dp(26); }
+        private float pad() { return dp(16); }
 
         private float xOf(float ratio) {
             float min = minZoom();
