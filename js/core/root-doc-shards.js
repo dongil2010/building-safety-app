@@ -208,14 +208,22 @@
         var data = raw || {};
         var man = data.rootShards;
         if (!man || !man.writeId || !docRef) return data;
-        var obj = null, err = null;
+        var obj = null, err = null, prevObj = null;
         try { obj = await readManifest(docRef, man, o.getOpts); } catch (e) { err = e; }
         if (!obj && man.prev && man.prev.writeId) {
-            try { obj = await readManifest(docRef, man.prev, o.getOpts); } catch (e2) { err = err || e2; }
-            if (obj && o.strict) obj = null;   // 쓰기 전에는 최신 목차만 믿는다
+            try { prevObj = await readManifest(docRef, man.prev, o.getOpts); } catch (e2) { err = err || e2; }
+            if (!o.strict) obj = prevObj;   // 쓰기 전에는 최신 목차만 믿는다
         }
         if (!obj) {
             if (o.strict) {
+                // 2026-11-10 서버가 답은 했는데(읽기 오류 없음) 목차가 가리키는 조각이 없는 경우 — 기다려도 생기지 않으므로
+                // 예전처럼 실패시키면 회사 전체가 영영 못 올린다(현장 폰 「ROOT_SHARDS_UNREADABLE」 반복). 이전 목차·루트 칸으로
+                // 이어 가고, 이번 쓰기가 새 조각·목차를 다시 만든다. 읽기 자체가 실패한 경우(인터넷 등)는 그대로 실패(다음에 다시).
+                if (!err) {
+                    if (typeof console !== 'undefined') console.warn('[루트 조각] 목차가 가리키는 조각이 서버에 없음 — 이전 목차·루트 칸으로 이어 감', man.writeId);
+                    try { if (typeof o.onDangling === 'function') o.onDangling(man, !!prevObj); } catch (_e) { /* ignore */ }
+                    return mergeExpanded(data, prevObj || {});
+                }
                 var x = new Error('ROOT_SHARDS_UNREADABLE: 건물 목록 조각을 읽지 못해 이번에는 쓰지 않습니다(다음에 다시)' + (err && err.message ? ' — ' + err.message : ''));
                 x.code = 'unavailable';
                 throw x;

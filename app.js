@@ -67655,7 +67655,7 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
         }
     };
 
-// @@app-part 16-backup-auth-init.js sha=9dbc38e1da52 — 원본은 app/16-backup-auth-init.js (여기 말고 거기서 고칠 것)
+// @@app-part 16-backup-auth-init.js sha=64ef7f1fa1ba — 원본은 app/16-backup-auth-init.js (여기 말고 거기서 고칠 것)
     // ==========================================================================
     // 건물 백업(체크포인트) — 2026-09-27
     // safety_app/{회사}/buildingCheckpoints/{id}          요약 + 이 백업이 쓰는 사진 id(photoIds)
@@ -71785,7 +71785,13 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
         const api = buildingDocsApi();
         try {
             const S = rootDocShardsApi();
-            if (S && data.rootShards) data = await S.expandRootData(docRef, data, o.strict ? { strict: true, getOpts: { source: 'server' } } : {});
+            if (S && data.rootShards) data = await S.expandRootData(docRef, data, o.strict ? {
+                strict: true, getOpts: { source: 'server' },
+                onDangling: (man, hadPrev) => {
+                    const el = window.BSA && window.BSA.errorLog;
+                    if (el && typeof el.record === 'function') el.record({ kind: 'root-shards-dangling', message: '목차 ' + (man && man.writeId) + ' 조각 없음 — ' + (hadPrev ? '이전 목차로' : '루트 칸만으로') + ' 이어 감', source: 'expandRootDocData' });
+                }
+            } : {});
             if (!api) return data;
             if (data.rootSplit && (!Object.keys(_bldgDocs).length || (o.strict && !_bldgDocsFromServer))) {
                 await fetchAllBuildingDocs(docRef, o.strict ? { source: 'server' } : undefined);

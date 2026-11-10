@@ -118,7 +118,20 @@ const settings = { styleColors: { a: '#fff' }, floorGridLines: { k1: { xs: [1, 2
         const soft = await S.expandRootData(root, raw5);
         assert.ok(Array.isArray(soft.buildings) && soft.buildings.length === 2, '이전 목차(wC)로');
         S._cacheClear();
-        await assert.rejects(S.expandRootData(root, raw5, { strict: true }), /ROOT_SHARDS_UNREADABLE/, '쓰기 전엔 최신만 믿음');
+        // 2026-11-10 서버가 답했는데 조각이 없으면(기다려도 안 생김) 엄격도 이전 목차로 이어 간다 — 영영 못 올리는 막힘 방지
+        let dangling = 0;
+        const healed = await S.expandRootData(root, raw5, { strict: true, onDangling: () => { dangling++; } });
+        assert.ok(Array.isArray(healed.buildings) && healed.buildings.length === 2 && dangling === 1, '조각 없음 → 이전 목차(wC)로 이어 감');
+        // 이어서 쓰면 새 목차·조각이 생겨 다음부터 정상
+        await S.writeRootDoc(root, { buildings: healed.buildings, deletedBuildingIds: healed.deletedBuildingIds || [] }, { serverRaw: raw5, deleteSentinel: () => DEL, writeId: 'wE' });
+        S._cacheClear();
+        const raw6 = (await root.get()).data();
+        const exp6 = await S.expandRootData(root, raw6, { strict: true });
+        assert.strictEqual(exp6.buildings.length, 2, '다시 정상');
+        // 읽기 자체가 실패(인터넷 등)하면 엄격은 그대로 실패
+        S._cacheClear();
+        const badRoot = { collection: () => ({ doc: () => ({ get: async () => { throw new Error('Failed to get document from server'); } }) }) };
+        await assert.rejects(S.expandRootData(badRoot, raw6, { strict: true }), /ROOT_SHARDS_UNREADABLE/, '읽기 실패는 쓰지 않음');
     }
     // 6) 목차 없는 예전 데이터: 그대로
     {

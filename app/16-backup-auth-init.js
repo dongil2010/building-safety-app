@@ -4128,7 +4128,13 @@
         const api = buildingDocsApi();
         try {
             const S = rootDocShardsApi();
-            if (S && data.rootShards) data = await S.expandRootData(docRef, data, o.strict ? { strict: true, getOpts: { source: 'server' } } : {});
+            if (S && data.rootShards) data = await S.expandRootData(docRef, data, o.strict ? {
+                strict: true, getOpts: { source: 'server' },
+                onDangling: (man, hadPrev) => {
+                    const el = window.BSA && window.BSA.errorLog;
+                    if (el && typeof el.record === 'function') el.record({ kind: 'root-shards-dangling', message: '목차 ' + (man && man.writeId) + ' 조각 없음 — ' + (hadPrev ? '이전 목차로' : '루트 칸만으로') + ' 이어 감', source: 'expandRootDocData' });
+                }
+            } : {});
             if (!api) return data;
             if (data.rootSplit && (!Object.keys(_bldgDocs).length || (o.strict && !_bldgDocsFromServer))) {
                 await fetchAllBuildingDocs(docRef, o.strict ? { source: 'server' } : undefined);
