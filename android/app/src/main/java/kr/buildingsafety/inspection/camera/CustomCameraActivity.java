@@ -97,6 +97,7 @@ import java.util.concurrent.Executors;
  * - 촬영 버튼을 누른 채 버튼 밖으로 끌고 떼면 찍지 않는다(취소). 음량 버튼과 블루투스 리모컨(셔터 버튼)으로도 찍는다.
  * - 버튼 지정(설정 창, 기기에 기억): 촬영 · 줌아웃 · 줌인 칸을 누른 뒤 리모컨(또는 음량) 버튼을 누르면 그 키가 등록된다.
  *   지정 중에 같은 칸을 다시 누르면 지정을 지운다. 줌 키로 지정한 키는 촬영 기본 키(음량 등)보다 먼저 먹는다.
+ *   찍은 뒤 확인 화면에서는 촬영 키 = 확인, 줌인·줌아웃 키 = 다시 찍기(화면이 뜨고 0.4초 뒤부터 받는다).
  *   단계 줌: 넓은 쪽은 1.0 → 0.8 → 0.6 → 0.5, 망원 쪽은 1.33배씩(1 → 1.33 → 1.77 → 2.35 …, 최대 15배).
  * - 촬영 방식: 화질 우선이 기본. 설정 창에서 속도 우선으로 바꿀 수 있다(기기에 기억).
  * - 초점: 기본은 화면 정중앙(계속 맞춤). 화면을 누르면 그 자리에 고정되고, 다시 찍기·렌즈 바꿈·새로 열 때 중앙으로 돌아온다.
@@ -205,6 +206,7 @@ public class CustomCameraActivity extends AppCompatActivity {
     private int remoteKey = KeyEvent.KEYCODE_UNKNOWN; // 직접 지정한 리모컨 촬영 키(없으면 UNKNOWN)
     private int zoomInKey = KeyEvent.KEYCODE_UNKNOWN;
     private int zoomOutKey = KeyEvent.KEYCODE_UNKNOWN;
+    private long reviewShownAt;
     private int learnTarget = LEARN_NONE; // 지금 버튼을 기다리는 칸
     private TextView remoteButton;
     private TextView zoomInButton;
@@ -1597,6 +1599,7 @@ public class CustomCameraActivity extends AppCompatActivity {
         shotDisplay = display;
         shotFile = f;
         reviewImage.setImageBitmap(display);
+        reviewShownAt = SystemClock.uptimeMillis();
         setReviewMode(true);
     }
 
@@ -1674,6 +1677,15 @@ public class CustomCameraActivity extends AppCompatActivity {
         }
     }
 
+    private boolean inReview() {
+        return reviewBar.getVisibility() == View.VISIBLE;
+    }
+
+    /** 확인 화면이 뜨자마자 눌린 키(찍을 때 누른 것의 여운·연타)는 받지 않는다. */
+    private boolean reviewKeyReady(KeyEvent event) {
+        return event.getRepeatCount() == 0 && SystemClock.uptimeMillis() - reviewShownAt > 400;
+    }
+
     @Override
     public boolean onKeyDown(int keyCode, KeyEvent event) {
         if (learnTarget != LEARN_NONE && keyCode != KeyEvent.KEYCODE_BACK) {
@@ -1685,10 +1697,18 @@ public class CustomCameraActivity extends AppCompatActivity {
             return true;
         }
         if (keyCode != KeyEvent.KEYCODE_UNKNOWN && (keyCode == zoomInKey || keyCode == zoomOutKey)) {
+            if (inReview()) {
+                if (reviewKeyReady(event)) retake(); // 확인 화면: 줌 키 = 다시 찍기
+                return true;
+            }
             if (event.getRepeatCount() % 4 == 0) stepZoom(keyCode == zoomInKey); // 누르고 있으면 천천히 이어서
             return true;
         }
         if (isShutterKey(keyCode) || (remoteKey != KeyEvent.KEYCODE_UNKNOWN && keyCode == remoteKey)) {
+            if (inReview()) {
+                if (reviewKeyReady(event)) confirm(); // 확인 화면: 촬영 키 = 확인
+                return true;
+            }
             if (event.getRepeatCount() == 0) shoot();
             return true;
         }
