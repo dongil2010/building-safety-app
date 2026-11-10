@@ -396,7 +396,7 @@
     window._justRegistering = false;
 
     // 앱 번호. 포팅하면 이 번호가 1 오르고, 같은 번호가 Storage releases/latest.json 에 올라간다.
-    window.BSA_APP_BUILD = { versionCode: 41, versionName: '1.3.33' };
+    window.BSA_APP_BUILD = { versionCode: 42, versionName: '1.3.34' };
 
     function isNativeAndroidApp() {
         try {
