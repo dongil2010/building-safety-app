@@ -136,6 +136,14 @@ function testNoSavedMutation() {
     assert.strictEqual(JSON.stringify(d), before, '결함 저장값 변경 없음');
 }
 
+// 2026-11-10 면적용(가로x세로)으로 넣은 값은 균열폭 배지에 안 나온다
+(function testAreaNotShown() {
+    assert.strictEqual(api.formatBadgeText(crack({ crackMeasures: [{ width: '0.3', length: '0.5', join: 'x' }], size: '0.3x0.5' })), '', 'x 행은 면적');
+    assert.strictEqual(api.formatBadgeText(crack({ crackMeasures: [{ width: '0.3', length: '0.5', join: '/' }], size: '0.3x0.5' })), '', '규모 글자가 면적');
+    assert.strictEqual(api.formatBadgeText(crack({ crackWidth: '0.3', size: '0.3x0.5' })), '', '옛 자료(측정 행 없음)');
+    assert.strictEqual(api.formatBadgeText(crack({ crackMeasures: [{ width: '0.4', length: '2', join: '/' }, { width: '0.3', length: '0.5', join: 'x' }], size: '0.4/2, 0.3x0.5' })), '0.4mm', '폭 행은 그대로');
+    assert.strictEqual(api.formatBadgeText(crack({ crackMeasures: [{ width: '0.3', length: '1.5', join: '/' }], size: '0.3/1.5' })), '0.3mm');
+})();
 testParseAndBoundary();
 testFormatUnits();
 testTogglePref();

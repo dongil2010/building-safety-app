@@ -61,16 +61,34 @@
         return n != null && Number.isFinite(n) && (n + EPS) >= MIN_MM;
     }
 
+    /** 규모 글자에 이 값으로 시작하는 면적 조각(0.3x0.5)이 있는가 — 면적(가로x세로)은 균열폭이 아니다 */
+    function isAreaWidthInSize(size, widthRaw) {
+        var w = parseCrackWidthMm(widthRaw);
+        if (w == null) return false;
+        var re = /(\d+(?:[.,]\d+)?)\s*[x×*]\s*\d+(?:[.,]\d+)?/ig, m;
+        var str = String(size || '');
+        while ((m = re.exec(str))) {
+            if (Math.abs(parseFloat(m[1].replace(',', '.')) - w) < EPS) return true;
+        }
+        return false;
+    }
+
     function collectWidthParts(d) {
         if (!d) return [];
+        // 2026-11-10 면적용(가로x세로)으로 넣은 값(0.3x0.5)은 배지에 안 나오게 — 측정 행 구분이 x이거나 규모 글자가 면적이면 뺀다
         if (Array.isArray(d.crackMeasures) && d.crackMeasures.length) {
-            return d.crackMeasures.map(function (m) {
-                return String(m && m.width != null ? m.width : '').trim();
+            return d.crackMeasures.filter(function (m) {
+                if (!m) return false;
+                if (/^[x×*]$/i.test(String(m.join || '').trim())) return false;
+                return !isAreaWidthInSize(d.size, m.width);
+            }).map(function (m) {
+                return String(m.width != null ? m.width : '').trim();
             }).filter(Boolean);
         }
         var raw = String(d.crackWidth != null ? d.crackWidth : '').trim();
         if (raw) {
-            return raw.split(/\s*[\/,]\s*/).map(function (s) { return s.trim(); }).filter(Boolean);
+            return raw.split(/\s*[\/,]\s*/).map(function (s) { return s.trim(); }).filter(Boolean)
+                .filter(function (w) { return !isAreaWidthInSize(d.size, w); });
         }
         var size = String(d.size || '').trim();
         if (!size || size === '-') return [];
