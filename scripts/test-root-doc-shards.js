@@ -27,7 +27,14 @@ function makeDb() {
     function ref(p) {
         return {
             path: p,
-            collection: (c) => ({ doc: (id) => ref(p + '/' + c + '/' + id) }),
+            collection: (c) => ({
+                doc: (id) => ref(p + '/' + c + '/' + id),
+                async get() {   // 하위 컬렉션 목록(조각 없음 복구용)
+                    const pre = p + '/' + c + '/';
+                    return { docs: Array.from(docs.keys()).filter((k) => k.startsWith(pre) && !k.slice(pre.length).includes('/'))
+                        .map((k) => ({ id: k.slice(pre.length), data: () => JSON.parse(JSON.stringify(docs.get(k))) })) };
+                }
+            }),
             async get() { return { exists: docs.has(p), data: () => JSON.parse(JSON.stringify(docs.get(p))) }; },
             async set(data, opt) {
                 const prev = (opt && opt.merge && docs.get(p)) || {};
@@ -133,6 +140,51 @@ const settings = { styleColors: { a: '#fff' }, floorGridLines: { k1: { xs: [1, 2
         const badRoot = { collection: () => ({ doc: () => ({ get: async () => { throw new Error('Failed to get document from server'); } }) }) };
         await assert.rejects(S.expandRootData(badRoot, raw6, { strict: true }), /ROOT_SHARDS_UNREADABLE/, '읽기 실패는 쓰지 않음');
     }
+    // 5-2) 2026-11-10 조각 없음 복구: 이전 목차 뒤에 다른 기기가 올린 「건물 영구 삭제」 기록을 남은 조각 묶음에서 되찾는다
+    {
+        S._cacheClear();
+        const db = makeDb(); const root = db.ref('safety_app/c5');
+        const del = () => DEL;
+        await S.writeRootDoc(root, { deletedBuildingIds: ['d1'] }, { fields: ['deletedBuildingIds'], force: true, deleteSentinel: del, writeId: 'w1' });
+        await S.writeRootDoc(root, { deletedBuildingIds: ['d1', 'd2'] }, { fields: ['deletedBuildingIds'], serverRaw: (await root.get()).data(), deleteSentinel: del, writeId: 'w2' });
+        // 다른 기기가 d3을 더해 올린 조각(w3)은 서버에 있는데, 목차는 조각이 사라진 옛 것(wX)으로 되돌아간 상태
+        await db.ref('safety_app/c5/rootShards/w3_0').set({ writeId: 'w3', i: 0, n: 1, p: JSON.stringify({ deletedBuildingIds: ['d1', 'd2', 'd3'] }), at: 3 });
+        await db.ref('safety_app/c5/rootShards/half_0').set({ writeId: 'half', i: 0, n: 2, p: '{"deletedBuildingIds":["zz"', at: 4 });   // 반만 쓴 묶음은 버린다
+        await root.set({ rootShards: { v: 1, writeId: 'wX', n: 1, fields: ['deletedBuildingIds'], at: 9, prev: { writeId: 'w2', n: 1 } } }, { merge: true });
+        S._cacheClear();
+        let note = null;
+        const healed = await S.expandRootData(root, (await root.get()).data(), { strict: true, onDangling: (_m, hadPrev, rec) => { note = { hadPrev, rec }; } });
+        assert.deepStrictEqual(healed.deletedBuildingIds.slice().sort(), ['d1', 'd2', 'd3'], '이전 목차(d1,d2) + 남은 조각의 d3, 반쪽 묶음(zz)은 제외');
+        assert.ok(note && note.hadPrev && note.rec && note.rec.deletedBuildingIds.includes('d3') && note.rec.sets >= 2, '되찾은 내용 알림');
+        // 이전 목차 조각까지 없어도(루트 칸만 남음) 남은 묶음에서 되찾는다
+        await db.ref('safety_app/c5/rootShards/w2_0').delete();
+        S._cacheClear();
+        const healed2 = await S.expandRootData(root, (await root.get()).data(), { strict: true });
+        assert.deepStrictEqual(healed2.deletedBuildingIds.slice().sort(), ['d1', 'd2', 'd3'], '이전 목차가 없어도 남은 묶음으로');
+        // 목록을 못 읽는 docRef(예전 가짜)여도 예전처럼 이어 간다
+        S._cacheClear();
+        const noList = { collection: (c) => ({ doc: (id) => db.ref('safety_app/c5/' + c + '/' + id) }) };
+        const healed3 = await S.expandRootData(noList, (await root.get()).data(), { strict: true });
+        assert.ok(healed3 && !healed3.buildings, '목록 없이도 실패하지 않음');
+    }
+    // 5-3) 2026-11-10 목차 쓰기는 commitRoot(앱: 트랜잭션)로 — 기기 대기열에 남는 보통 set을 쓰지 않는다
+    {
+        S._cacheClear();
+        const db = makeDb(); const root = db.ref('safety_app/c6');
+        const commits = [];
+        const plan = await S.writeRootDoc(root, { deletedBuildingIds: ['a'], companyName: '회사' }, {
+            fields: ['deletedBuildingIds'], force: true, deleteSentinel: () => DEL, writeId: 'wT',
+            commitRoot: async (data) => { commits.push(data); await root.set(data, { merge: true }); }
+        });
+        assert.ok(plan.sharded && commits.length === 1 && commits[0].rootShards.writeId === 'wT', '목차는 commitRoot로 한 번');
+        assert.strictEqual(db.ops.filter((o) => o[0] === 'set' && o[1] === 'safety_app/c6').length, 1, '루트 쓰기는 commitRoot 안의 한 번뿐');
+        assert.ok(db.docs.has('safety_app/c6/rootShards/wT_0'), '조각은 목차보다 먼저 올라가 있음');
+        // 나누지 않는 쓰기(목차 없음)는 예전처럼 set
+        const db2 = makeDb(); const root2 = db2.ref('safety_app/c7');
+        let called = 0;
+        const plan2 = await S.writeRootDoc(root2, { companyName: '회사' }, { fields: ['deletedBuildingIds'], deleteSentinel: () => DEL, commitRoot: async () => { called++; } });
+        assert.ok(!plan2.sharded && called === 0 && db2.docs.has('safety_app/c7'), '안 나눌 땐 그대로 set');
+    }
     // 6) 목차 없는 예전 데이터: 그대로
     {
         const raw = { buildings: [building(1)], deletedBuildingIds: ['z'] };
@@ -153,6 +205,7 @@ const settings = { styleColors: { a: '#fff' }, floorGridLines: { k1: { xs: [1, 2
     // 9) 앱 연결
     const app = fs.readFileSync(path.join(ROOT, 'app.js'), 'utf8');
     assert.ok(app.includes('.writeRootDoc(docRef, dataToSync'), '남은 공통 칸은 조각 경유'); // 나머지 앱 연결은 test-building-docs.js
+    assert.ok(/commitRoot:[\s\S]{0,200}db\.runTransaction\(async \(tx\) => \{ tx\.set\(docRef, data, \{ merge: true \}\); \}\)/.test(app), '목차 쓰기는 트랜잭션');
     assert.ok(/js\/core\/root-doc-shards\.js\?v=/.test(fs.readFileSync(path.join(ROOT, 'index.html'), 'utf8')));
     assert.ok(/match \/rootShards\/\{shardId\} \{\s*allow read, write: if isCompanyMember\(companyId\);/.test(fs.readFileSync(path.join(ROOT, 'firestore.rules'), 'utf8')), '규칙');
     console.log('test-root-doc-shards: ok');

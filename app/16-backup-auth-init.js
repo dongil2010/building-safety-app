@@ -4130,9 +4130,10 @@
             const S = rootDocShardsApi();
             if (S && data.rootShards) data = await S.expandRootData(docRef, data, o.strict ? {
                 strict: true, getOpts: { source: 'server' },
-                onDangling: (man, hadPrev) => {
+                onDangling: (man, hadPrev, rec) => {
                     const el = window.BSA && window.BSA.errorLog;
-                    if (el && typeof el.record === 'function') el.record({ kind: 'root-shards-dangling', message: '목차 ' + (man && man.writeId) + ' 조각 없음 — ' + (hadPrev ? '이전 목차로' : '루트 칸만으로') + ' 이어 감', source: 'expandRootDocData' });
+                    const recNote = rec ? ', 남은 조각 ' + rec.sets + '묶음에서 삭제 기록 ' + rec.deletedBuildingIds.length + '건 되찾음' : ', 남은 조각 목록 못 읽음';
+                    if (el && typeof el.record === 'function') el.record({ kind: 'root-shards-dangling', message: '목차 ' + (man && man.writeId) + ' 조각 없음 — ' + (hadPrev ? '이전 목차로' : '루트 칸만으로') + ' 이어 감' + recNote, source: 'expandRootDocData' });
                 }
             } : {});
             if (!api) return data;
@@ -4300,6 +4301,9 @@
             renderOutdatedAppBanner(true);
             return;
         }
+        // 2026-11-10 기기 날짜가 서버와 7일 넘게 다르면 쓰지 않는다 — 수정·삭제 시각이 틀리게 찍혀 남의 수정을 계속 이기거나 밀린다.
+        // 안내 띠가 뜨고, 날짜를 맞추면 다음 동기화부터 저절로 풀린다. 변경은 기기에 남는다.
+        if (await isDeviceClockBadForSync()) return;
         if (isRemoteSyncing || _syncInFlight) {
             _syncPending = true;
             return;
@@ -4639,7 +4643,11 @@
                     if (S) {
                         await S.writeRootDoc(docRef, dataToSync, {
                             fields: ['deletedBuildingIds'], serverRaw: rootGuardRaw || {},
-                            deleteSentinel: () => firebase.firestore.FieldValue.delete()
+                            deleteSentinel: () => firebase.firestore.FieldValue.delete(),
+                            // 2026-11-10 목차 쓰기는 트랜잭션으로 — 기기 대기열에 남았다가 며칠 뒤 옛 목차가 올라가 최신 목차를 덮지 않게
+                            commitRoot: (typeof db.runTransaction === 'function')
+                                ? (data) => db.runTransaction(async (tx) => { tx.set(docRef, data, { merge: true }); })
+                                : null
                         });
                     } else {
                         await docRef.set(dataToSync, { merge: true });

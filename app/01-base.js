@@ -3430,8 +3430,11 @@ document.addEventListener('DOMContentLoaded', () => {
 
     function getBuildingTrashRemainingMs(bldg) {
         const t = Date.parse(String(bldg && bldg.trashedAt));
-        if (!Number.isFinite(t)) return 0;
-        return (t + BUILDING_TRASH_RETENTION_MS) - Date.now();
+        // 2026-11-10 휴지통에 넣은 날짜를 못 읽으면 「만료」가 아니라 「아직 남음」으로 본다(영구 삭제는 되돌릴 수 없다)
+        if (!Number.isFinite(t)) return BUILDING_TRASH_RETENTION_MS;
+        // 서버 시계 보정값 기준(기기 시계가 조금 틀려도 만료 계산이 같게)
+        const now = (typeof bsaSyncNow === 'function') ? bsaSyncNow() : Date.now();
+        return (t + BUILDING_TRASH_RETENTION_MS) - now;
     }
 
     function formatBuildingTrashRemaining(bldg) {
@@ -4131,7 +4134,17 @@ document.addEventListener('DOMContentLoaded', () => {
 
     /** 보관 기간이 지난 휴지통 건물 영구 삭제 */
     window.purgeExpiredBuildingTrash = async function() {
-        const expired = listTrashedBuildings().filter((b) => getBuildingTrashRemainingMs(b) <= 0);
+        const listExpired = () => listTrashedBuildings().filter((b) => getBuildingTrashRemainingMs(b) <= 0);
+        let expired = listExpired();
+        if (!expired.length) return 0;
+        // 2026-11-10 자동 영구 삭제는 되돌릴 수 없다 — 지우기 직전에 서버 시계로 이 기기 날짜를 다시 확인한다.
+        // 날짜가 크게 틀렸거나(bad) 이번에 확인하지 못했으면(fail·unknown) 지우지 않고 다음으로 미룬다. 직접 누르는 「영구 삭제」는 그대로.
+        const clock = await checkClockBeforePurge();
+        if (!clock.ok) {
+            console.warn('[휴지통] 기기 날짜를 확인하지 못해 만료 건물 자동 영구 삭제를 미룹니다:', clock.status);
+            return 0;
+        }
+        expired = listExpired();   // 보정값이 바뀌었을 수 있다
         if (!expired.length) return 0;
         for (const b of expired) {
             await window.permanentlyDeleteBuilding(b, { silent: true });
@@ -4842,32 +4855,131 @@ document.addEventListener('DOMContentLoaded', () => {
     window.bsaSyncNow = bsaSyncNow;
     window.bsaStampAfter = bsaStampAfter;
     let _bsaClockMeasuredAt = 0;
+    // 2026-11-10 기기 날짜가 서버와 7일 넘게 다르면(보정 범위 밖) 예전엔 그냥 무시하고 그대로 동기화했다 — 그 기기의 수정·삭제 시각이
+    // 「가장 나중」으로 찍혀 다른 사람 수정을 계속 이기고(늦은 날짜면 계속 밀리고), 휴지통 30일 만료도 틀리게 계산된다.
+    // 이제 그 차이를 기억해 두고(__bsaClockBadMs) 동기화 쓰기·휴지통 자동 삭제를 멈춘 뒤 날짜를 맞추라고 안내한다. 맞추면 저절로 풀린다.
+    const BSA_CLOCK_MAX_OFFSET_MS = 7 * 24 * 3600 * 1000;
+    window.__bsaClockBadMs = 0;
+    // 'unknown' 아직 안 잼 · 'ok' · 'bad' 7일 넘게 다름 · 'fail' 이번에 못 잼(다음에 다시) · 'na' 잴 수 없는 환경(파일로 연 개발 화면 등)
+    let _bsaClockStatus = 'unknown';
+    let _bsaClockBadLogged = false;
+    let _bsaClockRecheckAt = 0;
+    function bsaClockStatus() { return _bsaClockStatus; }
+    window.bsaClockStatus = bsaClockStatus;
+    /** 잰 차이(ms, 서버 − 기기) 분류. slow: 응답이 느려 정밀 보정엔 못 쓰는 값(그래도 7일 넘는 차이는 판정한다) */
+    function classifyClockOffset(off, slow) {
+        const n = Number(off);
+        if (!Number.isFinite(n)) return { status: 'fail', offset: 0, badMs: 0 };
+        if (Math.abs(n) > BSA_CLOCK_MAX_OFFSET_MS) return { status: 'bad', offset: 0, badMs: Math.round(n) };
+        if (slow) return { status: 'fail', offset: 0, badMs: 0 };
+        return { status: 'ok', offset: Math.abs(n) < 2000 ? 0 : Math.round(n), badMs: 0 };   // 2초 안쪽은 보정 안 함(흔들림)
+    }
+    /** 못 쟀을 때: 이미 「틀림」으로 판정된 기기는 다시 재서 맞다고 나올 때까지 그대로 둔다 */
+    function noteClockMeasureFailed(status) {
+        if (_bsaClockStatus !== 'bad') _bsaClockStatus = status || 'fail';
+    }
+    function renderClockBadBanner(show) {
+        if (typeof document === 'undefined' || !document.body) return;
+        let bar = document.getElementById('bsaClockBadBanner');
+        if (!show) { if (bar) bar.remove(); return; }
+        const badMs = Number(window.__bsaClockBadMs) || 0;
+        const days = Math.max(1, Math.round(Math.abs(badMs) / (24 * 3600 * 1000)));
+        const text = '이 기기 날짜가 실제보다 약 ' + days + '일 ' + (badMs < 0 ? '앞서' : '늦어') + ' 있습니다. '
+            + '<b>기기 설정에서 날짜·시간을 맞춰 주세요 — 맞출 때까지 클라우드 동기화를 멈춥니다.</b> '
+            + '작업한 내용은 이 기기에 저장돼 있어요.';
+        if (bar) { const span = bar.querySelector('.bsa-outdated-banner-text'); if (span) span.innerHTML = text; return; }
+        bar = document.createElement('div');
+        bar.id = 'bsaClockBadBanner';
+        bar.className = 'bsa-outdated-banner bsa-clock-bad-banner';
+        bar.setAttribute('role', 'alert');
+        bar.innerHTML = '<span class="bsa-outdated-banner-text">' + text + '</span>'
+            + '<button type="button" class="btn btn-sm bsa-outdated-banner-btn">날짜 맞췄어요</button>';
+        bar.querySelector('button').addEventListener('click', async () => {
+            try { await measureServerClockOffset(true); } catch (_e) { /* ignore */ }
+            if (_bsaClockStatus === 'bad') {
+                if (typeof window.showToast === 'function') window.showToast('아직 날짜가 맞지 않습니다. 기기 설정의 날짜·시간을 확인해 주세요.', 'warning', 5000);
+                return;
+            }
+            if (typeof window.showToast === 'function') window.showToast('날짜가 확인됐습니다. 동기화를 다시 시작합니다.', 'success', 3500);
+            try { if (typeof syncStateToFirebase === 'function') syncStateToFirebase(); } catch (_e) { /* ignore */ }
+        });
+        document.body.appendChild(bar);
+    }
     /** 서버(배포 호스트) 응답 Date 머리말로 이 기기 시계 차이를 잰다. 10분에 한 번, 실패·느린 응답은 무시 */
     async function measureServerClockOffset(force) {
-        if (!force && Date.now() - _bsaClockMeasuredAt < 10 * 60 * 1000) return null;
+        // Math.abs: 기기 날짜를 뒤로 고치면 「지난 시간」이 음수가 된다 — 그래도 다시 재게
+        if (!force && Math.abs(Date.now() - _bsaClockMeasuredAt) < 10 * 60 * 1000) return null;
         if (typeof navigator !== 'undefined' && navigator.onLine === false) return null;
-        if (typeof fetch !== 'function' || !/^https?:$/.test(location.protocol)) return null;
+        if (typeof fetch !== 'function' || !/^https?:$/.test(location.protocol)) { noteClockMeasureFailed('na'); return null; }
         _bsaClockMeasuredAt = Date.now();
         try {
             const t0 = Date.now();
             const r = await fetch('web-version.json?clock=' + t0, { method: 'HEAD', cache: 'no-store' });
             const t1 = Date.now();
             const hd = r && r.headers && r.headers.get('Date');
-            if (!hd || t1 - t0 > 3000) return null;
+            // 응답은 왔는데 Date 머리말이 없는 호스트는 잴 수 없는 환경, 응답 자체가 실패면 다음에 다시
+            if (!hd) { noteClockMeasureFailed(r && r.ok ? 'na' : 'fail'); return null; }
             const srv = Date.parse(hd);
-            if (!Number.isFinite(srv)) return null;
-            let off = (srv + 500) - (t0 + t1) / 2;   // Date 머리말은 초 단위 → 가운데 값
-            if (Math.abs(off) < 2000) off = 0;       // 2초 안쪽은 보정 안 함(흔들림)
-            if (Math.abs(off) > 7 * 24 * 3600 * 1000) return null;
-            window.__bsaClockOffsetMs = Math.round(off);
+            if (!Number.isFinite(srv)) { noteClockMeasureFailed('fail'); return null; }
+            const c = classifyClockOffset((srv + 500) - (t0 + t1) / 2, t1 - t0 > 3000);   // Date 머리말은 초 단위 → 가운데 값
+            if (c.status === 'bad') {
+                _bsaClockStatus = 'bad';
+                window.__bsaClockBadMs = c.badMs;
+                console.warn('[시계] 기기 날짜가 서버와 7일 넘게 다릅니다 — 클라우드 동기화를 멈춥니다', c.badMs, 'ms');
+                renderClockBadBanner(true);
+                if (!_bsaClockBadLogged) {
+                    _bsaClockBadLogged = true;
+                    try {
+                        const el = window.BSA && window.BSA.errorLog;
+                        if (el && typeof el.record === 'function') el.record({ kind: 'clock-bad', message: '기기 날짜가 서버와 ' + Math.round(c.badMs / 86400000) + '일 다름(서버−기기) — 동기화·휴지통 자동 삭제 멈춤', source: 'measureServerClockOffset' });
+                    } catch (_e) { /* ignore */ }
+                }
+                return null;
+            }
+            if (c.status !== 'ok') { noteClockMeasureFailed('fail'); return null; }
+            const wasBad = _bsaClockStatus === 'bad';
+            _bsaClockStatus = 'ok';
+            window.__bsaClockBadMs = 0;
+            if (wasBad) renderClockBadBanner(false);
+            const off = c.offset;
+            window.__bsaClockOffsetMs = off;
             try { localStorage.setItem('bsaClockOffsetMs', String(window.__bsaClockOffsetMs)); } catch (_e) { /* ignore */ }
-            if (off) console.info('[시계] 서버와 차이 보정', Math.round(off), 'ms');
+            if (off) console.info('[시계] 서버와 차이 보정', off, 'ms');
             return off;
         } catch (_e) {
+            noteClockMeasureFailed('fail');
             return null;
         }
     }
     window.measureServerClockOffset = measureServerClockOffset;
+
+    /**
+     * 동기화 쓰기 전: 이 기기 날짜가 크게 틀렸는가. 이번 실행에서 아직 한 번도 못 쟀으면 한 번 재고(최대 4초),
+     * 「틀림」이던 기기는 30초에 한 번 다시 잰다(날짜를 맞추면 저절로 풀리게). 못 재면 막지 않는다(예전과 같음).
+     */
+    async function isDeviceClockBadForSync() {
+        const due = _bsaClockStatus === 'unknown'
+            || (_bsaClockStatus === 'bad' && Math.abs(Date.now() - _bsaClockRecheckAt) > 30 * 1000);
+        if (due) {
+            _bsaClockRecheckAt = Date.now();
+            try {
+                await Promise.race([measureServerClockOffset(true), new Promise((res) => setTimeout(res, 4000))]);
+            } catch (_e) { /* ignore */ }
+            if (_bsaClockStatus === 'unknown') _bsaClockStatus = 'fail';   // 느린 망에서 동기화마다 4초씩 기다리지 않게
+        }
+        if (_bsaClockStatus === 'bad') renderClockBadBanner(true);
+        return _bsaClockStatus === 'bad';
+    }
+    window.isDeviceClockBadForSync = isDeviceClockBadForSync;
+
+    /** 휴지통 자동 영구 삭제 직전: 지금 서버 시계로 다시 확인. 확인됐거나(ok) 잴 수 없는 환경(na)일 때만 진행 */
+    async function checkClockBeforePurge() {
+        try {
+            await Promise.race([measureServerClockOffset(true), new Promise((res) => setTimeout(res, 5000))]);
+        } catch (_e) { /* ignore */ }
+        const status = _bsaClockStatus;
+        return { ok: status === 'ok' || status === 'na', status: status };
+    }
 
     function isEditingOffline() {
         try {

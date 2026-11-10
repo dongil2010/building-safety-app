@@ -200,6 +200,35 @@
     }
 
     /**
+     * 2026-11-10 목차가 가리키는 조각이 없을 때: 서버에 남아 있는 조각 묶음(옛 목차·끊긴 쓰기 것)을 모두 읽어
+     * 삭제 기록(deletedBuildingIds)을 합집합으로 되찾는다. 삭제 기록은 원래 합집합으로만 합치므로 옛 묶음을 더해도 안전하다.
+     * 이전 목차만 쓰면 그 뒤에 다른 기기가 올린 「건물 영구 삭제」 기록이 빠져, 지운 건물을 아직 가진 기기가 되살릴 수 있다.
+     * 목록을 못 읽으면(가짜 docRef·오류) null — 부르는 쪽은 예전처럼 이전 목차만으로 이어 간다.
+     */
+    async function recoverDeletedIdsFromAllShards(docRef, getOpts) {
+        var col = docRef && typeof docRef.collection === 'function' ? docRef.collection(SUBCOLLECTION) : null;
+        if (!col || typeof col.get !== 'function') return null;
+        var qs = await col.get(getOpts);
+        var groups = {};
+        (qs && qs.docs ? qs.docs : []).forEach(function (d) {
+            var v = d && typeof d.data === 'function' ? d.data() : null;
+            if (!v || !v.writeId) return;
+            (groups[v.writeId] = groups[v.writeId] || []).push(v);
+        });
+        var seen = {}, ids = [], sets = 0;
+        Object.keys(groups).forEach(function (wid) {
+            var list = groups[wid].slice().sort(function (a, b) { return Number(a.i) - Number(b.i); });
+            var obj = assembleShards({ writeId: wid, n: Number(list[0].n) || list.length }, list);
+            if (!obj) return;
+            sets++;
+            (Array.isArray(obj.deletedBuildingIds) ? obj.deletedBuildingIds : []).forEach(function (id) {
+                if (id && !seen[id]) { seen[id] = true; ids.push(id); }
+            });
+        });
+        return { deletedBuildingIds: ids, sets: sets };
+    }
+
+    /**
      * 루트 문서 데이터(raw)를 조각까지 붙여 펼친다. 목차가 없으면 raw 그대로.
      * opts.strict: 조각을 못 읽으면 예외(쓰기 전 확인용 — 남의 건물을 모르고 덮어쓰지 않게)
      */
@@ -221,8 +250,13 @@
                 // 이어 가고, 이번 쓰기가 새 조각·목차를 다시 만든다. 읽기 자체가 실패한 경우(인터넷 등)는 그대로 실패(다음에 다시).
                 if (!err) {
                     if (typeof console !== 'undefined') console.warn('[루트 조각] 목차가 가리키는 조각이 서버에 없음 — 이전 목차·루트 칸으로 이어 감', man.writeId);
-                    try { if (typeof o.onDangling === 'function') o.onDangling(man, !!prevObj); } catch (_e) { /* ignore */ }
-                    return mergeExpanded(data, prevObj || {});
+                    var healed = mergeExpanded(data, prevObj || {});
+                    // 남아 있는 다른 조각 묶음에서 삭제 기록을 되찾아 합친다(이전 목차 뒤에 올라온 삭제 기록이 빠지지 않게)
+                    var rec = null;
+                    try { rec = await recoverDeletedIdsFromAllShards(docRef, o.getOpts); } catch (_e0) { rec = null; }
+                    if (rec && rec.deletedBuildingIds.length) healed = mergeExpanded(healed, { deletedBuildingIds: rec.deletedBuildingIds });
+                    try { if (typeof o.onDangling === 'function') o.onDangling(man, !!prevObj, rec); } catch (_e) { /* ignore */ }
+                    return healed;
                 }
                 var x = new Error('ROOT_SHARDS_UNREADABLE: 건물 목록 조각을 읽지 못해 이번에는 쓰지 않습니다(다음에 다시)' + (err && err.message ? ' — ' + err.message : ''));
                 x.code = 'unavailable';
@@ -236,7 +270,8 @@
 
     /**
      * 루트 문서 쓰기(커지면 나눠서). dataToSync는 고쳐서 쓴다.
-     * ctx: { deleteSentinel(): FieldValue.delete(), serverRaw, force, now, writeId, thresholdBytes, partBytes }
+     * ctx: { deleteSentinel(): FieldValue.delete(), serverRaw, force, now, writeId, thresholdBytes, partBytes, commitRoot }
+     * commitRoot(data): 목차를 쓰는 루트 쓰기를 대신 한다(앱은 트랜잭션으로 — 아래 설명). 없으면 docRef.set(merge).
      * → plan
      */
     async function writeRootDoc(docRef, dataToSync, ctx) {
@@ -251,7 +286,11 @@
             dataToSync.rootShards = plan.manifest;
             cachePut(plan.manifest.writeId, plan.shardObj);
         }
-        await docRef.set(dataToSync, { merge: true });
+        // 2026-11-10 목차 쓰기는 「기기 대기열에 남지 않는」 방법으로(앱: 트랜잭션). 보통 set은 인터넷이 끊기면 기기에 남았다가
+        // 며칠 뒤 다시 켰을 때 그대로 올라간다 — 그 사이 다른 기기가 두 번 쓰면 이 목차의 조각은 이미 정리돼, 서버 목차가
+        // 없는 조각을 가리키게 된다(「목차가 가리키는 조각 없음」의 유력한 원인). 트랜잭션은 그 자리에서 되거나 실패한다.
+        if (plan.sharded && typeof c.commitRoot === 'function') await c.commitRoot(dataToSync);
+        else await docRef.set(dataToSync, { merge: true });
         if (plan.sharded && plan.deleteIds.length) {
             for (var j = 0; j < plan.deleteIds.length; j++) {
                 try { await docRef.collection(SUBCOLLECTION).doc(plan.deleteIds[j]).delete(); } catch (_e) { /* 정리는 다음에 */ }
@@ -269,6 +308,7 @@
         SHARD_FIELDS: SHARD_FIELDS, THRESHOLD_BYTES: THRESHOLD_BYTES, PART_BYTES: PART_BYTES, SUBCOLLECTION: SUBCOLLECTION,
         utf8Bytes: utf8Bytes, jsonBytes: jsonBytes, splitUtf8: splitUtf8, planRootWrite: planRootWrite,
         assembleShards: assembleShards, mergeExpanded: mergeExpanded, expandRootData: expandRootData,
+            recoverDeletedIdsFromAllShards: recoverDeletedIdsFromAllShards,
         writeRootDoc: writeRootDoc, isDocTooLargeError: isDocTooLargeError, shardDocId: shardDocId, _cacheClear: cacheClear
     };
     if (typeof module !== 'undefined' && module.exports) module.exports = api;
