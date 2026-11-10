@@ -31166,7 +31166,7 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
         refreshDefectQuickPickBar();
     }
 
-// @@app-part 08-defect-presets.js sha=2f98d5e3e162 — 원본은 app/08-defect-presets.js (여기 말고 거기서 고칠 것)
+// @@app-part 08-defect-presets.js sha=5ed794a1cd26 — 원본은 app/08-defect-presets.js (여기 말고 거기서 고칠 것)
     // --- Dynamic Defect Type Presets & Custom Adding ---
     const STEEL_MEMBER_DEFECTS = [
         '상태양호',
@@ -32758,11 +32758,39 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
         return base;
     }
 
+    // 2026-11-10 「게이지는 (움직인) 방향을 알려줘야 해서」: 게이지 X·Y 값 맨 앞에 방향 글자(← → ↑ ↓)를 붙일 수 있다.
+    // 셈할 때는 방향이 부호다 — → · ↓ = +, ← · ↑ = − (방향 없이 적은 예전 값이 한글 출력에서 X는 →, Y는 ↓로 나가던 것과 같은 쪽).
+    const MONITOR_DIR_RE = /^\s*([←→↑↓])\s*/;
+    function monitorDirectionOf(raw) {
+        const m = String(raw == null ? '' : raw).match(MONITOR_DIR_RE);
+        return m ? m[1] : '';
+    }
     function parseMonitorNumber(raw) {
-        const s = String(raw == null ? '' : raw).trim().replace(/,/g, '');
+        let s = String(raw == null ? '' : raw).trim().replace(/,/g, '');
         if (!s) return null;
+        const dir = monitorDirectionOf(s);
+        if (dir) {
+            s = s.replace(MONITOR_DIR_RE, '').trim();
+            if (!s) return null; // 방향만 있고 숫자가 없음
+        }
         const n = Number(s);
-        return Number.isFinite(n) ? n : null;
+        if (!Number.isFinite(n)) return null;
+        return (dir === '←' || dir === '↑') && n !== 0 ? -n : n;
+    }
+    /** 이 게이지 기록의 그 축(x|y)에 방향을 붙여 적은 값이 하나라도 있는가 */
+    function gaugeLogUsesDirection(log, axis) {
+        if (!log) return false;
+        const key = axis === 'y' ? 'yMm' : 'xMm';
+        if (monitorDirectionOf(axis === 'y' ? log.initialY : log.initialX)) return true;
+        return (log.readings || []).some((r) => r && monitorDirectionOf(r[key]));
+    }
+    /** 게이지 누적·전차 대비 — 방향을 적은 기록이면 +/− 대신 방향 글자로(→0.5, ↑0.2), 아니면 예전처럼 +0.5 */
+    function formatGaugeDelta(axis, n, log) {
+        if (n == null || !Number.isFinite(n) || !gaugeLogUsesDirection(log, axis)) return formatMonitorDelta(n);
+        const rounded = Math.round(n * 100) / 100;
+        if (rounded === 0) return '0';
+        const dir = axis === 'y' ? (rounded > 0 ? '↓' : '↑') : (rounded > 0 ? '→' : '←');
+        return dir + String(Math.abs(rounded));
     }
 
     function formatMonitorDelta(n) {
@@ -33255,7 +33283,7 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
             const lastGauge = gauge.readings.length ? gauge.readings[gauge.readings.length - 1] : null;
             const gDelta = lastGauge ? computeGaugeDeltas(gauge, lastGauge) : { dx: null, dy: null };
             const xyText = lastGauge
-                ? `${lastGauge.xMm || '-'}/${lastGauge.yMm || '-'} (Δ${formatMonitorDelta(gDelta.dx)}/${formatMonitorDelta(gDelta.dy)})`
+                ? `${lastGauge.xMm || '-'}/${lastGauge.yMm || '-'} (Δ${formatGaugeDelta('x', gDelta.dx, gauge)}/${formatGaugeDelta('y', gDelta.dy, gauge)})`
                 : '-';
             const tipSum = summarizeCrackTipLog(d.crackTipLog);
             return `<tr>
@@ -33277,7 +33305,7 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
         const lastGauge = gauge.readings.length ? gauge.readings[gauge.readings.length - 1] : null;
         const gDelta = lastGauge ? computeGaugeDeltas(gauge, lastGauge) : { dx: null, dy: null };
         const xyText = lastGauge
-            ? `${lastGauge.xMm || '-'}/${lastGauge.yMm || '-'} (Δ${formatMonitorDelta(gDelta.dx)}/${formatMonitorDelta(gDelta.dy)})`
+            ? `${lastGauge.xMm || '-'}/${lastGauge.yMm || '-'} (Δ${formatGaugeDelta('x', gDelta.dx, gauge)}/${formatGaugeDelta('y', gDelta.dy, gauge)})`
             : '-';
         const tipSum = summarizeCrackTipLog(item.crackTipLog);
         return `<tr>
@@ -33319,10 +33347,10 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
             const deltas = computeGaugeDeltas(log, reading);
             const prevD = computeGaugePrevDeltas(log, idx);
             const cells = tr.querySelectorAll('.monitor-readonly');
-            if (cells[0]) cells[0].textContent = formatMonitorDelta(deltas.dx);
-            if (cells[1]) cells[1].textContent = formatMonitorDelta(deltas.dy);
-            if (cells[2]) cells[2].textContent = formatMonitorDelta(prevD.dx);
-            if (cells[3]) cells[3].textContent = formatMonitorDelta(prevD.dy);
+            if (cells[0]) cells[0].textContent = formatGaugeDelta('x', deltas.dx, log);
+            if (cells[1]) cells[1].textContent = formatGaugeDelta('y', deltas.dy, log);
+            if (cells[2]) cells[2].textContent = formatGaugeDelta('x', prevD.dx, log);
+            if (cells[3]) cells[3].textContent = formatGaugeDelta('y', prevD.dy, log);
         });
     }
 
@@ -33358,12 +33386,12 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
             return `<tr data-gauge-row="${idx}">
                 <td><input type="text" data-gauge-round value="${escapeSurveyAttr(r.roundKey || '')}" placeholder="회차"></td>
                 <td><input type="date" data-gauge-date value="${escapeSurveyAttr(r.date || '')}"></td>
-                <td><input type="text" data-gauge-x inputmode="decimal" value="${escapeSurveyAttr(r.xMm || '')}"></td>
-                <td><input type="text" data-gauge-y inputmode="decimal" value="${escapeSurveyAttr(r.yMm || '')}"></td>
-                <td class="monitor-readonly" title="누적(현회−초기)">${formatMonitorDelta(deltas.dx)}</td>
-                <td class="monitor-readonly" title="누적(현회−초기)">${formatMonitorDelta(deltas.dy)}</td>
-                <td class="monitor-readonly" title="전차 대비">${formatMonitorDelta(prevD.dx)}</td>
-                <td class="monitor-readonly" title="전차 대비">${formatMonitorDelta(prevD.dy)}</td>
+                <td><input type="text" data-gauge-x inputmode="decimal" data-num-keypad-dir value="${escapeSurveyAttr(r.xMm || '')}"></td>
+                <td><input type="text" data-gauge-y inputmode="decimal" data-num-keypad-dir value="${escapeSurveyAttr(r.yMm || '')}"></td>
+                <td class="monitor-readonly" title="누적(현회−초기)">${formatGaugeDelta('x', deltas.dx, log)}</td>
+                <td class="monitor-readonly" title="누적(현회−초기)">${formatGaugeDelta('y', deltas.dy, log)}</td>
+                <td class="monitor-readonly" title="전차 대비">${formatGaugeDelta('x', prevD.dx, log)}</td>
+                <td class="monitor-readonly" title="전차 대비">${formatGaugeDelta('y', prevD.dy, log)}</td>
                 <td><input type="text" data-gauge-note value="${escapeSurveyAttr(r.note || '')}"></td>
                 <td><button type="button" class="defect-crack-monitor-del" data-gauge-del ${rows.length <= 1 ? 'disabled' : ''} title="삭제"><i class="fa-solid fa-trash"></i></button></td>
             </tr>`;
@@ -33779,7 +33807,7 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
             const lastGauge = gauge.readings.length ? gauge.readings[gauge.readings.length - 1] : null;
             const gDelta = lastGauge ? computeGaugeDeltas(gauge, lastGauge) : { dx: null, dy: null };
             const xyText = lastGauge
-                ? `${lastGauge.xMm || '-'}/${lastGauge.yMm || '-'} (Δ${formatMonitorDelta(gDelta.dx)}/${formatMonitorDelta(gDelta.dy)})`
+                ? `${lastGauge.xMm || '-'}/${lastGauge.yMm || '-'} (Δ${formatGaugeDelta('x', gDelta.dx, gauge)}/${formatGaugeDelta('y', gDelta.dy, gauge)})`
                 : '-';
             const tipSum = summarizeCrackTipLog(d.crackTipLog);
             return `<tr>
@@ -47413,7 +47441,7 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
         inputImportCadPins.addEventListener('change', window.importCadPinsJson);
     }
 
-// @@app-part 12-survey-table.js sha=d204a4ab6a32 — 원본은 app/12-survey-table.js (여기 말고 거기서 고칠 것)
+// @@app-part 12-survey-table.js sha=2f4dd996184c — 원본은 app/12-survey-table.js (여기 말고 거기서 고칠 것)
     // --- 10. SURVEY TABLE & ALBUM RENDERING ---
 
     // 상태조사표 컬럼 기본 정의 (화면/PDF/엑셀 공통). size와 crackWidth/crackLength는 상호 배타적으로
@@ -51540,8 +51568,8 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
                     `${g.initialX || '-'} / ${g.initialY || '-'}`,
                     last ? (formatHwpxCrackMonitorDate(last.date) || last.roundKey || '-') : '-',
                     last ? `${last.xMm || '-'} / ${last.yMm || '-'}` : '-',
-                    `${formatMonitorDelta(cum.dx)} / ${formatMonitorDelta(cum.dy)}`,
-                    `${formatMonitorDelta(prevD.dx)} / ${formatMonitorDelta(prevD.dy)}`
+                    `${formatGaugeDelta('x', cum.dx, g)} / ${formatGaugeDelta('y', cum.dy, g)}`,
+                    `${formatGaugeDelta('x', prevD.dx, g)} / ${formatGaugeDelta('y', prevD.dy, g)}`
                 ]);
             }
             if (it.hasTip) {
@@ -51905,7 +51933,7 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
         }
     }
 
-// @@app-part 13-report-export.js sha=5f497af0c756 — 원본은 app/13-report-export.js (여기 말고 거기서 고칠 것)
+// @@app-part 13-report-export.js sha=3d06d0802c7d — 원본은 app/13-report-export.js (여기 말고 거기서 고칠 것)
     // --- REPORT PREVIEW MODAL (Instant Modal Open & Pure White Paper Theme) ---
     window.openReportPreviewModalFunc = async function(opts) {
         const manageLoading = !(opts && opts.skipLoading);
@@ -53164,6 +53192,9 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
         let prefix = axis === 'y' ? '↓ ' : (n > 0 ? '→ ' : '± ');
         if (axis === 'x' && n === 0) prefix = '± ';
         let s = prefix + (axis === 'y' ? n : Math.abs(n));
+        // 2026-11-10 방향을 붙여 적은 값(←1.5·↑0.3)은 적은 방향 그대로 + 크기
+        const dir = monitorDirectionOf(val);
+        if (dir) s = `${dir} ${Math.abs(n)}`;
         // 초기값 칸에 붙던 「(초기값)」 문구는 뺌 — 줄 이름(초기 부착 data)으로 충분 (2026-10-23 요청)
         if (!opts.isInitial && prevVal != null && String(prevVal).trim() !== '') {
             const pn = parseMonitorNumber(prevVal);

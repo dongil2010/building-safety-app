@@ -48,55 +48,47 @@
     ];
 
     /**
-     * 방향키 줄(2026-11-10 「그놈들은 방향키도」): 균열 게이지·균열팁 창의 숫자 칸은 키패드 맨 위에 ◀▲▼▶ 한 줄을 더 둔다.
-     * 표(회차별 X/Y·길이·증분)에서 옆 칸·윗줄·아랫줄 숫자 칸으로 바로 옮겨 간다. 다른 창에서 쓰려면 칸에 data-num-keypad-arrows.
+     * 방향 키 줄(2026-11-10 「움직인 방향을 입력하는 키 — 게이지는 방향을 알려줘야 해서」):
+     * data-num-keypad-dir 칸(균열 게이지 X·Y)은 키패드 맨 위에 ← ↑ ↓ → 한 줄을 더 둔다.
+     * 누르면 값 맨 앞에 그 방향 글자가 붙는다(→1.5). 다른 방향을 누르면 바뀌고, 같은 방향을 또 누르면 빠진다.
+     * 방향이 붙으면 부호(-)는 뺀다 — 방향이 부호를 대신한다(셈은 app.js parseMonitorNumber: →·↓ = +, ←·↑ = −).
      */
-    var ARROW_SELECTOR = '#ndtCrackMonitorModal input, input[data-num-keypad-arrows]';
-    var ARROW_KEYS = ['LEFT', 'UP', 'DOWN', 'RIGHT'];
-    var LAYOUT_NUM_ARROWS = [ARROW_KEYS].concat(LAYOUT_NUM);
+    var DIR_SELECTOR = 'input[data-num-keypad-dir]';
+    var DIR_KEYS = ['LEFT', 'UP', 'DOWN', 'RIGHT'];
+    var DIR_CHARS = { LEFT: '←', UP: '↑', DOWN: '↓', RIGHT: '→' };
+    var DIR_OPPOSITE = { '←': '→', '→': '←', '↑': '↓', '↓': '↑' };
+    var DIR_LEAD_RE = /^\s*([←→↑↓])\s*/;
+    var LAYOUT_NUM_DIRS = [DIR_KEYS].concat(LAYOUT_NUM);
 
-    function hasArrowKeys(el) {
-        return !!(isNumTarget(el) && el.matches(ARROW_SELECTOR));
+    function hasDirKeys(el) {
+        return !!(isNumTarget(el) && el.matches(DIR_SELECTOR));
     }
 
-    /**
-     * 방향키로 옮겨 갈 칸 고르기 — 화면에 보이는 자리(사각형)만으로 정한다. 없으면 -1.
-     * cur·cands[i]: {left, top, right, bottom}. dir: 'LEFT'|'RIGHT'|'UP'|'DOWN'
-     * 좌우: 같은 줄(세로로 겹치는 칸)에서 가장 가까운 칸. 상하: 가장 가까운 줄에서 가로로 가장 가까운 칸.
-     */
-    function pickArrowTarget(cur, cands, dir) {
-        if (!cur || !cands) return -1;
-        var cx = (cur.left + cur.right) / 2;
-        var cy = (cur.top + cur.bottom) / 2;
-        var best = -1, bestMain = Infinity, bestSide = Infinity;
-        for (var i = 0; i < cands.length; i++) {
-            var r = cands[i];
-            if (!r) continue;
-            var x = (r.left + r.right) / 2;
-            var y = (r.top + r.bottom) / 2;
-            var main, side;
-            if (dir === 'LEFT' || dir === 'RIGHT') {
-                if (Math.min(cur.bottom, r.bottom) - Math.max(cur.top, r.top) <= 0) continue; // 같은 줄만
-                main = dir === 'RIGHT' ? x - cx : cx - x;
-                side = 0;
-            } else if (dir === 'UP' || dir === 'DOWN') {
-                if (Math.min(cur.bottom, r.bottom) - Math.max(cur.top, r.top) > 0) continue; // 같은 줄은 좌우로
-                main = dir === 'DOWN' ? y - cy : cy - y;
-                side = Math.abs(x - cx);
-            } else return -1;
-            if (!(main > 0.5)) continue;
-            // 가까운 줄 먼저(2px 안쪽 차이는 같은 줄로 본다), 그 안에서 가로로 가까운 칸
-            if (main < bestMain - 2 || (Math.abs(main - bestMain) <= 2 && side < bestSide)) {
-                best = i; bestMain = main; bestSide = side;
-            }
-        }
-        return best;
+    /** 값 맨 앞의 방향 글자('' 이면 없음) */
+    function leadDirection(value) {
+        var m = String(value == null ? '' : value).match(DIR_LEAD_RE);
+        return m ? m[1] : '';
+    }
+
+    /** 방향 키: 맨 앞 방향을 붙이거나 바꾸거나(같은 방향이면) 뺀다 → { value, caret } */
+    function setDirection(value, key) {
+        var ch = DIR_CHARS[key];
+        value = String(value == null ? '' : value);
+        if (!ch) return { value: value, caret: value.length };
+        var cur = leadDirection(value);
+        var rest = value.replace(DIR_LEAD_RE, '').replace(/^\s*-\s*/, '');
+        var next = (cur === ch ? '' : ch) + rest;
+        return { value: next, caret: next.length };
     }
 
     /** '-' 키: 맨 앞 부호만 바꾼다(커서 위치 상관없이) → { value, caret } */
     function toggleSign(value) {
         value = String(value == null ? '' : value);
-        var next = value.charAt(0) === '-' ? value.slice(1) : '-' + value;
+        var dir = leadDirection(value);
+        // 방향이 붙은 값은 방향을 반대로(→ ↔ ←, ↑ ↔ ↓) — 방향이 부호를 대신한다
+        var next = dir
+            ? DIR_OPPOSITE[dir] + value.replace(DIR_LEAD_RE, '')
+            : (value.charAt(0) === '-' ? value.slice(1) : '-' + value);
         return { value: next, caret: next.length };
     }
 
@@ -218,10 +210,7 @@
         if (k === ' ') return '␣';
         if (k === 'NEXT') return '다음';
         if (k === '-') return '±';
-        if (k === 'LEFT') return '◀';
-        if (k === 'RIGHT') return '▶';
-        if (k === 'UP') return '▲';
-        if (k === 'DOWN') return '▼';
+        if (DIR_CHARS[k]) return DIR_CHARS[k];
         return k;
     }
 
@@ -232,10 +221,10 @@
         if (k === 'NEXT') return '다음 칸';
         if (k === '-') return '부호 바꾸기';
         if (k === 'C') return '칸 비우기';
-        if (k === 'LEFT') return '왼쪽 칸';
-        if (k === 'RIGHT') return '오른쪽 칸';
-        if (k === 'UP') return '윗줄 칸';
-        if (k === 'DOWN') return '아랫줄 칸';
+        if (k === 'LEFT') return '왼쪽으로 움직임';
+        if (k === 'RIGHT') return '오른쪽으로 움직임';
+        if (k === 'UP') return '위로 움직임';
+        if (k === 'DOWN') return '아래로 움직임';
         return k;
     }
 
@@ -243,10 +232,12 @@
         TARGET_SELECTOR: TARGET_SELECTOR,
         NUM_SELECTOR: NUM_SELECTOR,
         LAYOUT_NUM: LAYOUT_NUM,
-        LAYOUT_NUM_ARROWS: LAYOUT_NUM_ARROWS,
-        ARROW_SELECTOR: ARROW_SELECTOR,
-        hasArrowKeys: hasArrowKeys,
-        pickArrowTarget: pickArrowTarget,
+        LAYOUT_NUM_DIRS: LAYOUT_NUM_DIRS,
+        DIR_SELECTOR: DIR_SELECTOR,
+        DIR_CHARS: DIR_CHARS,
+        hasDirKeys: hasDirKeys,
+        leadDirection: leadDirection,
+        setDirection: setDirection,
         toggleSign: toggleSign,
         numAccepts: numAccepts,
         isNumTarget: isNumTarget,
@@ -377,18 +368,18 @@
         var pad = buildPad();
         // 배열은 늘 4×4. 폰 가로(키 높이가 모자람)만 키를 낮춘다(bsa-mkp-short)
         var numMode = !!(state.field && isNumTarget(state.field));
-        var arrowMode = numMode && hasArrowKeys(state.field);
-        var orient = (isLandscape() ? 'short' : 'grid') + (numMode ? ':num' : '') + (arrowMode ? ':arrows' : '');
+        var dirMode = numMode && hasDirKeys(state.field);
+        var orient = (isLandscape() ? 'short' : 'grid') + (numMode ? ':num' : '') + (dirMode ? ':dirs' : '');
         if (state.orientation === orient && pad.firstChild) return;
         state.orientation = orient;
-        var layout = arrowMode ? LAYOUT_NUM_ARROWS : (numMode ? LAYOUT_NUM : LAYOUT_PORTRAIT);
+        var layout = dirMode ? LAYOUT_NUM_DIRS : (numMode ? LAYOUT_NUM : LAYOUT_PORTRAIT);
         pad.className = 'bsa-mkp bsa-measure-keypad bsa-mkp-grid' + (orient.indexOf('short') === 0 ? ' bsa-mkp-short' : '') + (numMode ? ' bsa-mkp-numonly' : '');
         pad.style.setProperty('--mkp-cols', String(layout[0].length));
         var html = '';
         layout.forEach(function (row) {
             row.forEach(function (k) {
                 var cls = 'bsa-mkp-key' + (k === 'BS' || k === 'C' ? ' bsa-mkp-bs' : '') + (k === 'OK' || k === 'NEXT' ? ' bsa-mkp-ok' : '') +
-                    (/^[0-9]$/.test(k) ? ' bsa-mkp-num' : ' bsa-mkp-sym') + (ARROW_KEYS.indexOf(k) >= 0 ? ' bsa-mkp-arrow' : '');
+                    (/^[0-9]$/.test(k) ? ' bsa-mkp-num' : ' bsa-mkp-sym') + (DIR_KEYS.indexOf(k) >= 0 ? ' bsa-mkp-arrow' : '');
                 html += '<button type="button" tabindex="-1" class="' + cls + '" data-mkp-key="' +
                     (k === ' ' ? ' ' : k) + '" aria-label="' + keyAria(k) + '">' + keyLabel(k) + '</button>';
             });
@@ -409,11 +400,18 @@
         if (!el || !el.isConnected) { close(false); return; }
         if (k === 'OK') { close(true, true); return; }
         if (k === 'NEXT') { focusNextNum(el); return; }
-        if (ARROW_KEYS.indexOf(k) >= 0) { focusArrowNum(el, k); return; }
         var s = null, e = null;
         try { s = el.selectionStart; e = el.selectionEnd; } catch (_e) { /* 선택 미지원 */ }
         var res;
-        if (k === 'BS') res = backspaceAtCaret(el.value, s, e);
+        var isDirKey = DIR_KEYS.indexOf(k) >= 0;
+        if (!isDirKey && k !== 'BS' && leadDirection(el.value) && typeof s === 'number') {
+            // 숫자는 방향 글자 뒤에만 — 커서가 맨 앞이면 방향 뒤로 민다(전체 선택이면 방향은 남기고 숫자만 바꾼다)
+            var lead = el.value.match(DIR_LEAD_RE)[0].length;
+            if (s < lead) s = lead;
+            if (typeof e === 'number' && e < lead) e = lead;
+        }
+        if (isDirKey) { if (!hasDirKeys(el)) return; res = setDirection(el.value, k); }
+        else if (k === 'BS') res = backspaceAtCaret(el.value, s, e);
         else if (k === 'C') res = { value: '', caret: 0 };
         else if (k === '-' && isNumTarget(el)) res = toggleSign(el.value);
         else if (isNumTarget(el) && !numAccepts(el.value, k)) return;
@@ -436,21 +434,6 @@
         state.lastPointerAt = Date.now();
         try { next.focus({ preventScroll: true }); } catch (_e) { next.focus(); }
         if (state.field !== next && wantsKeypadFor(next)) open(next);
-    }
-
-    /** 방향키: 같은 창에서 그 방향의 숫자 칸(보이는 것)으로. 없으면 그대로 */
-    function focusArrowNum(el, dir) {
-        var scope = el.closest('.modal-overlay, .modal-card, form') || document.body;
-        var list = Array.prototype.slice.call(scope.querySelectorAll('input')).filter(function (x) {
-            return x !== el && isNumTarget(x) && x.offsetParent !== null;
-        });
-        var i = pickArrowTarget(el.getBoundingClientRect(), list.map(function (x) { return x.getBoundingClientRect(); }), dir);
-        if (i < 0) return;
-        var next = list[i];
-        // 가로로 넘치는 표·창 밖 줄: 옮겨 갈 칸이 보이게
-        try { next.scrollIntoView({ block: 'nearest', inline: 'nearest' }); } catch (_e) { /* 옛 브라우저 */ }
-        moveToNumField(next);
-        try { next.select(); } catch (_e) { /* ignore */ }
     }
 
     /** 「다음」: 같은 창의 다음 숫자 칸(보이는 것)으로. 없으면 완료 */

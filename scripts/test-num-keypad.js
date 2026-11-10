@@ -78,36 +78,41 @@ assert.ok(/el\.dataset\.mkpOrigInputmode = [^;]+;\s*el\.setAttribute\('inputmode
     assert.ok(app.includes('<input type="text" ' + attr + ' inputmode="decimal"'), attr + ' 숫자 칸');
 });
 
-// 2026-11-10 「그놈들은 방향키도」: 균열 게이지·균열팁 창 숫자 칸은 키패드 맨 위에 ◀▲▼▶ 한 줄
-assert.deepStrictEqual(kp.LAYOUT_NUM_ARROWS[0], ['LEFT', 'UP', 'DOWN', 'RIGHT']);
-assert.deepStrictEqual(kp.LAYOUT_NUM_ARROWS.slice(1), kp.LAYOUT_NUM, '숫자 키 자리는 그대로');
-assert.ok(kp.ARROW_SELECTOR.includes('#ndtCrackMonitorModal input') && kp.ARROW_SELECTOR.includes('input[data-num-keypad-arrows]'));
-assert.ok(!/#ndtModal|#ndtDisplacement/.test(kp.ARROW_SELECTOR), '다른 비파괴 창은 예전 16키 그대로');
-(function arrowPick() {
-    const box = (col, rowY) => ({ left: col * 80, right: col * 80 + 70, top: rowY, bottom: rowY + 30 });
-    // 0,1 = 초기 X/Y(위쪽 줄), 2..7 = 표 3줄 × (X, Y)
-    const cells = [box(1, 0), box(2, 0), box(1, 50), box(2, 50), box(1, 90), box(2, 90), box(1, 130), box(2, 130)];
-    const go = (from, dir) => {
-        const others = cells.map((c, i) => (i === from ? null : c));
-        return kp.pickArrowTarget(cells[from], others, dir);
-    };
-    assert.strictEqual(go(2, 'RIGHT'), 3, '같은 줄 오른쪽');
-    assert.strictEqual(go(3, 'LEFT'), 2, '같은 줄 왼쪽');
-    assert.strictEqual(go(3, 'RIGHT'), -1, '줄 끝에서는 그대로');
-    assert.strictEqual(go(2, 'LEFT'), -1);
-    assert.strictEqual(go(2, 'DOWN'), 4, '아랫줄 같은 열');
-    assert.strictEqual(go(5, 'DOWN'), 7);
-    assert.strictEqual(go(7, 'DOWN'), -1, '마지막 줄');
-    assert.strictEqual(go(5, 'UP'), 3, '바로 윗줄(더 먼 줄 아님)');
-    assert.strictEqual(go(2, 'UP'), 0, '표 첫 줄에서 위 = 초기값 칸');
-    assert.strictEqual(go(0, 'UP'), -1);
-    assert.strictEqual(kp.pickArrowTarget(null, cells, 'UP'), -1);
-    assert.strictEqual(kp.pickArrowTarget(cells[0], [], 'DOWN'), -1);
-})();
-assert.ok(/ARROW_KEYS\.indexOf\(k\) >= 0\) \{ focusArrowNum\(el, k\); return; \}/.test(src), '방향키 → 칸 이동');
-// 키패드 키로 칸을 옮기면 키패드가 따라 움직여 그 누르기의 click이 밖에 떨어진다 → 버린다(닫힘·엉뚱한 버튼 방지)
+// 2026-11-10 「움직인 방향을 입력하는 키 — 게이지는 방향을 알려줘야 해서」: 게이지 X·Y 칸은 키패드 맨 위에 ← ↑ ↓ → 한 줄
+assert.deepStrictEqual(kp.LAYOUT_NUM_DIRS[0], ['LEFT', 'UP', 'DOWN', 'RIGHT']);
+assert.deepStrictEqual(kp.LAYOUT_NUM_DIRS.slice(1), kp.LAYOUT_NUM, '숫자 키 자리는 그대로');
+assert.strictEqual(kp.DIR_SELECTOR, 'input[data-num-keypad-dir]');
+assert.deepStrictEqual(kp.DIR_CHARS, { LEFT: '←', UP: '↑', DOWN: '↓', RIGHT: '→' });
+const dirOf = (v, k) => kp.setDirection(v, k).value;
+assert.strictEqual(dirOf('1.5', 'RIGHT'), '→1.5', '방향을 맨 앞에');
+assert.strictEqual(dirOf('→1.5', 'LEFT'), '←1.5', '다른 방향이면 바꾼다');
+assert.strictEqual(dirOf('←1.5', 'LEFT'), '1.5', '같은 방향을 또 누르면 뺀다');
+assert.strictEqual(dirOf('-1.5', 'UP'), '↑1.5', '방향이 부호를 대신한다');
+assert.strictEqual(dirOf('', 'DOWN'), '↓', '방향 먼저, 숫자 나중도 된다');
+assert.deepStrictEqual(kp.setDirection('2', 'DOWN'), { value: '↓2', caret: 2 });
+assert.strictEqual(kp.leadDirection('↑0.3'), '↑');
+assert.strictEqual(kp.leadDirection('0.3'), '');
+assert.deepStrictEqual(kp.toggleSign('→1.5'), { value: '←1.5', caret: 4 }, '± = 방향 반대로');
+assert.strictEqual(kp.toggleSign('↑2').value, '↓2');
+assert.ok(kp.numAccepts('→1', '.') && !kp.numAccepts('→1.2', '.'));
+assert.ok(/if \(isDirKey\) \{ if \(!hasDirKeys\(el\)\) return; res = setDirection\(el\.value, k\); \}/.test(src), '방향 키 → 값에 방향');
+assert.ok(/if \(s < lead\) s = lead;/.test(src), '숫자는 방향 글자 뒤에만');
+// 방향 키는 게이지 X·Y 칸에만(초기값 2 + 회차별 2). 균열팁(길이)·다른 비파괴 창은 16키 그대로
+['crackGaugeInitialX', 'crackGaugeInitialY'].forEach((id) => {
+    assert.ok(new RegExp('id="' + id + '"[^>]*data-num-keypad-dir').test(html), id);
+});
+assert.ok(!/id="crackTipInitialLength"[^>]*data-num-keypad-dir/.test(html), '균열팁 길이는 방향 없음');
+['data-gauge-x', 'data-gauge-y'].forEach((attr) => {
+    assert.ok(app.includes('<input type="text" ' + attr + ' inputmode="decimal" data-num-keypad-dir'), attr);
+});
+['data-tip-length', 'data-tip-inc'].forEach((attr) => {
+    assert.ok(app.includes('<input type="text" ' + attr + ' inputmode="decimal" value='), attr + ' 방향 없음');
+});
+assert.strictEqual((html.match(/data-num-keypad-dir/g) || []).length, 2);
+assert.strictEqual((app.match(/data-num-keypad-dir/g) || []).length, 2);
+// 키패드 키(다음)로 칸을 옮기면 키패드가 따라 움직여 그 누르기의 click이 밖에 떨어진다 → 버린다(닫힘·엉뚱한 버튼 방지)
 assert.ok(/state\.downInPad = !!\(state\.pad && t && state\.pad\.contains\(t\)\)/.test(src));
 assert.ok(/if \(fromPad && !\(state\.pad && state\.pad\.contains\(t\)\)\) \{\s*if \(e\.cancelable\) e\.preventDefault\(\);\s*e\.stopPropagation\(\);\s*return;/.test(src));
 const css = fs.readFileSync(path.join(root, 'styles.css'), 'utf8');
-assert.ok(/\.bsa-mkp-key\.bsa-mkp-arrow \{ height: 34px;/.test(css), '방향키 줄은 숫자 키보다 낮게');
+assert.ok(/\.bsa-mkp-key\.bsa-mkp-arrow \{ height: 34px;/.test(css), '방향 키 줄은 숫자 키보다 낮게');
 console.log('test-num-keypad: OK');

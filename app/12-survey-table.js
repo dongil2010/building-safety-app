@@ -4125,8 +4125,8 @@
                     `${g.initialX || '-'} / ${g.initialY || '-'}`,
                     last ? (formatHwpxCrackMonitorDate(last.date) || last.roundKey || '-') : '-',
                     last ? `${last.xMm || '-'} / ${last.yMm || '-'}` : '-',
-                    `${formatMonitorDelta(cum.dx)} / ${formatMonitorDelta(cum.dy)}`,
-                    `${formatMonitorDelta(prevD.dx)} / ${formatMonitorDelta(prevD.dy)}`
+                    `${formatGaugeDelta('x', cum.dx, g)} / ${formatGaugeDelta('y', cum.dy, g)}`,
+                    `${formatGaugeDelta('x', prevD.dx, g)} / ${formatGaugeDelta('y', prevD.dy, g)}`
                 ]);
             }
             if (it.hasTip) {

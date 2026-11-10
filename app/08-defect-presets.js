@@ -1590,11 +1590,39 @@
         return base;
     }
 
+    // 2026-11-10 「게이지는 (움직인) 방향을 알려줘야 해서」: 게이지 X·Y 값 맨 앞에 방향 글자(← → ↑ ↓)를 붙일 수 있다.
+    // 셈할 때는 방향이 부호다 — → · ↓ = +, ← · ↑ = − (방향 없이 적은 예전 값이 한글 출력에서 X는 →, Y는 ↓로 나가던 것과 같은 쪽).
+    const MONITOR_DIR_RE = /^\s*([←→↑↓])\s*/;
+    function monitorDirectionOf(raw) {
+        const m = String(raw == null ? '' : raw).match(MONITOR_DIR_RE);
+        return m ? m[1] : '';
+    }
     function parseMonitorNumber(raw) {
-        const s = String(raw == null ? '' : raw).trim().replace(/,/g, '');
+        let s = String(raw == null ? '' : raw).trim().replace(/,/g, '');
         if (!s) return null;
+        const dir = monitorDirectionOf(s);
+        if (dir) {
+            s = s.replace(MONITOR_DIR_RE, '').trim();
+            if (!s) return null; // 방향만 있고 숫자가 없음
+        }
         const n = Number(s);
-        return Number.isFinite(n) ? n : null;
+        if (!Number.isFinite(n)) return null;
+        return (dir === '←' || dir === '↑') && n !== 0 ? -n : n;
+    }
+    /** 이 게이지 기록의 그 축(x|y)에 방향을 붙여 적은 값이 하나라도 있는가 */
+    function gaugeLogUsesDirection(log, axis) {
+        if (!log) return false;
+        const key = axis === 'y' ? 'yMm' : 'xMm';
+        if (monitorDirectionOf(axis === 'y' ? log.initialY : log.initialX)) return true;
+        return (log.readings || []).some((r) => r && monitorDirectionOf(r[key]));
+    }
+    /** 게이지 누적·전차 대비 — 방향을 적은 기록이면 +/− 대신 방향 글자로(→0.5, ↑0.2), 아니면 예전처럼 +0.5 */
+    function formatGaugeDelta(axis, n, log) {
+        if (n == null || !Number.isFinite(n) || !gaugeLogUsesDirection(log, axis)) return formatMonitorDelta(n);
+        const rounded = Math.round(n * 100) / 100;
+        if (rounded === 0) return '0';
+        const dir = axis === 'y' ? (rounded > 0 ? '↓' : '↑') : (rounded > 0 ? '→' : '←');
+        return dir + String(Math.abs(rounded));
     }
 
     function formatMonitorDelta(n) {
@@ -2087,7 +2115,7 @@
             const lastGauge = gauge.readings.length ? gauge.readings[gauge.readings.length - 1] : null;
             const gDelta = lastGauge ? computeGaugeDeltas(gauge, lastGauge) : { dx: null, dy: null };
             const xyText = lastGauge
-                ? `${lastGauge.xMm || '-'}/${lastGauge.yMm || '-'} (Δ${formatMonitorDelta(gDelta.dx)}/${formatMonitorDelta(gDelta.dy)})`
+                ? `${lastGauge.xMm || '-'}/${lastGauge.yMm || '-'} (Δ${formatGaugeDelta('x', gDelta.dx, gauge)}/${formatGaugeDelta('y', gDelta.dy, gauge)})`
                 : '-';
             const tipSum = summarizeCrackTipLog(d.crackTipLog);
             return `<tr>
@@ -2109,7 +2137,7 @@
         const lastGauge = gauge.readings.length ? gauge.readings[gauge.readings.length - 1] : null;
         const gDelta = lastGauge ? computeGaugeDeltas(gauge, lastGauge) : { dx: null, dy: null };
         const xyText = lastGauge
-            ? `${lastGauge.xMm || '-'}/${lastGauge.yMm || '-'} (Δ${formatMonitorDelta(gDelta.dx)}/${formatMonitorDelta(gDelta.dy)})`
+            ? `${lastGauge.xMm || '-'}/${lastGauge.yMm || '-'} (Δ${formatGaugeDelta('x', gDelta.dx, gauge)}/${formatGaugeDelta('y', gDelta.dy, gauge)})`
             : '-';
         const tipSum = summarizeCrackTipLog(item.crackTipLog);
         return `<tr>
@@ -2151,10 +2179,10 @@
             const deltas = computeGaugeDeltas(log, reading);
             const prevD = computeGaugePrevDeltas(log, idx);
             const cells = tr.querySelectorAll('.monitor-readonly');
-            if (cells[0]) cells[0].textContent = formatMonitorDelta(deltas.dx);
-            if (cells[1]) cells[1].textContent = formatMonitorDelta(deltas.dy);
-            if (cells[2]) cells[2].textContent = formatMonitorDelta(prevD.dx);
-            if (cells[3]) cells[3].textContent = formatMonitorDelta(prevD.dy);
+            if (cells[0]) cells[0].textContent = formatGaugeDelta('x', deltas.dx, log);
+            if (cells[1]) cells[1].textContent = formatGaugeDelta('y', deltas.dy, log);
+            if (cells[2]) cells[2].textContent = formatGaugeDelta('x', prevD.dx, log);
+            if (cells[3]) cells[3].textContent = formatGaugeDelta('y', prevD.dy, log);
         });
     }
 
@@ -2190,12 +2218,12 @@
             return `<tr data-gauge-row="${idx}">
                 <td><input type="text" data-gauge-round value="${escapeSurveyAttr(r.roundKey || '')}" placeholder="회차"></td>
                 <td><input type="date" data-gauge-date value="${escapeSurveyAttr(r.date || '')}"></td>
-                <td><input type="text" data-gauge-x inputmode="decimal" value="${escapeSurveyAttr(r.xMm || '')}"></td>
-                <td><input type="text" data-gauge-y inputmode="decimal" value="${escapeSurveyAttr(r.yMm || '')}"></td>
-                <td class="monitor-readonly" title="누적(현회−초기)">${formatMonitorDelta(deltas.dx)}</td>
-                <td class="monitor-readonly" title="누적(현회−초기)">${formatMonitorDelta(deltas.dy)}</td>
-                <td class="monitor-readonly" title="전차 대비">${formatMonitorDelta(prevD.dx)}</td>
-                <td class="monitor-readonly" title="전차 대비">${formatMonitorDelta(prevD.dy)}</td>
+                <td><input type="text" data-gauge-x inputmode="decimal" data-num-keypad-dir value="${escapeSurveyAttr(r.xMm || '')}"></td>
+                <td><input type="text" data-gauge-y inputmode="decimal" data-num-keypad-dir value="${escapeSurveyAttr(r.yMm || '')}"></td>
+                <td class="monitor-readonly" title="누적(현회−초기)">${formatGaugeDelta('x', deltas.dx, log)}</td>
+                <td class="monitor-readonly" title="누적(현회−초기)">${formatGaugeDelta('y', deltas.dy, log)}</td>
+                <td class="monitor-readonly" title="전차 대비">${formatGaugeDelta('x', prevD.dx, log)}</td>
+                <td class="monitor-readonly" title="전차 대비">${formatGaugeDelta('y', prevD.dy, log)}</td>
                 <td><input type="text" data-gauge-note value="${escapeSurveyAttr(r.note || '')}"></td>
                 <td><button type="button" class="defect-crack-monitor-del" data-gauge-del ${rows.length <= 1 ? 'disabled' : ''} title="삭제"><i class="fa-solid fa-trash"></i></button></td>
             </tr>`;
@@ -2611,7 +2639,7 @@
             const lastGauge = gauge.readings.length ? gauge.readings[gauge.readings.length - 1] : null;
             const gDelta = lastGauge ? computeGaugeDeltas(gauge, lastGauge) : { dx: null, dy: null };
             const xyText = lastGauge
-                ? `${lastGauge.xMm || '-'}/${lastGauge.yMm || '-'} (Δ${formatMonitorDelta(gDelta.dx)}/${formatMonitorDelta(gDelta.dy)})`
+                ? `${lastGauge.xMm || '-'}/${lastGauge.yMm || '-'} (Δ${formatGaugeDelta('x', gDelta.dx, gauge)}/${formatGaugeDelta('y', gDelta.dy, gauge)})`
                 : '-';
             const tipSum = summarizeCrackTipLog(d.crackTipLog);
             return `<tr>

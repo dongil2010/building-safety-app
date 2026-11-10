@@ -1257,6 +1257,9 @@
         let prefix = axis === 'y' ? '↓ ' : (n > 0 ? '→ ' : '± ');
         if (axis === 'x' && n === 0) prefix = '± ';
         let s = prefix + (axis === 'y' ? n : Math.abs(n));
+        // 2026-11-10 방향을 붙여 적은 값(←1.5·↑0.3)은 적은 방향 그대로 + 크기
+        const dir = monitorDirectionOf(val);
+        if (dir) s = `${dir} ${Math.abs(n)}`;
         // 초기값 칸에 붙던 「(초기값)」 문구는 뺌 — 줄 이름(초기 부착 data)으로 충분 (2026-10-23 요청)
         if (!opts.isInitial && prevVal != null && String(prevVal).trim() !== '') {
             const pn = parseMonitorNumber(prevVal);

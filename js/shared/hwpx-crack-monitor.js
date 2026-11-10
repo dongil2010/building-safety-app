@@ -39,8 +39,14 @@
 
     function num(v) {
         if (isBlank(v)) return null;
-        var n = Number(String(v).trim().replace(/,/g, ''));
-        return Number.isFinite(n) ? n : null;
+        // 2026-11-10 게이지 값 맨 앞의 방향 글자(← → ↑ ↓)는 부호다 — app.js parseMonitorNumber와 같은 규칙(→·↓ = +, ←·↑ = −)
+        var t = String(v).trim().replace(/,/g, '');
+        var m = t.match(/^([←→↑↓])\s*/);
+        if (m) t = t.slice(m[0].length);
+        if (!t) return null;
+        var n = Number(t);
+        if (!Number.isFinite(n)) return null;
+        return (m && (m[1] === '←' || m[1] === '↑') && n !== 0) ? -n : n;
     }
 
     function fmtNum(n) {

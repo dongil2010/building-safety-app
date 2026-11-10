@@ -16835,9 +16835,9 @@ html:not(.layout-desktop) .crack-monitor-photo-slots {
 .bsa-mkp-ok:active { background: #1d4ed8; }
 .bsa-mkp-numonly .bsa-mkp-key[data-mkp-key="NEXT"] { background: #0f766e; border-color: #0f766e; }
 .bsa-mkp-numonly .bsa-mkp-key[data-mkp-key="C"] { font-size: 18px; }
-/* 방향키 줄(균열 게이지·균열팁 숫자 칸): 맨 위 한 줄, 숫자 키보다 낮게 */
-.bsa-mkp-key.bsa-mkp-arrow { height: 34px; font-size: 15px; background: #e2e8f0; color: #1e293b; }
-.bsa-mkp-short .bsa-mkp-key.bsa-mkp-arrow { height: 26px; font-size: 13px; }
+/* 방향 키 줄(균열 게이지 X·Y — 움직인 방향 ← ↑ ↓ → 입력): 맨 위 한 줄, 숫자 키보다 낮게 */
+.bsa-mkp-key.bsa-mkp-arrow { height: 34px; font-size: 20px; background: #e2e8f0; color: #1e293b; }
+.bsa-mkp-short .bsa-mkp-key.bsa-mkp-arrow { height: 26px; font-size: 17px; }
 .bsa-mkp-key.bsa-mkp-arrow:active { background: #cbd5e1; }
 input.bsa-mkp-active, textarea.bsa-mkp-active {
     outline: 2px solid #2563eb !important;

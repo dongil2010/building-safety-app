@@ -20,7 +20,7 @@ assert.ok(hwpxStart > 0 && hwpxEnd > hwpxStart);
 const shared = ['function paginateSurveyDefects(', 'function formatSurveyReportNo(', 'function getReportSurveyRowValues(']
     .map((h) => extractFunction(app, h)).join('\n');
 const FP = {
-    "hwpxExport": "2f6596dbe444885a",
+    "hwpxExport": "4bfab15456b98681", // 2026-11-10 게이지 칸: 방향(← → ↑ ↓)을 붙여 적은 값은 그 방향 그대로 — 일부러 바꿈
     "sharedRows": "6b42deefb7ec5f3e",
     "hwpx-survey-row-fit.js": "3d22dcdf170a4bc4",
     "hwpx-font-8pt.js": "792b4169159c5676",
