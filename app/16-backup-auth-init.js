@@ -4700,8 +4700,19 @@
                 _rootForceSplit = true;
                 try { e.__kind = 'transient'; } catch (_e2) { /* ignore */ }
             }
+            // 2026-11-10 실패 원인을 화면·오류 기록에 남긴다 — 예전엔 콘솔에만 찍혀 현장 폰에서는 왜 안 올라가는지 알 수 없었다
+            let syncFailDetail = '';
+            try {
+                const code = e && e.code ? String(e.code) : '';
+                const msg = String((e && e.message) || e || '').replace(/\s+/g, ' ').trim();
+                syncFailDetail = (code && !msg.includes(code) ? code + ' ' : '') + msg;
+                if (syncFailDetail.length > 90) syncFailDetail = syncFailDetail.slice(0, 90) + '…';
+                const el = window.BSA && window.BSA.errorLog;
+                if (el && typeof el.record === 'function') el.record({ kind: 'sync-fail', message: syncFailDetail, stack: e && e.stack, source: 'syncToFirebase' });
+            } catch (_e3) { /* ignore */ }
+            const syncFailTail = syncFailDetail ? ' (' + syncFailDetail + ')' : '';
             if (typeof syncProgressFail === 'function') syncProgressFail('sync', isFirestorePermissionError(e) ? '서버 접근 권한 없음 — 관리자 확인 필요'
-                : (isFirestoreQuotaError(e) ? '서버 사용 한도 — 잠시 뒤 자동 재시도' : '서버 동기화 실패 — 잠시 뒤 자동 재시도'));
+                : (isFirestoreQuotaError(e) ? '서버 사용 한도 — 잠시 뒤 자동 재시도' : '서버 동기화 실패 — 잠시 뒤 자동 재시도' + syncFailTail));
             _syncPending = false;
             if (isFirestoreQuotaError(e)) pauseFirestoreWrites(SYNC_QUOTA_COOLDOWN_MS);
             const now = Date.now();
