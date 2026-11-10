@@ -95,6 +95,8 @@ import java.util.concurrent.Executors;
  *   지금 렌즈로 계속 확대하고 손이 멈춘 뒤에 바꾼다(넓은 쪽으로 갈 때와 배율 버튼은 바로). 뒤쪽 렌즈 여러 개를 동시에
  *   켜 두는 것은 일반 앱에 허용되지 않아 이렇게 가린다.
  * - 촬영 버튼을 누른 채 버튼 밖으로 끌고 떼면 찍지 않는다(취소). 음량 버튼과 블루투스 리모컨(셔터 버튼)으로도 찍는다.
+ * - 리모컨 버튼 지정: 설정 창에서 「리모컨 버튼」을 누르고 리모컨 버튼을 누르면 그 키가 촬영 키로 등록된다(기기에 기억).
+ *   기본 키 목록에 없는 리모컨용. 지정 중에 다시 누르면 지정을 지우고 기본으로 돌아간다.
  * - 촬영 방식: 화질 우선이 기본. 설정 창에서 속도 우선으로 바꿀 수 있다(기기에 기억).
  * - 초점: 기본은 화면 정중앙(계속 맞춤). 화면을 누르면 그 자리에 고정되고, 다시 찍기·렌즈 바꿈·새로 열 때 중앙으로 돌아온다.
  * - 촬영 버튼 자리는 위 「설정」 창에서 끌어 옮긴다(기기에 기억). 평소에는 안 움직인다.
@@ -112,6 +114,7 @@ public class CustomCameraActivity extends AppCompatActivity {
     private static final String KEY_SHUTTER_Y = "shutterFy2";
     private static final String KEY_FLASH = "flashState";
     private static final String KEY_FAST = "fastCapture";
+    private static final String KEY_REMOTE = "remoteKey";
     private static final int FLASH_OFF = 0, FLASH_ON = 1, FLASH_AUTO = 2, FLASH_TORCH = 3;
     private static final int ICON_CLOSE = 0, ICON_GEAR = 1, ICON_BOLT = 2, ICON_BOLT_SLASH = 3, ICON_BOLT_A = 4, ICON_TORCH = 5,
         ICON_CHECK = 6, ICON_RETRY = 7;
@@ -193,6 +196,9 @@ public class CustomCameraActivity extends AppCompatActivity {
     private int flashMode = FLASH_OFF;
     private boolean settingsMode;
     private boolean fastCapture;
+    private int remoteKey = KeyEvent.KEYCODE_UNKNOWN; // 직접 지정한 리모컨 촬영 키(없으면 UNKNOWN)
+    private boolean learningKey;
+    private TextView remoteButton;
     private boolean portraitHeld;
     private TextView portraitWarning;
     private float shutterFx = DEF_FX;
@@ -214,6 +220,7 @@ public class CustomCameraActivity extends AppCompatActivity {
         shutterFx = Math.max(0f, Math.min(1f, prefs().getFloat(KEY_SHUTTER_X, DEF_FX)));
         shutterFy = Math.max(0f, Math.min(1f, prefs().getFloat(KEY_SHUTTER_Y, DEF_FY)));
         fastCapture = prefs().getBoolean(KEY_FAST, false);
+        remoteKey = prefs().getInt(KEY_REMOTE, KeyEvent.KEYCODE_UNKNOWN);
         int fm = prefs().getInt(KEY_FLASH, FLASH_OFF);
         flashMode = (fm == FLASH_ON || fm == FLASH_AUTO) ? fm : FLASH_OFF;
         io = Executors.newSingleThreadExecutor();
@@ -450,6 +457,21 @@ public class CustomCameraActivity extends AppCompatActivity {
         LinearLayout.LayoutParams mlp = new LinearLayout.LayoutParams(dp(226), dp(44));
         mlp.topMargin = dp(16);
         settingsBox.addView(modeButton, mlp);
+        // 리모컨 버튼 지정: 누른 뒤 리모컨 버튼을 누르면 그 키로 찍는다
+        remoteButton = pillButton(remoteKeyText(), 0xFF3A3A3C, Color.WHITE);
+        remoteButton.setOnClickListener(v -> {
+            if (learningKey) { // 지정 중에 다시 누르면 지정을 지운다
+                learningKey = false;
+                remoteKey = KeyEvent.KEYCODE_UNKNOWN;
+                prefs().edit().remove(KEY_REMOTE).apply();
+            } else {
+                learningKey = true;
+            }
+            remoteButton.setText(remoteKeyText());
+        });
+        LinearLayout.LayoutParams klp = new LinearLayout.LayoutParams(dp(226), dp(44));
+        klp.topMargin = dp(8);
+        settingsBox.addView(remoteButton, klp);
         LinearLayout settingsButtons = new LinearLayout(this);
         settingsButtons.setOrientation(LinearLayout.HORIZONTAL);
         settingsButtons.setGravity(Gravity.CENTER);
@@ -568,6 +590,10 @@ public class CustomCameraActivity extends AppCompatActivity {
 
     private void setSettingsMode(boolean on) {
         settingsMode = on;
+        if (!on && learningKey) {
+            learningKey = false;
+            remoteButton.setText(remoteKeyText());
+        }
         settingsPanel.setVisibility(on ? View.VISIBLE : View.GONE);
         updatePortraitWarning();
         // 옮길 수 있을 때는 노란 테두리
@@ -747,6 +773,12 @@ public class CustomCameraActivity extends AppCompatActivity {
      */
     private int captureMode() {
         return fastCapture ? ImageCapture.CAPTURE_MODE_MINIMIZE_LATENCY : ImageCapture.CAPTURE_MODE_MAXIMIZE_QUALITY;
+    }
+
+    private String remoteKeyText() {
+        if (learningKey) return "리모컨 버튼을 누르세요…";
+        if (remoteKey == KeyEvent.KEYCODE_UNKNOWN) return "리모컨 버튼: 기본";
+        return "리모컨 버튼: " + KeyEvent.keyCodeToString(remoteKey).replace("KEYCODE_", "");
     }
 
     private String captureModeText() {
@@ -1561,7 +1593,15 @@ public class CustomCameraActivity extends AppCompatActivity {
 
     @Override
     public boolean onKeyDown(int keyCode, KeyEvent event) {
-        if (isShutterKey(keyCode)) {
+        if (learningKey && keyCode != KeyEvent.KEYCODE_BACK) {
+            // 리모컨 버튼 지정: 지금 눌린 키를 촬영 키로 기억한다
+            learningKey = false;
+            remoteKey = keyCode;
+            prefs().edit().putInt(KEY_REMOTE, keyCode).apply();
+            remoteButton.setText(remoteKeyText());
+            return true;
+        }
+        if (isShutterKey(keyCode) || (remoteKey != KeyEvent.KEYCODE_UNKNOWN && keyCode == remoteKey)) {
             if (event.getRepeatCount() == 0) shoot();
             return true;
         }
@@ -1570,7 +1610,7 @@ public class CustomCameraActivity extends AppCompatActivity {
 
     @Override
     public boolean onKeyUp(int keyCode, KeyEvent event) {
-        if (isShutterKey(keyCode)) return true;
+        if (isShutterKey(keyCode) || (remoteKey != KeyEvent.KEYCODE_UNKNOWN && keyCode == remoteKey)) return true;
         return super.onKeyUp(keyCode, event);
     }
 
