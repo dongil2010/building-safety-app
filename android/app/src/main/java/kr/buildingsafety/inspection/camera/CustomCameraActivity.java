@@ -91,6 +91,9 @@ import java.util.concurrent.Executors;
  * - 모양: 검정 바탕 + 흰 선 아이콘 + 노란 포인트(ACCENT) 하나. 위쪽은 닫기(X) · 플래시 · 설정(톱니바퀴) 선 아이콘,
  *   배율 버튼은 반투명 캡슐 안의 작은 원(지금 구간만 노란 글자로 실제 배율 표시), 줌 막대는 눈금자 + 노란 바늘,
  *   촬영 버튼은 흰 고리 + 흰 원, 찍은 뒤에는 흰 원의 체크(확인) · 테두리 원의 되돌리기(다시 찍기).
+ * - 렌즈를 바꿔 거는 동안(수백 ms)은 직전 화면을 붙잡아 보여 주다가 새 화면이 나오면 겹쳐 넘긴다. 줌을 끄는 중에는
+ *   지금 렌즈로 계속 확대하고 손이 멈춘 뒤에 바꾼다(넓은 쪽으로 갈 때와 배율 버튼은 바로). 뒤쪽 렌즈 여러 개를 동시에
+ *   켜 두는 것은 일반 앱에 허용되지 않아 이렇게 가린다.
  * - 촬영 방식: 화질 우선이 기본. 설정 창에서 속도 우선으로 바꿀 수 있다(기기에 기억).
  * - 초점: 기본은 화면 정중앙(계속 맞춤). 화면을 누르면 그 자리에 고정되고, 다시 찍기·렌즈 바꿈·새로 열 때 중앙으로 돌아온다.
  * - 촬영 버튼 자리는 위 「설정」 창에서 끌어 옮긴다(기기에 기억). 평소에는 안 움직인다.
@@ -118,7 +121,8 @@ public class CustomCameraActivity extends AppCompatActivity {
     private static final float MAX_ZOOM = 15f;
     private static final float[] ZOOM_STEPS = { 1f, 2f, 5f, 10f, 15f };
     private static final int MAX_CHIPS = 7;
-    private static final int LENS_SWITCH_DELAY_MS = 160;
+    private static final int LENS_SWITCH_DELAY_MS = 320;
+    private static final int LENS_SWITCH_WIDER_MS = 60;
     private static final int LENS_WATCHDOG_MS = 3000;
     private static final Object WATCHDOG = new Object();
 
@@ -147,6 +151,12 @@ public class CustomCameraActivity extends AppCompatActivity {
     private FrameLayout reviewBar;
     private ShutterView shutter;
     private View shotBlink;
+    private ImageView freezeView;
+    private Bitmap freezeBitmap;
+    private float freezeZoom = 1f;
+    private float freezeScale = 1f;
+    private boolean freezeFading;
+    private final Runnable releaseFreezeTask = this::releaseFreeze;
     private int activeChip = -2;
     private IconView confirmButton;
     private IconView retakeButton;
@@ -276,6 +286,14 @@ public class CustomCameraActivity extends AppCompatActivity {
         previewView.setImplementationMode(PreviewView.ImplementationMode.COMPATIBLE);
         previewBox = new FrameLayout(this);
         previewBox.addView(previewView, new FrameLayout.LayoutParams(-1, -1));
+        // 렌즈를 바꿔 거는 동안 보여 줄 직전 화면
+        freezeView = new ImageView(this);
+        freezeView.setScaleType(ImageView.ScaleType.FIT_XY);
+        freezeView.setVisibility(View.GONE);
+        previewBox.addView(freezeView, new FrameLayout.LayoutParams(-1, -1));
+        previewView.getPreviewStreamState().observe(this, st -> {
+            if (st == PreviewView.StreamState.STREAMING) releaseFreeze();
+        });
         // 찍는 순간 잠깐 어두워지는 깜빡임
         shotBlink = new View(this);
         shotBlink.setBackgroundColor(Color.BLACK);
@@ -834,10 +852,45 @@ public class CustomCameraActivity extends AppCompatActivity {
         return pick != null ? pick : mainLens;
     }
 
+    /** 렌즈를 바꾸기 직전 화면을 붙잡아 둔다. */
+    private void freezeFrame() {
+        try {
+            Bitmap b = previewView.getBitmap();
+            if (b == null) return;
+            freezeView.animate().cancel();
+            freezeFading = false;
+            freezeView.setImageBitmap(b);
+            if (freezeBitmap != null) freezeBitmap.recycle();
+            freezeBitmap = b;
+            freezeZoom = zoom;
+            freezeScale = previewView.getScaleX();
+            freezeView.setScaleX(freezeScale);
+            freezeView.setScaleY(freezeScale);
+            freezeView.setAlpha(1f);
+            freezeView.setVisibility(View.VISIBLE);
+            handler.removeCallbacks(releaseFreezeTask);
+            handler.postDelayed(releaseFreezeTask, 2500); // 새 화면 신호가 안 와도 풀리게
+        } catch (Throwable ignored) { /* 못 붙잡으면 그냥 바꾼다 */ }
+    }
+
+    /** 새 렌즈 화면이 나오기 시작하면 붙잡아 둔 화면을 서서히 걷는다. */
+    private void releaseFreeze() {
+        if (freezeView.getVisibility() != View.VISIBLE || freezeFading) return;
+        freezeFading = true;
+        handler.removeCallbacks(releaseFreezeTask);
+        freezeView.animate().alpha(0f).setStartDelay(100).setDuration(200).withEndAction(() -> {
+            freezeView.setVisibility(View.GONE);
+            freezeView.setImageDrawable(null);
+            if (freezeBitmap != null) { freezeBitmap.recycle(); freezeBitmap = null; }
+            freezeFading = false;
+        }).start();
+    }
+
     private void switchLensNow() {
         if (provider == null || isFinishing()) return;
         Lens t = targetLens();
         if (t == lens) return;
+        freezeFrame();
         lens = t;
         bind();
     }
@@ -854,7 +907,11 @@ public class CustomCameraActivity extends AppCompatActivity {
         zoom = Math.max(minZoom(), Math.min(MAX_ZOOM, zoom));
         // 렌즈 바꾸기는 잠깐 미뤄서, 줌 막대를 끄는 동안 경계를 지날 때마다 멈칫하지 않게 한다
         handler.removeCallbacks(switchLensTask);
-        if (targetLens() != lens) handler.postDelayed(switchLensTask, LENS_SWITCH_DELAY_MS);
+        Lens target = targetLens();
+        if (target != lens) {
+            // 넓은 쪽은 지금 렌즈로 못 보여 주니 바로, 망원 쪽은 지금 렌즈로 확대해 두고 손이 멈춘 뒤에 바꾼다
+            handler.postDelayed(switchLensTask, target.ratio < lens.ratio ? LENS_SWITCH_WIDER_MS : LENS_SWITCH_DELAY_MS);
+        }
         float want = zoom / lens.ratio;
         // 물리 렌즈는 기기 줌을 건드리지 않고(1배) 나머지는 잘라서 맞춘다
         float cam = lens.physicalId != null
@@ -864,6 +921,12 @@ public class CustomCameraActivity extends AppCompatActivity {
         camera.getCameraControl().setZoomRatio(cam);
         previewView.setScaleX(extraCrop);
         previewView.setScaleY(extraCrop);
+        if (freezeView.getVisibility() == View.VISIBLE) {
+            // 붙잡아 둔 화면도 줌에 맞춰 키워서 손을 따라오게 한다
+            float fs = freezeScale * zoom / Math.max(0.01f, freezeZoom);
+            freezeView.setScaleX(fs);
+            freezeView.setScaleY(fs);
+        }
         updateZoomUi();
     }
 
@@ -935,7 +998,11 @@ public class CustomCameraActivity extends AppCompatActivity {
         chip.setTypeface(Typeface.DEFAULT_BOLD);
         chip.setTextColor(Color.argb(225, 255, 255, 255));
         chip.setGravity(Gravity.CENTER);
-        chip.setOnClickListener(v -> setZoom(value));
+        chip.setOnClickListener(v -> {
+            setZoom(value);
+            handler.removeCallbacks(switchLensTask); // 배율 버튼은 기다리지 않고 바로 렌즈를 바꾼다
+            switchLensNow();
+        });
         LinearLayout.LayoutParams lp = new LinearLayout.LayoutParams(dp(40), dp(40));
         lp.leftMargin = dp(2);
         lp.rightMargin = dp(2);
