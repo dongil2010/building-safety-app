@@ -95,8 +95,9 @@ import java.util.concurrent.Executors;
  *   지금 렌즈로 계속 확대하고 손이 멈춘 뒤에 바꾼다(넓은 쪽으로 갈 때와 배율 버튼은 바로). 뒤쪽 렌즈 여러 개를 동시에
  *   켜 두는 것은 일반 앱에 허용되지 않아 이렇게 가린다.
  * - 촬영 버튼을 누른 채 버튼 밖으로 끌고 떼면 찍지 않는다(취소). 음량 버튼과 블루투스 리모컨(셔터 버튼)으로도 찍는다.
- * - 리모컨 버튼 지정: 설정 창에서 「리모컨 버튼」을 누르고 리모컨 버튼을 누르면 그 키가 촬영 키로 등록된다(기기에 기억).
- *   기본 키 목록에 없는 리모컨용. 지정 중에 다시 누르면 지정을 지우고 기본으로 돌아간다.
+ * - 버튼 지정(설정 창, 기기에 기억): 촬영 · 줌아웃 · 줌인 칸을 누른 뒤 리모컨(또는 음량) 버튼을 누르면 그 키가 등록된다.
+ *   지정 중에 같은 칸을 다시 누르면 지정을 지운다. 줌 키로 지정한 키는 촬영 기본 키(음량 등)보다 먼저 먹는다.
+ *   단계 줌: 넓은 쪽은 1.0 → 0.8 → 0.6 → 0.5, 망원 쪽은 1.33배씩(1 → 1.33 → 1.77 → 2.35 …, 최대 15배).
  * - 촬영 방식: 화질 우선이 기본. 설정 창에서 속도 우선으로 바꿀 수 있다(기기에 기억).
  * - 초점: 기본은 화면 정중앙(계속 맞춤). 화면을 누르면 그 자리에 고정되고, 다시 찍기·렌즈 바꿈·새로 열 때 중앙으로 돌아온다.
  * - 촬영 버튼 자리는 위 「설정」 창에서 끌어 옮긴다(기기에 기억). 평소에는 안 움직인다.
@@ -115,6 +116,11 @@ public class CustomCameraActivity extends AppCompatActivity {
     private static final String KEY_FLASH = "flashState";
     private static final String KEY_FAST = "fastCapture";
     private static final String KEY_REMOTE = "remoteKey";
+    private static final String KEY_ZOOM_IN = "zoomInKey";
+    private static final String KEY_ZOOM_OUT = "zoomOutKey";
+    private static final int LEARN_NONE = 0, LEARN_SHUTTER = 1, LEARN_ZOOM_IN = 2, LEARN_ZOOM_OUT = 3;
+    private static final float ZOOM_STEP = 1.33f;
+    private static final float[] WIDE_STEPS = { 0.5f, 0.6f, 0.8f, 1f };
     private static final int FLASH_OFF = 0, FLASH_ON = 1, FLASH_AUTO = 2, FLASH_TORCH = 3;
     private static final int ICON_CLOSE = 0, ICON_GEAR = 1, ICON_BOLT = 2, ICON_BOLT_SLASH = 3, ICON_BOLT_A = 4, ICON_TORCH = 5,
         ICON_CHECK = 6, ICON_RETRY = 7;
@@ -197,8 +203,12 @@ public class CustomCameraActivity extends AppCompatActivity {
     private boolean settingsMode;
     private boolean fastCapture;
     private int remoteKey = KeyEvent.KEYCODE_UNKNOWN; // 직접 지정한 리모컨 촬영 키(없으면 UNKNOWN)
-    private boolean learningKey;
+    private int zoomInKey = KeyEvent.KEYCODE_UNKNOWN;
+    private int zoomOutKey = KeyEvent.KEYCODE_UNKNOWN;
+    private int learnTarget = LEARN_NONE; // 지금 버튼을 기다리는 칸
     private TextView remoteButton;
+    private TextView zoomInButton;
+    private TextView zoomOutButton;
     private boolean portraitHeld;
     private TextView portraitWarning;
     private float shutterFx = DEF_FX;
@@ -221,6 +231,8 @@ public class CustomCameraActivity extends AppCompatActivity {
         shutterFy = Math.max(0f, Math.min(1f, prefs().getFloat(KEY_SHUTTER_Y, DEF_FY)));
         fastCapture = prefs().getBoolean(KEY_FAST, false);
         remoteKey = prefs().getInt(KEY_REMOTE, KeyEvent.KEYCODE_UNKNOWN);
+        zoomInKey = prefs().getInt(KEY_ZOOM_IN, KeyEvent.KEYCODE_UNKNOWN);
+        zoomOutKey = prefs().getInt(KEY_ZOOM_OUT, KeyEvent.KEYCODE_UNKNOWN);
         int fm = prefs().getInt(KEY_FLASH, FLASH_OFF);
         flashMode = (fm == FLASH_ON || fm == FLASH_AUTO) ? fm : FLASH_OFF;
         io = Executors.newSingleThreadExecutor();
@@ -457,21 +469,32 @@ public class CustomCameraActivity extends AppCompatActivity {
         LinearLayout.LayoutParams mlp = new LinearLayout.LayoutParams(dp(226), dp(44));
         mlp.topMargin = dp(16);
         settingsBox.addView(modeButton, mlp);
-        // 리모컨 버튼 지정: 누른 뒤 리모컨 버튼을 누르면 그 키로 찍는다
-        remoteButton = pillButton(remoteKeyText(), 0xFF3A3A3C, Color.WHITE);
-        remoteButton.setOnClickListener(v -> {
-            if (learningKey) { // 지정 중에 다시 누르면 지정을 지운다
-                learningKey = false;
-                remoteKey = KeyEvent.KEYCODE_UNKNOWN;
-                prefs().edit().remove(KEY_REMOTE).apply();
-            } else {
-                learningKey = true;
-            }
-            remoteButton.setText(remoteKeyText());
-        });
+        // 버튼 지정: 칸을 누른 뒤 리모컨(음량) 버튼을 누르면 그 키로 촬영 / 줌아웃 / 줌인
+        remoteButton = pillButton("", 0xFF3A3A3C, Color.WHITE);
+        remoteButton.setOnClickListener(v -> toggleLearn(LEARN_SHUTTER));
         LinearLayout.LayoutParams klp = new LinearLayout.LayoutParams(dp(226), dp(44));
         klp.topMargin = dp(8);
         settingsBox.addView(remoteButton, klp);
+        LinearLayout zoomKeyRow = new LinearLayout(this);
+        zoomKeyRow.setOrientation(LinearLayout.HORIZONTAL);
+        zoomOutButton = pillButton("", 0xFF3A3A3C, Color.WHITE);
+        zoomOutButton.setOnClickListener(v -> toggleLearn(LEARN_ZOOM_OUT));
+        LinearLayout.LayoutParams zolp = new LinearLayout.LayoutParams(dp(109), dp(44));
+        zolp.rightMargin = dp(8);
+        zoomKeyRow.addView(zoomOutButton, zolp);
+        zoomInButton = pillButton("", 0xFF3A3A3C, Color.WHITE);
+        zoomInButton.setOnClickListener(v -> toggleLearn(LEARN_ZOOM_IN));
+        zoomKeyRow.addView(zoomInButton, new LinearLayout.LayoutParams(dp(109), dp(44)));
+        for (TextView t : new TextView[] { remoteButton, zoomOutButton, zoomInButton }) {
+            t.setTextSize(TypedValue.COMPLEX_UNIT_DIP, 13);
+            t.setSingleLine(true);
+            t.setEllipsize(android.text.TextUtils.TruncateAt.END);
+            t.setPadding(dp(8), 0, dp(8), 0);
+        }
+        LinearLayout.LayoutParams zklp = new LinearLayout.LayoutParams(-2, -2);
+        zklp.topMargin = dp(8);
+        settingsBox.addView(zoomKeyRow, zklp);
+        updateKeyButtons();
         LinearLayout settingsButtons = new LinearLayout(this);
         settingsButtons.setOrientation(LinearLayout.HORIZONTAL);
         settingsButtons.setGravity(Gravity.CENTER);
@@ -590,9 +613,9 @@ public class CustomCameraActivity extends AppCompatActivity {
 
     private void setSettingsMode(boolean on) {
         settingsMode = on;
-        if (!on && learningKey) {
-            learningKey = false;
-            remoteButton.setText(remoteKeyText());
+        if (!on && learnTarget != LEARN_NONE) {
+            learnTarget = LEARN_NONE;
+            updateKeyButtons();
         }
         settingsPanel.setVisibility(on ? View.VISIBLE : View.GONE);
         updatePortraitWarning();
@@ -775,10 +798,70 @@ public class CustomCameraActivity extends AppCompatActivity {
         return fastCapture ? ImageCapture.CAPTURE_MODE_MINIMIZE_LATENCY : ImageCapture.CAPTURE_MODE_MAXIMIZE_QUALITY;
     }
 
-    private String remoteKeyText() {
-        if (learningKey) return "리모컨 버튼을 누르세요…";
-        if (remoteKey == KeyEvent.KEYCODE_UNKNOWN) return "리모컨 버튼: 기본";
-        return "리모컨 버튼: " + KeyEvent.keyCodeToString(remoteKey).replace("KEYCODE_", "");
+    /** 칸을 누르면 버튼을 기다리고, 기다리는 중에 같은 칸을 다시 누르면 그 지정을 지운다. */
+    private void toggleLearn(int target) {
+        if (learnTarget == target) {
+            learnTarget = LEARN_NONE;
+            assignKey(target, KeyEvent.KEYCODE_UNKNOWN);
+        } else {
+            learnTarget = target;
+        }
+        updateKeyButtons();
+    }
+
+    private void assignKey(int target, int keyCode) {
+        // 한 키는 한 가지 일만: 다른 칸에 같은 키가 있으면 거기서는 뺀다
+        if (keyCode != KeyEvent.KEYCODE_UNKNOWN) {
+            if (remoteKey == keyCode) remoteKey = KeyEvent.KEYCODE_UNKNOWN;
+            if (zoomInKey == keyCode) zoomInKey = KeyEvent.KEYCODE_UNKNOWN;
+            if (zoomOutKey == keyCode) zoomOutKey = KeyEvent.KEYCODE_UNKNOWN;
+        }
+        if (target == LEARN_SHUTTER) remoteKey = keyCode;
+        else if (target == LEARN_ZOOM_IN) zoomInKey = keyCode;
+        else if (target == LEARN_ZOOM_OUT) zoomOutKey = keyCode;
+        prefs().edit().putInt(KEY_REMOTE, remoteKey).putInt(KEY_ZOOM_IN, zoomInKey).putInt(KEY_ZOOM_OUT, zoomOutKey).apply();
+    }
+
+    private String keyText(String label, int target, int keyCode, String none) {
+        if (learnTarget == target) return label + ": 버튼을 누르세요…";
+        if (keyCode == KeyEvent.KEYCODE_UNKNOWN) return label + ": " + none;
+        return label + ": " + KeyEvent.keyCodeToString(keyCode).replace("KEYCODE_", "");
+    }
+
+    private void updateKeyButtons() {
+        remoteButton.setText(keyText("촬영 버튼", LEARN_SHUTTER, remoteKey, "기본"));
+        zoomOutButton.setText(keyText("줌아웃", LEARN_ZOOM_OUT, zoomOutKey, "없음"));
+        zoomInButton.setText(keyText("줌인", LEARN_ZOOM_IN, zoomInKey, "없음"));
+    }
+
+    /** 버튼 한 번에 한 단계: 넓은 쪽 1.0 → 0.8 → 0.6 → 0.5, 망원 쪽 1.33배씩. */
+    private void stepZoom(boolean in) {
+        if (camera == null || settingsMode || reviewBar.getVisibility() == View.VISIBLE) return;
+        float next;
+        if (in) {
+            if (zoom < 0.999f) {
+                next = 1f;
+                for (float w : WIDE_STEPS) {
+                    if (w > zoom + 0.01f) { next = w; break; }
+                }
+            } else {
+                int n = (int) Math.floor(Math.log(zoom) / Math.log(ZOOM_STEP) + 0.02) + 1;
+                next = (float) Math.pow(ZOOM_STEP, n);
+            }
+        } else {
+            if (zoom > 1.001f) {
+                int n = (int) Math.ceil(Math.log(zoom) / Math.log(ZOOM_STEP) - 0.02) - 1;
+                next = (float) Math.pow(ZOOM_STEP, Math.max(0, n));
+            } else {
+                next = zoom;
+                for (int i = WIDE_STEPS.length - 1; i >= 0; i--) {
+                    if (WIDE_STEPS[i] < zoom - 0.01f) { next = WIDE_STEPS[i]; break; }
+                }
+            }
+        }
+        setZoom(next);
+        handler.removeCallbacks(switchLensTask); // 단계 줌은 기다리지 않고 바로 렌즈를 바꾼다
+        switchLensNow();
     }
 
     private String captureModeText() {
@@ -1593,12 +1676,16 @@ public class CustomCameraActivity extends AppCompatActivity {
 
     @Override
     public boolean onKeyDown(int keyCode, KeyEvent event) {
-        if (learningKey && keyCode != KeyEvent.KEYCODE_BACK) {
-            // 리모컨 버튼 지정: 지금 눌린 키를 촬영 키로 기억한다
-            learningKey = false;
-            remoteKey = keyCode;
-            prefs().edit().putInt(KEY_REMOTE, keyCode).apply();
-            remoteButton.setText(remoteKeyText());
+        if (learnTarget != LEARN_NONE && keyCode != KeyEvent.KEYCODE_BACK) {
+            // 버튼 지정: 지금 눌린 키를 기다리던 칸에 기억한다
+            int target = learnTarget;
+            learnTarget = LEARN_NONE;
+            assignKey(target, keyCode);
+            updateKeyButtons();
+            return true;
+        }
+        if (keyCode != KeyEvent.KEYCODE_UNKNOWN && (keyCode == zoomInKey || keyCode == zoomOutKey)) {
+            if (event.getRepeatCount() % 4 == 0) stepZoom(keyCode == zoomInKey); // 누르고 있으면 천천히 이어서
             return true;
         }
         if (isShutterKey(keyCode) || (remoteKey != KeyEvent.KEYCODE_UNKNOWN && keyCode == remoteKey)) {
@@ -1610,6 +1697,7 @@ public class CustomCameraActivity extends AppCompatActivity {
 
     @Override
     public boolean onKeyUp(int keyCode, KeyEvent event) {
+        if (keyCode != KeyEvent.KEYCODE_UNKNOWN && (keyCode == zoomInKey || keyCode == zoomOutKey)) return true;
         if (isShutterKey(keyCode) || (remoteKey != KeyEvent.KEYCODE_UNKNOWN && keyCode == remoteKey)) return true;
         return super.onKeyUp(keyCode, event);
     }
