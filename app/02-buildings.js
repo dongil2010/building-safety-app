@@ -219,6 +219,11 @@
                 window.BsaFinishMemberChooser.close('cancel');
                 return true;
             }
+            // 사진 크게 보기 창은 수정창 위에 뜬다 — 그것만 닫고 아래 수정창은 유지
+            if (window.BSA && window.BSA.photoZoomViewer && window.BSA.photoZoomViewer.isOpen()) {
+                window.BSA.photoZoomViewer.close();
+                return true;
+            }
             // 선택 목록 시트·숫자 키패드·변위 그래프도 수정창(비파괴 포함) 위에 뜬다 — 그것만 닫고 아래 창은 유지
             const selectSheetEl = document.getElementById('bsaSelectSheet');
             if (selectSheetEl && selectSheetEl.classList.contains('open') && typeof closeBsaSelectSheet === 'function') {

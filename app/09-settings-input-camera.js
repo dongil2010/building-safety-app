@@ -3960,6 +3960,8 @@
         if (target.closest('#bsaFinishMemberChooser') || target.closest('.bsa-finish-chooser-overlay')) return true;
         // 2026-10-19 접합부 부재(기둥·보…) 고르는 선택 목록 시트도 body에 붙는다 — 고를 때 수정창이 사라지던 문제
         if (target.closest('#bsaSelectSheet')) return true;
+        // 2026-11-10 사진 크게 보기 창도 body에 붙는다 — 사진을 끌거나 단추를 누를 때 수정창이 닫히지 않게
+        if (target.closest('#bsaPhotoViewer')) return true;
         if (target.closest('#defectMarkingMemberFloat')) return true;
         if (target.closest('#mobileMapDock')) return true;
         if (target.closest('.defect-list-item')) return true; // 목록에서 다른 결함 열기
@@ -4339,7 +4341,7 @@
 
         // 2026-10-15 중점관리 마킹은 전회차 사진도 직접 넣고 뺄 수 있다(그 밖에는 가져오기·차수 전환으로만)
         const prevEditable = isPrev && isPrevPhotoEditableNow();
-        const openFn = isPrev ? 'previewPrevRoundPhoto' : 'annotatePendingPhoto';
+        const openFn = isPrev ? 'previewPrevRoundPhoto' : 'viewPendingPhoto'; // 누르면 크게 보기(확대·축소) — 그리기는 보기 창의 「그리기」
         const removeFn = isPrev ? (prevEditable ? 'removePendingPrevPhoto' : null) : 'removePendingPhoto';
         const addKind = isPrev ? (prevEditable ? 'prev' : null) : 'curr';
         const label = isPrev ? '전차' : '현차';
@@ -4596,7 +4598,7 @@
         previewList.innerHTML = photos.map((src, idx) => `
             <div style="display:inline-block; position:relative; margin-right:12px; margin-top:8px; text-align:center;">
                 <div style="position:relative; display:inline-block;">
-                    <img src="${src}" style="width:75px; height:75px; object-fit:cover; border-radius:6px; border:1px solid #6b6b6b; cursor:pointer;" title="클릭시 사진 마킹 드로잉 모달 오픈" onclick="window.annotatePendingPhoto(${idx})">
+                    <img src="${src}" style="width:75px; height:75px; object-fit:cover; border-radius:6px; border:1px solid #6b6b6b; cursor:pointer;" title="탭하여 크게 보기(확대·축소)" onclick="window.viewPendingPhoto(${idx})">
                     <span style="position:absolute; top:-6px; right:-6px; background:#ef4444; color:#fff; border-radius:50%; width:20px; height:20px; text-align:center; font-size:13px; font-weight:bold; cursor:pointer; line-height:20px;" onclick="window.removePendingPhoto(${idx})">×</span>
                 </div>
                 <button type="button" class="btn btn-sm btn-outline" style="display:block; width:75px; margin-top:4px; font-size:0.7rem; padding:0.1rem 0.2rem; border-color:#f43f5e; color:#fb7185;" onclick="window.annotatePendingPhoto(${idx})">
@@ -4626,12 +4628,37 @@
         `).join('');
     }
 
+    // 2026-11-10 「찍은 사진 눌러보면 막 그리게 되어 있는데 그거 말고 확대 축소 해서 볼 수 있게」
+    // 사진을 누르면 크게 보기(js/shared/photo-zoom-viewer.js). 그리기(마킹)는 보기 창의 「그리기」 단추로.
+    function openPhotoZoomViewer(photos, idx, label, onDraw) {
+        const list = (photos || []).filter(Boolean);
+        if (!list.length) return false;
+        const api = window.BSA && window.BSA.photoZoomViewer;
+        if (!api || typeof api.open !== 'function') return false;
+        return api.open({ photos: list, index: idx, label, onDraw });
+    }
+    window.bsaOpenPhotoZoomViewer = openPhotoZoomViewer;
+
     window.previewPrevRoundPhoto = function(idx) {
         const src = window._pendingPrevRoundPhotos && window._pendingPrevRoundPhotos[idx];
         if (!src) return;
+        // 화면의 번호는 빈 칸을 뺀 목록 기준(renderDefectPhotoSlot) — 보기 창도 같은 목록으로
+        const list = (window._pendingPrevRoundPhotos || []).filter(Boolean);
+        if (openPhotoZoomViewer(list, Math.max(0, list.indexOf(src)), '전차', null)) return;
         if (typeof window.openPhotoAnnotationModal === 'function') {
             window.openPhotoAnnotationModal(src, null);
         }
+    };
+
+    window.viewPendingPhoto = function(idx) {
+        const src = window._pendingPhotos && window._pendingPhotos[idx];
+        if (!src) return;
+        const list = (window._pendingPhotos || []).filter(Boolean);
+        const opened = openPhotoZoomViewer(list, Math.max(0, list.indexOf(src)), '현차', (viewIdx) => {
+            const i = (window._pendingPhotos || []).indexOf(list[viewIdx]);
+            if (i >= 0) window.annotatePendingPhoto(i);
+        });
+        if (!opened) window.annotatePendingPhoto(idx); // 보기 창을 못 쓰면 예전처럼
     };
 
     window.annotatePendingPhoto = function(idx) {

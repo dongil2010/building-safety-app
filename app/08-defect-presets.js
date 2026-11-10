@@ -2419,6 +2419,8 @@
         const img = frame.querySelector('img');
         if (img) {
             img.addEventListener('click', () => {
+                // 2026-11-10 누르면 크게 보기(확대·축소) — 그리기 창 대신
+                if (typeof window.bsaOpenPhotoZoomViewer === 'function' && window.bsaOpenPhotoZoomViewer([src], 0, label, null)) return;
                 if (typeof window.openPhotoAnnotationModal === 'function') window.openPhotoAnnotationModal(src, null);
                 else window.open(src, '_blank');
             });
