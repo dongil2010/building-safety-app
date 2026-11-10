@@ -92,7 +92,7 @@ import java.util.concurrent.Executors;
  *   배율 버튼은 반투명 캡슐 안의 작은 원(지금 구간만 노란 글자로 실제 배율 표시), 줌 막대는 눈금자 + 노란 바늘,
  *   촬영 버튼은 흰 고리 + 흰 원, 찍은 뒤에는 흰 원의 체크(확인) · 테두리 원의 되돌리기(다시 찍기).
  * - 렌즈를 바꿔 거는 동안(수백 ms)은 직전 화면을 붙잡아 보여 주다가 새 화면이 나오면 겹쳐 넘긴다. 줌을 끄는 중에는
- *   지금 렌즈로 계속 확대하고 손이 멈춘 뒤에 바꾼다(넓은 쪽으로 갈 때와 배율 버튼은 바로). 뒤쪽 렌즈 여러 개를 동시에
+ *   기다리지 않고 그 배율의 렌즈로 바로 바꾼다(2026-11-10: 손이 멈춘 뒤 바꾸던 것은 굼떠서 뺌). 뒤쪽 렌즈 여러 개를 동시에
  *   켜 두는 것은 일반 앱에 허용되지 않아 이렇게 가린다.
  * - 촬영 버튼을 누른 채 버튼 밖으로 끌고 떼면 찍지 않는다(취소). 음량 버튼과 블루투스 리모컨(셔터 버튼)으로도 찍는다.
  * - 버튼 지정(설정 창, 기기에 기억): 촬영 · 줌아웃 · 줌인 칸을 누른 뒤 리모컨(또는 음량) 버튼을 누르면 그 키가 등록된다.
@@ -132,8 +132,8 @@ public class CustomCameraActivity extends AppCompatActivity {
     private static final float MAX_ZOOM = 15f;
     private static final float[] ZOOM_STEPS = { 1f, 2f, 5f, 10f, 15f };
     private static final int MAX_CHIPS = 7;
-    private static final int LENS_SWITCH_DELAY_MS = 320;
-    private static final int LENS_SWITCH_WIDER_MS = 60;
+    private static final int LENS_SWITCH_DELAY_MS = 40; // 2026-11-10 끄는 중에도 바로 바꾼다(기다리면 굼떠 보임)
+    private static final int LENS_SWITCH_WIDER_MS = 40;
     private static final int LENS_WATCHDOG_MS = 3000;
     private static final Object WATCHDOG = new Object();
 
@@ -197,6 +197,7 @@ public class CustomCameraActivity extends AppCompatActivity {
     private float camMax = 1f;
     private float mainMin = 1f;       // 기본 렌즈의 최소 줌(1 미만이면 초광각까지 한 렌즈로 됨)
     private boolean mainRangeKnown;
+    private boolean switchPending;
 
     private int landRotation = Surface.ROTATION_90; // 왼쪽으로 눕힘(오른손으로 듦)이 기본
     private boolean busy;
@@ -746,6 +747,7 @@ public class CustomCameraActivity extends AppCompatActivity {
     /** 지금 고른 렌즈(lens)를 건다. 안 걸리면 그 렌즈를 빼고 기본 렌즈로. */
     private void bind() {
         handler.removeCallbacks(switchLensTask);
+        switchPending = false;
         handler.removeCallbacksAndMessages(WATCHDOG);
         try {
             provider.unbindAll();
@@ -1013,6 +1015,7 @@ public class CustomCameraActivity extends AppCompatActivity {
     }
 
     private void switchLensNow() {
+        switchPending = false;
         if (provider == null || isFinishing()) return;
         Lens t = targetLens();
         if (t == lens) return;
@@ -1032,10 +1035,14 @@ public class CustomCameraActivity extends AppCompatActivity {
         if (camera == null) return;
         zoom = Math.max(minZoom(), Math.min(MAX_ZOOM, zoom));
         // 렌즈 바꾸기는 잠깐 미뤄서, 줌 막대를 끄는 동안 경계를 지날 때마다 멈칫하지 않게 한다
-        handler.removeCallbacks(switchLensTask);
         Lens target = targetLens();
-        if (target != lens) {
-            // 넓은 쪽은 지금 렌즈로 못 보여 주니 바로, 망원 쪽은 지금 렌즈로 확대해 두고 손이 멈춘 뒤에 바꾼다
+        if (target == lens) {
+            handler.removeCallbacks(switchLensTask);
+            switchPending = false;
+        } else if (!switchPending) {
+            // 줌 막대를 쥐고 있는 중에도 그 배율의 렌즈로 바로 바꾼다. 이미 예약돼 있으면 미루지 않는다
+            // (끄는 동안 계속 들어오는 줌 변경이 예약을 뒤로 밀면 손을 뗄 때까지 안 바뀐다).
+            switchPending = true;
             handler.postDelayed(switchLensTask, target.ratio < lens.ratio ? LENS_SWITCH_WIDER_MS : LENS_SWITCH_DELAY_MS);
         }
         float want = zoom / lens.ratio;
