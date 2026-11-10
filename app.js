@@ -23365,7 +23365,7 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
         return bestKey;
     }
 
-// @@app-part 06-defect-edit.js sha=d4b0b4f018e2 — 원본은 app/06-defect-edit.js (여기 말고 거기서 고칠 것)
+// @@app-part 06-defect-edit.js sha=87db8a26d477 — 원본은 app/06-defect-edit.js (여기 말고 거기서 고칠 것)
     // --- 결함 회차 일괄 재지정 모달 ---
     // 건물 전체(또는 현재 층)가 잘못된 회차로 통째로 등록됐을 때, 결함들의 surveyRound를
     // 한번에 올바른 값으로 옮기는 관리자용 복구 기능. 결함 내용은 건드리지 않고 회차 값만 바꾼다.
@@ -27852,6 +27852,59 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
         ctx.restore();
     }
 
+    // 화면 전용 사진 표시 (2026-11-10 「마킹에 사진을 찍어 놨으면 네모마킹에도 보이게, 한글 출력에는 안 보이게」).
+    // 번호칸 오른쪽 아래 모서리에 작은 카메라. 현차 사진만 본다(전차 사진 제외). 묶음은 구성원 중 하나라도 있으면.
+    // 본 화면 도면 캔버스(state.ctx)에만 그린다 — drawPin을 쓰는 비파괴 위치도 출력·drawPinSafe(PDF/한글)에는 안 나온다.
+    function defectHasCurrentPhoto(d) {
+        if (!d) return false;
+        return (Array.isArray(d.photos) && d.photos.some(Boolean))
+            || (Array.isArray(d.photoIds) && d.photoIds.some(Boolean));
+    }
+    function defectHasPhotoMark(defect) {
+        if (!defect) return false;
+        if (defectHasCurrentPhoto(defect)) return true;
+        if (!defect.groupId || typeof getDefectMarkingGroupMembers !== 'function') return false;
+        return getDefectMarkingGroupMembers(defect.groupId).some(defectHasCurrentPhoto);
+    }
+    function drawPhotoChrome(ctx, w, h, scale) {
+        const gh = getBookmarkChromeGlyphHeight(scale);
+        const bw = gh * 1.35; // 카메라 몸통
+        const bh = gh * 0.92;
+        const r = gh * 0.18;
+        const x = w / 2 - bw / 2; // 몸통 가운데 = 박스 오른쪽 아래 모서리
+        const y = h / 2 - bh / 2;
+        ctx.save();
+        ctx.setLineDash([]);
+        ctx.lineJoin = 'round';
+        ctx.beginPath();
+        // 위 돌기(뷰파인더)
+        ctx.moveTo(x + bw * 0.30, y);
+        ctx.lineTo(x + bw * 0.38, y - gh * 0.2);
+        ctx.lineTo(x + bw * 0.62, y - gh * 0.2);
+        ctx.lineTo(x + bw * 0.70, y);
+        // 몸통(둥근 네모)
+        ctx.lineTo(x + bw - r, y);
+        ctx.quadraticCurveTo(x + bw, y, x + bw, y + r);
+        ctx.lineTo(x + bw, y + bh - r);
+        ctx.quadraticCurveTo(x + bw, y + bh, x + bw - r, y + bh);
+        ctx.lineTo(x + r, y + bh);
+        ctx.quadraticCurveTo(x, y + bh, x, y + bh - r);
+        ctx.lineTo(x, y + r);
+        ctx.quadraticCurveTo(x, y, x + r, y);
+        ctx.closePath();
+        ctx.lineWidth = Math.max(0.6, gh * 0.16);
+        ctx.strokeStyle = '#ffffff';
+        ctx.stroke();
+        ctx.fillStyle = '#7c3aed';
+        ctx.fill();
+        // 렌즈
+        ctx.beginPath();
+        ctx.arc(x + bw / 2, y + bh / 2, bh * 0.27, 0, Math.PI * 2);
+        ctx.fillStyle = '#ffffff';
+        ctx.fill();
+        ctx.restore();
+    }
+
     function drawPin(ctx, defect, arrows) {
         drawPinBody(ctx, defect, arrows);
     }
@@ -28037,6 +28090,7 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
         if (defectHasCornerMark(defect)) drawBookmarkChrome(ctx, w, h, scale);
         const cwText = crackWidthBadgeTextFor(defect);
         if (cwText) drawCrackWidthChrome(ctx, w, h, scale, cwText, defectHasCornerMark(defect));
+        if (ctx === state.ctx && defectHasPhotoMark(defect)) drawPhotoChrome(ctx, w, h, scale);
 
         ctx.restore();
     }
