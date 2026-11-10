@@ -49,6 +49,7 @@ import androidx.camera.camera2.interop.ExperimentalCamera2Interop;
 import androidx.camera.core.Camera;
 import androidx.camera.core.CameraInfo;
 import androidx.camera.core.CameraSelector;
+import androidx.camera.core.ExperimentalZeroShutterLag;
 import androidx.camera.core.FocusMeteringAction;
 import androidx.camera.core.ImageCapture;
 import androidx.camera.core.ImageCaptureException;
@@ -122,6 +123,7 @@ public class CustomCameraActivity extends AppCompatActivity {
 
     private FrameLayout rootView;
     private PreviewView previewView;
+    private FrameLayout previewBox;
     private ImageView reviewImage;
     private View focusRing;
     private GradientDrawable focusRingBg;
@@ -258,7 +260,13 @@ public class CustomCameraActivity extends AppCompatActivity {
         previewView = new PreviewView(this);
         // 찍히는 범위와 보이는 범위를 같게(잘라서 채우지 않음)
         previewView.setScaleType(PreviewView.ScaleType.FIT_CENTER);
-        root.addView(previewView, new FrameLayout.LayoutParams(-1, -1));
+        // 미리보기는 사진 비율(4:3) 상자 안에만 그린다. 고배율에서 미리보기를 키워도(extraCrop) 상자 밖으로
+        // 번지지 않게 상자 테두리에서 자른다 — 자르기가 먹도록 TextureView 방식으로 띄운다.
+        previewView.setImplementationMode(PreviewView.ImplementationMode.COMPATIBLE);
+        previewBox = new FrameLayout(this);
+        previewBox.addView(previewView, new FrameLayout.LayoutParams(-1, -1));
+        previewBox.addOnLayoutChangeListener((v, l, t, r, b, ol, ot, or, ob) -> v.setClipBounds(new Rect(0, 0, r - l, b - t)));
+        root.addView(previewBox, new FrameLayout.LayoutParams(-1, -1, Gravity.CENTER));
 
         // 초점 자리 표시: 기본은 정중앙(흰색), 눌러서 잡으면 그 자리(노란색)
         focusRing = new View(this);
@@ -388,6 +396,7 @@ public class CustomCameraActivity extends AppCompatActivity {
         root.addView(shutter, new FrameLayout.LayoutParams(dp(84), dp(84)));
         root.addOnLayoutChangeListener((v, l, t, r, b, ol, ot, or, ob) -> {
             placeShutter();
+            fitPreviewBox();
             if (!focusTapped) centerFocusRing();
         });
 
@@ -449,6 +458,23 @@ public class CustomCameraActivity extends AppCompatActivity {
         retakeButton.setRotation(a);
         settingsBox.setRotation(a);
         zoomSlider.invalidate();
+    }
+
+    /** 미리보기 상자를 화면 안에 들어가는 가장 큰 3:4(세로 기준) 크기로 맞춘다. */
+    private void fitPreviewBox() {
+        int w = rootView.getWidth() - rootView.getPaddingLeft() - rootView.getPaddingRight();
+        int h = rootView.getHeight() - rootView.getPaddingTop() - rootView.getPaddingBottom();
+        if (w <= 0 || h <= 0) return;
+        int bw = Math.min(w, Math.round(h * 3f / 4f));
+        int bh = Math.min(h, Math.round(bw * 4f / 3f));
+        FrameLayout.LayoutParams lp = (FrameLayout.LayoutParams) previewBox.getLayoutParams();
+        if (lp.width == bw && lp.height == bh) return;
+        rootView.post(() -> {
+            FrameLayout.LayoutParams p2 = (FrameLayout.LayoutParams) previewBox.getLayoutParams();
+            p2.width = bw;
+            p2.height = bh;
+            previewBox.setLayoutParams(p2);
+        });
     }
 
     private void updatePortraitWarning() {
@@ -582,7 +608,7 @@ public class CustomCameraActivity extends AppCompatActivity {
             provider.unbindAll();
             Preview.Builder pb = new Preview.Builder();
             ImageCapture.Builder ib = new ImageCapture.Builder()
-                .setCaptureMode(ImageCapture.CAPTURE_MODE_MINIMIZE_LATENCY)
+                .setCaptureMode(captureMode())
                 .setFlashMode(captureFlashMode());
             if (lens.physicalId != null && Build.VERSION.SDK_INT >= 28) usePhysicalLens(pb, ib, lens.physicalId);
             preview = pb.build();
@@ -620,6 +646,15 @@ public class CustomCameraActivity extends AppCompatActivity {
         }
         resetFocusToCenter();
         applyZoom();
+    }
+
+    /**
+     * 누르는 순간의 화면을 그대로 쓰는 촬영(셔터 지연 없음). 못 쓰는 기기와 플래시 켬·자동일 때는
+     * CameraX 가 알아서 빠른 촬영으로 바꾼다. 물리 렌즈를 직접 걸었을 때는 안전하게 빠른 촬영만 쓴다.
+     */
+    @OptIn(markerClass = ExperimentalZeroShutterLag.class)
+    private int captureMode() {
+        return lens.physicalId != null ? ImageCapture.CAPTURE_MODE_MINIMIZE_LATENCY : ImageCapture.CAPTURE_MODE_ZERO_SHUTTER_LAG;
     }
 
     private void dropLens(Lens l) {
@@ -897,8 +932,8 @@ public class CustomCameraActivity extends AppCompatActivity {
             // 미리보기는 가운데를 기준으로 extraCrop 만큼 커져 있다
             float w = previewView.getWidth();
             float h = previewView.getHeight();
-            float px = previewView.getLeft() + w / 2f + (x - w / 2f) * extraCrop;
-            float py = previewView.getTop() + h / 2f + (y - h / 2f) * extraCrop;
+            float px = previewBox.getLeft() + w / 2f + (x - w / 2f) * extraCrop;
+            float py = previewBox.getTop() + h / 2f + (y - h / 2f) * extraCrop;
             focusRingBg.setStroke(dp(2), Color.rgb(250, 204, 21));
             focusRing.setX(px - focusRing.getWidth() / 2f);
             focusRing.setY(py - focusRing.getHeight() / 2f);
@@ -917,8 +952,8 @@ public class CustomCameraActivity extends AppCompatActivity {
 
     private void centerFocusRing() {
         if (previewView.getWidth() <= 0) return;
-        focusRing.setX(previewView.getLeft() + previewView.getWidth() / 2f - dp(36));
-        focusRing.setY(previewView.getTop() + previewView.getHeight() / 2f - dp(36));
+        focusRing.setX(previewBox.getLeft() + previewView.getWidth() / 2f - dp(36));
+        focusRing.setY(previewBox.getTop() + previewView.getHeight() / 2f - dp(36));
     }
 
     /** 계속 맞추는 초점이 볼 영역을 센서 정중앙(가로·세로 1/5)으로 건다 / 푼다. */
