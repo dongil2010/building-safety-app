@@ -9,7 +9,9 @@ import android.graphics.Canvas;
 import android.graphics.Color;
 import android.graphics.Matrix;
 import android.graphics.Paint;
+import android.graphics.Path;
 import android.graphics.Rect;
+import android.graphics.RectF;
 import android.graphics.Typeface;
 import android.graphics.drawable.GradientDrawable;
 import android.hardware.camera2.CameraCharacteristics;
@@ -25,6 +27,7 @@ import android.util.SizeF;
 import android.util.TypedValue;
 import android.view.GestureDetector;
 import android.view.Gravity;
+import android.view.HapticFeedbackConstants;
 import android.view.KeyEvent;
 import android.view.MotionEvent;
 import android.view.OrientationEventListener;
@@ -86,7 +89,9 @@ import java.util.concurrent.Executors;
  *   방향을 알 수 없으므로 오른손으로 든 방향(왼쪽으로 눕힘)으로 저장한다.
  * - 플래시(아이콘, 누를 때마다 바뀜): 끔(번개에 빗금) → 켬(번개) → 자동(번개 A) → 손전등(계속 켜 둠).
  *   끔·켬·자동은 기기에 기억하고 손전등은 다음에 열면 끔으로 돌아온다. 불이 없는 렌즈에서는 버튼을 숨긴다.
- * - 위쪽 버튼은 글자 대신 아이콘: 닫기(X) · 플래시 · 설정(톱니바퀴).
+ * - 모양: 검정 바탕 + 흰 선 아이콘 + 노란 포인트(ACCENT) 하나. 위쪽은 닫기(X) · 플래시 · 설정(톱니바퀴) 선 아이콘,
+ *   배율 버튼은 반투명 캡슐 안의 작은 원(지금 구간만 노란 글자로 실제 배율 표시), 줌 막대는 눈금자 + 노란 바늘,
+ *   촬영 버튼은 흰 고리 + 흰 원, 찍은 뒤에는 흰 원의 체크(확인) · 테두리 원의 되돌리기(다시 찍기).
  * - 초점: 기본은 화면 정중앙(계속 맞춤). 화면을 누르면 그 자리에 고정되고, 다시 찍기·렌즈 바꿈·새로 열 때 중앙으로 돌아온다.
  * - 촬영 버튼 자리는 위 「설정」 창에서 끌어 옮긴다(기기에 기억). 평소에는 안 움직인다.
  * - 찍은 뒤 「확인」은 촬영 버튼이 있는 쪽에 크게, 「다시 찍기」는 반대쪽. 음량 버튼으로도 찍는다.
@@ -103,7 +108,10 @@ public class CustomCameraActivity extends AppCompatActivity {
     private static final String KEY_SHUTTER_Y = "shutterFy2";
     private static final String KEY_FLASH = "flashState";
     private static final int FLASH_OFF = 0, FLASH_ON = 1, FLASH_AUTO = 2, FLASH_TORCH = 3;
-    private static final int ICON_CLOSE = 0, ICON_GEAR = 1, ICON_BOLT = 2, ICON_BOLT_SLASH = 3, ICON_BOLT_A = 4, ICON_TORCH = 5;
+    private static final int ICON_CLOSE = 0, ICON_GEAR = 1, ICON_BOLT = 2, ICON_BOLT_SLASH = 3, ICON_BOLT_A = 4, ICON_TORCH = 5,
+        ICON_CHECK = 6, ICON_RETRY = 7;
+    private static final int STYLE_PLAIN = 0, STYLE_GHOST = 1, STYLE_SOLID = 2; // 바탕 없음 / 반투명 원 / 흰 원
+    private static final int ACCENT = 0xFFFFD60A;
     private static final float DEF_FX = 0.5f;
     private static final float DEF_FY = 0.74f;
     private static final float MAX_ZOOM = 15f;
@@ -131,16 +139,16 @@ public class CustomCameraActivity extends AppCompatActivity {
     private LinearLayout topBar;
     private LinearLayout zoomArea;
     private LinearLayout zoomRow;
-    private TextView zoomLabel;
     private ZoomSlider zoomSlider;
     private IconView closeButton;
     private IconView settingsButton;
     private IconView torchButton;
     private FrameLayout reviewBar;
-    private View shutter;
-    private GradientDrawable shutterRing;
-    private TextView confirmButton;
-    private TextView retakeButton;
+    private ShutterView shutter;
+    private View shotBlink;
+    private int activeChip = -2;
+    private IconView confirmButton;
+    private IconView retakeButton;
     private FrameLayout settingsPanel;
     private LinearLayout settingsBox;
     private TextView settingsText;
@@ -265,6 +273,11 @@ public class CustomCameraActivity extends AppCompatActivity {
         previewView.setImplementationMode(PreviewView.ImplementationMode.COMPATIBLE);
         previewBox = new FrameLayout(this);
         previewBox.addView(previewView, new FrameLayout.LayoutParams(-1, -1));
+        // 찍는 순간 잠깐 어두워지는 깜빡임
+        shotBlink = new View(this);
+        shotBlink.setBackgroundColor(Color.BLACK);
+        shotBlink.setAlpha(0f);
+        previewBox.addView(shotBlink, new FrameLayout.LayoutParams(-1, -1));
         previewBox.addOnLayoutChangeListener((v, l, t, r, b, ol, ot, or, ob) -> v.setClipBounds(new Rect(0, 0, r - l, b - t)));
         root.addView(previewBox, new FrameLayout.LayoutParams(-1, -1, Gravity.CENTER));
 
@@ -273,7 +286,7 @@ public class CustomCameraActivity extends AppCompatActivity {
         focusRingBg = new GradientDrawable();
         focusRingBg.setShape(GradientDrawable.OVAL);
         focusRingBg.setColor(Color.TRANSPARENT);
-        focusRingBg.setStroke(dp(2), Color.argb(170, 255, 255, 255));
+        focusRingBg.setStroke(Math.max(2, dp(1)), Color.argb(170, 255, 255, 255));
         focusRing.setBackground(focusRingBg);
         root.addView(focusRing, new FrameLayout.LayoutParams(dp(72), dp(72)));
 
@@ -287,28 +300,39 @@ public class CustomCameraActivity extends AppCompatActivity {
         topBar = new LinearLayout(this);
         topBar.setOrientation(LinearLayout.HORIZONTAL);
         topBar.setGravity(Gravity.CENTER_VERTICAL);
-        topBar.setPadding(dp(10), dp(8), dp(10), dp(8));
+        topBar.setPadding(dp(8), dp(6), dp(8), dp(20));
+        topBar.setBackground(new GradientDrawable(GradientDrawable.Orientation.TOP_BOTTOM, new int[] { 0x99000000, 0x00000000 }));
         topBar.setClipChildren(false);
         topBar.setClipToPadding(false);
-        closeButton = new IconView(ICON_CLOSE, "닫기");
+        closeButton = new IconView(ICON_CLOSE, "닫기", STYLE_PLAIN);
         closeButton.setOnClickListener(v -> cancel());
         topBar.addView(closeButton, new LinearLayout.LayoutParams(dp(48), dp(48)));
         topBar.addView(new View(this), new LinearLayout.LayoutParams(0, 1, 1f));
-        torchButton = new IconView(ICON_BOLT_SLASH, "플래시");
+        torchButton = new IconView(ICON_BOLT_SLASH, "플래시", STYLE_PLAIN);
         torchButton.setVisibility(View.GONE);
         torchButton.setOnClickListener(v -> cycleFlash());
         LinearLayout.LayoutParams tlp = new LinearLayout.LayoutParams(dp(48), dp(48));
-        tlp.rightMargin = dp(12);
+        tlp.rightMargin = dp(4);
         topBar.addView(torchButton, tlp);
-        settingsButton = new IconView(ICON_GEAR, "설정");
+        settingsButton = new IconView(ICON_GEAR, "설정", STYLE_PLAIN);
         settingsButton.setOnClickListener(v -> setSettingsMode(true));
         topBar.addView(settingsButton, new LinearLayout.LayoutParams(dp(48), dp(48)));
         root.addView(topBar, new FrameLayout.LayoutParams(-1, -2, Gravity.TOP));
 
         // 세로로 세웠을 때 경고(글자는 세로 기준으로 바로 보임). 누르는 것은 막지 않는다.
-        portraitWarning = bigButton("폰을 가로로 돌려서 찍으세요", Color.argb(235, 220, 38, 38), 18);
+        portraitWarning = new TextView(this);
+        portraitWarning.setText("가로로 돌려서 찍어 주세요");
+        portraitWarning.setTextColor(Color.WHITE);
+        portraitWarning.setTypeface(Typeface.DEFAULT_BOLD);
+        portraitWarning.setTextSize(TypedValue.COMPLEX_UNIT_DIP, 15);
+        portraitWarning.setGravity(Gravity.CENTER);
+        GradientDrawable warnBg = new GradientDrawable();
+        warnBg.setCornerRadius(dp(26));
+        warnBg.setColor(Color.argb(228, 28, 28, 30));
+        warnBg.setStroke(Math.max(2, dp(1)), ACCENT);
+        portraitWarning.setBackground(warnBg);
         portraitWarning.setVisibility(View.GONE);
-        root.addView(portraitWarning, new FrameLayout.LayoutParams(dp(300), dp(76), Gravity.CENTER));
+        root.addView(portraitWarning, new FrameLayout.LayoutParams(dp(250), dp(52), Gravity.CENTER));
 
         // 맨 아래(화면 1/5 안): 배율 글자 · 배율 버튼 · 그 아래 줌 막대
         zoomArea = new LinearLayout(this);
@@ -316,21 +340,23 @@ public class CustomCameraActivity extends AppCompatActivity {
         zoomArea.setGravity(Gravity.CENTER_HORIZONTAL);
         zoomArea.setClipChildren(false);
         zoomArea.setClipToPadding(false);
+        zoomArea.setPadding(0, dp(16), 0, dp(4));
+        zoomArea.setBackground(new GradientDrawable(GradientDrawable.Orientation.BOTTOM_TOP, new int[] { 0xB0000000, 0x00000000 }));
 
-        zoomLabel = new TextView(this);
-        zoomLabel.setTextColor(Color.rgb(250, 204, 21));
-        zoomLabel.setTypeface(Typeface.DEFAULT_BOLD);
-        zoomLabel.setTextSize(TypedValue.COMPLEX_UNIT_DIP, 14);
-        zoomLabel.setGravity(Gravity.CENTER);
-        zoomLabel.setShadowLayer(4f, 0f, 0f, Color.BLACK);
-        zoomArea.addView(zoomLabel, new LinearLayout.LayoutParams(dp(60), dp(44))); // 돌려도 들어가는 칸
-
+        // 배율 버튼: 반투명 캡슐 안의 작은 원들
         zoomRow = new LinearLayout(this);
         zoomRow.setOrientation(LinearLayout.HORIZONTAL);
         zoomRow.setGravity(Gravity.CENTER);
-        zoomRow.setPadding(0, dp(2), 0, dp(2));
+        zoomRow.setPadding(dp(4), dp(4), dp(4), dp(4));
         zoomRow.setClipChildren(false);
-        zoomArea.addView(zoomRow, new LinearLayout.LayoutParams(-1, -2));
+        zoomRow.setClipToPadding(false);
+        GradientDrawable capsule = new GradientDrawable();
+        capsule.setCornerRadius(dp(26));
+        capsule.setColor(Color.argb(96, 0, 0, 0));
+        zoomRow.setBackground(capsule);
+        LinearLayout.LayoutParams zlp = new LinearLayout.LayoutParams(-2, -2);
+        zlp.bottomMargin = dp(6);
+        zoomArea.addView(zoomRow, zlp);
 
         zoomSlider = new ZoomSlider();
         // 줌 막대 폭은 화면의 3/5(가운데) — 엄지가 닿는 범위 안에서 끝까지 끌 수 있게
@@ -339,7 +365,7 @@ public class CustomCameraActivity extends AppCompatActivity {
         sliderRow.setWeightSum(5f);
         sliderRow.setClipChildren(false);
         sliderRow.addView(new View(this), new LinearLayout.LayoutParams(0, 1, 1f));
-        sliderRow.addView(zoomSlider, new LinearLayout.LayoutParams(0, dp(64), 3f));
+        sliderRow.addView(zoomSlider, new LinearLayout.LayoutParams(0, dp(60), 3f));
         sliderRow.addView(new View(this), new LinearLayout.LayoutParams(0, 1, 1f));
         zoomArea.addView(sliderRow, new LinearLayout.LayoutParams(-1, -2));
         root.addView(zoomArea, new FrameLayout.LayoutParams(-1, -2, Gravity.BOTTOM));
@@ -348,44 +374,65 @@ public class CustomCameraActivity extends AppCompatActivity {
         reviewBar = new FrameLayout(this);
         reviewBar.setVisibility(View.GONE);
         reviewBar.setClipChildren(false);
-        confirmButton = bigButton("확인", Color.rgb(22, 163, 74), 22);
+        confirmButton = new IconView(ICON_CHECK, "확인", STYLE_SOLID);
         confirmButton.setOnClickListener(v -> confirm());
-        reviewBar.addView(confirmButton, new FrameLayout.LayoutParams(dp(150), dp(76)));
-        retakeButton = bigButton("다시 찍기", Color.argb(200, 60, 60, 60), 17);
+        reviewBar.addView(confirmButton, new FrameLayout.LayoutParams(dp(76), dp(76)));
+        retakeButton = new IconView(ICON_RETRY, "다시 찍기", STYLE_GHOST);
         retakeButton.setOnClickListener(v -> retake());
-        reviewBar.addView(retakeButton, new FrameLayout.LayoutParams(dp(130), dp(64)));
-        root.addView(reviewBar, new FrameLayout.LayoutParams(-1, dp(180), Gravity.BOTTOM));
+        reviewBar.addView(retakeButton, new FrameLayout.LayoutParams(dp(56), dp(56)));
+        reviewBar.setBackground(new GradientDrawable(GradientDrawable.Orientation.BOTTOM_TOP, new int[] { 0xB0000000, 0x00000000 }));
+        root.addView(reviewBar, new FrameLayout.LayoutParams(-1, dp(140), Gravity.BOTTOM));
 
         // 설정 창: 촬영 버튼 자리 옮기기(촬영 버튼보다 아래에 깔린다)
         settingsPanel = new FrameLayout(this);
-        settingsPanel.setBackgroundColor(Color.argb(150, 0, 0, 0));
+        settingsPanel.setBackgroundColor(Color.argb(120, 0, 0, 0));
         settingsPanel.setClickable(true);
         settingsPanel.setClipChildren(false);
         settingsPanel.setVisibility(View.GONE);
         settingsBox = new LinearLayout(this);
         settingsBox.setOrientation(LinearLayout.VERTICAL);
         settingsBox.setGravity(Gravity.CENTER_HORIZONTAL);
+        settingsBox.setPadding(dp(22), dp(20), dp(22), dp(18));
+        GradientDrawable sheet = new GradientDrawable();
+        sheet.setCornerRadius(dp(22));
+        sheet.setColor(Color.argb(244, 28, 28, 30));
+        settingsBox.setBackground(sheet);
+        TextView settingsTitle = new TextView(this);
+        settingsTitle.setText("촬영 버튼 자리");
+        settingsTitle.setTextColor(Color.WHITE);
+        settingsTitle.setTypeface(Typeface.DEFAULT_BOLD);
+        settingsTitle.setTextSize(TypedValue.COMPLEX_UNIT_DIP, 17);
+        settingsBox.addView(settingsTitle, new LinearLayout.LayoutParams(-2, -2));
+        TextView settingsHint = new TextView(this);
+        settingsHint.setText("노란 촬영 버튼을 끌어서 옮기세요");
+        settingsHint.setTextColor(Color.argb(205, 235, 235, 245));
+        settingsHint.setTextSize(TypedValue.COMPLEX_UNIT_DIP, 13);
+        LinearLayout.LayoutParams hlp = new LinearLayout.LayoutParams(-2, -2);
+        hlp.topMargin = dp(6);
+        settingsBox.addView(settingsHint, hlp);
         settingsText = new TextView(this);
-        settingsText.setTextColor(Color.WHITE);
-        settingsText.setTextSize(TypedValue.COMPLEX_UNIT_DIP, 16);
+        settingsText.setTextColor(Color.argb(150, 235, 235, 245));
+        settingsText.setTextSize(TypedValue.COMPLEX_UNIT_DIP, 12);
         settingsText.setGravity(Gravity.CENTER);
-        settingsBox.addView(settingsText, new LinearLayout.LayoutParams(dp(280), -2));
+        LinearLayout.LayoutParams ilp = new LinearLayout.LayoutParams(dp(236), -2);
+        ilp.topMargin = dp(10);
+        settingsBox.addView(settingsText, ilp);
         LinearLayout settingsButtons = new LinearLayout(this);
         settingsButtons.setOrientation(LinearLayout.HORIZONTAL);
         settingsButtons.setGravity(Gravity.CENTER);
-        TextView resetButton = bigButton("기본 자리", Color.argb(220, 70, 70, 70), 16);
+        TextView resetButton = pillButton("기본 자리", 0xFF3A3A3C, Color.WHITE);
         resetButton.setOnClickListener(v -> {
             shutterFx = DEF_FX;
             shutterFy = DEF_FY;
             saveShutterPos();
             placeShutter();
         });
-        LinearLayout.LayoutParams rlp = new LinearLayout.LayoutParams(dp(120), dp(56));
-        rlp.rightMargin = dp(12);
+        LinearLayout.LayoutParams rlp = new LinearLayout.LayoutParams(dp(108), dp(44));
+        rlp.rightMargin = dp(10);
         settingsButtons.addView(resetButton, rlp);
-        TextView doneButton = bigButton("완료", Color.rgb(22, 163, 74), 18);
+        TextView doneButton = pillButton("완료", ACCENT, 0xFF111111);
         doneButton.setOnClickListener(v -> setSettingsMode(false));
-        settingsButtons.addView(doneButton, new LinearLayout.LayoutParams(dp(120), dp(56)));
+        settingsButtons.addView(doneButton, new LinearLayout.LayoutParams(dp(108), dp(44)));
         LinearLayout.LayoutParams blp = new LinearLayout.LayoutParams(-2, -2);
         blp.topMargin = dp(18);
         settingsBox.addView(settingsButtons, blp);
@@ -393,12 +440,7 @@ public class CustomCameraActivity extends AppCompatActivity {
         root.addView(settingsPanel, new FrameLayout.LayoutParams(-1, -1));
 
         // 촬영 버튼(자리는 설정 창에서만 옮긴다)
-        shutter = new View(this);
-        shutterRing = new GradientDrawable();
-        shutterRing.setShape(GradientDrawable.OVAL);
-        shutterRing.setColor(Color.WHITE);
-        shutterRing.setStroke(dp(5), Color.argb(170, 0, 0, 0));
-        shutter.setBackground(shutterRing);
+        shutter = new ShutterView();
         shutter.setContentDescription("촬영");
         shutter.setOnTouchListener(this::onShutterTouch);
         root.addView(shutter, new FrameLayout.LayoutParams(dp(84), dp(84)));
@@ -440,16 +482,16 @@ public class CustomCameraActivity extends AppCompatActivity {
         setContentView(root);
     }
 
-    private TextView bigButton(String text, int color, int sp) {
+    private TextView pillButton(String text, int bgColor, int textColor) {
         TextView t = new TextView(this);
         t.setText(text);
-        t.setTextColor(Color.WHITE);
+        t.setTextColor(textColor);
         t.setTypeface(Typeface.DEFAULT_BOLD);
-        t.setTextSize(TypedValue.COMPLEX_UNIT_DIP, sp);
+        t.setTextSize(TypedValue.COMPLEX_UNIT_DIP, 15);
         t.setGravity(Gravity.CENTER);
         GradientDrawable bg = new GradientDrawable();
-        bg.setCornerRadius(dp(18));
-        bg.setColor(color);
+        bg.setCornerRadius(dp(22));
+        bg.setColor(bgColor);
         t.setBackground(bg);
         return t;
     }
@@ -460,7 +502,6 @@ public class CustomCameraActivity extends AppCompatActivity {
         closeButton.setRotation(a);
         torchButton.setRotation(a);
         settingsButton.setRotation(a);
-        zoomLabel.setRotation(a);
         for (TextView chip : zoomChips) chip.setRotation(a);
         confirmButton.setRotation(a);
         retakeButton.setRotation(a);
@@ -497,10 +538,9 @@ public class CustomCameraActivity extends AppCompatActivity {
         settingsPanel.setVisibility(on ? View.VISIBLE : View.GONE);
         updatePortraitWarning();
         // 옮길 수 있을 때는 노란 테두리
-        shutterRing.setStroke(dp(5), on ? Color.rgb(250, 204, 21) : Color.argb(170, 0, 0, 0));
+        shutter.setMovable(on);
         if (on) {
-            StringBuilder sb = new StringBuilder("촬영 버튼을 끌어서\n원하는 자리에 놓으세요");
-            sb.append("\n\n찾은 렌즈: ");
+            StringBuilder sb = new StringBuilder("찾은 렌즈  ");
             for (int i = 0; i < lenses.size(); i++) {
                 Lens l = lenses.get(i);
                 if (i > 0) sb.append(" · ");
@@ -536,8 +576,8 @@ public class CustomCameraActivity extends AppCompatActivity {
         boolean left = shutterFx < 0.5f;
         if (confirmOnLeft == null || confirmOnLeft != left) {
             confirmOnLeft = left;
-            place(confirmButton, left ? Gravity.LEFT : Gravity.RIGHT, dp(16));
-            place(retakeButton, left ? Gravity.RIGHT : Gravity.LEFT, dp(16));
+            place(confirmButton, left ? Gravity.LEFT : Gravity.RIGHT, dp(40));
+            place(retakeButton, left ? Gravity.RIGHT : Gravity.LEFT, dp(48));
         }
     }
 
@@ -558,6 +598,7 @@ public class CustomCameraActivity extends AppCompatActivity {
                 downViewX = v.getX();
                 downViewY = v.getY();
                 shutterDragging = false;
+                shutter.setPressedLook(true);
                 return true;
             case MotionEvent.ACTION_MOVE: {
                 if (!settingsMode) return true;
@@ -577,6 +618,7 @@ public class CustomCameraActivity extends AppCompatActivity {
                 return true;
             }
             case MotionEvent.ACTION_UP:
+                shutter.setPressedLook(false);
                 if (shutterDragging) {
                     shutterDragging = false;
                     saveShutterPos();
@@ -586,6 +628,7 @@ public class CustomCameraActivity extends AppCompatActivity {
                 }
                 return true;
             case MotionEvent.ACTION_CANCEL:
+                shutter.setPressedLook(false);
                 shutterDragging = false;
                 placeShutter();
                 return true;
@@ -635,7 +678,7 @@ public class CustomCameraActivity extends AppCompatActivity {
         final CameraInfo info = camera.getCameraInfo();
         boolean flash = info.hasFlashUnit();
         if (flash) camera.getCameraControl().enableTorch(flashMode == FLASH_TORCH);
-        torchButton.setKind(flashIcon());
+        updateFlashButton();
         torchButton.setVisibility(flash && reviewBar.getVisibility() != View.VISIBLE ? View.VISIBLE : View.GONE);
         camMin = 1f;
         camMax = 1f;
@@ -803,15 +846,38 @@ public class CustomCameraActivity extends AppCompatActivity {
         camera.getCameraControl().setZoomRatio(cam);
         previewView.setScaleX(extraCrop);
         previewView.setScaleY(extraCrop);
-        zoomLabel.setText(ratioText(zoom));
+        updateZoomUi();
+    }
+
+    /** 배율 버튼 표시: 지금 배율이 속한 구간의 버튼만 노란 글자로 실제 배율을 보여 준다. */
+    private void updateZoomUi() {
         zoomSlider.invalidate();
+        int active = zoomChips.isEmpty() ? -1 : 0;
+        for (int i = 0; i < zoomChipValues.size(); i++) {
+            if (zoomChipValues.get(i) <= zoom + 0.02f) active = i;
+        }
         for (int i = 0; i < zoomChips.size(); i++) {
-            boolean on = Math.abs(zoomChipValues.get(i) - zoom) < 0.05f;
-            GradientDrawable bg = new GradientDrawable();
-            bg.setShape(GradientDrawable.OVAL);
-            bg.setColor(on ? Color.rgb(250, 204, 21) : Color.argb(150, 0, 0, 0));
-            zoomChips.get(i).setBackground(bg);
-            zoomChips.get(i).setTextColor(on ? Color.BLACK : Color.WHITE);
+            TextView chip = zoomChips.get(i);
+            boolean on = i == active;
+            String text = ratioText(on ? zoom : zoomChipValues.get(i));
+            if (!text.contentEquals(chip.getText())) chip.setText(text);
+        }
+        if (active == activeChip) return;
+        activeChip = active;
+        for (int i = 0; i < zoomChips.size(); i++) {
+            TextView chip = zoomChips.get(i);
+            boolean on = i == active;
+            if (on) {
+                GradientDrawable bg = new GradientDrawable();
+                bg.setShape(GradientDrawable.OVAL);
+                bg.setColor(Color.argb(150, 0, 0, 0));
+                chip.setBackground(bg);
+            } else {
+                chip.setBackground(null);
+            }
+            chip.setTextColor(on ? ACCENT : Color.argb(225, 255, 255, 255));
+            chip.setScaleX(on ? 1.14f : 1f);
+            chip.setScaleY(on ? 1.14f : 1f);
         }
     }
 
@@ -835,6 +901,8 @@ public class CustomCameraActivity extends AppCompatActivity {
         zoomChipValues.clear();
         for (float v : values) addZoomChip(v);
         applyUiRotation();
+        activeChip = -2;
+        updateZoomUi();
     }
 
     private static void addValue(List<Float> values, float v) {
@@ -845,13 +913,14 @@ public class CustomCameraActivity extends AppCompatActivity {
     private void addZoomChip(float value) {
         TextView chip = new TextView(this);
         chip.setText(ratioText(value));
-        chip.setTextSize(TypedValue.COMPLEX_UNIT_DIP, 14);
+        chip.setTextSize(TypedValue.COMPLEX_UNIT_DIP, 12);
         chip.setTypeface(Typeface.DEFAULT_BOLD);
+        chip.setTextColor(Color.argb(225, 255, 255, 255));
         chip.setGravity(Gravity.CENTER);
         chip.setOnClickListener(v -> setZoom(value));
-        LinearLayout.LayoutParams lp = new LinearLayout.LayoutParams(dp(44), dp(44));
-        lp.leftMargin = dp(3);
-        lp.rightMargin = dp(3);
+        LinearLayout.LayoutParams lp = new LinearLayout.LayoutParams(dp(40), dp(40));
+        lp.leftMargin = dp(2);
+        lp.rightMargin = dp(2);
         zoomRow.addView(chip, lp);
         zoomChips.add(chip);
         zoomChipValues.add(value);
@@ -876,35 +945,43 @@ public class CustomCameraActivity extends AppCompatActivity {
 
         @Override
         protected void onDraw(@NonNull Canvas c) {
-            float cy = dp(20);
+            // 눈금자: 잔눈금 + 배율 버튼 자리의 큰 눈금·숫자 + 지금 배율의 노란 바늘
+            float y = dp(16);
+            float left = pad();
+            float right = getWidth() - pad();
+            paint.clearShadowLayer();
             paint.setStyle(Paint.Style.STROKE);
             paint.setStrokeCap(Paint.Cap.ROUND);
-            paint.setStrokeWidth(dp(10));
-            paint.setColor(Color.argb(120, 0, 0, 0));
-            c.drawLine(pad(), cy, getWidth() - pad(), cy, paint);
-            paint.setStrokeWidth(dp(5));
-            paint.setColor(Color.argb(230, 255, 255, 255));
-            c.drawLine(pad(), cy, getWidth() - pad(), cy, paint);
-            paint.setStyle(Paint.Style.FILL);
+            paint.setStrokeWidth(Math.max(2f, dp(1)));
+            paint.setColor(Color.argb(105, 255, 255, 255));
+            int n = 40;
+            for (int i = 0; i <= n; i++) {
+                float x = left + (right - left) * i / n;
+                c.drawLine(x, y, x, y + dp(6), paint);
+            }
             paint.setTextAlign(Paint.Align.CENTER);
             paint.setTextSize(dp(10));
-            paint.setShadowLayer(4f, 0f, 0f, Color.BLACK);
             for (float m : zoomChipValues) {
                 float x = xOf(m);
+                paint.setStyle(Paint.Style.STROKE);
+                paint.setStrokeWidth(dp(2));
                 paint.setColor(Color.WHITE);
-                c.drawCircle(x, cy, dp(3), paint);
-                float ly = cy + dp(26);
+                c.drawLine(x, y - dp(2), x, y + dp(10), paint);
+                paint.setStyle(Paint.Style.FILL);
+                paint.setColor(Color.argb(200, 255, 255, 255));
+                float ly = y + dp(27);
                 c.save();
                 c.rotate(uiAngle(), x, ly);
                 c.drawText(ratioText(m), x, ly + dp(4), paint);
                 c.restore();
             }
-            paint.clearShadowLayer();
             float x = xOf(zoom);
-            paint.setColor(Color.argb(140, 0, 0, 0));
-            c.drawCircle(x, cy, dp(15), paint);
-            paint.setColor(Color.rgb(250, 204, 21));
-            c.drawCircle(x, cy, dp(12), paint);
+            paint.setStyle(Paint.Style.STROKE);
+            paint.setStrokeWidth(dp(3));
+            paint.setColor(ACCENT);
+            c.drawLine(x, y - dp(7), x, y + dp(13), paint);
+            paint.setStyle(Paint.Style.FILL);
+            c.drawCircle(x, y - dp(10), dp(4), paint);
         }
 
         @SuppressLint("ClickableViewAccessibility")
@@ -942,16 +1019,22 @@ public class CustomCameraActivity extends AppCompatActivity {
             float h = previewView.getHeight();
             float px = previewBox.getLeft() + w / 2f + (x - w / 2f) * extraCrop;
             float py = previewBox.getTop() + h / 2f + (y - h / 2f) * extraCrop;
-            focusRingBg.setStroke(dp(2), Color.rgb(250, 204, 21));
+            focusRingBg.setStroke(Math.max(2, dp(1)), ACCENT);
             focusRing.setX(px - focusRing.getWidth() / 2f);
             focusRing.setY(py - focusRing.getHeight() / 2f);
+            focusRing.setAlpha(1f);
+            focusRing.animate().cancel();
+            focusRing.setScaleX(1.4f);
+            focusRing.setScaleY(1.4f);
+            focusRing.animate().scaleX(1f).scaleY(1f).setDuration(180).start();
         } catch (Exception ignored) { /* 초점을 못 맞추는 기기는 그대로 둔다 */ }
     }
 
     /** 초점 기준을 화면 정중앙으로 되돌린다(계속 맞추는 초점 + 중앙 영역). */
     private void resetFocusToCenter() {
         focusTapped = false;
-        focusRingBg.setStroke(dp(2), Color.argb(170, 255, 255, 255));
+        focusRing.setAlpha(0.6f);
+        focusRingBg.setStroke(Math.max(2, dp(1)), Color.argb(170, 255, 255, 255));
         centerFocusRing();
         if (camera == null) return;
         try { camera.getCameraControl().cancelFocusAndMetering(); } catch (Exception ignored) { }
@@ -988,6 +1071,11 @@ public class CustomCameraActivity extends AppCompatActivity {
         } catch (Throwable ignored) { /* 못 걸면 기기 기본 초점 */ }
     }
 
+    private void updateFlashButton() {
+        torchButton.setKind(flashIcon());
+        torchButton.setTint(flashMode == FLASH_OFF ? Color.WHITE : ACCENT);
+    }
+
     private int flashIcon() {
         return flashMode == FLASH_ON ? ICON_BOLT : flashMode == FLASH_AUTO ? ICON_BOLT_A
             : flashMode == FLASH_TORCH ? ICON_TORCH : ICON_BOLT_SLASH;
@@ -1008,23 +1096,29 @@ public class CustomCameraActivity extends AppCompatActivity {
         if (camera != null && camera.getCameraInfo().hasFlashUnit()) {
             camera.getCameraControl().enableTorch(flashMode == FLASH_TORCH);
         }
-        torchButton.setKind(flashIcon());
+        updateFlashButton();
     }
 
-    /** 위쪽 둥근 아이콘 버튼(닫기 X · 톱니바퀴 · 번개 · 번개 빗금 · 번개 A · 손전등). 24칸 격자에 그린다. */
+    /** 선 아이콘 버튼. 24칸 격자에 그린다. 바탕: 없음(위쪽) / 반투명 원(다시 찍기) / 흰 원(확인). */
     private class IconView extends View {
         private final Paint paint = new Paint(Paint.ANTI_ALIAS_FLAG);
-        private final android.graphics.Path path = new android.graphics.Path();
+        private final Path path = new Path();
+        private final RectF arc = new RectF(5f, 5f, 19f, 19f);
         private int kind;
+        private int tint;
 
-        IconView(int kind, String description) {
+        IconView(int kind, String description, int style) {
             super(CustomCameraActivity.this);
             this.kind = kind;
+            this.tint = style == STYLE_SOLID ? 0xFF111111 : Color.WHITE;
             setContentDescription(description);
-            GradientDrawable bg = new GradientDrawable();
-            bg.setShape(GradientDrawable.OVAL);
-            bg.setColor(Color.argb(150, 0, 0, 0));
-            setBackground(bg);
+            if (style != STYLE_PLAIN) {
+                GradientDrawable bg = new GradientDrawable();
+                bg.setShape(GradientDrawable.OVAL);
+                bg.setColor(style == STYLE_SOLID ? Color.WHITE : Color.argb(110, 0, 0, 0));
+                if (style == STYLE_GHOST) bg.setStroke(Math.max(2, dp(1)), Color.argb(120, 255, 255, 255));
+                setBackground(bg);
+            }
         }
 
         void setKind(int k) {
@@ -1033,62 +1127,92 @@ public class CustomCameraActivity extends AppCompatActivity {
             invalidate();
         }
 
+        void setTint(int color) {
+            if (color == tint) return;
+            tint = color;
+            invalidate();
+        }
+
         private void bolt(float dx) {
             path.reset();
-            path.moveTo(7 + dx, 2);
-            path.lineTo(7 + dx, 13);
-            path.lineTo(10 + dx, 13);
-            path.lineTo(10 + dx, 22);
-            path.lineTo(17 + dx, 10);
-            path.lineTo(13 + dx, 10);
-            path.lineTo(17 + dx, 2);
+            path.moveTo(7.5f + dx, 2.5f);
+            path.lineTo(7.5f + dx, 13);
+            path.lineTo(10.5f + dx, 13);
+            path.lineTo(10.5f + dx, 21.5f);
+            path.lineTo(16.5f + dx, 10.5f);
+            path.lineTo(13 + dx, 10.5f);
+            path.lineTo(16.5f + dx, 2.5f);
             path.close();
         }
 
         @Override
         protected void onDraw(@NonNull Canvas c) {
-            float u = getWidth() * 0.58f / 24f;
+            float u = Math.min(getWidth() * 0.5f, dp(30)) / 24f;
             c.save();
             c.translate((getWidth() - 24 * u) / 2f, (getHeight() - 24 * u) / 2f);
             c.scale(u, u);
-            paint.setColor(Color.WHITE);
+            paint.setColor(tint);
             paint.setStrokeCap(Paint.Cap.ROUND);
+            paint.setStrokeJoin(Paint.Join.ROUND);
             switch (kind) {
                 case ICON_CLOSE:
                     paint.setStyle(Paint.Style.STROKE);
-                    paint.setStrokeWidth(2.6f);
-                    c.drawLine(5, 5, 19, 19, paint);
-                    c.drawLine(19, 5, 5, 19, paint);
+                    paint.setStrokeWidth(2f);
+                    c.drawLine(6, 6, 18, 18, paint);
+                    c.drawLine(18, 6, 6, 18, paint);
                     break;
                 case ICON_GEAR:
                     paint.setStyle(Paint.Style.STROKE);
                     paint.setStrokeCap(Paint.Cap.BUTT);
-                    paint.setStrokeWidth(3.6f);
+                    paint.setStrokeWidth(2.8f);
                     for (int i = 0; i < 8; i++) {
                         c.save();
                         c.rotate(i * 45f, 12, 12);
-                        c.drawLine(12, 1.5f, 12, 5.5f, paint);
+                        c.drawLine(12, 2.2f, 12, 5f, paint);
                         c.restore();
                     }
-                    paint.setStrokeWidth(3.4f);
-                    c.drawCircle(12, 12, 6.2f, paint);
+                    paint.setStrokeWidth(1.9f);
+                    c.drawCircle(12, 12, 6.6f, paint);
+                    paint.setStrokeWidth(1.7f);
+                    c.drawCircle(12, 12, 2.5f, paint);
+                    break;
+                case ICON_CHECK:
+                    paint.setStyle(Paint.Style.STROKE);
+                    paint.setStrokeWidth(2.6f);
+                    path.reset();
+                    path.moveTo(5.5f, 12.5f);
+                    path.lineTo(10f, 17f);
+                    path.lineTo(18.5f, 7.5f);
+                    c.drawPath(path, paint);
+                    break;
+                case ICON_RETRY:
+                    paint.setStyle(Paint.Style.STROKE);
+                    paint.setStrokeWidth(2.1f);
+                    c.drawArc(arc, -40f, 300f, false, paint);
+                    paint.setStyle(Paint.Style.FILL);
+                    path.reset();
+                    path.moveTo(16.2f, 5.6f);
+                    path.lineTo(20.4f, 7.0f);
+                    path.lineTo(16.6f, 10.4f);
+                    path.close();
+                    c.drawPath(path, paint);
                     break;
                 case ICON_TORCH:
                     paint.setStyle(Paint.Style.FILL);
                     path.reset();
-                    path.moveTo(6, 2);
-                    path.lineTo(18, 2);
-                    path.lineTo(18, 5.5f);
-                    path.lineTo(15, 10);
-                    path.lineTo(15, 22);
-                    path.lineTo(9, 22);
-                    path.lineTo(9, 10);
-                    path.lineTo(6, 5.5f);
+                    path.moveTo(7, 2.5f);
+                    path.lineTo(17, 2.5f);
+                    path.lineTo(17, 6);
+                    path.lineTo(14.6f, 10);
+                    path.lineTo(14.6f, 21.5f);
+                    path.lineTo(9.4f, 21.5f);
+                    path.lineTo(9.4f, 10);
+                    path.lineTo(7, 6);
                     path.close();
                     c.drawPath(path, paint);
-                    paint.setColor(Color.argb(220, 0, 0, 0));
-                    c.drawCircle(12, 14.5f, 1.7f, paint);
-                    c.drawRect(6, 4.4f, 18, 5.6f, paint);
+                    paint.setColor(0xFF000000);
+                    c.drawCircle(12, 14.5f, 1.4f, paint);
+                    c.drawRect(7, 4.9f, 17, 5.9f, paint);
                     break;
                 case ICON_BOLT_A:
                     paint.setStyle(Paint.Style.FILL);
@@ -1096,20 +1220,20 @@ public class CustomCameraActivity extends AppCompatActivity {
                     c.drawPath(path, paint);
                     paint.setTypeface(Typeface.DEFAULT_BOLD);
                     paint.setTextAlign(Paint.Align.CENTER);
-                    paint.setTextSize(12f);
-                    c.drawText("A", 18.5f, 12f, paint);
+                    paint.setTextSize(11f);
+                    c.drawText("A", 18.5f, 12.5f, paint);
                     break;
                 case ICON_BOLT_SLASH:
                     paint.setStyle(Paint.Style.FILL);
                     bolt(0);
                     c.drawPath(path, paint);
                     paint.setStyle(Paint.Style.STROKE);
-                    paint.setStrokeWidth(5f);
-                    paint.setColor(Color.argb(255, 40, 40, 40));
-                    c.drawLine(4, 3, 20, 21, paint);
-                    paint.setStrokeWidth(2.2f);
-                    paint.setColor(Color.WHITE);
-                    c.drawLine(4, 3, 20, 21, paint);
+                    paint.setStrokeWidth(4.4f);
+                    paint.setColor(0xFF000000);
+                    c.drawLine(4.5f, 3.5f, 19.5f, 20.5f, paint);
+                    paint.setStrokeWidth(1.9f);
+                    paint.setColor(tint);
+                    c.drawLine(4.5f, 3.5f, 19.5f, 20.5f, paint);
                     break;
                 default: // ICON_BOLT
                     paint.setStyle(Paint.Style.FILL);
@@ -1118,6 +1242,45 @@ public class CustomCameraActivity extends AppCompatActivity {
                     break;
             }
             c.restore();
+        }
+    }
+
+    /** 촬영 버튼: 흰 고리 + 흰 원. 누르면 안쪽 원이 줄고, 설정 창에서 옮길 수 있을 때는 고리가 노랗다. */
+    private class ShutterView extends View {
+        private final Paint paint = new Paint(Paint.ANTI_ALIAS_FLAG);
+        private boolean movable;
+        private boolean pressedLook;
+
+        ShutterView() {
+            super(CustomCameraActivity.this);
+        }
+
+        void setMovable(boolean on) {
+            movable = on;
+            invalidate();
+        }
+
+        void setPressedLook(boolean on) {
+            if (pressedLook == on) return;
+            pressedLook = on;
+            invalidate();
+        }
+
+        @Override
+        protected void onDraw(@NonNull Canvas c) {
+            float cx = getWidth() / 2f;
+            float cy = getHeight() / 2f;
+            float r = Math.min(cx, cy) - dp(5);
+            paint.setStyle(Paint.Style.STROKE);
+            paint.setStrokeWidth(dp(7));
+            paint.setColor(Color.argb(50, 0, 0, 0)); // 밝은 화면 위에서도 고리가 보이게 옅은 그림자
+            c.drawCircle(cx, cy, r, paint);
+            paint.setStrokeWidth(dp(4));
+            paint.setColor(movable ? ACCENT : Color.WHITE);
+            c.drawCircle(cx, cy, r, paint);
+            paint.setStyle(Paint.Style.FILL);
+            paint.setColor(Color.WHITE);
+            c.drawCircle(cx, cy, r - dp(pressedLook ? 11 : 6), paint);
         }
     }
 
@@ -1140,6 +1303,10 @@ public class CustomCameraActivity extends AppCompatActivity {
         // 화면은 세로로 고정이라, 사진 방향은 폰을 눕힌 쪽(가로 두 방향 중 하나)으로 직접 정한다
         imageCapture.setTargetRotation(landRotation);
         shutter.setAlpha(0.4f);
+        shotBlink.animate().cancel();
+        shotBlink.setAlpha(0.75f);
+        shotBlink.animate().alpha(0f).setDuration(220).start();
+        shutter.performHapticFeedback(HapticFeedbackConstants.KEYBOARD_TAP);
         imageCapture.takePicture(io, new ImageCapture.OnImageCapturedCallback() {
             @Override
             public void onCaptureSuccess(@NonNull ImageProxy image) {
