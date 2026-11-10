@@ -44,4 +44,37 @@ assert.ok(/data-mkp-orig-type', 'number'\);\s*el\.setAttribute\('type', 'text'\)
 assert.ok(/el\.setAttribute\('type', 'number'\)/.test(src), 'unprep 복원');
 assert.ok(/function focusNextNum/.test(src) && /k === 'NEXT'/.test(src));
 assert.ok(/prepAll[\s\S]*NUM_SELECTOR/.test(src), '새로 그린 칸도 준비');
+
+// 2026-11-10 「게이지, 균열팁 수치 입력할 때 팝업키보드」: type=text + inputmode=decimal 칸은 준비 때 inputmode가
+// none으로 바뀌어 대상에서 빠졌다(키패드도 OS 키보드도 안 뜸) → 원래 inputmode(data-mkp-orig-inputmode)로도 대상
+['#ndtModal', '#ndtCrackMonitorModal', '#ndtDisplacementModal', '#ndtDisplacementGroupEditModal'].forEach((d) => {
+    assert.ok(kp.NUM_SELECTOR.includes(d + ' input[data-mkp-orig-inputmode="decimal"]'), d);
+    assert.ok(kp.NUM_SELECTOR.includes(d + ' input[data-mkp-orig-inputmode="numeric"]'), d);
+});
+assert.ok(/el\.dataset\.mkpOrigInputmode = [^;]+;\s*el\.setAttribute\('inputmode', 'none'\)/.test(src), '원래 inputmode를 먼저 적어 둔다');
+(function fakeDom() {
+    // 준비 전·후 모두 숫자 칸으로 본다
+    const mk = (attrs) => ({
+        nodeType: 1, tagName: 'INPUT', disabled: false, readOnly: false,
+        getAttribute: (k) => (k in attrs ? attrs[k] : null),
+        matches(sel) {
+            return sel.split(', ').some((one) => {
+                const m = one.match(/^(#\w+) input\[([\w-]+)="([^"]+)"\]$/);
+                if (m) return m[1] === '#ndtCrackMonitorModal' && attrs[m[2]] === m[3];
+                const m2 = one.match(/^(?:input)?\[([\w-]+)\]$/);
+                return !!(m2 && m2[1] in attrs);
+            });
+        }
+    });
+    assert.ok(kp.isNumTarget(mk({ type: 'text', inputmode: 'decimal', 'data-gauge-x': '' })), '준비 전');
+    assert.ok(kp.isNumTarget(mk({ type: 'text', inputmode: 'none', 'data-mkp-orig-inputmode': 'decimal', 'data-tip-length': '' })), '준비 후에도');
+    assert.ok(!kp.isNumTarget(mk({ type: 'text', 'data-gauge-note': '' })), '비고 칸은 일반 키보드');
+})();
+['crackGaugeInitialX', 'crackGaugeInitialY', 'crackTipInitialLength'].forEach((id) => {
+    assert.ok(inModal('ndtCrackMonitorModal', id), id);
+    assert.ok(new RegExp('id="' + id + '"[^>]*inputmode="decimal"').test(html), id + ' 숫자 칸');
+});
+['data-gauge-x', 'data-gauge-y', 'data-tip-length', 'data-tip-inc'].forEach((attr) => {
+    assert.ok(app.includes('<input type="text" ' + attr + ' inputmode="decimal"'), attr + ' 숫자 칸');
+});
 console.log('test-num-keypad: OK');

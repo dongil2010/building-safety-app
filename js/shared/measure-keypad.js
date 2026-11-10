@@ -35,7 +35,10 @@
     var NUM_DRAWERS = ['#ndtModal', '#ndtCrackMonitorModal', '#ndtDisplacementModal', '#ndtDisplacementGroupEditModal'];
     var NUM_SELECTOR = NUM_DRAWERS.map(function (d) {
         return d + ' input[type="number"], ' + d + ' input[inputmode="decimal"], ' + d + ' input[inputmode="numeric"], ' +
-            d + ' input[data-mkp-orig-type="number"]';
+            d + ' input[data-mkp-orig-type="number"], ' +
+            // 2026-11-10 준비(prepField)가 inputmode를 none으로 바꾸면 위 inputmode 조건에서 빠져 키패드가 안 뜨던 문제
+            // (균열 게이지 X/Y·균열팁 길이 같은 type=text + inputmode=decimal 칸) → 원래 inputmode로도 찾는다
+            d + ' input[data-mkp-orig-inputmode="decimal"], ' + d + ' input[data-mkp-orig-inputmode="numeric"]';
     }).join(', ') + ', input[data-num-keypad]';
     var LAYOUT_NUM = [
         ['7', '8', '9', 'BS'],
