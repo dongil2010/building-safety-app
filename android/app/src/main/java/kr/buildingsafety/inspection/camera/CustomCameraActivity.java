@@ -94,6 +94,7 @@ import java.util.concurrent.Executors;
  * - 렌즈를 바꿔 거는 동안(수백 ms)은 직전 화면을 붙잡아 보여 주다가 새 화면이 나오면 겹쳐 넘긴다. 줌을 끄는 중에는
  *   지금 렌즈로 계속 확대하고 손이 멈춘 뒤에 바꾼다(넓은 쪽으로 갈 때와 배율 버튼은 바로). 뒤쪽 렌즈 여러 개를 동시에
  *   켜 두는 것은 일반 앱에 허용되지 않아 이렇게 가린다.
+ * - 촬영 버튼을 누른 채 버튼 밖으로 끌고 떼면 찍지 않는다(취소). 음량 버튼과 블루투스 리모컨(셔터 버튼)으로도 찍는다.
  * - 촬영 방식: 화질 우선이 기본. 설정 창에서 속도 우선으로 바꿀 수 있다(기기에 기억).
  * - 초점: 기본은 화면 정중앙(계속 맞춤). 화면을 누르면 그 자리에 고정되고, 다시 찍기·렌즈 바꿈·새로 열 때 중앙으로 돌아온다.
  * - 촬영 버튼 자리는 위 「설정」 창에서 끌어 옮긴다(기기에 기억). 평소에는 안 움직인다.
@@ -621,6 +622,11 @@ public class CustomCameraActivity extends AppCompatActivity {
         v.setLayoutParams(lp);
     }
 
+    private boolean insideShutter(View v, MotionEvent e) {
+        float slop = dp(10);
+        return e.getX() >= -slop && e.getY() >= -slop && e.getX() <= v.getWidth() + slop && e.getY() <= v.getHeight() + slop;
+    }
+
     /** 평소: 누르면 촬영. 설정 창: 끌어서 옮긴다(찍지 않음). */
     private boolean onShutterTouch(View v, MotionEvent e) {
         switch (e.getActionMasked()) {
@@ -633,7 +639,10 @@ public class CustomCameraActivity extends AppCompatActivity {
                 shutter.setPressedLook(true);
                 return true;
             case MotionEvent.ACTION_MOVE: {
-                if (!settingsMode) return true;
+                if (!settingsMode) {
+                    shutter.setPressedLook(insideShutter(v, e)); // 밖으로 나가면 눌림 표시를 풀어 취소됨을 보여 준다
+                    return true;
+                }
                 float dx = e.getRawX() - downRawX;
                 float dy = e.getRawY() - downRawY;
                 if (!shutterDragging && Math.hypot(dx, dy) > ViewConfiguration.get(this).getScaledTouchSlop()) shutterDragging = true;
@@ -655,8 +664,8 @@ public class CustomCameraActivity extends AppCompatActivity {
                     shutterDragging = false;
                     saveShutterPos();
                     placeShutter();
-                } else if (!settingsMode) {
-                    shoot();
+                } else if (!settingsMode && insideShutter(v, e)) {
+                    shoot(); // 버튼 밖에서 손을 떼면 찍지 않는다
                 }
                 return true;
             case MotionEvent.ACTION_CANCEL:
@@ -1527,9 +1536,32 @@ public class CustomCameraActivity extends AppCompatActivity {
         super.onBackPressed();
     }
 
+    /**
+     * 찍는 키: 음량 버튼 + 블루투스 리모컨. 리모컨은 제품마다 음량 올림·엔터·카메라·재생 키 중 하나를 보낸다.
+     */
+    private static boolean isShutterKey(int keyCode) {
+        switch (keyCode) {
+            case KeyEvent.KEYCODE_VOLUME_UP:
+            case KeyEvent.KEYCODE_VOLUME_DOWN:
+            case KeyEvent.KEYCODE_CAMERA:
+            case KeyEvent.KEYCODE_ENTER:
+            case KeyEvent.KEYCODE_NUMPAD_ENTER:
+            case KeyEvent.KEYCODE_DPAD_CENTER:
+            case KeyEvent.KEYCODE_SPACE:
+            case KeyEvent.KEYCODE_HEADSETHOOK:
+            case KeyEvent.KEYCODE_MEDIA_PLAY_PAUSE:
+            case KeyEvent.KEYCODE_MEDIA_PLAY:
+            case KeyEvent.KEYCODE_MEDIA_NEXT:
+            case KeyEvent.KEYCODE_BUTTON_A:
+                return true;
+            default:
+                return false;
+        }
+    }
+
     @Override
     public boolean onKeyDown(int keyCode, KeyEvent event) {
-        if (keyCode == KeyEvent.KEYCODE_VOLUME_UP || keyCode == KeyEvent.KEYCODE_VOLUME_DOWN) {
+        if (isShutterKey(keyCode)) {
             if (event.getRepeatCount() == 0) shoot();
             return true;
         }
@@ -1538,7 +1570,7 @@ public class CustomCameraActivity extends AppCompatActivity {
 
     @Override
     public boolean onKeyUp(int keyCode, KeyEvent event) {
-        if (keyCode == KeyEvent.KEYCODE_VOLUME_UP || keyCode == KeyEvent.KEYCODE_VOLUME_DOWN) return true;
+        if (isShutterKey(keyCode)) return true;
         return super.onKeyUp(keyCode, event);
     }
 
