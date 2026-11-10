@@ -196,6 +196,7 @@ public class CustomCameraActivity extends AppCompatActivity {
     private float camMin = 1f;        // 지금 걸린 렌즈의 기기 줌 범위
     private float camMax = 1f;
     private float mainMin = 1f;       // 기본 렌즈의 최소 줌(1 미만이면 초광각까지 한 렌즈로 됨)
+    private float mainMax = 1f;       // 기본 카메라의 최대 줌(이 안의 렌즈 교체는 기기가 끊김 없이 한다)
     private boolean mainRangeKnown;
     private boolean switchPending;
 
@@ -896,6 +897,7 @@ public class CustomCameraActivity extends AppCompatActivity {
         if (lens == mainLens && !mainRangeKnown) {
             mainRangeKnown = true;
             mainMin = camMin;
+            mainMax = camMax;
             findLenses(info);
             rebuildZoomUi();
             applyZoom();
@@ -970,11 +972,16 @@ public class CustomCameraActivity extends AppCompatActivity {
         return min;
     }
 
-    /** 지금 배율에 쓸 렌즈: 배율 이하에서 가장 망원인 렌즈. */
+    /**
+     * 지금 배율에 쓸 렌즈: 배율 이하에서 가장 망원인 렌즈.
+     * 2026-11-10 기본 카메라 줌 범위 안의 렌즈는 앱이 걸지 않는다 — 다시 걸면 카메라를 닫았다 열어 깜빡이고,
+     * setZoomRatio 만 주면 기기가 화각·노출을 맞춰 끊김 없이 넘긴다. 범위 밖 렌즈만 따로 건다.
+     */
     private Lens targetLens() {
         Lens pick = null;
         for (Lens l : lenses) {
             if (l.bad) continue;
+            if (l != mainLens && l.ratio >= mainMin - 0.001f && l.ratio <= mainMax + 0.001f) continue;
             if (l.ratio <= zoom + 0.001f && (pick == null || l.ratio > pick.ratio)) pick = l;
         }
         return pick != null ? pick : mainLens;
