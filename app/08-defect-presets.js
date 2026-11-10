@@ -243,9 +243,10 @@
         const row = document.getElementById('defectOpeningPosRow');
         if (!row) return;
         const cur = (document.getElementById('defectOpeningPos')?.value || '').trim();
+        const curList = parseOpeningPosValue(cur);
         row.style.display = (defectOpeningPosApplies() || cur) ? '' : 'none';
         row.querySelectorAll('[data-opening-pos]').forEach((b) => {
-            const on = b.getAttribute('data-opening-pos') === cur;
+            const on = curList.indexOf(b.getAttribute('data-opening-pos')) >= 0;
             b.classList.toggle('active', on);
             b.classList.toggle('is-on', on);
             b.setAttribute('aria-pressed', on ? 'true' : 'false');
@@ -256,7 +257,8 @@
     }
     function setDefectOpeningPosUi(val) {
         const inp = document.getElementById('defectOpeningPos');
-        if (inp) inp.value = String(val || '').trim();
+        // 여러 개 고를 수 있다 — 「창 상부, 창 하부」처럼 표준 이름을 쉼표로 이어 적는다(목록에 없는 옛 값은 그대로)
+        if (inp) inp.value = normalizeOpeningPosValue(val);
         refreshDefectOpeningPosRow();
     }
     function readDefectOpeningPosUi() {
@@ -274,7 +276,7 @@
         const chk = document.getElementById('defectOpeningCrackCheck');
         if (!chk) return;
         const text = getDefectComboValue(document.getElementById('defectType'), document.getElementById('defectTypeInput')) || '';
-        const pos = findOpeningPosInText(text);
+        const pos = findOpeningPosListInText(text).join(', '); // 「창 상부·하부」로 쓰면 둘 다
         if (!pos) { delete chk.dataset.openingManualOff; return; }
         if (chk.dataset.openingManualOff === '1') return;
         if (chk.checked) return; // 이미 체크됨(직접 체크 포함) — 끄지도, 위치 버튼을 바꾸지도 않는다
@@ -302,8 +304,12 @@
             if (!b) return;
             e.preventDefault();
             const v = b.getAttribute('data-opening-pos');
-            const next = readDefectOpeningPosUi() === v ? '' : v; // 다시 누르면 해제
-            setDefectOpeningPosUi(next);
+            // 2026-11-10 「창 상부·하부 중복으로 고를 수 있게」 — 누를 때마다 그 위치만 켜고 끈다(다른 위치는 그대로)
+            const list = parseOpeningPosValue(readDefectOpeningPosUi());
+            const at = list.indexOf(v);
+            if (at >= 0) list.splice(at, 1); else list.push(v);
+            setDefectOpeningPosUi(list.join(', '));
+            const next = readDefectOpeningPosUi();
             // 위치를 골랐으면 개구부 결함으로(통계 「개구부 결함 제외」와 같은 기준)
             const chk = document.getElementById('defectOpeningCrackCheck');
             if (next && chk && !chk.checked) { chk.checked = true; chk.dispatchEvent(new Event('change', { bubbles: true })); }
@@ -322,22 +328,59 @@
     })();
 
     // ---- 2026-10-27 개구부 결함 위치 인식(창 상부·창 하부·창 측면·문 상부·문 측면 — 띄어쓰기 있든 없든) ----
-    const OPENING_POS_NAMES = ['창 상부', '창 하부', '창 측면', '문 상부', '문 측면'];
-    /** 글 안에서 개구부 위치 이름을 찾아 표준 이름(창 상부 …)으로 돌려준다. 없으면 ''. 「문 하부」처럼 목록에 없는 조합은 무시 */
-    function findOpeningPosInText(text) {
+    // 2026-11-10 개구부 상부·개구부 하부 추가, 여러 위치를 같이 고를 수 있다(창 상부 + 창 하부 → 「창 상부·하부」).
+    const OPENING_POS_NAMES = ['창 상부', '창 하부', '창 측면', '문 상부', '문 측면', '개구부 상부', '개구부 하부'];
+    /**
+     * 글 안의 개구부 위치 이름을 표준 이름 목록으로. 「창 상부·하부」「창 상부/하부」처럼 줄여 쓴 것도 푼다.
+     * all=false(기본): 글에서 처음 나온 한 묶음만(결함 내용 글 — 「창 상부 균열, 창 하부 누수」는 예전처럼 창 상부만).
+     * all=true: 글 전체(골라 둔 값 「창 상부, 창 하부」 읽기). 「문 하부」처럼 목록에 없는 조합은 무시.
+     */
+    function findOpeningPosListInText(text, all) {
         const s = String(text == null ? '' : text);
-        const re = /(창|문)[\s\u3000]*(상부|하부|측면)/g;
+        const re = /(개구부|창|문)[\s\u3000]*(상부|하부|측면)((?:[\s\u3000]*[·ㆍ\/][\s\u3000]*(?:상부|하부|측면))*)/g;
+        const out = [];
         let m;
         while ((m = re.exec(s))) {
-            const name = `${m[1]} ${m[2]}`;
-            if (OPENING_POS_NAMES.indexOf(name) >= 0) return name;
-            re.lastIndex = m.index + 1;
+            const found = [m[2]].concat(m[3] ? (m[3].match(/상부|하부|측면/g) || []) : [])
+                .map((part) => `${m[1]} ${part}`)
+                .filter((name) => OPENING_POS_NAMES.indexOf(name) >= 0);
+            if (!found.length) { re.lastIndex = m.index + 1; continue; }
+            found.forEach((name) => { if (out.indexOf(name) < 0) out.push(name); });
+            if (!all) break;
         }
-        return '';
+        return out;
     }
-    /** 결함 내용 맨 앞의 「개구부 주위」·「창 상부 (벽체)」 표기를 떼어 낸 나머지 */
+    /** 글 안에서 개구부 위치 이름을 찾아 표준 이름(창 상부 …)으로 돌려준다. 없으면 ''. 여러 개면 첫 번째 */
+    function findOpeningPosInText(text) {
+        return findOpeningPosListInText(text)[0] || '';
+    }
+    /** 골라 둔 위치 값(「창 상부, 창 하부」) → 표준 이름 목록 */
+    function parseOpeningPosValue(val) {
+        return findOpeningPosListInText(val, true);
+    }
+    /** 저장할 위치 값: 표준 이름을 버튼 순서대로 쉼표로 잇는다. 목록에 없는 옛 값은 그대로 둔다 */
+    function normalizeOpeningPosValue(val) {
+        const raw = String(val == null ? '' : val).trim();
+        const list = parseOpeningPosValue(raw);
+        if (!list.length) return raw;
+        return OPENING_POS_NAMES.filter((n) => list.indexOf(n) >= 0).join(', ');
+    }
+    /** 조사내용에 붙는 위치 표기: 같은 종류는 묶는다 — ['창 상부','창 하부'] → 「창 상부·하부」, 종류가 다르면 「창 상부·문 상부」 */
+    function formatOpeningPosLabel(list) {
+        const groups = [];
+        (list || []).forEach((name) => {
+            const at = String(name).indexOf(' ');
+            const kind = at > 0 ? name.slice(0, at) : name;
+            const part = at > 0 ? name.slice(at + 1) : '';
+            let g = groups.find((x) => x.kind === kind);
+            if (!g) { g = { kind, parts: [] }; groups.push(g); }
+            if (part && g.parts.indexOf(part) < 0) g.parts.push(part);
+        });
+        return groups.map((g) => (g.parts.length ? `${g.kind} ${g.parts.join('·')}` : g.kind)).join('·');
+    }
+    /** 결함 내용 맨 앞의 「개구부 주위」·「창 상부 (벽체)」·「창 상부·하부 (벽체)」 표기를 떼어 낸 나머지 */
     function stripOpeningPosPrefix(t) {
-        return String(t || '').replace(/^\s*(?:개구부[\s\u3000]*주위[\s\u3000]*)?(?:(?:창|문)[\s\u3000]*(?:상부|하부|측면)[\s\u3000]*(?:벽체[\s\u3000]*)?)?/, '').trim();
+        return String(t || '').replace(/^\s*(?:개구부[\s\u3000]*주위[\s\u3000]*)?(?:(?:개구부|창|문)[\s\u3000]*(?:상부|하부|측면)(?:[\s\u3000]*[·ㆍ\/][\s\u3000]*(?:(?:개구부|창|문)[\s\u3000]*)?(?:상부|하부|측면))*[\s\u3000]*(?:벽체[\s\u3000]*)?)?/, '').trim();
     }
 
     /**
@@ -349,8 +392,8 @@
         const raw = (d && d.defectType) ? String(d.defectType) : '';
         // 골라 둔 위치가 우선, 없으면 결함 내용 글에서 찾는다(저장된 값은 건드리지 않고 표기만)
         let pos = d && d.openingPos ? String(d.openingPos).trim() : '';
-        if (pos) pos = findOpeningPosInText(pos) || pos;
-        else pos = findOpeningPosInText(raw);
+        if (pos) { const chosen = parseOpeningPosValue(pos); if (chosen.length) pos = formatOpeningPosLabel(chosen); }
+        else pos = formatOpeningPosLabel(findOpeningPosListInText(raw));
         if (pos) {
             const head = `${pos} 벽체`;
             const ps = parseDefectTypeList(raw);
@@ -2972,7 +3015,7 @@
         const k = normalizeComponentKey(component);
         if (k) {
             // 2026-11-02 회사 결함표: 「창 하부 벽체」·「문 상부 벽체」·「개구부」 → 창호가 아니라 개구부 주변 벽체(개구부 주위 응력집중)
-            if (/(창|문)(상부|하부|측면)/.test(k) || k.includes('개구부')) return '개구부벽체';
+            if (/(창|문)(상부|하부|측면)/.test(k) || k.includes('개구부')) return '개구부벽체'; // 개구부 상부·하부도 '개구부'로 걸린다
             if ((k.includes('벽체') && k.includes('접합')) || k === '벽체접합부') return '벽체접합부';
             if (category === '비구조체' && k.includes('기둥') && !k.includes('접합') && !k.includes('SRC') && !k.includes('철골')) return '비구조기둥';
             if (k.includes('철골')) return '철골';

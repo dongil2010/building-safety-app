@@ -79,8 +79,8 @@ assert.strictEqual(c.extract('2F 기둥', '2F'), '2F 기둥');
 // ---- 개구부 판별은 부재명(component)을 따로 받아 계속 동작 ----
 const sb = { window: {} };
 vm.createContext(sb);
-vm.runInContext("const OPENING_POS_NAMES = ['창 상부', '창 하부', '창 측면', '문 상부', '문 측면'];\n"
-    + extractFunction(app, 'function findOpeningPosInText(') + '\n'
+vm.runInContext("const OPENING_POS_NAMES = ['창 상부', '창 하부', '창 측면', '문 상부', '문 측면', '개구부 상부', '개구부 하부'];\n"
+    + extractFunction(app, 'function findOpeningPosListInText(') + '\n' + extractFunction(app, 'function parseOpeningPosValue(') + '\n' + extractFunction(app, 'function normalizeOpeningPosValue(') + '\n' + extractFunction(app, 'function formatOpeningPosLabel(') + '\n' + extractFunction(app, 'function findOpeningPosInText(') + '\n'
     + extractFunction(app, 'function detectImportOpeningCrack(') + '\nthis.det = detectImportOpeningCrack;', sb);
 assert.strictEqual(sb.det({ location: '', defectType: '균열', component: '개구부 벽체', size: '' }), true, '위치 공란이어도 부재명 개구부면 판별');
 assert.strictEqual(sb.det({ location: '지상2층', defectType: '문 상부 수직균열', component: '벽체', size: '' }), true);

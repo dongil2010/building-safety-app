@@ -1357,13 +1357,15 @@
                         <label class="checkbox-chip" style="border-color:#facc15; color:#facc15;"><input type="checkbox" id="defectBookmark"> 중요</label>
                         <label class="checkbox-chip" style="border-color:#16a34a; color:#16a34a;"><input type="checkbox" id="defectPriorityManage"> 중점관리</label>
                     </div>
-                    <div class="defect-flag-grid defect-opening-pos-row" id="defectOpeningPosRow" style="display:none;" title="개구부 위치 — 한글·표 조사내용에 「창 상부 벽체 ○○」 식으로 붙습니다(다시 누르면 해제). 결함 내용에 창 상부·문 측면 등을 쓰면 자동으로 체크됩니다">
+                    <div class="defect-flag-grid defect-opening-pos-row" id="defectOpeningPosRow" style="display:none;" title="개구부 위치 — 한글·표 조사내용에 「창 상부 벽체 ○○」 식으로 붙습니다(여러 개 고를 수 있음 — 창 상부 + 창 하부 → 「창 상부·하부 벽체 ○○」, 다시 누르면 해제). 결함 내용에 창 상부·문 측면 등을 쓰면 자동으로 체크됩니다">
                         <input type="hidden" id="defectOpeningPos" value="">
                         <button type="button" class="checkbox-chip" data-opening-pos="창 상부">창 상부</button>
                         <button type="button" class="checkbox-chip" data-opening-pos="창 하부">창 하부</button>
                         <button type="button" class="checkbox-chip" data-opening-pos="창 측면">창 측면</button>
                         <button type="button" class="checkbox-chip" data-opening-pos="문 상부">문 상부</button>
                         <button type="button" class="checkbox-chip" data-opening-pos="문 측면">문 측면</button>
+                        <button type="button" class="checkbox-chip" data-opening-pos="개구부 상부">개구부 상부</button>
+                        <button type="button" class="checkbox-chip" data-opening-pos="개구부 하부">개구부 하부</button>
                     </div>
 
                     <div class="form-group defect-shape-convert-block" id="defectShapeConvertBlock">

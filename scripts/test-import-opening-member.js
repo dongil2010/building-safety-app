@@ -37,7 +37,11 @@ assert.ok(/if \(opPosM\) existing\.openingPos = opPosM;/.test(imp), '기존 결�
 const sb = { window: {} };
 vm.createContext(sb);
 vm.runInContext([
-    "const OPENING_POS_NAMES = ['창 상부', '창 하부', '창 측면', '문 상부', '문 측면'];",
+    "const OPENING_POS_NAMES = ['창 상부', '창 하부', '창 측면', '문 상부', '문 측면', '개구부 상부', '개구부 하부'];",
+    extractFunction(app, 'function findOpeningPosListInText('),
+    extractFunction(app, 'function parseOpeningPosValue('),
+    extractFunction(app, 'function normalizeOpeningPosValue('),
+    extractFunction(app, 'function formatOpeningPosLabel('),
     extractFunction(app, 'function findOpeningPosInText('),
     extractFunction(app, 'function stripOpeningPosPrefix('),
     extractFunction(app, 'function parseDefectTypeList('),
@@ -79,6 +83,16 @@ assert.strictEqual(E('기둥'), 'false||기둥');
 assert.strictEqual(E(''), 'false||');
 assert.strictEqual(E('문 하부 벽체'), 'false||문 하부 벽체', '목록에 없는 조합은 그대로');
 assert.strictEqual(E('출입문 상부'), 'true|문 상부|출입문 상부', '낱말에 붙은 「문」은 글을 지우지 않고 종류만');
+
+// 2026-11-10 개구부 상부·개구부 하부도 위치(「개구부」만 지워 「상부 벽체」가 남지 않게)
+assert.strictEqual(E('개구부 상부 벽체'), 'true|개구부 상부|벽체');
+assert.strictEqual(E('개구부하부'), 'true|개구부 하부|');
+assert.strictEqual(E('벽체(개구부 상부)'), 'true|개구부 상부|벽체');
+assert.strictEqual(E('개구부 측면 벽체'), 'true||측면 벽체', '개구부 측면은 목록에 없다 — 예전처럼 개구부만 지운다');
+// 조사내용: 「벽체」를 두 번 쓰지 않는다(여러 위치·개구부 위치 포함)
+assert.strictEqual(sb.content({ component: '벽체', defectType: '수직균열', openingPos: '창 상부, 창 하부', isOpeningCrack: true }), '창 상부·하부 벽체 수직균열');
+assert.strictEqual(sb.content({ component: '벽체', defectType: '수직균열', openingPos: '개구부 하부', isOpeningCrack: true }), '개구부 하부 벽체 수직균열');
+assert.strictEqual(sb.content({ component: '벽체', defectType: '수직균열', openingPos: '창 상부, 문 상부', isOpeningCrack: true }), '창 상부·문 상부 벽체 수직균열');
 
 // ---- 개구부 결함 체크 판정 ----
 assert.strictEqual(sb.det({ location: '', defectType: '수직균열', component: '벽체', size: '', openingFromMember: true }), true, '부재명칭에서 찾으면 체크');

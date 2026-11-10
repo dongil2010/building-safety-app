@@ -984,12 +984,13 @@
         const out = { found: false, pos: '', component: orig.trim() };
         if (!orig.trim()) return out;
         let work = orig;
-        work = work.replace(/(창|문)[\s\u3000]*(상부|하부|측면)/g, (m, a, b, off, all) => {
+        // 2026-11-10 개구부 상부·개구부 하부도 위치로 — 「개구부」만 지우면 「상부 벽체」가 남는다
+        work = work.replace(/(개구부|창|문)[\s\u3000]*(상부|하부|측면)/g, (m, a, b, off, all) => {
             const name = `${a} ${b}`;
             if (OPENING_POS_NAMES.indexOf(name) < 0) return m;
             out.found = true;
             if (!out.pos) out.pos = name;
-            return (off > 0 && /[가-힣]/.test(all.charAt(off - 1))) ? m : ' ';
+            return (a !== '개구부' && off > 0 && /[가-힣]/.test(all.charAt(off - 1))) ? m : ' ';
         });
         work = work.replace(/개구부[\s\u3000]*주위|개구부/g, () => { out.found = true; return ' '; });
         if (!out.found) return out;

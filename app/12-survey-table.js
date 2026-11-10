@@ -620,7 +620,7 @@
     function surveyContentComponentText(d, ctx) {
         const comp = getSurveyCellText('component', d, ctx);
         const t = String(getSurveyCellText('defectType', d, ctx) || '').trim();
-        if (String(comp || '').trim() === '벽체' && /^(?:창|문) (?:상부|하부|측면) 벽체(?:\s|,|$)/.test(t)) return '';
+        if (String(comp || '').trim() === '벽체' && /^(?:개구부|창|문) (?:상부|하부|측면)(?:·(?:(?:개구부|창|문) )?(?:상부|하부|측면))* 벽체(?:\s|,|$)/.test(t)) return '';
         return comp;
     }
 
