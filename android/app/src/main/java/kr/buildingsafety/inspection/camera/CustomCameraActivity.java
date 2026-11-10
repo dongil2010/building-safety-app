@@ -5,11 +5,15 @@ import android.content.Intent;
 import android.content.SharedPreferences;
 import android.graphics.Bitmap;
 import android.graphics.BitmapFactory;
+import android.graphics.Canvas;
 import android.graphics.Color;
 import android.graphics.Matrix;
+import android.graphics.Paint;
 import android.graphics.Typeface;
 import android.graphics.drawable.GradientDrawable;
+import android.hardware.camera2.CameraCharacteristics;
 import android.os.Bundle;
+import android.util.SizeF;
 import android.util.TypedValue;
 import android.view.GestureDetector;
 import android.view.Gravity;
@@ -23,8 +27,12 @@ import android.widget.LinearLayout;
 import android.widget.TextView;
 import android.widget.Toast;
 import androidx.annotation.NonNull;
+import androidx.annotation.OptIn;
 import androidx.appcompat.app.AppCompatActivity;
+import androidx.camera.camera2.interop.Camera2CameraInfo;
+import androidx.camera.camera2.interop.ExperimentalCamera2Interop;
 import androidx.camera.core.Camera;
+import androidx.camera.core.CameraInfo;
 import androidx.camera.core.CameraSelector;
 import androidx.camera.core.FocusMeteringAction;
 import androidx.camera.core.ImageCapture;
@@ -51,7 +59,9 @@ import java.util.concurrent.Executors;
 
 /**
  * 2026-11-10 앱 전용 촬영 화면(CameraX). 순정 카메라 대신 쓴다.
- * - 줌: 배율 버튼(기기가 되는 배율만) + 두 손가락 벌리기. 화면을 누르면 그 자리에 초점.
+ * - 줌: 줌 막대를 끌면 부드럽게(초광각 ~ 15배), 배율 버튼, 두 손가락 벌리기. 화면을 누르면 그 자리에 초점.
+ *   기기 줌 한계를 넘는 배율은 가운데를 잘라 맞춘다(보이는 대로 찍힘). 초광각은 기기가 1배 미만 줌을 주면 그대로,
+ *   아니면 따로 달린 초광각 렌즈로 바꿔 건다. 플래시(손전등)는 지금 렌즈에 불이 있으면 초광각에서도 켠다.
  * - 촬영 버튼 자리: 왼쪽 / 가운데 / 오른쪽 (위 「촬영 버튼」을 눌러 바꾸고, 기기에 기억).
  * - 찍은 뒤 「확인」은 촬영 버튼과 같은 쪽(가운데면 오른쪽)에 크게, 「다시 찍기」는 반대쪽.
  * - 음량 버튼으로도 찍는다.
@@ -65,7 +75,8 @@ public class CustomCameraActivity extends AppCompatActivity {
 
     private static final String PREFS = "bsa_camera";
     private static final String KEY_SHUTTER_POS = "shutterPos"; // 0 왼쪽, 1 가운데, 2 오른쪽
-    private static final float[] ZOOM_STEPS = { 1f, 2f, 3f, 5f, 10f };
+    private static final float MAX_ZOOM = 15f;
+    private static final float[] ZOOM_STEPS = { 1f, 2f, 5f, 10f, 15f };
     private static final String[] POS_LABEL = { "왼쪽", "가운데", "오른쪽" };
 
     private PreviewView previewView;
@@ -83,7 +94,18 @@ public class CustomCameraActivity extends AppCompatActivity {
 
     private final List<TextView> zoomChips = new ArrayList<>();
     private final List<Float> zoomChipValues = new ArrayList<>();
-    private boolean zoomChipsBuilt;
+    private ZoomSlider zoomSlider;
+    private float zoom = 1f;          // 화면에 보이는 배율(초광각 < 1 ≤ 망원)
+    private float extraCrop = 1f;     // 기기 줌 한계를 넘는 만큼 가운데를 자르는 배율
+    private volatile float extraCropAtShot = 1f;
+    private float camMin = 1f;        // 지금 걸린 렌즈의 기기 줌 범위
+    private float camMax = 1f;
+    private float mainMin = 1f;       // 기본 렌즈의 최소 줌(1 미만이면 초광각까지 한 렌즈로 됨)
+    private boolean mainRangeKnown;
+    private CameraSelector uwSelector; // 따로 달린 초광각 렌즈(없으면 null)
+    private float uwRatio = 0.5f;     // 그 렌즈의 배율(기본 렌즈 = 1)
+    private boolean usingUw;
+    private Preview preview;
 
     private ExecutorService io;
     private ProcessCameraProvider provider;
@@ -166,6 +188,9 @@ public class CustomCameraActivity extends AppCompatActivity {
         zoomLabel.setShadowLayer(4f, 0f, 0f, Color.BLACK);
         bottom.addView(zoomLabel, new LinearLayout.LayoutParams(-1, -2));
 
+        zoomSlider = new ZoomSlider();
+        bottom.addView(zoomSlider, new LinearLayout.LayoutParams(-1, dp(58)));
+
         zoomRow = new LinearLayout(this);
         zoomRow.setOrientation(LinearLayout.HORIZONTAL);
         zoomRow.setGravity(Gravity.CENTER);
@@ -207,8 +232,7 @@ public class CustomCameraActivity extends AppCompatActivity {
         ScaleGestureDetector pinch = new ScaleGestureDetector(this, new ScaleGestureDetector.SimpleOnScaleGestureListener() {
             @Override
             public boolean onScale(@NonNull ScaleGestureDetector d) {
-                ZoomState z = zoomState();
-                if (z != null) setZoom(z.getZoomRatio() * d.getScaleFactor());
+                setZoom(zoom * d.getScaleFactor());
                 return true;
             }
         });
@@ -284,53 +308,148 @@ public class CustomCameraActivity extends AppCompatActivity {
         future.addListener(() -> {
             try {
                 provider = future.get();
-                Preview preview = new Preview.Builder().build();
+                preview = new Preview.Builder().build();
                 preview.setSurfaceProvider(previewView.getSurfaceProvider());
                 imageCapture = new ImageCapture.Builder()
                     .setCaptureMode(ImageCapture.CAPTURE_MODE_MAXIMIZE_QUALITY)
                     .build();
-                provider.unbindAll();
-                camera = provider.bindToLifecycle(this, CameraSelector.DEFAULT_BACK_CAMERA, preview, imageCapture);
-                if (camera.getCameraInfo().hasFlashUnit()) torchButton.setVisibility(View.VISIBLE);
-                camera.getCameraInfo().getZoomState().observe(this, this::onZoomState);
+                bind();
             } catch (Exception e) {
                 fail("카메라를 열지 못했습니다: " + e.getMessage());
             }
         }, ContextCompat.getMainExecutor(this));
     }
 
-    private ZoomState zoomState() {
-        return camera == null ? null : camera.getCameraInfo().getZoomState().getValue();
+    /** 지금 배율에 맞는 렌즈(기본 / 따로 달린 초광각)를 건다. */
+    private void bind() {
+        try {
+            provider.unbindAll();
+            CameraSelector selector = usingUw && uwSelector != null ? uwSelector : CameraSelector.DEFAULT_BACK_CAMERA;
+            camera = provider.bindToLifecycle(this, selector, preview, imageCapture);
+        } catch (Exception e) {
+            if (usingUw) { // 초광각 렌즈를 못 걸면 기본 렌즈만 쓴다
+                usingUw = false;
+                uwSelector = null;
+                zoom = Math.max(1f, zoom);
+                bind();
+                rebuildZoomUi();
+                return;
+            }
+            fail("카메라를 열지 못했습니다: " + e.getMessage());
+            return;
+        }
+        final CameraInfo info = camera.getCameraInfo();
+        boolean flash = info.hasFlashUnit();
+        if (!flash) torchOn = false;
+        if (torchOn) camera.getCameraControl().enableTorch(true);
+        torchButton.setText(torchOn ? "플래시 켬" : "플래시 끔");
+        torchButton.setVisibility(flash && reviewBar.getVisibility() != View.VISIBLE ? View.VISIBLE : View.GONE);
+        readRange(info, info.getZoomState().getValue());
+        info.getZoomState().observe(this, z -> {
+            if (camera == null || camera.getCameraInfo() != info) return;
+            readRange(info, z);
+        });
+        applyZoom();
+    }
+
+    /** 걸린 렌즈의 줌 범위를 읽는다. 처음 기본 렌즈 범위를 알게 되면 초광각 렌즈를 찾고 줌 버튼을 만든다. */
+    private void readRange(CameraInfo info, ZoomState z) {
+        if (z == null) return;
+        boolean changed = Math.abs(camMin - z.getMinZoomRatio()) > 0.001f || Math.abs(camMax - z.getMaxZoomRatio()) > 0.001f;
+        camMin = z.getMinZoomRatio();
+        camMax = z.getMaxZoomRatio();
+        if (!usingUw && !mainRangeKnown) {
+            mainRangeKnown = true;
+            mainMin = camMin;
+            if (mainMin >= 0.95f) findUltraWide(info);
+            rebuildZoomUi();
+            applyZoom();
+        } else if (changed) {
+            applyZoom();
+        }
+    }
+
+    /** 기본 렌즈가 1배 미만 줌을 못 주는 기기: 뒤쪽 렌즈 중 화각이 더 넓은 것을 초광각으로 쓴다. */
+    @OptIn(markerClass = ExperimentalCamera2Interop.class)
+    private void findUltraWide(CameraInfo mainInfo) {
+        try {
+            Camera2CameraInfo main = Camera2CameraInfo.from(mainInfo);
+            float mainView = viewFactor(main);
+            if (mainView <= 0f) return;
+            float best = 0.9f;
+            for (CameraInfo ci : provider.getAvailableCameraInfos()) {
+                Camera2CameraInfo c = Camera2CameraInfo.from(ci);
+                if (c.getCameraId().equals(main.getCameraId())) continue;
+                Integer facing = c.getCameraCharacteristic(CameraCharacteristics.LENS_FACING);
+                if (facing == null || facing != CameraCharacteristics.LENS_FACING_BACK) continue;
+                float v = viewFactor(c);
+                if (v <= 0f) continue;
+                float ratio = v / mainView;
+                if (ratio < best) {
+                    best = ratio;
+                    uwSelector = ci.getCameraSelector();
+                    uwRatio = Math.max(0.4f, ratio);
+                }
+            }
+        } catch (Throwable ignored) { /* 못 찾으면 기본 렌즈만 */ }
+    }
+
+    /** 초점거리 ÷ 센서 너비 — 작을수록 넓게 찍힌다. */
+    @OptIn(markerClass = ExperimentalCamera2Interop.class)
+    private static float viewFactor(Camera2CameraInfo c) {
+        float[] f = c.getCameraCharacteristic(CameraCharacteristics.LENS_INFO_AVAILABLE_FOCAL_LENGTHS);
+        SizeF size = c.getCameraCharacteristic(CameraCharacteristics.SENSOR_INFO_PHYSICAL_SIZE);
+        if (f == null || f.length == 0 || size == null || size.getWidth() <= 0f) return 0f;
+        return f[0] / size.getWidth();
+    }
+
+    private float minZoom() {
+        if (mainMin < 0.95f) return mainMin;
+        return uwSelector != null ? uwRatio : 1f;
     }
 
     private void setZoom(float ratio) {
-        ZoomState z = zoomState();
-        if (z == null) return;
-        float r = Math.max(z.getMinZoomRatio(), Math.min(z.getMaxZoomRatio(), ratio));
-        camera.getCameraControl().setZoomRatio(r);
+        if (camera == null) return;
+        zoom = Math.max(minZoom(), Math.min(MAX_ZOOM, ratio));
+        applyZoom();
     }
 
-    private void onZoomState(ZoomState z) {
-        if (z == null) return;
-        if (!zoomChipsBuilt) {
-            zoomChipsBuilt = true;
-            float min = z.getMinZoomRatio();
-            float max = z.getMaxZoomRatio();
-            if (min < 0.95f) addZoomChip(min); // 광각(기기가 될 때만)
-            for (float s : ZOOM_STEPS) {
-                if (s >= min - 0.01f && s <= max + 0.01f) addZoomChip(s);
-            }
+    /** zoom 값을 렌즈 선택 + 기기 줌 + 가운데 자르기로 나눠 건다. */
+    private void applyZoom() {
+        if (camera == null) return;
+        zoom = Math.max(minZoom(), Math.min(MAX_ZOOM, zoom));
+        boolean wantUw = uwSelector != null && zoom < 0.999f;
+        if (wantUw != usingUw) {
+            usingUw = wantUw;
+            bind(); // 렌즈를 바꿔 건 뒤 다시 applyZoom
+            return;
         }
-        float cur = z.getZoomRatio();
-        zoomLabel.setText(ratioText(cur));
+        float want = usingUw ? zoom / uwRatio : zoom;
+        float cam = Math.max(camMin, Math.min(camMax, want));
+        extraCrop = Math.max(1f, want / cam);
+        camera.getCameraControl().setZoomRatio(cam);
+        previewView.setScaleX(extraCrop);
+        previewView.setScaleY(extraCrop);
+        zoomLabel.setText(ratioText(zoom));
+        zoomSlider.invalidate();
         for (int i = 0; i < zoomChips.size(); i++) {
-            boolean on = Math.abs(zoomChipValues.get(i) - cur) < 0.05f;
+            boolean on = Math.abs(zoomChipValues.get(i) - zoom) < 0.05f;
             GradientDrawable bg = new GradientDrawable();
             bg.setShape(GradientDrawable.OVAL);
             bg.setColor(on ? Color.rgb(250, 204, 21) : Color.argb(150, 0, 0, 0));
             zoomChips.get(i).setBackground(bg);
             zoomChips.get(i).setTextColor(on ? Color.BLACK : Color.WHITE);
         }
+    }
+
+    private void rebuildZoomUi() {
+        zoomRow.removeAllViews();
+        zoomChips.clear();
+        zoomChipValues.clear();
+        float min = minZoom();
+        if (min < 0.95f) addZoomChip(min); // 초광각(기기가 될 때만)
+        for (float s : ZOOM_STEPS) addZoomChip(s);
+        zoomSlider.invalidate();
     }
 
     private void addZoomChip(float value) {
@@ -340,12 +459,79 @@ public class CustomCameraActivity extends AppCompatActivity {
         chip.setTypeface(Typeface.DEFAULT_BOLD);
         chip.setGravity(Gravity.CENTER);
         chip.setOnClickListener(v -> setZoom(value));
-        LinearLayout.LayoutParams lp = new LinearLayout.LayoutParams(dp(54), dp(54));
-        lp.leftMargin = dp(6);
-        lp.rightMargin = dp(6);
+        LinearLayout.LayoutParams lp = new LinearLayout.LayoutParams(dp(50), dp(50));
+        lp.leftMargin = dp(5);
+        lp.rightMargin = dp(5);
         zoomRow.addView(chip, lp);
         zoomChips.add(chip);
         zoomChipValues.add(value);
+    }
+
+    /** 줌 막대: 좌우로 끌면 배율이 부드럽게 바뀐다(왼쪽 끝 = 가장 넓게, 오른쪽 끝 = 15배, 배수 간격이 고르게). */
+    private class ZoomSlider extends View {
+        private final Paint paint = new Paint(Paint.ANTI_ALIAS_FLAG);
+        private final float[] marks = { 1f, 2f, 5f, 10f, 15f };
+
+        ZoomSlider() {
+            super(CustomCameraActivity.this);
+            setContentDescription("줌 막대");
+        }
+
+        private float pad() { return dp(28); }
+
+        private float xOf(float ratio) {
+            float min = minZoom();
+            float t = (float) (Math.log(ratio / min) / Math.log(MAX_ZOOM / min));
+            return pad() + Math.max(0f, Math.min(1f, t)) * (getWidth() - 2 * pad());
+        }
+
+        @Override
+        protected void onDraw(@NonNull Canvas c) {
+            float cy = dp(18);
+            paint.setStyle(Paint.Style.STROKE);
+            paint.setStrokeCap(Paint.Cap.ROUND);
+            paint.setStrokeWidth(dp(8));
+            paint.setColor(Color.argb(120, 0, 0, 0));
+            c.drawLine(pad(), cy, getWidth() - pad(), cy, paint);
+            paint.setStrokeWidth(dp(4));
+            paint.setColor(Color.argb(230, 255, 255, 255));
+            c.drawLine(pad(), cy, getWidth() - pad(), cy, paint);
+            paint.setStyle(Paint.Style.FILL);
+            paint.setTextAlign(Paint.Align.CENTER);
+            paint.setTextSize(dp(11));
+            paint.setShadowLayer(4f, 0f, 0f, Color.BLACK);
+            float min = minZoom();
+            if (min < 0.95f) drawMark(c, min, cy);
+            for (float m : marks) drawMark(c, m, cy);
+            paint.clearShadowLayer();
+            float x = xOf(zoom);
+            paint.setColor(Color.argb(140, 0, 0, 0));
+            c.drawCircle(x, cy, dp(14), paint);
+            paint.setColor(Color.rgb(250, 204, 21));
+            c.drawCircle(x, cy, dp(11), paint);
+        }
+
+        private void drawMark(Canvas c, float ratio, float cy) {
+            float x = xOf(ratio);
+            paint.setColor(Color.WHITE);
+            c.drawCircle(x, cy, dp(3), paint);
+            c.drawText(ratioText(ratio), x, cy + dp(28), paint);
+        }
+
+        @SuppressLint("ClickableViewAccessibility")
+        @Override
+        public boolean onTouchEvent(MotionEvent e) {
+            int a = e.getActionMasked();
+            if (a == MotionEvent.ACTION_DOWN || a == MotionEvent.ACTION_MOVE) {
+                if (getParent() != null) getParent().requestDisallowInterceptTouchEvent(true);
+                float w = getWidth() - 2 * pad();
+                if (w <= 0) return true;
+                float t = Math.max(0f, Math.min(1f, (e.getX() - pad()) / w));
+                float min = minZoom();
+                setZoom((float) (min * Math.pow(MAX_ZOOM / min, t)));
+            }
+            return true;
+        }
     }
 
     private static String ratioText(float r) {
@@ -374,6 +560,7 @@ public class CustomCameraActivity extends AppCompatActivity {
     private void shoot() {
         if (imageCapture == null || busy || reviewBar.getVisibility() == View.VISIBLE) return;
         busy = true;
+        extraCropAtShot = extraCrop;
         shutter.setAlpha(0.4f);
         imageCapture.takePicture(io, new ImageCapture.OnImageCapturedCallback() {
             @Override
@@ -405,19 +592,25 @@ public class CustomCameraActivity extends AppCompatActivity {
         BitmapFactory.Options bounds = new BitmapFactory.Options();
         bounds.inJustDecodeBounds = true;
         BitmapFactory.decodeByteArray(bytes, 0, bytes.length, bounds);
-        int srcLong = Math.max(bounds.outWidth, bounds.outHeight);
+        float crop = Math.max(1f, extraCropAtShot);
+        int srcLong = Math.round(Math.max(bounds.outWidth, bounds.outHeight) / crop);
         int sample = 1;
         while (srcLong / (sample * 2) >= longEdge) sample *= 2;
         BitmapFactory.Options opt = new BitmapFactory.Options();
         opt.inSampleSize = sample;
         Bitmap raw = BitmapFactory.decodeByteArray(bytes, 0, bytes.length, opt);
         if (raw == null) throw new IllegalStateException("사진을 읽지 못했습니다");
+        // 기기 줌 한계를 넘은 배율만큼 가운데를 자른다(미리보기와 같은 범위)
+        int cw = Math.max(1, Math.round(raw.getWidth() / crop));
+        int ch = Math.max(1, Math.round(raw.getHeight() / crop));
+        int cx = (raw.getWidth() - cw) / 2;
+        int cy = (raw.getHeight() - ch) / 2;
         Matrix m = new Matrix();
-        float scale = longEdge / (float) Math.max(raw.getWidth(), raw.getHeight());
+        float scale = longEdge / (float) Math.max(cw, ch);
         if (scale < 1f) m.postScale(scale, scale);
         if (rotation != 0) m.postRotate(rotation);
-        if (m.isIdentity()) return raw;
-        Bitmap out = Bitmap.createBitmap(raw, 0, 0, raw.getWidth(), raw.getHeight(), m, true);
+        if (m.isIdentity() && crop <= 1f) return raw;
+        Bitmap out = Bitmap.createBitmap(raw, cx, cy, cw, ch, m, true);
         if (out != raw) raw.recycle();
         return out;
     }
@@ -454,6 +647,7 @@ public class CustomCameraActivity extends AppCompatActivity {
         captureBar.setVisibility(review ? View.GONE : View.VISIBLE);
         zoomRow.setVisibility(review ? View.GONE : View.VISIBLE);
         zoomLabel.setVisibility(review ? View.GONE : View.VISIBLE);
+        zoomSlider.setVisibility(review ? View.GONE : View.VISIBLE);
         posButton.setVisibility(review ? View.GONE : View.VISIBLE);
         torchButton.setVisibility(!review && camera != null && camera.getCameraInfo().hasFlashUnit() ? View.VISIBLE : View.GONE);
     }
