@@ -3962,6 +3962,8 @@
         if (target.closest('#bsaSelectSheet')) return true;
         // 2026-11-10 사진 크게 보기 창도 body에 붙는다 — 사진을 끌거나 단추를 누를 때 수정창이 닫히지 않게
         if (target.closest('#bsaPhotoViewer')) return true;
+        // 2026-11-10 사진 위에 그리기 창도 수정창 밖 형제 요소다 — 그리려고 누르는 순간 수정창이 닫히지 않게
+        if (target.closest('#photoAnnotationModal')) return true;
         if (target.closest('#defectMarkingMemberFloat')) return true;
         if (target.closest('#mobileMapDock')) return true;
         if (target.closest('.defect-list-item')) return true; // 목록에서 다른 결함 열기

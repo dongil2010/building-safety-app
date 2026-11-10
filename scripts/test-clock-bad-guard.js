@@ -2,7 +2,7 @@
 'use strict';
 /**
  * 2026-11-10 날짜가 크게 틀린 기기 방어.
- * - 서버와 7일 넘게 다르면 「틀림」으로 판정해 동기화 쓰기를 멈춘다(예전엔 보정만 포기하고 그대로 동기화).
+ * - 서버와 1일 넘게 다르면 「틀림」으로 판정해 동기화 쓰기를 멈춘다(예전엔 보정만 포기하고 그대로 동기화).
  * - 휴지통 30일 만료는 서버 시계 보정값 기준, 자동 영구 삭제 직전에 서버 시계를 다시 확인(틀림·확인 실패면 미룸).
  * - 휴지통에 넣은 날짜를 못 읽으면 만료로 보지 않는다.
  */
@@ -14,6 +14,10 @@ const ROOT = path.join(__dirname, '..');
 const app = fs.readFileSync(path.join(ROOT, 'app.js'), 'utf8');
 
 const DAY = 24 * 3600 * 1000;
+const HOUR = 3600 * 1000;
+// 기준값은 앱 코드에서 읽는다(숫자를 테스트에 따로 적어 두면 앱만 바뀌어도 통과해 버린다)
+const MAX_OFFSET_MS = Function('return ' + app.match(/const BSA_CLOCK_MAX_OFFSET_MS = ([0-9 *]+);/)[1])();
+assert.strictEqual(MAX_OFFSET_MS, DAY, '기준은 1일');
 const fns = [
     'function bsaSyncNow(', 'function bsaClockStatus(', 'function classifyClockOffset(', 'function noteClockMeasureFailed(',
     'async function measureServerClockOffset(', 'async function isDeviceClockBadForSync(', 'async function checkClockBeforePurge(',
@@ -32,7 +36,7 @@ function makeApp(env) {
     };
     const body = `
         let _bsaClockMeasuredAt = 0;
-        const BSA_CLOCK_MAX_OFFSET_MS = 7 * 24 * 3600 * 1000;
+        const BSA_CLOCK_MAX_OFFSET_MS = ${MAX_OFFSET_MS};
         const BUILDING_TRASH_RETENTION_MS = 30 * 24 * 60 * 60 * 1000;
         let _bsaClockStatus = 'unknown';
         let _bsaClockBadLogged = false;
@@ -59,8 +63,9 @@ const ago = (ms) => new Date(Date.now() - ms).toISOString();
     {
         const A = makeApp(newEnv());
         assert.deepStrictEqual(A.classifyClockOffset(500), { status: 'ok', offset: 0, badMs: 0 }, '2초 안쪽은 보정 안 함');
-        assert.strictEqual(A.classifyClockOffset(-3 * DAY).offset, -3 * DAY, '7일 안쪽은 보정');
-        assert.strictEqual(A.classifyClockOffset(-8 * DAY).status, 'bad', '7일 넘으면 틀림');
+        assert.strictEqual(A.classifyClockOffset(-3 * HOUR).offset, -3 * HOUR, '1일 안쪽은 보정');
+        assert.strictEqual(A.classifyClockOffset(23 * HOUR).status, 'ok', '23시간은 보정 범위');
+        assert.strictEqual(A.classifyClockOffset(-25 * HOUR).status, 'bad', '1일 넘으면 틀림');
         assert.strictEqual(A.classifyClockOffset(40 * DAY, true).status, 'bad', '느린 응답이어도 7일 넘는 차이는 판정');
         assert.strictEqual(A.classifyClockOffset(5000, true).status, 'fail', '느린 응답은 정밀 보정에 안 씀');
         assert.strictEqual(A.classifyClockOffset(NaN).status, 'fail');
@@ -121,11 +126,11 @@ const ago = (ms) => new Date(Date.now() - ms).toISOString();
         env.fetchMode = 'ok';
         assert.strictEqual(await A.purge(), 1, '다음에 확인되면 지움');
     }
-    // 7) 휴지통: 기기가 2일 앞섬(보정 범위) → 실제로는 29일째인 건물은 아직 지우지 않는다
+    // 7) 휴지통: 기기가 12시간 앞섬(보정 범위) → 실제로는 30일이 안 된 건물은 아직 지우지 않는다
     {
-        const env = newEnv({ serverSkewMs: -2 * DAY, trash: [{ id: 'd29', trashedAt: ago(31 * DAY) }] });
+        const env = newEnv({ serverSkewMs: -12 * HOUR, trash: [{ id: 'd29', trashedAt: ago(30 * DAY + 6 * HOUR) }] });
         const A = makeApp(env);
-        assert.strictEqual(await A.purge(), 0, '보정값 기준으로는 아직 29일');
+        assert.strictEqual(await A.purge(), 0, '보정값 기준으로는 아직 30일 전');
         assert.ok(A.getBuildingTrashRemainingMs(env.trash[0]) > 0);
     }
     // 8) 휴지통에 넣은 날짜를 못 읽으면 만료가 아니다

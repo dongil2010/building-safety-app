@@ -4301,7 +4301,7 @@
             renderOutdatedAppBanner(true);
             return;
         }
-        // 2026-11-10 기기 날짜가 서버와 7일 넘게 다르면 쓰지 않는다 — 수정·삭제 시각이 틀리게 찍혀 남의 수정을 계속 이기거나 밀린다.
+        // 2026-11-10 기기 날짜가 서버와 1일 넘게 다르면 쓰지 않는다 — 수정·삭제 시각이 틀리게 찍혀 남의 수정을 계속 이기거나 밀린다.
         // 안내 띠가 뜨고, 날짜를 맞추면 다음 동기화부터 저절로 풀린다. 변경은 기기에 남는다.
         if (await isDeviceClockBadForSync()) return;
         if (isRemoteSyncing || _syncInFlight) {

@@ -4855,18 +4855,18 @@ document.addEventListener('DOMContentLoaded', () => {
     window.bsaSyncNow = bsaSyncNow;
     window.bsaStampAfter = bsaStampAfter;
     let _bsaClockMeasuredAt = 0;
-    // 2026-11-10 기기 날짜가 서버와 7일 넘게 다르면(보정 범위 밖) 예전엔 그냥 무시하고 그대로 동기화했다 — 그 기기의 수정·삭제 시각이
+    // 2026-11-10 기기 날짜가 서버와 1일 넘게 다르면(보정 범위 밖) 예전엔 그냥 무시하고 그대로 동기화했다 — 그 기기의 수정·삭제 시각이
     // 「가장 나중」으로 찍혀 다른 사람 수정을 계속 이기고(늦은 날짜면 계속 밀리고), 휴지통 30일 만료도 틀리게 계산된다.
     // 이제 그 차이를 기억해 두고(__bsaClockBadMs) 동기화 쓰기·휴지통 자동 삭제를 멈춘 뒤 날짜를 맞추라고 안내한다. 맞추면 저절로 풀린다.
-    const BSA_CLOCK_MAX_OFFSET_MS = 7 * 24 * 3600 * 1000;
+    const BSA_CLOCK_MAX_OFFSET_MS = 24 * 3600 * 1000;   // 처음엔 7일(옛 보정 한계)이었다가 같은 날 1일로 좁힘 — 하루 넘게 틀리면 자동 시간이 꺼진 기기
     window.__bsaClockBadMs = 0;
-    // 'unknown' 아직 안 잼 · 'ok' · 'bad' 7일 넘게 다름 · 'fail' 이번에 못 잼(다음에 다시) · 'na' 잴 수 없는 환경(파일로 연 개발 화면 등)
+    // 'unknown' 아직 안 잼 · 'ok' · 'bad' 1일 넘게 다름 · 'fail' 이번에 못 잼(다음에 다시) · 'na' 잴 수 없는 환경(파일로 연 개발 화면 등)
     let _bsaClockStatus = 'unknown';
     let _bsaClockBadLogged = false;
     let _bsaClockRecheckAt = 0;
     function bsaClockStatus() { return _bsaClockStatus; }
     window.bsaClockStatus = bsaClockStatus;
-    /** 잰 차이(ms, 서버 − 기기) 분류. slow: 응답이 느려 정밀 보정엔 못 쓰는 값(그래도 7일 넘는 차이는 판정한다) */
+    /** 잰 차이(ms, 서버 − 기기) 분류. slow: 응답이 느려 정밀 보정엔 못 쓰는 값(그래도 1일 넘는 차이는 판정한다) */
     function classifyClockOffset(off, slow) {
         const n = Number(off);
         if (!Number.isFinite(n)) return { status: 'fail', offset: 0, badMs: 0 };
@@ -4925,7 +4925,7 @@ document.addEventListener('DOMContentLoaded', () => {
             if (c.status === 'bad') {
                 _bsaClockStatus = 'bad';
                 window.__bsaClockBadMs = c.badMs;
-                console.warn('[시계] 기기 날짜가 서버와 7일 넘게 다릅니다 — 클라우드 동기화를 멈춥니다', c.badMs, 'ms');
+                console.warn('[시계] 기기 날짜가 서버와 1일 넘게 다릅니다 — 클라우드 동기화를 멈춥니다', c.badMs, 'ms');
                 renderClockBadBanner(true);
                 if (!_bsaClockBadLogged) {
                     _bsaClockBadLogged = true;

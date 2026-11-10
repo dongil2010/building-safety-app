@@ -71,193 +71,145 @@
     }
 
     // --- 3. 현장 사진 2차 주석(드로잉) 모달 엔진 ---
+    // 2026-11-10 「찍은 사진 눌러보면 그리기 기능 있는데 화면 제일 큰 상태에서 그리기 실행되게」
+    //  - 창은 화면 가득(index.html #photoAnnotationModal, styles.css .photo-annot-*), 사진은 남은 자리에 꽉 차게.
+    //  - 캔버스 해상도 = 사진 원래 크기(긴 변은 현장 사진 규격 2000까지). 예전엔 860×550으로 줄여 그려서
+    //    크게 띄우면 흐리고, 저장하면 사진이 작아졌다. 보이는 크기는 style(width/height)로만 정하고
+    //    좌표는 늘 「캔버스 크기 ÷ 보이는 크기」로 환산한다(photoAnnotPoint) — 화면을 돌려도 어긋나지 않는다.
+    //  - 선 굵기·글자 크기는 캔버스가 커진 만큼 키운다(photoAnnotStrokeScale) — 출력물에서 예전과 같은 굵기.
+    //  - 그린 것은 목록(annotationOps)으로 들고 다시 그린다 — 큰 캔버스에서도 되돌리기·미리보기가 가볍다.
+    const PHOTO_ANNOT_OLD_MAX_W = 860;
+    const PHOTO_ANNOT_OLD_MAX_H = 550;
+
+    /** 그리기 캔버스 크기: 사진 원래 크기 그대로, 긴 변이 maxEdge를 넘을 때만 줄인다 */
+    function photoAnnotCanvasSize(iw, ih, maxEdge) {
+        let w = Math.round(Number(iw) || 0);
+        let h = Math.round(Number(ih) || 0);
+        if (!(w > 0 && h > 0)) return { w: 1, h: 1 };
+        const cap = Number(maxEdge) > 0 ? Number(maxEdge) : 2000;
+        const long = Math.max(w, h);
+        if (long > cap) {
+            const r = cap / long;
+            w = Math.max(1, Math.round(w * r));
+            h = Math.max(1, Math.round(h * r));
+        }
+        return { w, h };
+    }
+
+    /** 화면에 보이는 크기: 비율을 지키며 남은 자리(W×H)에 가장 크게(작은 사진은 키운다) */
+    function photoAnnotFitSize(cw, ch, W, H) {
+        if (!(cw > 0 && ch > 0 && W > 0 && H > 0)) return null;
+        const s = Math.min(W / cw, H / ch);
+        return { w: Math.max(1, Math.floor(cw * s)), h: Math.max(1, Math.floor(ch * s)) };
+    }
+
+    /** 굵기 배율: 예전 창이 860×550으로 줄이던 비율의 역수(그보다 작은 사진은 1) */
+    function photoAnnotStrokeScale(cw, ch) {
+        if (!(cw > 0 && ch > 0)) return 1;
+        return Math.max(1, cw / PHOTO_ANNOT_OLD_MAX_W, ch / PHOTO_ANNOT_OLD_MAX_H);
+    }
+
+    /** 화면 좌표 → 캔버스 좌표 (rect = 캔버스가 화면에 보이는 자리) */
+    function photoAnnotPoint(clientX, clientY, rect, cw, ch) {
+        const rw = rect && rect.width > 0 ? rect.width : cw;
+        const rh = rect && rect.height > 0 ? rect.height : ch;
+        const left = rect ? rect.left : 0;
+        const top = rect ? rect.top : 0;
+        return { x: (clientX - left) * (cw / rw), y: (clientY - top) * (ch / rh) };
+    }
+
     let annotationCanvas = null;
     let annotationCtx = null;
     let currentAnnotationTool = 'pen';
-    let annotationHistory = [];
-    let isDrawingAnnotation = false;
-    let startX = 0, startY = 0;
-    let tempCanvasState = null;
+    let annotationOps = [];        // 확정된 그림 목록
+    let annotationDraft = null;    // 지금 그리는 중인 것
+    let annotationPointerId = null;
+    let annotationBase = null;     // 사진 + 확정된 그림(화면 밖 캔버스) — 저장도 이걸로
+    let annotationBaseCtx = null;
+    let annotationOpenSeq = 0;
     let basePhotoImg = null;
     let targetPhotoCallback = null;
 
-    window.openPhotoAnnotationModal = function(photoDataUrl, callback) {
-        targetPhotoCallback = callback;
+    function isPhotoAnnotationModalOpen() {
         const modal = document.getElementById('photoAnnotationModal');
-        if (!modal) return;
+        return !!(modal && modal.classList.contains('open'));
+    }
+    window.isPhotoAnnotationModalOpen = isPhotoAnnotationModalOpen;
+
+    function closePhotoAnnotationModal() {
+        const modal = document.getElementById('photoAnnotationModal');
+        if (modal) {
+            modal.style.display = 'none';
+            modal.classList.remove('open');
+        }
+        annotationOpenSeq++;
+        targetPhotoCallback = null;
+        annotationOps = [];
+        annotationDraft = null;
+        annotationPointerId = null;
+        annotationBase = null;
+        annotationBaseCtx = null;
+        basePhotoImg = null;
+        // 큰 캔버스가 잡고 있던 메모리를 돌려준다
+        if (annotationCanvas) { annotationCanvas.width = 1; annotationCanvas.height = 1; }
+    }
+    window.closePhotoAnnotationModal = closePhotoAnnotationModal;
+
+    window.openPhotoAnnotationModal = function(photoDataUrl, callback) {
+        const modal = document.getElementById('photoAnnotationModal');
+        const canvas = document.getElementById('annotationCanvas');
+        if (!modal || !canvas || !photoDataUrl) return;
+
+        targetPhotoCallback = callback;
+        annotationCanvas = canvas;
+        annotationCtx = canvas.getContext('2d');
+        annotationOps = [];
+        annotationDraft = null;
+        annotationPointerId = null;
+        annotationBase = null;
+        annotationBaseCtx = null;
+        basePhotoImg = null;
+        canvas.width = 1;
+        canvas.height = 1;
+        canvas.style.width = '';
+        canvas.style.height = '';
 
         modal.style.display = 'flex';
         modal.classList.add('open');
+        try { if (document.activeElement && document.activeElement.blur) document.activeElement.blur(); } catch (_e) { /* ignore */ }
 
-        annotationCanvas = document.getElementById('annotationCanvas');
-        if (!annotationCanvas) return;
-        annotationCtx = annotationCanvas.getContext('2d');
-
-        basePhotoImg = new Image();
-        basePhotoImg.onload = function() {
-            let w = basePhotoImg.width;
-            let h = basePhotoImg.height;
-            const maxW = 860, maxH = 550;
-            if (w > maxW || h > maxH) {
-                const ratio = Math.min(maxW / w, maxH / h);
-                w = Math.round(w * ratio);
-                h = Math.round(h * ratio);
-            }
-            annotationCanvas.width = w;
-            annotationCanvas.height = h;
-
-            redrawAnnotationCanvas();
-            annotationHistory = [];
-            saveAnnotationHistory();
+        const seq = ++annotationOpenSeq;
+        const img = new Image();
+        img.onload = function() {
+            if (seq !== annotationOpenSeq) return; // 그 사이 닫았거나 다른 사진을 열었다
+            basePhotoImg = img;
+            const maxEdge = typeof window.getPhotoLongEdge === 'function' ? window.getPhotoLongEdge() : 2000;
+            const size = photoAnnotCanvasSize(img.naturalWidth || img.width, img.naturalHeight || img.height, maxEdge);
+            canvas.width = size.w;
+            canvas.height = size.h;
+            annotationBase = document.createElement('canvas');
+            annotationBase.width = size.w;
+            annotationBase.height = size.h;
+            annotationBaseCtx = annotationBase.getContext('2d');
+            rebuildAnnotationBase();
+            fitAnnotationCanvas();
         };
-        basePhotoImg.src = photoDataUrl;
+        img.onerror = function() {
+            if (seq !== annotationOpenSeq) return;
+            closePhotoAnnotationModal();
+            window.showToast?.('사진을 불러오지 못해 그리기를 열 수 없습니다.', 'error', 4000);
+        };
+        img.src = photoDataUrl;
     };
 
-    function saveAnnotationHistory() {
-        if (!annotationCanvas) return;
-        if (annotationHistory.length > 20) annotationHistory.shift();
-        annotationHistory.push(annotationCanvas.toDataURL());
-    }
-
-    function redrawAnnotationCanvas() {
-        if (!annotationCtx || !basePhotoImg) return;
-        annotationCtx.clearRect(0, 0, annotationCanvas.width, annotationCanvas.height);
-        annotationCtx.drawImage(basePhotoImg, 0, 0, annotationCanvas.width, annotationCanvas.height);
-    }
-
-    function initPhotoAnnotationEvents() {
-        const canvas = document.getElementById('annotationCanvas');
-        if (!canvas) return;
-
-        const getPos = (e) => {
-            const rect = canvas.getBoundingClientRect();
-            const clientX = e.touches ? e.touches[0].clientX : e.clientX;
-            const clientY = e.touches ? e.touches[0].clientY : e.clientY;
-            return {
-                x: (clientX - rect.left) * (canvas.width / rect.width),
-                y: (clientY - rect.top) * (canvas.height / rect.height)
-            };
-        };
-
-        const startDraw = (e) => {
-            isDrawingAnnotation = true;
-            const pos = getPos(e);
-            startX = pos.x;
-            startY = pos.y;
-            tempCanvasState = annotationCtx.getImageData(0, 0, canvas.width, canvas.height);
-
-            if (currentAnnotationTool === 'pen') {
-                annotationCtx.beginPath();
-                annotationCtx.moveTo(startX, startY);
-            }
-        };
-
-        const moveDraw = (e) => {
-            if (!isDrawingAnnotation) return;
-            const pos = getPos(e);
-            const color = document.getElementById('annotationColorPicker')?.value || '#ef4444';
-            const lineWidth = parseInt(document.getElementById('annotationLineWidth')?.value || '4');
-
-            annotationCtx.strokeStyle = color;
-            annotationCtx.fillStyle = color;
-            annotationCtx.lineWidth = lineWidth;
-            annotationCtx.lineCap = 'round';
-            annotationCtx.lineJoin = 'round';
-
-            if (currentAnnotationTool === 'pen') {
-                annotationCtx.lineTo(pos.x, pos.y);
-                annotationCtx.stroke();
-            } else if (currentAnnotationTool === 'arrow') {
-                annotationCtx.putImageData(tempCanvasState, 0, 0);
-                drawArrowOnCtx(annotationCtx, startX, startY, pos.x, pos.y, lineWidth, color);
-            } else if (currentAnnotationTool === 'circle') {
-                annotationCtx.putImageData(tempCanvasState, 0, 0);
-                const radius = Math.sqrt(Math.pow(pos.x - startX, 2) + Math.pow(pos.y - startY, 2));
-                annotationCtx.beginPath();
-                annotationCtx.arc(startX, startY, radius, 0, 2 * Math.PI);
-                annotationCtx.stroke();
-            }
-        };
-
-        const endDraw = async (e) => {
-            if (!isDrawingAnnotation) return;
-            isDrawingAnnotation = false;
-            if (currentAnnotationTool === 'text') {
-                const pos = getPos(e);
-                const text = await window.appPrompt('사진 위에 입력할 결함 설명 문구를 입력하세요:', '손상 부위');
-                if (text) {
-                    const color = document.getElementById('annotationColorPicker')?.value || '#ef4444';
-                    const fontSize = parseInt(document.getElementById('annotationLineWidth')?.value || '4') * 3 + 12;
-                    annotationCtx.font = `bold ${fontSize}px "Pretendard", "Malgun Gothic", "맑은 고딕", sans-serif`;
-                    annotationCtx.fillStyle = color;
-                    annotationCtx.strokeStyle = '#000000';
-                    annotationCtx.lineWidth = 3;
-                    annotationCtx.strokeText(text, pos.x, pos.y);
-                    annotationCtx.fillText(text, pos.x, pos.y);
-                }
-            }
-            saveAnnotationHistory();
-        };
-
-        canvas.addEventListener('mousedown', startDraw);
-        canvas.addEventListener('mousemove', moveDraw);
-        canvas.addEventListener('mouseup', endDraw);
-        canvas.addEventListener('touchstart', startDraw, { passive: true });
-        canvas.addEventListener('touchmove', moveDraw, { passive: true });
-        canvas.addEventListener('touchend', endDraw);
-
-        document.querySelectorAll('.annotation-tool-btn').forEach(btn => {
-            btn.addEventListener('click', () => {
-                document.querySelectorAll('.annotation-tool-btn').forEach(b => b.classList.remove('active'));
-                btn.classList.add('active');
-                currentAnnotationTool = btn.dataset.tool || 'pen';
-            });
-        });
-
-        document.getElementById('btnUndoAnnotation')?.addEventListener('click', () => {
-            if (annotationHistory.length > 1) {
-                annotationHistory.pop();
-                const prevState = annotationHistory[annotationHistory.length - 1];
-                const img = new Image();
-                img.onload = () => {
-                    annotationCtx.clearRect(0, 0, canvas.width, canvas.height);
-                    annotationCtx.drawImage(img, 0, 0);
-                };
-                img.src = prevState;
-            } else {
-                redrawAnnotationCanvas();
-            }
-        });
-
-        document.getElementById('btnClearAnnotation')?.addEventListener('click', async () => {
-            if (!await window.confirmDelete('사진 위 마킹을 모두 지울까요?')) return;
-            redrawAnnotationCanvas();
-            saveAnnotationHistory();
-        });
-
-        const closeBtn = document.getElementById('btnClosePhotoAnnotationModal');
-        const cancelBtn = document.getElementById('btnCancelPhotoAnnotation');
-        const saveBtn = document.getElementById('btnSavePhotoAnnotation');
-
-        const closeModal = () => {
-            const modal = document.getElementById('photoAnnotationModal');
-            if (modal) {
-                modal.style.display = 'none';
-                modal.classList.remove('open');
-            }
-        };
-
-        if (closeBtn) closeBtn.addEventListener('click', closeModal);
-        if (cancelBtn) cancelBtn.addEventListener('click', closeModal);
-        if (saveBtn) {
-            saveBtn.addEventListener('click', () => {
-                if (annotationCanvas && typeof targetPhotoCallback === 'function') {
-                    const annotatedDataUrl = annotationCanvas.toDataURL('image/jpeg', 0.85);
-                    targetPhotoCallback(annotatedDataUrl);
-                }
-                closeModal();
-            });
-        }
+    /** 사진(캔버스)을 남은 자리에 꽉 차게 — 창을 열 때, 화면 크기·방향이 바뀔 때 */
+    function fitAnnotationCanvas() {
+        const stage = document.getElementById('photoAnnotationStage');
+        if (!annotationCanvas || !stage || !basePhotoImg) return;
+        const size = photoAnnotFitSize(annotationCanvas.width, annotationCanvas.height, stage.clientWidth, stage.clientHeight);
+        if (!size) return;
+        annotationCanvas.style.width = size.w + 'px';
+        annotationCanvas.style.height = size.h + 'px';
     }
 
     function drawArrowOnCtx(ctx, fromX, fromY, toX, toY, width, color) {
@@ -276,6 +228,217 @@
         ctx.closePath();
         ctx.fillStyle = color;
         ctx.fill();
+    }
+
+    function drawAnnotationOp(ctx, op) {
+        if (!ctx || !op) return;
+        ctx.save();
+        ctx.strokeStyle = op.color;
+        ctx.fillStyle = op.color;
+        ctx.lineWidth = op.width;
+        ctx.lineCap = 'round';
+        ctx.lineJoin = 'round';
+        if (op.tool === 'pen') {
+            const pts = op.pts || [];
+            if (pts.length === 1) {
+                ctx.beginPath();
+                ctx.arc(pts[0].x, pts[0].y, op.width / 2, 0, 2 * Math.PI);
+                ctx.fill();
+            } else if (pts.length > 1) {
+                ctx.beginPath();
+                ctx.moveTo(pts[0].x, pts[0].y);
+                for (let i = 1; i < pts.length; i++) ctx.lineTo(pts[i].x, pts[i].y);
+                ctx.stroke();
+            }
+        } else if (op.tool === 'arrow') {
+            drawArrowOnCtx(ctx, op.x1, op.y1, op.x2, op.y2, op.width, op.color);
+        } else if (op.tool === 'circle') {
+            ctx.beginPath();
+            ctx.arc(op.x1, op.y1, Math.hypot(op.x2 - op.x1, op.y2 - op.y1), 0, 2 * Math.PI);
+            ctx.stroke();
+        } else if (op.tool === 'text') {
+            ctx.font = `bold ${op.size}px "Pretendard", "Malgun Gothic", "맑은 고딕", sans-serif`;
+            ctx.strokeStyle = '#000000';
+            ctx.lineWidth = op.width;
+            ctx.strokeText(op.text, op.x, op.y);
+            ctx.fillText(op.text, op.x, op.y);
+        }
+        ctx.restore();
+    }
+
+    /** 사진 + 확정된 그림을 화면 밖 캔버스에 다시 그리고 화면에 옮긴다 */
+    function rebuildAnnotationBase() {
+        if (!annotationBaseCtx || !basePhotoImg) return;
+        annotationBaseCtx.clearRect(0, 0, annotationBase.width, annotationBase.height);
+        annotationBaseCtx.drawImage(basePhotoImg, 0, 0, annotationBase.width, annotationBase.height);
+        annotationOps.forEach((op) => drawAnnotationOp(annotationBaseCtx, op));
+        showAnnotationBase();
+    }
+
+    function showAnnotationBase() {
+        if (!annotationCtx || !annotationBase) return;
+        annotationCtx.clearRect(0, 0, annotationCanvas.width, annotationCanvas.height);
+        annotationCtx.drawImage(annotationBase, 0, 0);
+    }
+
+    function commitAnnotationOp(op) {
+        if (!op || !annotationBaseCtx) return;
+        annotationOps.push(op);
+        drawAnnotationOp(annotationBaseCtx, op);
+        showAnnotationBase();
+    }
+
+    function undoPhotoAnnotation() {
+        if (annotationDraft || !annotationOps.length) return;
+        annotationOps.pop();
+        rebuildAnnotationBase();
+    }
+
+    function initPhotoAnnotationEvents() {
+        const canvas = document.getElementById('annotationCanvas');
+        if (!canvas) return;
+
+        const getPos = (e) => photoAnnotPoint(e.clientX, e.clientY, canvas.getBoundingClientRect(), canvas.width, canvas.height);
+        const currentStyle = () => {
+            const scale = photoAnnotStrokeScale(canvas.width, canvas.height);
+            const slider = parseInt(document.getElementById('annotationLineWidth')?.value || '4', 10) || 4;
+            return {
+                color: document.getElementById('annotationColorPicker')?.value || '#ef4444',
+                width: slider * scale,
+                textSize: Math.round((slider * 3 + 12) * scale),
+                textOutline: 3 * scale
+            };
+        };
+
+        const startDraw = (e) => {
+            if (!annotationBase || annotationPointerId !== null) return; // 사진을 아직 못 불렀거나, 이미 다른 손가락으로 그리는 중
+            if (e.pointerType === 'mouse' && e.button !== 0) return;
+            e.preventDefault();
+            annotationPointerId = e.pointerId;
+            try { canvas.setPointerCapture(e.pointerId); } catch (_e) { /* ignore */ }
+            const pos = getPos(e);
+            const style = currentStyle();
+            if (currentAnnotationTool === 'pen') {
+                annotationDraft = { tool: 'pen', color: style.color, width: style.width, pts: [pos] };
+            } else if (currentAnnotationTool === 'arrow' || currentAnnotationTool === 'circle') {
+                annotationDraft = { tool: currentAnnotationTool, color: style.color, width: style.width, x1: pos.x, y1: pos.y, x2: pos.x, y2: pos.y };
+            } else {
+                annotationDraft = { tool: 'text' }; // 글자는 손을 뗀 자리에 넣는다
+            }
+        };
+
+        const moveDraw = (e) => {
+            const d = annotationDraft;
+            if (!d || e.pointerId !== annotationPointerId) return;
+            e.preventDefault();
+            const pos = getPos(e);
+            if (d.tool === 'pen') {
+                // 자유선은 늘어난 마디만 덧그린다(움직일 때마다 전체를 다시 그리지 않게)
+                const last = d.pts[d.pts.length - 1];
+                d.pts.push(pos);
+                annotationCtx.save();
+                annotationCtx.strokeStyle = d.color;
+                annotationCtx.lineWidth = d.width;
+                annotationCtx.lineCap = 'round';
+                annotationCtx.lineJoin = 'round';
+                annotationCtx.beginPath();
+                annotationCtx.moveTo(last.x, last.y);
+                annotationCtx.lineTo(pos.x, pos.y);
+                annotationCtx.stroke();
+                annotationCtx.restore();
+            } else if (d.tool === 'arrow' || d.tool === 'circle') {
+                d.x2 = pos.x;
+                d.y2 = pos.y;
+                showAnnotationBase();
+                drawAnnotationOp(annotationCtx, d);
+            }
+        };
+
+        const endDraw = async (e, cancelled) => {
+            const d = annotationDraft;
+            if (!d || e.pointerId !== annotationPointerId) return;
+            annotationDraft = null;
+            annotationPointerId = null;
+            try { canvas.releasePointerCapture(e.pointerId); } catch (_e) { /* ignore */ }
+            if (d.tool === 'pen') {
+                commitAnnotationOp(d); // 끊긴(취소된) 선도 그린 데까지는 남긴다
+            } else if (d.tool === 'arrow' || d.tool === 'circle') {
+                // 끌지 않고 누르기만 했으면(길이 0) 넣지 않는다
+                if (!cancelled && Math.hypot(d.x2 - d.x1, d.y2 - d.y1) >= 1) commitAnnotationOp(d);
+                else showAnnotationBase();
+            } else if (d.tool === 'text' && !cancelled) {
+                const pos = getPos(e);
+                const seq = annotationOpenSeq;
+                const text = await window.appPrompt('사진 위에 입력할 결함 설명 문구를 입력하세요:', '손상 부위');
+                if (text && seq === annotationOpenSeq) {
+                    const style = currentStyle();
+                    commitAnnotationOp({ tool: 'text', color: style.color, width: style.textOutline, size: style.textSize, text: String(text), x: pos.x, y: pos.y });
+                }
+            }
+        };
+
+        canvas.addEventListener('pointerdown', startDraw);
+        canvas.addEventListener('pointermove', moveDraw);
+        canvas.addEventListener('pointerup', (e) => { void endDraw(e, false); });
+        canvas.addEventListener('pointercancel', (e) => { void endDraw(e, true); });
+        canvas.addEventListener('contextmenu', (e) => e.preventDefault());
+        // 그리는 동안 화면이 같이 밀리거나 브라우저가 확대되지 않게(도구 줄의 굵기 조절·세로 넘김은 그대로)
+        document.getElementById('photoAnnotationStage')?.addEventListener('touchmove', (e) => {
+            if (e.cancelable) e.preventDefault();
+        }, { passive: false });
+
+        document.querySelectorAll('.annotation-tool-btn').forEach(btn => {
+            btn.addEventListener('click', () => {
+                document.querySelectorAll('.annotation-tool-btn').forEach(b => b.classList.remove('active'));
+                btn.classList.add('active');
+                currentAnnotationTool = btn.dataset.tool || 'pen';
+            });
+        });
+
+        document.getElementById('btnUndoAnnotation')?.addEventListener('click', undoPhotoAnnotation);
+
+        document.getElementById('btnClearAnnotation')?.addEventListener('click', async () => {
+            if (!annotationOps.length) return;
+            const seq = annotationOpenSeq;
+            if (!await window.confirmDelete('사진 위 마킹을 모두 지울까요?')) return;
+            if (seq !== annotationOpenSeq) return;
+            annotationOps = [];
+            rebuildAnnotationBase();
+        });
+
+        document.getElementById('btnCancelPhotoAnnotation')?.addEventListener('click', closePhotoAnnotationModal);
+        document.getElementById('btnSavePhotoAnnotation')?.addEventListener('click', () => {
+            // 아무것도 안 그렸으면 사진을 다시 압축해 바꾸지 않는다
+            if (annotationBase && annotationOps.length && typeof targetPhotoCallback === 'function') {
+                const quality = typeof window.getPhotoJpegQuality === 'function' ? window.getPhotoJpegQuality() : 0.85;
+                const cb = targetPhotoCallback;
+                cb(annotationBase.toDataURL('image/jpeg', quality));
+            }
+            closePhotoAnnotationModal();
+        });
+
+        // 화면 크기·방향이 바뀌면 사진을 다시 맞춘다(그린 것은 캔버스 좌표라 그대로)
+        window.addEventListener('resize', () => { if (isPhotoAnnotationModalOpen()) fitAnnotationCanvas(); });
+        window.addEventListener('orientationchange', () => { setTimeout(() => { if (isPhotoAnnotationModalOpen()) fitAnnotationCanvas(); }, 250); });
+        // 사진 자리 크기가 바뀌는 것을 직접 본다 — resize가 안 오는 경우(화면 나누기·도구 줄이 두 줄로 접힘)에도 맞춘다
+        if (typeof ResizeObserver === 'function') {
+            const stageEl = document.getElementById('photoAnnotationStage');
+            if (stageEl) new ResizeObserver(() => { if (isPhotoAnnotationModalOpen()) fitAnnotationCanvas(); }).observe(stageEl);
+        }
+        // Esc = 취소, Ctrl+Z = 되돌리기. window 캡처: 아래에 깔린 수정창의 Esc 처리보다 먼저 받는다
+        window.addEventListener('keydown', (e) => {
+            if (!isPhotoAnnotationModalOpen()) return;
+            if (window.appDialog && typeof window.appDialog.isOpen === 'function' && window.appDialog.isOpen()) return; // 글자 입력·확인 창이 먼저
+            if (e.key === 'Escape') {
+                e.preventDefault();
+                e.stopPropagation();
+                closePhotoAnnotationModal();
+            } else if ((e.ctrlKey || e.metaKey) && !e.shiftKey && (e.key === 'z' || e.key === 'Z')) {
+                e.preventDefault();
+                e.stopPropagation();
+                undoPhotoAnnotation();
+            }
+        }, true);
     }
 
     initPhotoAnnotationEvents();

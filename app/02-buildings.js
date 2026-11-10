@@ -224,6 +224,12 @@
                 window.BSA.photoZoomViewer.close();
                 return true;
             }
+            // 2026-11-10 사진 위에 그리기 창(화면 가득)도 수정창 위에 뜬다 — 뒤로가기 = 취소, 아래 수정창은 유지
+            if (typeof window.isPhotoAnnotationModalOpen === 'function' && window.isPhotoAnnotationModalOpen()
+                && typeof window.closePhotoAnnotationModal === 'function') {
+                window.closePhotoAnnotationModal();
+                return true;
+            }
             // 선택 목록 시트·숫자 키패드·변위 그래프도 수정창(비파괴 포함) 위에 뜬다 — 그것만 닫고 아래 창은 유지
             const selectSheetEl = document.getElementById('bsaSelectSheet');
             if (selectSheetEl && selectSheetEl.classList.contains('open') && typeof closeBsaSelectSheet === 'function') {
