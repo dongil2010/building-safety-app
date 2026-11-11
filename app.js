@@ -60912,7 +60912,7 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
         }
     });
 
-// @@app-part 14-extras.js sha=f1c1c9e59d8a — 원본은 app/14-extras.js (여기 말고 거기서 고칠 것)
+// @@app-part 14-extras.js sha=786daa34bcc4 — 원본은 app/14-extras.js (여기 말고 거기서 고칠 것)
     // ==========================================================================
     // 🛠️ 6대 추천 개선 및 신규 기능 모듈 (100% 한글 주석 & 독립 보조엔진)
     // ==========================================================================
@@ -60992,6 +60992,9 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
     //    좌표는 늘 「캔버스 크기 ÷ 보이는 크기」로 환산한다(photoAnnotPoint) — 화면을 돌려도 어긋나지 않는다.
     //  - 선 굵기·글자 크기는 캔버스가 커진 만큼 키운다(photoAnnotStrokeScale) — 출력물에서 예전과 같은 굵기.
     //  - 그린 것은 목록(annotationOps)으로 들고 다시 그린다 — 큰 캔버스에서도 되돌리기·미리보기가 가볍다.
+    // 2026-11-11 지우개: 그린 것은 사진과 따로 「그림 층」(annotationInk, 투명 캔버스)에 그리고,
+    //  저장용 캔버스 = 사진 + 그림 층. 지우개는 그림 층만 destination-out으로 지워서 사진은 그대로 남는다.
+    //  지우개도 목록에 한 획으로 들어가 되돌리기로 살릴 수 있다.
     const PHOTO_ANNOT_OLD_MAX_W = 860;
     const PHOTO_ANNOT_OLD_MAX_H = 550;
 
@@ -61040,6 +61043,8 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
     let annotationPointerId = null;
     let annotationBase = null;     // 사진 + 확정된 그림(화면 밖 캔버스) — 저장도 이걸로
     let annotationBaseCtx = null;
+    let annotationInk = null;      // 그린 것만(투명 바탕) — 지우개는 여기만 지운다
+    let annotationInkCtx = null;
     let annotationOpenSeq = 0;
     let basePhotoImg = null;
     let targetPhotoCallback = null;
@@ -61063,6 +61068,8 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
         annotationPointerId = null;
         annotationBase = null;
         annotationBaseCtx = null;
+        annotationInk = null;
+        annotationInkCtx = null;
         basePhotoImg = null;
         // 큰 캔버스가 잡고 있던 메모리를 돌려준다
         if (annotationCanvas) { annotationCanvas.width = 1; annotationCanvas.height = 1; }
@@ -61082,6 +61089,8 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
         annotationPointerId = null;
         annotationBase = null;
         annotationBaseCtx = null;
+        annotationInk = null;
+        annotationInkCtx = null;
         basePhotoImg = null;
         canvas.width = 1;
         canvas.height = 1;
@@ -61105,6 +61114,10 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
             annotationBase.width = size.w;
             annotationBase.height = size.h;
             annotationBaseCtx = annotationBase.getContext('2d');
+            annotationInk = document.createElement('canvas');
+            annotationInk.width = size.w;
+            annotationInk.height = size.h;
+            annotationInkCtx = annotationInk.getContext('2d');
             rebuildAnnotationBase();
             fitAnnotationCanvas();
         };
@@ -61152,7 +61165,13 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
         ctx.lineWidth = op.width;
         ctx.lineCap = 'round';
         ctx.lineJoin = 'round';
-        if (op.tool === 'pen') {
+        if (op.tool === 'pen' || op.tool === 'eraser') {
+            if (op.tool === 'eraser') {
+                // 그림 층에서만 쓰인다: 칠한 자리를 투명하게
+                ctx.globalCompositeOperation = 'destination-out';
+                ctx.strokeStyle = '#000';
+                ctx.fillStyle = '#000';
+            }
             const pts = op.pts || [];
             if (pts.length === 1) {
                 ctx.beginPath();
@@ -61180,13 +61199,40 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
         ctx.restore();
     }
 
-    /** 사진 + 확정된 그림을 화면 밖 캔버스에 다시 그리고 화면에 옮긴다 */
+    /** 확정된 그림을 그림 층에 처음부터 다시 그리고(지우개 획 포함) 사진과 합친다 */
     function rebuildAnnotationBase() {
-        if (!annotationBaseCtx || !basePhotoImg) return;
+        if (!annotationInkCtx || !basePhotoImg) return;
+        annotationInkCtx.clearRect(0, 0, annotationInk.width, annotationInk.height);
+        annotationOps.forEach((op) => drawAnnotationOp(annotationInkCtx, op));
+        composeAnnotationBase();
+    }
+
+    /** 저장용 캔버스 = 사진 + 그림 층, 그리고 화면에 옮긴다 */
+    function composeAnnotationBase() {
+        if (!annotationBaseCtx || !annotationInk || !basePhotoImg) return;
         annotationBaseCtx.clearRect(0, 0, annotationBase.width, annotationBase.height);
         annotationBaseCtx.drawImage(basePhotoImg, 0, 0, annotationBase.width, annotationBase.height);
-        annotationOps.forEach((op) => drawAnnotationOp(annotationBaseCtx, op));
+        annotationBaseCtx.drawImage(annotationInk, 0, 0);
         showAnnotationBase();
+    }
+
+    /** 지우는 중: 그림 층을 지우고, 화면은 지운 자리 둘레만 사진 + 그림 층으로 다시 그린다(큰 캔버스에서도 가볍게) */
+    function eraseAnnotationSegment(d, from, to) {
+        if (!annotationInkCtx || !annotationCtx || !basePhotoImg) return;
+        drawAnnotationOp(annotationInkCtx, { tool: 'eraser', width: d.width, pts: from === to ? [to] : [from, to] });
+        const pad = d.width / 2 + 2;
+        const x = Math.floor(Math.min(from.x, to.x) - pad);
+        const y = Math.floor(Math.min(from.y, to.y) - pad);
+        const w = Math.ceil(Math.abs(to.x - from.x) + pad * 2) + 1;
+        const h = Math.ceil(Math.abs(to.y - from.y) + pad * 2) + 1;
+        annotationCtx.save();
+        annotationCtx.beginPath();
+        annotationCtx.rect(x, y, w, h);
+        annotationCtx.clip();
+        annotationCtx.clearRect(x, y, w, h);
+        annotationCtx.drawImage(basePhotoImg, 0, 0, annotationCanvas.width, annotationCanvas.height);
+        annotationCtx.drawImage(annotationInk, 0, 0);
+        annotationCtx.restore();
     }
 
     function showAnnotationBase() {
@@ -61196,10 +61242,16 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
     }
 
     function commitAnnotationOp(op) {
-        if (!op || !annotationBaseCtx) return;
+        if (!op || !annotationInkCtx) return;
         annotationOps.push(op);
-        drawAnnotationOp(annotationBaseCtx, op);
-        showAnnotationBase();
+        // 지우개 획은 지우는 동안 이미 그림 층에 반영됐다(두 번 지우면 가장자리가 더 깎인다)
+        if (op.tool !== 'eraser') drawAnnotationOp(annotationInkCtx, op);
+        composeAnnotationBase();
+    }
+
+    /** 그린 것이 하나라도 있나(지우개 획만 있으면 없음) */
+    function hasDrawnAnnotation() {
+        return annotationOps.some((op) => op.tool !== 'eraser');
     }
 
     function undoPhotoAnnotation() {
@@ -61234,6 +61286,10 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
             const style = currentStyle();
             if (currentAnnotationTool === 'pen') {
                 annotationDraft = { tool: 'pen', color: style.color, width: style.width, pts: [pos] };
+            } else if (currentAnnotationTool === 'eraser') {
+                // 지우개는 펜보다 넓게(굵기 막대로 조절)
+                annotationDraft = { tool: 'eraser', width: style.width * 3, pts: [pos] };
+                eraseAnnotationSegment(annotationDraft, pos, pos);
             } else if (currentAnnotationTool === 'arrow' || currentAnnotationTool === 'circle') {
                 annotationDraft = { tool: currentAnnotationTool, color: style.color, width: style.width, x1: pos.x, y1: pos.y, x2: pos.x, y2: pos.y };
             } else {
@@ -61260,6 +61316,10 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
                 annotationCtx.lineTo(pos.x, pos.y);
                 annotationCtx.stroke();
                 annotationCtx.restore();
+            } else if (d.tool === 'eraser') {
+                const last = d.pts[d.pts.length - 1];
+                d.pts.push(pos);
+                eraseAnnotationSegment(d, last, pos);
             } else if (d.tool === 'arrow' || d.tool === 'circle') {
                 d.x2 = pos.x;
                 d.y2 = pos.y;
@@ -61276,6 +61336,10 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
             try { canvas.releasePointerCapture(e.pointerId); } catch (_e) { /* ignore */ }
             if (d.tool === 'pen') {
                 commitAnnotationOp(d); // 끊긴(취소된) 선도 그린 데까지는 남긴다
+            } else if (d.tool === 'eraser') {
+                // 지운 데까지는 남긴다. 지울 그림이 없었으면 목록에 넣지 않는다(빈 되돌리기·사진 재압축 방지)
+                if (hasDrawnAnnotation()) commitAnnotationOp(d);
+                else rebuildAnnotationBase();
             } else if (d.tool === 'arrow' || d.tool === 'circle') {
                 // 끌지 않고 누르기만 했으면(길이 0) 넣지 않는다
                 if (!cancelled && Math.hypot(d.x2 - d.x1, d.y2 - d.y1) >= 1) commitAnnotationOp(d);
@@ -61323,7 +61387,7 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
         document.getElementById('btnCancelPhotoAnnotation')?.addEventListener('click', closePhotoAnnotationModal);
         document.getElementById('btnSavePhotoAnnotation')?.addEventListener('click', () => {
             // 아무것도 안 그렸으면 사진을 다시 압축해 바꾸지 않는다
-            if (annotationBase && annotationOps.length && typeof targetPhotoCallback === 'function') {
+            if (annotationBase && hasDrawnAnnotation() && typeof targetPhotoCallback === 'function') {
                 const quality = typeof window.getPhotoJpegQuality === 'function' ? window.getPhotoJpegQuality() : 0.85;
                 const cb = targetPhotoCallback;
                 cb(annotationBase.toDataURL('image/jpeg', quality));

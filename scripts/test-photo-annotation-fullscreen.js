@@ -63,10 +63,12 @@ assert.ok(near(pure.photoAnnotStrokeScale(3000, 1000), 3000 / 860), '가로로 �
 function makeCtx(canvas) {
     const calls = [];
     const ctx = { calls, canvas };
-    ['save', 'restore', 'beginPath', 'closePath', 'moveTo', 'lineTo', 'stroke', 'fill', 'arc', 'clearRect', 'drawImage', 'strokeText', 'fillText']
+    ['save', 'restore', 'beginPath', 'closePath', 'moveTo', 'lineTo', 'stroke', 'fill', 'arc', 'rect', 'clip', 'clearRect', 'drawImage', 'strokeText', 'fillText']
         .forEach((name) => { ctx[name] = (...args) => { calls.push([name, ...args.map((a) => (typeof a === 'number' ? a : (a && a.tag) || String(a)))]); }; });
     let lw = 1;
     Object.defineProperty(ctx, 'lineWidth', { get: () => lw, set: (v) => { lw = v; calls.push(['lineWidth', v]); } });
+    let gco = 'source-over';
+    Object.defineProperty(ctx, 'globalCompositeOperation', { get: () => gco, set: (v) => { gco = v; calls.push(['gco', v]); } });
     return ctx;
 }
 function makeEl(id) {
@@ -103,7 +105,7 @@ const els = {
     btnCancelPhotoAnnotation: makeEl('btnCancelPhotoAnnotation'),
     btnSavePhotoAnnotation: makeEl('btnSavePhotoAnnotation')
 };
-const toolBtns = ['pen', 'arrow', 'circle', 'text'].map((t) => Object.assign(makeEl('tool-' + t), { dataset: { tool: t } }));
+const toolBtns = ['pen', 'arrow', 'circle', 'text', 'eraser'].map((t) => Object.assign(makeEl('tool-' + t), { dataset: { tool: t } }));
 const offscreen = [];
 const fakeDocument = {
     activeElement: null,
@@ -132,12 +134,13 @@ const b = app.indexOf('    // --- 5. 현장 음성 인식 (Speech-to-Text) 이�
 assert.ok(a > 0 && b > a, '그리기 엔진 구간');
 const engineSrc = app.slice(a, b);
 const engine = new Function('window', 'document', 'Image', 'setTimeout',
-    engineSrc + '\nreturn { ops: () => annotationOps, base: () => annotationBase };')(fakeWindow, fakeDocument, FakeImage, (fn) => fn());
+    engineSrc + '\nreturn { ops: () => annotationOps, base: () => annotationBase, ink: () => annotationInk };')(fakeWindow, fakeDocument, FakeImage, (fn) => fn());
 
 const modal = els.photoAnnotationModal;
 const canvas = els.annotationCanvas;
 const ptr = (x, y, id, extra) => Object.assign({ clientX: x, clientY: y, pointerId: id || 1, pointerType: 'touch', button: 0, preventDefault() {} }, extra || {});
 const baseCalls = () => engine.base().getContext('2d').calls;
+const inkCalls = () => engine.ink().getContext('2d').calls;
 
 // 열기: 화면에 뜨고, 캔버스는 사진 원래 크기, 보이는 크기는 남은 자리(360×500)에 맞춤
 let saved = [];
@@ -162,7 +165,8 @@ let op = engine.ops()[0];
 assert.strictEqual(op.tool, 'pen');
 assert.deepStrictEqual(op.pts.map((p) => [Math.round(p.x), Math.round(p.y)]), [[1000, 750], [1500, 750]]);
 assert.ok(near(op.width, 4 * 1500 / 550), '굵기는 캔버스가 커진 만큼');
-assert.ok(baseCalls().some((c) => c[0] === 'lineTo' && near(c[1], 1500) && near(c[2], 750)), '확정된 선은 저장용 캔버스에');
+assert.ok(inkCalls().some((c) => c[0] === 'lineTo' && near(c[1], 1500) && near(c[2], 750)), '확정된 선은 그림 층에');
+assert.deepStrictEqual(baseCalls().slice(-2).map((c) => c[0] + ':' + c[1]), ['drawImage:photo', 'drawImage:offscreen'], '저장용 캔버스 = 사진 + 그림 층');
 
 // 화면을 눕힘 → 다시 맞춤(480×360). 그린 것은 캔버스 좌표라 그대로, 새 좌표도 사진의 같은 자리
 els.photoAnnotationStage.clientWidth = 800;
@@ -200,8 +204,28 @@ assert.strictEqual(engine.ops().length, 2);
     // 되돌리기: 마지막 것만 빠지고 사진부터 다시 그린다
     els.btnUndoAnnotation.fire('click', {});
     assert.strictEqual(engine.ops().length, 2);
-    const lastPhotoDraw = baseCalls().map((c) => c[0] + ':' + c[1]).lastIndexOf('drawImage:photo');
-    assert.ok(lastPhotoDraw > 0 && !baseCalls().slice(lastPhotoDraw).some((c) => c[0] === 'fillText'), '되돌린 글자는 다시 안 그린다');
+    const lastInkClear = inkCalls().map((c) => c[0]).lastIndexOf('clearRect');
+    assert.ok(lastInkClear > 0 && !inkCalls().slice(lastInkClear).some((c) => c[0] === 'fillText'), '되돌린 글자는 다시 안 그린다');
+    assert.deepStrictEqual(baseCalls().slice(-2).map((c) => c[0] + ':' + c[1]), ['drawImage:photo', 'drawImage:offscreen'], '사진부터 다시');
+
+    // 지우개: 그림 층만 지우고(destination-out) 사진(저장용 캔버스)은 지우지 않는다. 되돌리기로 살아난다
+    toolBtns[4].fire('click', {});
+    const baseBefore = baseCalls().length;
+    canvas.fire('pointerdown', ptr(400, 180));
+    canvas.fire('pointermove', ptr(450, 200));
+    canvas.fire('pointerup', ptr(450, 200));
+    assert.strictEqual(engine.ops().length, 3);
+    op = engine.ops()[2];
+    assert.strictEqual(op.tool, 'eraser');
+    assert.ok(near(op.width, 4 * 3 * 1500 / 550), '지우개는 펜보다 3배 넓게');
+    assert.ok(inkCalls().some((c) => c[0] === 'gco' && c[1] === 'destination-out'), '그림 층을 지운다');
+    assert.ok(!baseCalls().some((c) => c[0] === 'gco'), '사진 층은 지우지 않는다');
+    assert.deepStrictEqual(baseCalls().slice(baseBefore).filter((c) => c[0] === 'drawImage').map((c) => c[1]), ['photo', 'offscreen'], '사진 + 지운 그림 층');
+    assert.ok(canvas.getContext('2d').calls.some((c) => c[0] === 'clip'), '화면은 지운 자리만 다시 그린다');
+    els.btnUndoAnnotation.fire('click', {});
+    assert.strictEqual(engine.ops().length, 2, '지우개도 되돌리기로 취소');
+    const lastClear = inkCalls().map((c) => c[0]).lastIndexOf('clearRect');
+    assert.ok(!inkCalls().slice(lastClear).some((c) => c[0] === 'gco' && c[1] === 'destination-out'), '되돌린 지우개는 다시 안 지운다');
 
     // 저장: 저장용 캔버스(사진 원래 크기)를 현장 사진 품질로, 그리고 창을 닫는다
     els.btnSavePhotoAnnotation.fire('click', {});
@@ -213,6 +237,10 @@ assert.strictEqual(engine.ops().length, 2);
     saved = [];
     fakeWindow.openPhotoAnnotationModal('data:photo2', (url) => saved.push(url));
     assert.strictEqual(engine.ops().length, 0, '새로 열면 앞 사진의 그림이 남지 않는다');
+    canvas.fire('pointerdown', ptr(200, 100));
+    canvas.fire('pointermove', ptr(300, 200));
+    canvas.fire('pointerup', ptr(300, 200));
+    assert.strictEqual(engine.ops().length, 0, '지울 그림이 없으면 지우개 획은 안 남긴다');
     els.btnSavePhotoAnnotation.fire('click', {});
     assert.deepStrictEqual(saved, []);
 
@@ -244,7 +272,7 @@ assert.strictEqual(engine.ops().length, 2);
     assert.ok(!/max-width:\s*920px|max-height:\s*5\dvh/.test(block), '작게 묶던 크기 제한이 없다');
     ['annotationCanvas', 'photoAnnotationStage', 'annotationColorPicker', 'annotationLineWidth', 'btnUndoAnnotation', 'btnClearAnnotation',
         'btnCancelPhotoAnnotation', 'btnSavePhotoAnnotation'].forEach((id) => assert.ok(block.includes('id="' + id + '"'), id));
-    assert.strictEqual((block.match(/annotation-tool-btn/g) || []).length, 4, '도구 4개');
+    assert.strictEqual((block.match(/annotation-tool-btn/g) || []).length, 5, '도구 5개(지우개 포함)');
     const overlayCss = (css.match(/#photoAnnotationModal\.photo-annot-overlay \{[^}]*\}/) || [''])[0];
     assert.ok(/inset: 0;/.test(overlayCss) && /padding: 0;/.test(overlayCss) && /align-items: stretch;/.test(overlayCss), '화면 가득');
     assert.ok(/#photoAnnotationModal\.photo-annot-overlay\.open \{ z-index: 2147481900 !important; \}/.test(css));
