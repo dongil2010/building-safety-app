@@ -89,7 +89,8 @@
         }
         var raw = String(d.crackWidth != null ? d.crackWidth : '').trim();
         if (raw) {
-            return raw.split(/\s*[\/,]\s*/).map(function (s) { return s.trim(); }).filter(Boolean)
+            // 2026-11-11 「0.1 ~ 0.5」 같은 범위 표기도 ~ 뒤 값을 따로 보도록 구분자에 넣음 (예전엔 앞 숫자만 읽음)
+            return raw.split(/\s*(?:[\/,~∼〜～–]|-(?=\s|\d|\.))\s*/).map(function (s) { return s.trim(); }).filter(Boolean)
                 .filter(function (w) { return !isAreaWidthInSize(d.size, w); });
         }
         var size = String(d.size || '').trim();
