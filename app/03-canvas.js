@@ -3365,9 +3365,10 @@
     }
 
     // 카테고리 설정에 따라 "NO.01" ↔ "01" 형식으로 번호 라벨 텍스트 변환
-    function formatPinNumberLabel(rawText, styleKey) {
+    function formatPinNumberLabel(rawText, styleKey, keepSubNo) {
         if (getStyleShape(styleKey).numberFormat !== 'plain') return rawText;
-        const m = String(rawText || '').match(/(\d+)/);
+        // 2026-11-11 결함 마킹의 직접 준 하위번호(NO.74-2)는 숫자만 모양에서도 74-2(keepSubNo). 비파괴는 그대로
+        const m = String(rawText || '').match(keepSubNo ? /(\d+(?:-\d+)?)/ : /(\d+)/);
         return m ? m[1] : (rawText || '');
     }
 
@@ -3376,7 +3377,7 @@
     }
 
     function formatDefectPinLabel(defect, styleKey) {
-        return formatPinNumberLabel(defect.groupNo || defect.no || 'NO.01', styleKey);
+        return formatPinNumberLabel(defect.groupNo || defect.no || 'NO.01', styleKey, true);
     }
 
     // NDT 카테고리 → 스타일 설정 키 매핑 (색상/크기 공용)

@@ -3089,7 +3089,8 @@
             }
             const parts = parseDefectNoParts(d);
             if (parts.suffix > 0 && !d.groupId) {
-                if (seenMainMarking.has(parts.main)) return;
+                // 2026-11-11 직접 준 하위번호(74-2)는 본번호 74가 있어도 자기 행
+                if (seenMainMarking.has(parts.main) && !(d.noManual && !d.groupId && !d.surveyExtra)) return;
             } else if (!d.groupId && parts.main !== Number.MAX_SAFE_INTEGER) {
                 seenMainMarking.add(parts.main);
             }

@@ -386,7 +386,7 @@
     //   절댓값이 큰 쪽을 따르고, 기록이 없는 사진은 양쪽 목록을 합친다.
     // -----------------------------------------------------------------------------------------
     var NON_CONTENT_FIELDS = new Set([
-        'id', 'no', 'groupNo', 'cadNo', 'isCadImported', 'groupId', 'surveyExtra', 'surveyNumbered', 'mergedFrom',
+        'id', 'no', 'noManual', 'groupNo', 'cadNo', 'isCadImported', 'groupId', 'surveyExtra', 'surveyNumbered', 'mergedFrom',
         'updatedAt', 'contentUpdatedAt', 'positionUpdatedAt', 'groupUpdatedAt', 'photosUpdatedAt', 'photoOrderAt',
         'fieldAt', 'contentBaseAt', 'fieldAtThrough', 'photoState', 'revivedAt', 'offlineEditAt',
         'photos', 'photoIds', 'photoUrls', 'prevRoundPhotos', 'prevRoundPhotoIds', 'prevRoundPhotoUrls'
@@ -586,6 +586,9 @@
         if (noSource.no != null && noSource.no !== '') merged.no = noSource.no;
         else if (serverRec.no) merged.no = serverRec.no;
         else if (localRec.no) merged.no = localRec.no;
+        // 2026-11-11 직접 준 하위번호 표시(noManual)는 번호(no)와 같은 쪽을 따른다(js/shared/defect-sub-no.js)
+        if (noSource.noManual) merged.noManual = true;
+        else delete merged.noManual;
         if (noSource.groupNo != null && noSource.groupNo !== '') merged.groupNo = noSource.groupNo;
         else if (serverRec.groupNo) merged.groupNo = serverRec.groupNo;
         else if (localRec.groupNo) merged.groupNo = localRec.groupNo;

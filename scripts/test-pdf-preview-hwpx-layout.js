@@ -21,7 +21,7 @@ const shared = ['function paginateSurveyDefects(', 'function formatSurveyReportN
     .map((h) => extractFunction(app, h)).join('\n');
 const FP = {
     "hwpxExport": "4bfab15456b98681", // 2026-11-10 게이지 칸: 방향(← → ↑ ↓)을 붙여 적은 값은 그 방향 그대로 — 일부러 바꿈
-    "sharedRows": "6b42deefb7ec5f3e",
+    "sharedRows": "0ce605cc38dd62c3", // 2026-11-11 번호 칸: 직접 준 하위번호(noManual, NO.74-2)는 꼬리 유지 — 일부러 바꿈
     "hwpx-survey-row-fit.js": "3d22dcdf170a4bc4",
     "hwpx-font-8pt.js": "792b4169159c5676",
     "korean-text-wrap.js": "89a43af61acc9888"

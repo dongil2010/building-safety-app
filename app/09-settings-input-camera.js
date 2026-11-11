@@ -1556,7 +1556,7 @@
                 }
 
                 const pinStyleKey = getDefectStyleKey(d.category, d.defectType);
-                const boxDim = getPinBoxDimensions(scale, formatPinNumberLabel(d.groupNo || d.no || 'NO.01', pinStyleKey), state.ctx);
+                const boxDim = getPinBoxDimensions(scale, formatPinNumberLabel(d.groupNo || d.no || 'NO.01', pinStyleKey, true), state.ctx);
                 const bx = d.x || 100;
                 const by = d.y || 100;
                 if (d.targetX !== undefined && d.targetY !== undefined) {
@@ -1579,7 +1579,7 @@
             const bx = d.x || 100;
             const by = d.y || 100;
             const pinStyleKey = getDefectStyleKey(d.category, d.defectType);
-            const boxDim = getPinBoxDimensions(scale, formatPinNumberLabel(d.groupNo || d.no || 'NO.01', pinStyleKey), state.ctx);
+            const boxDim = getPinBoxDimensions(scale, formatPinNumberLabel(d.groupNo || d.no || 'NO.01', pinStyleKey, true), state.ctx);
 
             if (d.targetX !== undefined && d.targetY !== undefined) {
                 const tipHit = getMapArrowTipHitCenter(d.targetX, d.targetY, bx, by, arrowScale);
@@ -1642,7 +1642,7 @@
             if (!isSel) {
                 if (!fine) return;
                 // 터치·펜: 이웃 마킹이 누른 곳에서 얼마나 가까운지(박스는 안이면 0, 화살촉은 중심까지 거리)
-                const boxDimO = getPinBoxDimensions(dSize.pin, formatPinNumberLabel(d.groupNo || d.no || 'NO.01', getDefectStyleKey(d.category, d.defectType)), state.ctx);
+                const boxDimO = getPinBoxDimensions(dSize.pin, formatPinNumberLabel(d.groupNo || d.no || 'NO.01', getDefectStyleKey(d.category, d.defectType), true), state.ctx);
                 const bd = SH.boxDist(imgX, imgY, { cx: bx, cy: by, w: boxDimO.w, h: boxDimO.h, rot: state.rotationAngle || 0 });
                 const otherR = getMapTipHitRadius(dSize.arrow, true, kind);
                 if (bd <= otherR) nearestOther = Math.min(nearestOther, bd);
@@ -1656,7 +1656,7 @@
             }
             // 영역은 꼭짓점·변 손잡이가 있으니, 영역 둘레 근처면 예전 판정에 맡긴다
             if (isAreaD && isPointInAreaMark(d, imgX, imgY, 16)) return;
-            const boxDim = getPinBoxDimensions(dSize.pin, formatPinNumberLabel(d.groupNo || d.no || 'NO.01', getDefectStyleKey(d.category, d.defectType)), state.ctx);
+            const boxDim = getPinBoxDimensions(dSize.pin, formatPinNumberLabel(d.groupNo || d.no || 'NO.01', getDefectStyleKey(d.category, d.defectType), true), state.ctx);
             const tip = hasTip ? getMapArrowTipHitCenter(d.targetX, d.targetY, bx, by, dSize.arrow) : null;
             byId.set(d.id, d);
             cands.push({
@@ -3862,6 +3862,7 @@
 
         const titleEl = document.getElementById('defectModalTitle');
         if (titleEl) titleEl.textContent = `📍 결함 핀 일괄 수정 (${defects.length}건)`;
+        if (typeof window.syncDefectRenumberButton === 'function') window.syncDefectRenumberButton(null);
 
         const bulkAllArea = defects.every(d => d.shapeType === 'area' && d.areaX1 !== undefined);
         setDefectAreaStylePanelVisible(
@@ -4253,6 +4254,7 @@
             if (!existingPin) titleEl.textContent = '📍 결함 핀 등록';
             else titleEl.textContent = isAreaTitle ? '⬚ 결함 영역 수정' : '📍 결함 핀 수정';
         }
+        if (typeof window.syncDefectRenumberButton === 'function') window.syncDefectRenumberButton(existingPin || null);
         if (typeof syncDefectShapeConvertButton === 'function') syncDefectShapeConvertButton(existingPin || null);
 
         const isAreaModal = !!(existingPin && existingPin.shapeType === 'area' && existingPin.areaX1 !== undefined) || !!areaRect || !!window._pendingAreaRect;

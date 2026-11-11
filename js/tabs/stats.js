@@ -1481,15 +1481,25 @@
             var ws = getCrackWidthNumbers(d);
             return ws.length ? Math.max.apply(null, ws) : -1;
         };
+        // 2026-11-11 직접 준 하위번호(74, 74-1, 74-2 …, 묶음 없음)도 한 개소 — 같은 본번호끼리 가장 넓은 균열 하나만
+        var subApi = (typeof window !== 'undefined' && window.BSA && window.BSA.shared && window.BSA.shared.defectSubNo) || null;
+        var subMains = subApi ? subApi.subMainsOf(rows) : null;
+        var unitKey = function (d) {
+            if (!d) return null;
+            if (subApi) return subApi.statsUnitKey(d, subMains);
+            return d.groupId ? 'g:' + d.groupId : null;
+        };
         var best = {};
         rows.forEach(function (d) {
-            if (!d || !d.groupId || !isCrack(d)) return;
+            var k = unitKey(d);
+            if (!k || !isCrack(d)) return;
             var w = maxWidth(d);
-            if (!best[d.groupId] || w > best[d.groupId].w) best[d.groupId] = { row: d, w: w };
+            if (!best[k] || w > best[k].w) best[k] = { row: d, w: w };
         });
         return rows.filter(function (d) {
-            if (!d || !d.groupId || !isCrack(d)) return true;
-            return best[d.groupId].row === d;
+            var k = unitKey(d);
+            if (!k || !isCrack(d)) return true;
+            return best[k].row === d;
         });
     }
 

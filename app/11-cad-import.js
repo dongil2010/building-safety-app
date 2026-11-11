@@ -1016,6 +1016,85 @@
         });
     }
 
+    /**
+     * 2026-11-11 결함 번호 직접 바꾸기(NO.74-2 같은 하위번호 포함, js/shared/defect-sub-no.js).
+     * 기둥 하나에 균열 여러 개 → 번호칸은 따로 두고 74-1, 74-2 … (통합 없이). 묶인 결함은 본번호만 바꾼다.
+     */
+    function defectRenumberLabelFor(d) {
+        if (!d) return 'NO.?';
+        const raw = d.groupId ? (d.groupNo || stripDefectNoSuffix(d.no || '')) : (d.no || '');
+        return String(raw || 'NO.?');
+    }
+    function syncDefectRenumberButton(defect) {
+        const btn = document.getElementById('btnDefectRenumber');
+        if (!btn) return;
+        const show = !!(defect && defect.id && !defect.surveyExtra && !window._defectBulkEditIds?.length);
+        btn.hidden = !show;
+        if (show) btn.textContent = `${defectRenumberLabelFor(defect)} ✎`;
+    }
+    window.syncDefectRenumberButton = syncDefectRenumberButton;
+
+    async function renumberOpenDefect() {
+        const api = window.BSA && window.BSA.shared && window.BSA.shared.defectSubNo;
+        const pinId = document.getElementById('defectPinId')?.value;
+        if (!api || !pinId || !state.currentBuildingId) return;
+        const key = `${state.currentBuildingId}_${state.currentFloor}`;
+        const findTarget = () => ((state.defects && state.defects[key]) || []).find((d) => d && d.id === pinId) || null;
+        let target = findTarget();
+        if (!target) return;
+        const cur = defectRenumberLabelFor(target).replace(/^NO\.?\s*/i, '');
+        const grouped = !!(target.groupId && (getFloorDefectsForNumbering(key) || []).filter((d) => d && d.groupId === target.groupId).length > 1);
+        const hint = grouped
+            ? '묶인 결함입니다. 본번호만 바꿀 수 있습니다(묶음째 이동).'
+            : '하위번호도 쓸 수 있습니다: 74-2, 74-3 … (원래 NO.74는 자동으로 74-1)\n번호칸은 따로 두고, 통계에서는 같은 본번호를 한 개소(가장 넓은 균열)로 셉니다.';
+        const input = await window.appPrompt(`새 결함 번호\n${hint}`, cur, { title: '결함 번호 바꾸기', okText: '바꾸기' });
+        if (input == null) return;
+        // 입력을 기다리는 사이 동기화가 결함을 새 객체로 바꿔 끼웠을 수 있다 — 다시 읽는다(빈칸 당기기와 같은 이유)
+        target = findTarget();
+        if (!target) return;
+        const pool = getFloorDefectsForNumbering(key);
+        const plan = api.planRenumber(pool, target, input);
+        if (!plan.ok) {
+            await window.appAlert(plan.reason, { title: '번호를 바꿀 수 없습니다' });
+            return;
+        }
+        if (plan.unchanged) return;
+        const poolKeys = Object.keys(state.defects || {}).filter((k) => {
+            const arr = state.defects[k];
+            return Array.isArray(arr) && arr.some((d) => pool.indexOf(d) >= 0);
+        });
+        if (typeof pushDefectHistory === 'function') pushDefectHistory(poolKeys);
+        api.applyRenumber(plan, {
+            stamp: stampDefectNumberChanged,
+            groupNumbering: applyDefectGroupNumbering
+        });
+        poolKeys.concat([key]).forEach((k) => {
+            const arr = state.defects[k] || [];
+            if (arr.some((d) => d && d._numberChanged) && typeof markFloorKeyDirty === 'function') markFloorKeyDirty(k);
+            arr.forEach((d) => {
+                if (d && d._numberChanged) {
+                    delete d._numberChanged;
+                    if (typeof journalDefectChange === 'function') journalDefectChange('edit', d, k);
+                }
+            });
+        });
+        if (typeof discardStalePendingRemoteAfterLocalPinEdit === 'function') discardStalePendingRemoteAfterLocalPinEdit();
+        // 수정창 숨은 번호 칸도 맞춘다(자동 저장이 옛 번호를 되써넣지 않게)
+        const noEl = document.getElementById('defectNo');
+        if (noEl) noEl.value = target.no || '';
+        saveStateToLocalStorage();
+        refreshAfterDefectNumberChange();
+        syncDefectRenumberButton(target);
+        const alsoMsg = (plan.extra || []).map((x) => ` · 원래 ${x.from} → ${x.no}`).join('');
+        window.showToast?.(`번호를 ${plan.no}(으)로 바꿨습니다.${alsoMsg}`, 'success', alsoMsg ? 5000 : 3000);
+    }
+    document.getElementById('btnDefectRenumber')?.addEventListener('click', () => {
+        renumberOpenDefect().catch((e) => {
+            console.warn('[번호 바꾸기] 실패', e);
+            window.showToast?.('번호 바꾸기에 실패했습니다: ' + (e && e.message), 'error', 5000);
+        });
+    });
+
     const btnConvertDefectShape = document.getElementById('btnConvertDefectShape');
     if (btnConvertDefectShape) {
         btnConvertDefectShape.addEventListener('click', async () => {

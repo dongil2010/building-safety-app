@@ -1,5 +1,5 @@
 // @@app-parts 자동 생성 파일 — 여기를 고치지 말고 app/ 조각을 고친 뒤 `node scripts/app-parts.js join` (CLAUDE.md 「app.js 조각」)
-// @@app-part 01-base.js sha=703ba13a3eba — 원본은 app/01-base.js (여기 말고 거기서 고칠 것)
+// @@app-part 01-base.js sha=0e795b757d20 — 원본은 app/01-base.js (여기 말고 거기서 고칠 것)
 /* ==========================================================================
    스마트 건축물 안전점검 현장점검 시스템 — UI 부트스트랩
    전역 상태·IndexedDB·이미지 헬퍼: js/core/state.js
@@ -4457,7 +4457,8 @@ document.addEventListener('DOMContentLoaded', () => {
         // 그룹 없이 no만 N-1 인 고아 싱글톤도 접미사 제거
         const byMain = new Map();
         defects.forEach((d) => {
-            if (!d || d.groupId) return;
+            // 2026-11-11 사용자가 직접 준 하위번호(noManual, js/shared/defect-sub-no.js)는 꼬리를 떼지 않는다
+            if (!d || d.groupId || d.noManual) return;
             const p = parseDefectNoParts(d);
             if (p.main === Number.MAX_SAFE_INTEGER) return;
             if (!byMain.has(p.main)) byMain.set(p.main, []);
@@ -4478,7 +4479,8 @@ document.addEventListener('DOMContentLoaded', () => {
         let changed = false;
         const byMain = new Map();
         defects.forEach((d) => {
-            if (!d || d.surveyExtra || d.groupId) return;
+            // 2026-11-11 직접 준 하위번호(noManual)는 옛 데이터 고장이 아니다 — 묶지 않는다
+            if (!d || d.surveyExtra || d.groupId || d.noManual) return;
             const p = parseDefectNoParts(d);
             if (p.main === Number.MAX_SAFE_INTEGER) return;
             const key = String(p.main);
@@ -4746,9 +4748,21 @@ document.addEventListener('DOMContentLoaded', () => {
         const buildUnits = () => {
             const units = [];
             const seenGroup = new Set();
+            // 2026-11-11 직접 준 하위번호(74-1, 74-2 …)는 본번호째 한 칸으로 옮기고 꼬리는 살린다
+            const subMains = new Set();
+            defects.forEach((d) => { if (d && d.noManual && !d.groupId && !d.surveyExtra) subMains.add(getMain(d)); });
+            const seenSub = new Set();
             defects.forEach((d) => {
                 if (!d || d.surveyExtra) return;
                 const gid = d.groupId || null;
+                if (!gid && subMains.has(getMain(d))) {
+                    const main = getMain(d);
+                    if (seenSub.has(main)) return;
+                    seenSub.add(main);
+                    const members = defects.filter((m) => m && !m.groupId && !m.surveyExtra && getMain(m) === main);
+                    units.push({ kind: 'sub', groupId: 'sub:' + main, main, members });
+                    return;
+                }
                 if (gid) {
                     if (seenGroup.has(gid)) return;
                     seenGroup.add(gid);
@@ -4791,7 +4805,16 @@ document.addEventListener('DOMContentLoaded', () => {
             });
             const victim = candidates[0];
             const baseStr = formatDefectNoSeq(gap);
-            if (victim.kind === 'group') {
+            if (victim.kind === 'sub') {
+                victim.members.forEach((m) => {
+                    const prev = String(m.no || '');
+                    const sfx = parseDefectNoParts(m).suffix;
+                    const nextNo = sfx ? `${baseStr}-${sfx}` : baseStr;
+                    m.no = nextNo;
+                    if (m.isCadImported) m.cadNo = nextNo;
+                    if (prev !== nextNo) stampDefectNumberChanged(m, false);
+                });
+            } else if (victim.kind === 'group') {
                 victim.members.forEach((m) => {
                     const prevG = String(m.groupNo || '');
                     m.groupNo = baseStr;
@@ -10528,7 +10551,7 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
         });
     }
 
-// @@app-part 03-canvas.js sha=3e215a478336 — 원본은 app/03-canvas.js (여기 말고 거기서 고칠 것)
+// @@app-part 03-canvas.js sha=dbb7c0a4e77a — 원본은 app/03-canvas.js (여기 말고 거기서 고칠 것)
     // --- 8. DRAWING CANVAS ENGINE (PAN/ZOOM/ROTATE & PINS) ---
 
     function setupCanvas() {
@@ -13895,9 +13918,10 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
     }
 
     // 카테고리 설정에 따라 "NO.01" ↔ "01" 형식으로 번호 라벨 텍스트 변환
-    function formatPinNumberLabel(rawText, styleKey) {
+    function formatPinNumberLabel(rawText, styleKey, keepSubNo) {
         if (getStyleShape(styleKey).numberFormat !== 'plain') return rawText;
-        const m = String(rawText || '').match(/(\d+)/);
+        // 2026-11-11 결함 마킹의 직접 준 하위번호(NO.74-2)는 숫자만 모양에서도 74-2(keepSubNo). 비파괴는 그대로
+        const m = String(rawText || '').match(keepSubNo ? /(\d+(?:-\d+)?)/ : /(\d+)/);
         return m ? m[1] : (rawText || '');
     }
 
@@ -13906,7 +13930,7 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
     }
 
     function formatDefectPinLabel(defect, styleKey) {
-        return formatPinNumberLabel(defect.groupNo || defect.no || 'NO.01', styleKey);
+        return formatPinNumberLabel(defect.groupNo || defect.no || 'NO.01', styleKey, true);
     }
 
     // NDT 카테고리 → 스타일 설정 키 매핑 (색상/크기 공용)
@@ -23486,7 +23510,7 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
         return bestKey;
     }
 
-// @@app-part 06-defect-edit.js sha=37d37acaa878 — 원본은 app/06-defect-edit.js (여기 말고 거기서 고칠 것)
+// @@app-part 06-defect-edit.js sha=41912c5906b7 — 원본은 app/06-defect-edit.js (여기 말고 거기서 고칠 것)
     // --- 결함 회차 일괄 재지정 모달 ---
     // 건물 전체(또는 현재 층)가 잘못된 회차로 통째로 등록됐을 때, 결함들의 surveyRound를
     // 한번에 올바른 값으로 옮기는 관리자용 복구 기능. 결함 내용은 건드리지 않고 회차 값만 바꾼다.
@@ -26577,7 +26601,8 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
             }
             const parts = parseDefectNoParts(d);
             if (parts.suffix > 0 && !d.groupId) {
-                if (seenMainMarking.has(parts.main)) return;
+                // 2026-11-11 직접 준 하위번호(74-2)는 본번호 74가 있어도 자기 행
+                if (seenMainMarking.has(parts.main) && !(d.noManual && !d.groupId && !d.surveyExtra)) return;
             } else if (!d.groupId && parts.main !== Number.MAX_SAFE_INTEGER) {
                 seenMainMarking.add(parts.main);
             }
@@ -35549,7 +35574,7 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
         }
     }
 
-// @@app-part 09-settings-input-camera.js sha=1d3b0e132829 — 원본은 app/09-settings-input-camera.js (여기 말고 거기서 고칠 것)
+// @@app-part 09-settings-input-camera.js sha=496e4b94ce87 — 원본은 app/09-settings-input-camera.js (여기 말고 거기서 고칠 것)
     // --- 카테고리별 핀/박스 색상 설정 모달 ---
     // 결함 색상은 getDefectColor()가 쓰는 등급·상태 키와 맞춰야 도면에 바로 반영됨
     const STYLE_COLOR_FIELDS = [
@@ -37107,7 +37132,7 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
                 }
 
                 const pinStyleKey = getDefectStyleKey(d.category, d.defectType);
-                const boxDim = getPinBoxDimensions(scale, formatPinNumberLabel(d.groupNo || d.no || 'NO.01', pinStyleKey), state.ctx);
+                const boxDim = getPinBoxDimensions(scale, formatPinNumberLabel(d.groupNo || d.no || 'NO.01', pinStyleKey, true), state.ctx);
                 const bx = d.x || 100;
                 const by = d.y || 100;
                 if (d.targetX !== undefined && d.targetY !== undefined) {
@@ -37130,7 +37155,7 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
             const bx = d.x || 100;
             const by = d.y || 100;
             const pinStyleKey = getDefectStyleKey(d.category, d.defectType);
-            const boxDim = getPinBoxDimensions(scale, formatPinNumberLabel(d.groupNo || d.no || 'NO.01', pinStyleKey), state.ctx);
+            const boxDim = getPinBoxDimensions(scale, formatPinNumberLabel(d.groupNo || d.no || 'NO.01', pinStyleKey, true), state.ctx);
 
             if (d.targetX !== undefined && d.targetY !== undefined) {
                 const tipHit = getMapArrowTipHitCenter(d.targetX, d.targetY, bx, by, arrowScale);
@@ -37193,7 +37218,7 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
             if (!isSel) {
                 if (!fine) return;
                 // 터치·펜: 이웃 마킹이 누른 곳에서 얼마나 가까운지(박스는 안이면 0, 화살촉은 중심까지 거리)
-                const boxDimO = getPinBoxDimensions(dSize.pin, formatPinNumberLabel(d.groupNo || d.no || 'NO.01', getDefectStyleKey(d.category, d.defectType)), state.ctx);
+                const boxDimO = getPinBoxDimensions(dSize.pin, formatPinNumberLabel(d.groupNo || d.no || 'NO.01', getDefectStyleKey(d.category, d.defectType), true), state.ctx);
                 const bd = SH.boxDist(imgX, imgY, { cx: bx, cy: by, w: boxDimO.w, h: boxDimO.h, rot: state.rotationAngle || 0 });
                 const otherR = getMapTipHitRadius(dSize.arrow, true, kind);
                 if (bd <= otherR) nearestOther = Math.min(nearestOther, bd);
@@ -37207,7 +37232,7 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
             }
             // 영역은 꼭짓점·변 손잡이가 있으니, 영역 둘레 근처면 예전 판정에 맡긴다
             if (isAreaD && isPointInAreaMark(d, imgX, imgY, 16)) return;
-            const boxDim = getPinBoxDimensions(dSize.pin, formatPinNumberLabel(d.groupNo || d.no || 'NO.01', getDefectStyleKey(d.category, d.defectType)), state.ctx);
+            const boxDim = getPinBoxDimensions(dSize.pin, formatPinNumberLabel(d.groupNo || d.no || 'NO.01', getDefectStyleKey(d.category, d.defectType), true), state.ctx);
             const tip = hasTip ? getMapArrowTipHitCenter(d.targetX, d.targetY, bx, by, dSize.arrow) : null;
             byId.set(d.id, d);
             cands.push({
@@ -39413,6 +39438,7 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
 
         const titleEl = document.getElementById('defectModalTitle');
         if (titleEl) titleEl.textContent = `📍 결함 핀 일괄 수정 (${defects.length}건)`;
+        if (typeof window.syncDefectRenumberButton === 'function') window.syncDefectRenumberButton(null);
 
         const bulkAllArea = defects.every(d => d.shapeType === 'area' && d.areaX1 !== undefined);
         setDefectAreaStylePanelVisible(
@@ -39804,6 +39830,7 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
             if (!existingPin) titleEl.textContent = '📍 결함 핀 등록';
             else titleEl.textContent = isAreaTitle ? '⬚ 결함 영역 수정' : '📍 결함 핀 수정';
         }
+        if (typeof window.syncDefectRenumberButton === 'function') window.syncDefectRenumberButton(existingPin || null);
         if (typeof syncDefectShapeConvertButton === 'function') syncDefectShapeConvertButton(existingPin || null);
 
         const isAreaModal = !!(existingPin && existingPin.shapeType === 'area' && existingPin.areaX1 !== undefined) || !!areaRect || !!window._pendingAreaRect;
@@ -46455,7 +46482,7 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
         });
     }
 
-// @@app-part 11-cad-import.js sha=5af906219c1c — 원본은 app/11-cad-import.js (여기 말고 거기서 고칠 것)
+// @@app-part 11-cad-import.js sha=83ca8bd3e016 — 원본은 app/11-cad-import.js (여기 말고 거기서 고칠 것)
     // --- 9-1. CAD Defect Pins 2-Point Calibration Engine (v2.0) ---
     window.cadCalibrationState = null;
 
@@ -47473,6 +47500,85 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
         });
     }
 
+    /**
+     * 2026-11-11 결함 번호 직접 바꾸기(NO.74-2 같은 하위번호 포함, js/shared/defect-sub-no.js).
+     * 기둥 하나에 균열 여러 개 → 번호칸은 따로 두고 74-1, 74-2 … (통합 없이). 묶인 결함은 본번호만 바꾼다.
+     */
+    function defectRenumberLabelFor(d) {
+        if (!d) return 'NO.?';
+        const raw = d.groupId ? (d.groupNo || stripDefectNoSuffix(d.no || '')) : (d.no || '');
+        return String(raw || 'NO.?');
+    }
+    function syncDefectRenumberButton(defect) {
+        const btn = document.getElementById('btnDefectRenumber');
+        if (!btn) return;
+        const show = !!(defect && defect.id && !defect.surveyExtra && !window._defectBulkEditIds?.length);
+        btn.hidden = !show;
+        if (show) btn.textContent = `${defectRenumberLabelFor(defect)} ✎`;
+    }
+    window.syncDefectRenumberButton = syncDefectRenumberButton;
+
+    async function renumberOpenDefect() {
+        const api = window.BSA && window.BSA.shared && window.BSA.shared.defectSubNo;
+        const pinId = document.getElementById('defectPinId')?.value;
+        if (!api || !pinId || !state.currentBuildingId) return;
+        const key = `${state.currentBuildingId}_${state.currentFloor}`;
+        const findTarget = () => ((state.defects && state.defects[key]) || []).find((d) => d && d.id === pinId) || null;
+        let target = findTarget();
+        if (!target) return;
+        const cur = defectRenumberLabelFor(target).replace(/^NO\.?\s*/i, '');
+        const grouped = !!(target.groupId && (getFloorDefectsForNumbering(key) || []).filter((d) => d && d.groupId === target.groupId).length > 1);
+        const hint = grouped
+            ? '묶인 결함입니다. 본번호만 바꿀 수 있습니다(묶음째 이동).'
+            : '하위번호도 쓸 수 있습니다: 74-2, 74-3 … (원래 NO.74는 자동으로 74-1)\n번호칸은 따로 두고, 통계에서는 같은 본번호를 한 개소(가장 넓은 균열)로 셉니다.';
+        const input = await window.appPrompt(`새 결함 번호\n${hint}`, cur, { title: '결함 번호 바꾸기', okText: '바꾸기' });
+        if (input == null) return;
+        // 입력을 기다리는 사이 동기화가 결함을 새 객체로 바꿔 끼웠을 수 있다 — 다시 읽는다(빈칸 당기기와 같은 이유)
+        target = findTarget();
+        if (!target) return;
+        const pool = getFloorDefectsForNumbering(key);
+        const plan = api.planRenumber(pool, target, input);
+        if (!plan.ok) {
+            await window.appAlert(plan.reason, { title: '번호를 바꿀 수 없습니다' });
+            return;
+        }
+        if (plan.unchanged) return;
+        const poolKeys = Object.keys(state.defects || {}).filter((k) => {
+            const arr = state.defects[k];
+            return Array.isArray(arr) && arr.some((d) => pool.indexOf(d) >= 0);
+        });
+        if (typeof pushDefectHistory === 'function') pushDefectHistory(poolKeys);
+        api.applyRenumber(plan, {
+            stamp: stampDefectNumberChanged,
+            groupNumbering: applyDefectGroupNumbering
+        });
+        poolKeys.concat([key]).forEach((k) => {
+            const arr = state.defects[k] || [];
+            if (arr.some((d) => d && d._numberChanged) && typeof markFloorKeyDirty === 'function') markFloorKeyDirty(k);
+            arr.forEach((d) => {
+                if (d && d._numberChanged) {
+                    delete d._numberChanged;
+                    if (typeof journalDefectChange === 'function') journalDefectChange('edit', d, k);
+                }
+            });
+        });
+        if (typeof discardStalePendingRemoteAfterLocalPinEdit === 'function') discardStalePendingRemoteAfterLocalPinEdit();
+        // 수정창 숨은 번호 칸도 맞춘다(자동 저장이 옛 번호를 되써넣지 않게)
+        const noEl = document.getElementById('defectNo');
+        if (noEl) noEl.value = target.no || '';
+        saveStateToLocalStorage();
+        refreshAfterDefectNumberChange();
+        syncDefectRenumberButton(target);
+        const alsoMsg = (plan.extra || []).map((x) => ` · 원래 ${x.from} → ${x.no}`).join('');
+        window.showToast?.(`번호를 ${plan.no}(으)로 바꿨습니다.${alsoMsg}`, 'success', alsoMsg ? 5000 : 3000);
+    }
+    document.getElementById('btnDefectRenumber')?.addEventListener('click', () => {
+        renumberOpenDefect().catch((e) => {
+            console.warn('[번호 바꾸기] 실패', e);
+            window.showToast?.('번호 바꾸기에 실패했습니다: ' + (e && e.message), 'error', 5000);
+        });
+    });
+
     const btnConvertDefectShape = document.getElementById('btnConvertDefectShape');
     if (btnConvertDefectShape) {
         btnConvertDefectShape.addEventListener('click', async () => {
@@ -47658,7 +47764,7 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
         inputImportCadPins.addEventListener('change', window.importCadPinsJson);
     }
 
-// @@app-part 12-survey-table.js sha=7f63f7da7608 — 원본은 app/12-survey-table.js (여기 말고 거기서 고칠 것)
+// @@app-part 12-survey-table.js sha=93071024e474 — 원본은 app/12-survey-table.js (여기 말고 거기서 고칠 것)
     // --- 10. SURVEY TABLE & ALBUM RENDERING ---
 
     // 상태조사표 컬럼 기본 정의 (화면/PDF/엑셀 공통). size와 crackWidth/crackLength는 상호 배타적으로
@@ -48416,7 +48522,8 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
             }
             const parts = parseDefectNoParts(d);
             if (parts.suffix > 0 && !d.groupId) {
-                if (seenMainMarking.has(parts.main)) return;
+                // 2026-11-11 직접 준 하위번호(74-2)는 본번호 74가 있어도 자기 행
+                if (seenMainMarking.has(parts.main) && !(d.noManual && !d.groupId && !d.surveyExtra)) return;
             } else if (!d.groupId && parts.main !== Number.MAX_SAFE_INTEGER) {
                 seenMainMarking.add(parts.main);
             }
@@ -48519,7 +48626,7 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
 
     function formatSurveyReportNo(d, isGrade3, floorCode) {
         let raw = String(d.no || '').replace(/^NO\.?\s*/i, '').trim();
-        if (!d.surveyExtra && !d._groupHasSurveyExtras) {
+        if (!d.surveyExtra && !d._groupHasSurveyExtras && !(d.noManual && !d.groupId && !d.surveyExtra)) {
             raw = String(stripDefectNoSuffix(raw)).replace(/^NO\.?\s*/i, '').trim();
         }
         const stripped = raw.replace(/^0+(\d)/, '$1');

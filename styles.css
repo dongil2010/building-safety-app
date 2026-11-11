@@ -18978,3 +18978,21 @@ body.defect-modal-open .map-sel-photo-bar { display: none !important; }
     .photo-annot-foot .photo-annot-btn { min-width: 0; flex-direction: column; gap: 2px; padding: 4px 2px; }
     .photo-annot-foot .photo-annot-save { min-height: 64px; }
 }
+
+/* 2026-11-11 결함 수정창 머리의 번호 바꾸기 단추(NO.74-2 하위번호 직접 입력) */
+#defectModal .defect-renumber-btn {
+    flex: 0 0 auto;
+    margin-left: 0.4rem;
+    padding: 0.15rem 0.55rem;
+    border: 1px solid rgba(239, 68, 68, 0.55);
+    border-radius: 6px;
+    background: rgba(239, 68, 68, 0.08);
+    color: #dc2626;
+    font-weight: 700;
+    font-size: 0.85rem;
+    line-height: 1.4;
+    cursor: pointer;
+    white-space: nowrap;
+}
+#defectModal .defect-renumber-btn:hover { background: rgba(239, 68, 68, 0.16); }
+#defectModal .defect-renumber-btn[hidden] { display: none; }

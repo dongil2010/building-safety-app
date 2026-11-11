@@ -756,7 +756,8 @@
             }
             const parts = parseDefectNoParts(d);
             if (parts.suffix > 0 && !d.groupId) {
-                if (seenMainMarking.has(parts.main)) return;
+                // 2026-11-11 직접 준 하위번호(74-2)는 본번호 74가 있어도 자기 행
+                if (seenMainMarking.has(parts.main) && !(d.noManual && !d.groupId && !d.surveyExtra)) return;
             } else if (!d.groupId && parts.main !== Number.MAX_SAFE_INTEGER) {
                 seenMainMarking.add(parts.main);
             }
@@ -859,7 +860,7 @@
 
     function formatSurveyReportNo(d, isGrade3, floorCode) {
         let raw = String(d.no || '').replace(/^NO\.?\s*/i, '').trim();
-        if (!d.surveyExtra && !d._groupHasSurveyExtras) {
+        if (!d.surveyExtra && !d._groupHasSurveyExtras && !(d.noManual && !d.groupId && !d.surveyExtra)) {
             raw = String(stripDefectNoSuffix(raw)).replace(/^NO\.?\s*/i, '').trim();
         }
         const stripped = raw.replace(/^0+(\d)/, '$1');

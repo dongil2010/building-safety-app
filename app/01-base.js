@@ -4456,7 +4456,8 @@ document.addEventListener('DOMContentLoaded', () => {
         // 그룹 없이 no만 N-1 인 고아 싱글톤도 접미사 제거
         const byMain = new Map();
         defects.forEach((d) => {
-            if (!d || d.groupId) return;
+            // 2026-11-11 사용자가 직접 준 하위번호(noManual, js/shared/defect-sub-no.js)는 꼬리를 떼지 않는다
+            if (!d || d.groupId || d.noManual) return;
             const p = parseDefectNoParts(d);
             if (p.main === Number.MAX_SAFE_INTEGER) return;
             if (!byMain.has(p.main)) byMain.set(p.main, []);
@@ -4477,7 +4478,8 @@ document.addEventListener('DOMContentLoaded', () => {
         let changed = false;
         const byMain = new Map();
         defects.forEach((d) => {
-            if (!d || d.surveyExtra || d.groupId) return;
+            // 2026-11-11 직접 준 하위번호(noManual)는 옛 데이터 고장이 아니다 — 묶지 않는다
+            if (!d || d.surveyExtra || d.groupId || d.noManual) return;
             const p = parseDefectNoParts(d);
             if (p.main === Number.MAX_SAFE_INTEGER) return;
             const key = String(p.main);
@@ -4745,9 +4747,21 @@ document.addEventListener('DOMContentLoaded', () => {
         const buildUnits = () => {
             const units = [];
             const seenGroup = new Set();
+            // 2026-11-11 직접 준 하위번호(74-1, 74-2 …)는 본번호째 한 칸으로 옮기고 꼬리는 살린다
+            const subMains = new Set();
+            defects.forEach((d) => { if (d && d.noManual && !d.groupId && !d.surveyExtra) subMains.add(getMain(d)); });
+            const seenSub = new Set();
             defects.forEach((d) => {
                 if (!d || d.surveyExtra) return;
                 const gid = d.groupId || null;
+                if (!gid && subMains.has(getMain(d))) {
+                    const main = getMain(d);
+                    if (seenSub.has(main)) return;
+                    seenSub.add(main);
+                    const members = defects.filter((m) => m && !m.groupId && !m.surveyExtra && getMain(m) === main);
+                    units.push({ kind: 'sub', groupId: 'sub:' + main, main, members });
+                    return;
+                }
                 if (gid) {
                     if (seenGroup.has(gid)) return;
                     seenGroup.add(gid);
@@ -4790,7 +4804,16 @@ document.addEventListener('DOMContentLoaded', () => {
             });
             const victim = candidates[0];
             const baseStr = formatDefectNoSeq(gap);
-            if (victim.kind === 'group') {
+            if (victim.kind === 'sub') {
+                victim.members.forEach((m) => {
+                    const prev = String(m.no || '');
+                    const sfx = parseDefectNoParts(m).suffix;
+                    const nextNo = sfx ? `${baseStr}-${sfx}` : baseStr;
+                    m.no = nextNo;
+                    if (m.isCadImported) m.cadNo = nextNo;
+                    if (prev !== nextNo) stampDefectNumberChanged(m, false);
+                });
+            } else if (victim.kind === 'group') {
                 victim.members.forEach((m) => {
                     const prevG = String(m.groupNo || '');
                     m.groupNo = baseStr;
