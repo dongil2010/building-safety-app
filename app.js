@@ -42206,7 +42206,7 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
         });
     }
 
-// @@app-part 10-marking.js sha=e57abe88e200 — 원본은 app/10-marking.js (여기 말고 거기서 고칠 것)
+// @@app-part 10-marking.js sha=6ed68f5d55b3 — 원본은 app/10-marking.js (여기 말고 거기서 고칠 것)
     // --- 9. BUTTON CONTROLS & LISTENERS ---
 
     // Main Navigation Tabs Click Listener
@@ -43819,7 +43819,7 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
                         <b>그룹 전체 (${(selF.group.lines || []).length}개)</b>${nudgeBtns('nudgeGroup', selF.group.axis)}
                     </div>
                     <div class="grid-panel-row">
-                        <button type="button" data-act="bend" class="${ge.bendArmed ? 'active' : ''}">꺾기 추가</button>
+                        <button type="button" data-act="bend" class="${ge.bendArmed ? 'active' : ''}" title="선을 누른 뒤 꺾을 점을 찍습니다 (단축키 F)">꺾기 추가 (F)</button>
                         ${canDelVertex ? '<button type="button" data-act="delVertex">꺾인 점 삭제</button>' : ''}
                         <button type="button" data-act="splitGroup" title="증축 등으로 번호 체계가 바뀔 때(A~D 다음 1~4, X1~ 다음 A1~): 이 선과 그 뒤쪽 선(열은 오른쪽, 행은 아래쪽)을 새 그룹으로 나눕니다. 새 그룹은 머리글·시작 번호·번호 방식을 따로 정할 수 있습니다">여기부터 새 그룹</button>
                         <button type="button" data-act="delLine" class="danger">선 삭제</button>
@@ -44694,6 +44694,15 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
             if (ge.bendArmed) ge.bendArmed = false;
             else if (ge.sel) ge.sel = null;
             else { setGridEditActive(false); return; }
+            renderGridPanel();
+            drawCanvas();
+        } else if ((e.key === 'f' || e.key === 'F') && !e.ctrlKey && !e.metaKey && !e.altKey && ge.sel) {
+            // F = 꺾기 추가 토글 (선을 선택한 상태에서만, 버튼 「꺾기 추가」와 같은 동작)
+            const gridF = getCurrentFloorGrid(false);
+            if (!gridF || !gridLib().findLine(gridF, ge.sel.lineId)) return;
+            e.preventDefault();
+            e.stopImmediatePropagation();
+            ge.bendArmed = !ge.bendArmed;
             renderGridPanel();
             drawCanvas();
         }
