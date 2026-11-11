@@ -2,8 +2,8 @@
  * NO. 박스(번호칸) 자동 정리 — 순수 계산 모듈 (DOM 없음, 2026-09-30)
  *
  * 마킹 점(화살표 끝)·영역은 절대 안 움직이고 박스 자리만 고른다.
- * - 후보(2026-11-11 방사형): 박스마다 기준점(화살표 끝들의 가운데)에서 **도면 중심 반대쪽(바깥)** 방향을 기본으로,
- *         그 방향 ±15°…±90° × 거리 7단계 + 지금 자리. 그래도 충돌이 남는 박스만 360° × 더 먼 거리까지 다시 찾는다.
+ * - 후보(2026-11-11 방사형·45°): 박스마다 기준점(화살표 끝들의 가운데)에서 **마킹 전체 평균 위치의 반대쪽(바깥) 대각선(45°)**을
+ *         기본으로(지시선이 딱 45°가 되게 박스 모서리를 그 선 위에 둔다), 그 방향 ±15°…±90° × 거리 7단계 + 지금 자리. 그래도 충돌이 남는 박스만 360° × 더 먼 거리까지 다시 찾는다.
  * - 비용: 박스끼리 겹침, 박스가 마킹 점을 가림, 박스가 다른 지시선을 가림(또는 내 지시선이 다른 박스를 지남),
  *         지시선끼리 교차, 지시선이 다른 마킹 점을 지남 — 이것들은 「충돌」(강하게).
  *         방사 방향에서 벗어난 각도(중간), 지시선 길이(아주 약하게 — 길어져도 됨), 도면 밖,
@@ -17,7 +17,7 @@
  *   targets: [{ x, y }] 또는 [{ rect: { x1, y1, x2, y2 } }](영역: 지시선이 영역 테두리에 꽂힘),
  *   movable: bool
  * }
- * opts: { bounds: { w, h }(가운데 = 방사형 기준점), center: { x, y }(따로 줄 때), fresh: bool, obstacles: [{ x1, y1, x2, y2 }](범례 등 — 박스가 피함), unit(박스 높이 기준, 없으면 중앙값) }
+ * opts: { bounds: { w, h }, center: { x, y }(방사형 기준점 — 없으면 마킹 전체 평균), fresh: bool, obstacles: [{ x1, y1, x2, y2 }](범례 등 — 박스가 피함), unit(박스 높이 기준, 없으면 중앙값) }
  * 결과: { moves: { id: { x, y } }, before: 충돌 수, after: 충돌 수, cost }
  */
 (function (root) {
@@ -160,16 +160,14 @@
         P.anchors = list.map(anchorOf);
         let center = null;
         if (o.center && Number.isFinite(num(o.center.x, NaN)) && Number.isFinite(num(o.center.y, NaN))) center = { x: Number(o.center.x), y: Number(o.center.y) };
-        else if (bounds) center = { x: (bounds.x1 + bounds.x2) / 2, y: (bounds.y1 + bounds.y2) / 2 };
         else if (list.length) center = P.anchors.reduce((a, p) => ({ x: a.x + p.x / list.length, y: a.y + p.y / list.length }), { x: 0, y: 0 });
+        else if (bounds) center = { x: (bounds.x1 + bounds.x2) / 2, y: (bounds.y1 + bounds.y2) / 2 };
         else center = { x: 0, y: 0 };
         P.center = center;
-        // 방사 방향(단위 벡터). 중심에 딱 붙은 점은 위쪽
-        P.dirs = P.anchors.map((a) => {
-            const dx = a.x - center.x; const dy = a.y - center.y;
-            const d = Math.hypot(dx, dy);
-            return d > unit * 0.05 ? { x: dx / d, y: dy / d } : { x: 0, y: -1 };
-        });
+        // 기본 방향(단위 벡터) = 마킹 전체 평균에서 바깥쪽인 **대각선(45°)**. 평균의 오른쪽 위에 있는 점 → 오른쪽 위 45°.
+        // 평균과 좌우(또는 상하)가 같은 점은 오른쪽(위쪽)으로.
+        const Q = Math.SQRT1_2;
+        P.dirs = P.anchors.map((a) => ({ x: (a.x - center.x >= 0 ? 1 : -1) * Q, y: (a.y - center.y > 0 ? 1 : -1) * Q }));
         return P;
     }
 
@@ -212,12 +210,11 @@
             (wide ? ANGLES_WIDE : ANGLES).forEach((deg) => {
                 const th = base + deg * Math.PI / 180;
                 const ux = Math.cos(th); const uy = Math.sin(th);
-                // 박스에서 마킹 점 쪽을 보는 변까지 + 영역 반폭 + 간격
-                const boxReach = reachAlong(ux, uy, ux > 0 ? it.ext.l : it.ext.r, uy > 0 ? it.ext.t : it.ext.b);
+                // 지시선이 딱 이 각도가 되게: 마킹 점에서 이 방향으로 g만큼 간 곳에 박스의 **가까운 모서리**(축 방향이면 변 가운데)를 둔다
                 const areaReach = (hw || hh) ? reachAlong(ux, uy, hw, hh) : 0;
-                const g = dk * P.unit + boxReach + areaReach;
-                let x = a.x + ux * g;
-                let y = a.y + uy * g;
+                const g = dk * P.unit + areaReach;
+                let x = a.x + ux * g + (ux > 1e-6 ? it.ext.l : (ux < -1e-6 ? -it.ext.r : 0));
+                let y = a.y + uy * g + (uy > 1e-6 ? it.ext.t : (uy < -1e-6 ? -it.ext.b : 0));
                 if (bounds) {
                     x = clamp(x, bounds.x1 + it.ext.l, bounds.x2 - it.ext.r);
                     y = clamp(y, bounds.y1 + it.ext.t, bounds.y2 - it.ext.b);
@@ -264,7 +261,8 @@
         // 방사 방향에서 벗어난 각도 (새로 놓는 게 아니면 지금 자리는 따지지 않음 — 충돌 없는 박스가 괜히 안 움직이게)
         if (P.fresh || Math.abs(x - it.cx0) > 1e-6 || Math.abs(y - it.cy0) > 1e-6) {
             const an = P.anchors[i]; const dr = P.dirs[i];
-            const vx = x - an.x; const vy = y - an.y;
+            // 지시선 각도 = 기준점 → 박스에서 가장 가까운 점
+            const vx = clamp(an.x, box.x1, box.x2) - an.x; const vy = clamp(an.y, box.y1, box.y2) - an.y;
             const vl = Math.hypot(vx, vy);
             const dev = vl > 1e-6 ? Math.acos(clamp((vx * dr.x + vy * dr.y) / vl, -1, 1)) : Math.PI;
             cost += W.radial * dev;

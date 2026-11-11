@@ -2380,7 +2380,7 @@
         const defects = filterMapPlacedDefects(getCurrentFloorDefects());
         const { items, membersById } = buildBoxAutoLayoutItems(defects, mode);
         const dims = getFloorPlanDisplayDims();
-        // 방사형(2026-11-11): 도면 가운데에서 바깥쪽으로 박스를 뺀다. 「모든 박스」는 지금 자리에 매이지 않고 새로 놓음(fresh)
+        // 방사형(2026-11-11): 마킹 전체 평균 위치에서 바깥쪽 45° 대각선으로 박스를 뺀다. 「모든 박스」는 지금 자리에 매이지 않고 새로 놓음(fresh)
         const opts = { bounds: { w: dims.w, h: dims.h }, obstacles: boxAutoLayoutObstacles(), fresh: mode === 'all' };
         if (mode !== 'all') {
             const conf = L.conflictsAtCurrent(items, opts);
@@ -2423,7 +2423,7 @@
             window.showToast?.('이 층에 마킹이 없습니다.', 'info', 2000);
             return;
         }
-        const pick = await window.appChoose('NO. 박스를 도면 가운데에서 바깥쪽(방사형)으로, 마킹 점·다른 박스와 겹치지 않고 지시선끼리 엇갈리지 않는 자리로 옮깁니다.\n마킹 점(화살표 끝)·영역은 움직이지 않습니다.', [
+        const pick = await window.appChoose('NO. 박스를 마킹들의 가운데에서 바깥쪽(방사형, 45° 대각선)으로,마킹 점·다른 박스와 겹치지 않고 지시선끼리 엇갈리지 않는 자리로 옮깁니다.\n마킹 점(화살표 끝)·영역은 움직이지 않습니다.', [
             { label: '겹친 박스만', detail: '직접 끌어 옮긴 박스는 그대로 둡니다' },
             { label: '모든 박스', detail: '직접 옮긴 박스도 포함해 이 층 박스를 모두 방사형으로 다시 놓습니다' }
         ], { title: '박스 자동 정리', okText: '정리', defaultIndex: 0 });

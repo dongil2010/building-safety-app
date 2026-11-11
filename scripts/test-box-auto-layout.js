@@ -81,12 +81,17 @@ assert.ok(L.segHitsRect({ x: 0, y: 5 }, { x: 20, y: 5 }, { x1: 5, y1: 0, x2: 15,
     assert.strictEqual(rr.after, 0, `방사형 충돌 없음 ${rr.before}→${rr.after}`);
     const placedAt = (it) => rr.moves[it.id] || { x: it.cx, y: it.cy };
     const cl = (v, lo, hi) => Math.max(lo, Math.min(hi, v));
-    let devSum = 0;
+    // 기준 = 마킹 전체 평균. 지시선(점 → 박스에서 가장 가까운 점)이 평균 반대쪽 45° 대각선에 가까워야 함
+    const mx = pts.reduce((a, it) => a + it.targets[0].x, 0) / pts.length;
+    const my = pts.reduce((a, it) => a + it.targets[0].y, 0) / pts.length;
+    let devSum = 0; let exact45 = 0;
     const leads = pts.map((it) => {
         const m = placedAt(it); const T = it.targets[0];
-        const out = Math.atan2(T.y - H2 / 2, T.x - W2 / 2); const got = Math.atan2(m.y - T.y, m.x - T.x);
+        const out = Math.atan2(T.y - my > 0 ? 1 : -1, T.x - mx >= 0 ? 1 : -1);
+        const got = Math.atan2(cl(T.y, m.y - ext.t, m.y + ext.b) - T.y, cl(T.x, m.x - ext.l, m.x + ext.r) - T.x);
         let d = Math.abs(out - got); if (d > Math.PI) d = 2 * Math.PI - d;
         devSum += d;
+        if (d < 1e-6) exact45 += 1;
         // 박스가 어떤 마킹 점도 가리지 않음
         pts.forEach((o) => {
             const q = o.targets[0];
@@ -94,13 +99,18 @@ assert.ok(L.segHitsRect({ x: 0, y: 5 }, { x: 20, y: 5 }, { x1: 5, y1: 0, x2: 15,
         });
         return { a: { x: cl(T.x, m.x - ext.l, m.x + ext.r), y: cl(T.y, m.y - ext.t, m.y + ext.b) }, b: T };
     });
-    assert.ok(devSum / pts.length < 15 * Math.PI / 180, `바깥 방향 평균 편차 ${(devSum / pts.length * 57.3).toFixed(1)}°`);
+    assert.ok(devSum / pts.length < 10 * Math.PI / 180, `45° 대각선 평균 편차 ${(devSum / pts.length * 57.3).toFixed(1)}°`);
+    assert.ok(exact45 >= pts.length * 0.7, `대부분 딱 45° (${exact45}/${pts.length})`);
     for (let i = 0; i < leads.length; i++) {
         for (let j = i + 1; j < leads.length; j++) assert.ok(!L.segCross(leads[i].a, leads[i].b, leads[j].a, leads[j].b), `지시선 교차 ${i}/${j}`);
     }
-    // 한 점만 있어도 바깥쪽: 오른쪽 아래 점 → 박스는 점보다 오른쪽 아래
-    const one = L.layoutBoxes([mk('s', 1500, 1100)], { bounds: { w: W2, h: H2 }, fresh: true }).moves.s;
+    // 기준점을 따로 주면 그 반대쪽: 오른쪽 아래 점 → 박스는 점보다 오른쪽 아래, 지시선은 딱 45°
+    const one = L.layoutBoxes([mk('s', 1500, 1100)], { bounds: { w: W2, h: H2 }, center: { x: 1000, y: 750 }, fresh: true }).moves.s;
     assert.ok(one && one.x > 1500 && one.y > 1100, '바깥쪽으로 ' + JSON.stringify(one));
+    assert.ok(Math.abs((one.x - ext.l - 1500) - (one.y - ext.t - 1100)) < 1e-6, '지시선 45° ' + JSON.stringify(one));
+    // 두 점: 평균의 왼쪽 위 점은 왼쪽 위로, 오른쪽 아래 점은 오른쪽 아래로
+    const duo = L.layoutBoxes([mk('u', 900, 700), mk('v', 1100, 800)], { bounds: { w: W2, h: H2 }, fresh: true }).moves;
+    assert.ok(duo.u.x < 900 && duo.u.y < 700 && duo.v.x > 1100 && duo.v.y > 800, '마킹 평균 기준 ' + JSON.stringify(duo));
 }
 
 // 앱 연결
