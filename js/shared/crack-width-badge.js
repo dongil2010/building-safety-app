@@ -75,23 +75,30 @@
         return false;
     }
 
+    /** 2026-11-11 「0.1 ~ 0.5」 같은 범위·여러 값 표기를 낱개로 나눈다 (~ 뒤 값도 본다) */
+    function splitWidthText(raw) {
+        return String(raw == null ? '' : raw).trim()
+            .split(/\s*(?:[\/,~∼〜～–]|-(?=\s|\d|\.))\s*/)
+            .map(function (s) { return s.trim(); })
+            .filter(Boolean);
+    }
+
     function collectWidthParts(d) {
         if (!d) return [];
         // 2026-11-10 면적용(가로x세로)으로 넣은 값(0.3x0.5)은 배지에 안 나오게 — 측정 행 구분이 x이거나 규모 글자가 면적이면 뺀다
         if (Array.isArray(d.crackMeasures) && d.crackMeasures.length) {
-            return d.crackMeasures.filter(function (m) {
-                if (!m) return false;
-                if (/^[x×*]$/i.test(String(m.join || '').trim())) return false;
-                return !isAreaWidthInSize(d.size, m.width);
-            }).map(function (m) {
-                return String(m.width != null ? m.width : '').trim();
-            }).filter(Boolean);
+            var out = [];
+            d.crackMeasures.forEach(function (m) {
+                if (!m) return;
+                if (/^[x×*]$/i.test(String(m.join || '').trim())) return;
+                if (isAreaWidthInSize(d.size, m.width)) return;
+                splitWidthText(m.width).forEach(function (w) { out.push(w); });
+            });
+            return out;
         }
         var raw = String(d.crackWidth != null ? d.crackWidth : '').trim();
         if (raw) {
-            // 2026-11-11 「0.1 ~ 0.5」 같은 범위 표기도 ~ 뒤 값을 따로 보도록 구분자에 넣음 (예전엔 앞 숫자만 읽음)
-            return raw.split(/\s*(?:[\/,~∼〜～–]|-(?=\s|\d|\.))\s*/).map(function (s) { return s.trim(); }).filter(Boolean)
-                .filter(function (w) { return !isAreaWidthInSize(d.size, w); });
+            return splitWidthText(raw).filter(function (w) { return !isAreaWidthInSize(d.size, w); });
         }
         var size = String(d.size || '').trim();
         if (!size || size === '-') return [];

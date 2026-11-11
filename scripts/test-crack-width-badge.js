@@ -59,6 +59,7 @@ function testFormatUnits() {
     assert.strictEqual(api.formatBadgeText(crack({ crackWidth: '0.1 ~ 0.5' })), '0.5', '범위 ~ 뒤 값도 본다');
     assert.strictEqual(api.formatBadgeText(crack({ crackWidth: '0.1~0.3' })), '0.3', '범위 뒤 0.3 이상');
     assert.strictEqual(api.formatBadgeText(crack({ crackWidth: '0.1~0.2' })), '', '범위 모두 0.3 미만이면 없음');
+    assert.strictEqual(api.formatBadgeText(crack({ crackMeasures: [{ width: '0.1~0.5', length: '0.3', join: '/' }], size: '0.1~0.5/0.3' })), '0.5', '폭·길이·개수 행의 범위 뒤 값');
     assert.strictEqual(api.formatBadgeText(crack({
         crackMeasures: [{ width: '0.3' }, { width: '0.5' }]
     })), '0.3 / 0.5');
