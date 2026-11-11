@@ -931,6 +931,56 @@
         return (best && bestScore > 0) ? best.floorCode : null;
     }
 
+    /**
+     * 2026-11-11 「시트 배정을 층을 다 보여주고 엑셀에 어떤 탭을 넣을지로」 — 층 기준 배정의 처음 값.
+     * 탭 이름으로 추정한 층에 그 탭을 넣는다. 같은 층으로 추정된 탭이 둘이면 앞 탭만 넣고 나머지는 미배정.
+     * 반환 { byFloor: { floorCode: 탭 번호 }, unassigned: [탭 번호] }
+     */
+    function buildImportFloorSheetAssignment(sheets, floors) {
+        const byFloor = {};
+        const unassigned = [];
+        (sheets || []).forEach((sh, i) => {
+            const code = sh && sh.guessedFloorCode;
+            const known = !!code && (floors || []).some((f) => f && f.floorCode === code);
+            if (known && byFloor[code] === undefined) byFloor[code] = i;
+            else unassigned.push(i);
+        });
+        return { byFloor, unassigned };
+    }
+
+    /** 층별 탭 선택값 → 실제로 가져올 [{ floorCode, sheetIdx }] (층 순서 그대로, 「넣지 않음」·없는 탭은 뺌) */
+    function collectImportFloorSheetPairs(selections, sheetCount) {
+        const pairs = [];
+        (selections || []).forEach((sel) => {
+            const idx = parseInt(sel && sel.value, 10);
+            if (!sel || !sel.floorCode || !(idx >= 0) || idx >= sheetCount) return;
+            pairs.push({ floorCode: sel.floorCode, sheetIdx: idx });
+        });
+        return pairs;
+    }
+
+    /** 어느 층에도 넣지 않은 탭 / 여러 층에 같이 넣은 탭을 배정 목록 아래에 알린다 */
+    function updateImportFloorSheetNotice() {
+        const box = document.getElementById('importDefectExcelSheetMapNotice');
+        if (!box) return;
+        const sheets = window._importExcelSheets || [];
+        const unit = window._importFromHwpx ? '층 블록' : '탭';
+        const count = {};
+        document.querySelectorAll('.import-defect-floor-sheet-map').forEach((sel) => {
+            if (sel.value !== '') count[sel.value] = (count[sel.value] || 0) + 1;
+            const row = sel.closest('.import-floor-sheet-row');
+            if (row) row.style.opacity = sel.value === '' ? '0.6' : '';
+        });
+        const nameOf = (i) => `${escapeHtml(sheets[i].sheetName)}(${sheets[i].rows.length}행)`;
+        const unused = sheets.map((sh, i) => i).filter((i) => !count[i]);
+        const dup = sheets.map((sh, i) => i).filter((i) => count[i] > 1);
+        const lines = [];
+        if (unused.length) lines.push(`⚠ 아직 어느 층에도 넣지 않은 ${unit}: <b>${unused.map(nameOf).join(', ')}</b> — 이대로면 가져오지 않습니다. 넣을 층에서 골라 주세요(맞는 층이 없으면 건축물 정보에서 층을 먼저 추가).`);
+        if (dup.length) lines.push(`⚠ 여러 층에 같이 넣는 ${unit}: <b>${dup.map(nameOf).join(', ')}</b> — 같은 내용이 층마다 들어갑니다.`);
+        box.innerHTML = lines.map((l) => `<div>${l}</div>`).join('');
+        box.style.display = lines.length ? '' : 'none';
+    }
+
     window.handleImportDefectExcelFile = function(event) {
         const file = event.target.files && event.target.files[0];
         if (!file) return;
@@ -1021,8 +1071,8 @@
         const sheetMapTitle = document.getElementById('importDefectExcelSheetMapTitle');
         if (sheetMapTitle) {
             sheetMapTitle.textContent = fromHwpx
-                ? '한글 문서 층 블록 ↔ 점검 층 배정 (층 이름으로 자동 추정, 다르면 직접 선택하세요)'
-                : '시트 ↔ 층 배정 (시트 이름으로 자동 추정, 다르면 직접 선택하세요)';
+                ? '층별 배정 — 층마다 넣을 한글 문서 층 블록을 고르세요 (이름으로 자동 추정)'
+                : '층별 시트 배정 — 층마다 넣을 엑셀 탭을 고르세요 (탭 이름으로 자동 추정)';
         }
 
         const sheetMapBody = document.getElementById('importDefectExcelSheetMapBody');
@@ -1030,21 +1080,24 @@
             if (floors.length === 0) {
                 sheetMapBody.innerHTML = `<div style="font-size:0.82rem; color:var(--text-muted);">선택된 건축물의 층 정보를 찾지 못해 모든 시트를 현재 층(${state.currentFloor || ''})으로 가져옵니다.</div>`;
             } else {
-                sheetMapBody.innerHTML = sheets.map(s => {
-                    // 2026-10-16 앱에 맞는 층이 없으면 조용히 「가져오지 않음」이 아니라 눈에 띄게 알린다
-                    const noMatch = !s.guessedFloorCode;
-                    const options = ['<option value="">(가져오지 않음)</option>']
-                        .concat(floors.map(f => `<option value="${escapeHtml(f.floorCode)}" ${f.floorCode === s.guessedFloorCode ? 'selected' : ''}>${escapeHtml(f.floorLabel)}</option>`));
+                // 2026-11-11 층 기준: 건물의 모든 층을 한 줄씩 보여주고, 층마다 넣을 탭을 고른다
+                const unit = fromHwpx ? '층 블록' : '탭';
+                const initial = buildImportFloorSheetAssignment(sheets, floors);
+                sheetMapBody.innerHTML = floors.map((f) => {
+                    const picked = initial.byFloor[f.floorCode];
+                    const options = ['<option value="">(넣지 않음)</option>']
+                        .concat(sheets.map((sh, i) => `<option value="${i}" ${i === picked ? 'selected' : ''}>${escapeHtml(sh.sheetName)} (${sh.rows.length}행)</option>`));
                     return `
-                        <div style="display:flex; align-items:center; gap:0.6rem;">
-                            <span style="flex:1; min-width:0; font-size:0.82rem; font-weight:700; color:var(--text-secondary); overflow:hidden; text-overflow:ellipsis; white-space:nowrap;" title="${escapeHtml(s.sheetName)}">
-                                ${escapeHtml(s.sheetName)} <span style="color:var(--text-muted); font-weight:400;">(${s.rows.length}행)</span>
-                                ${noMatch ? '<span class="import-floor-nomatch" style="display:block; color:#b45309; font-weight:600; font-size:0.75rem; white-space:normal;">⚠ 앱에 맞는 층이 없음 — 층을 직접 고르거나 건축물 정보에서 층을 먼저 추가하세요</span>' : ''}
-                            </span>
-                            <select class="form-select import-defect-sheet-floor-map" data-sheet="${escapeHtml(s.sheetName)}" style="width:200px; flex-shrink:0;">${options.join('')}</select>
+                        <div class="import-floor-sheet-row" style="display:flex; align-items:center; gap:0.6rem;">
+                            <span style="flex:1; min-width:0; font-size:0.82rem; font-weight:700; color:var(--text-secondary); overflow:hidden; text-overflow:ellipsis; white-space:nowrap;" title="${escapeHtml(f.floorLabel || f.floorCode)}">${escapeHtml(f.floorLabel || f.floorCode)}</span>
+                            <select class="form-select import-defect-floor-sheet-map" data-floor="${escapeHtml(f.floorCode)}" title="이 층에 넣을 ${unit}" style="width:260px; max-width:60%; flex-shrink:0;">${options.join('')}</select>
                         </div>
                     `;
-                }).join('');
+                }).join('') + '<div id="importDefectExcelSheetMapNotice" class="import-floor-nomatch" style="display:none; color:#b45309; font-weight:600; font-size:0.78rem; line-height:1.5;"></div>';
+                sheetMapBody.querySelectorAll('.import-defect-floor-sheet-map').forEach((sel) => {
+                    sel.addEventListener('change', updateImportFloorSheetNotice);
+                });
+                updateImportFloorSheetNotice();
             }
         }
 
@@ -1264,21 +1317,25 @@
         const sheets = window._importExcelSheets || [];
         if (sheets.length === 0) return;
 
-        const sheetSelects = document.querySelectorAll('.import-defect-sheet-floor-map');
-        const floorBySheetName = {};
-        sheetSelects.forEach(sel => { floorBySheetName[sel.dataset.sheet] = sel.value; });
         // 층 정보가 아예 없는 건축물은 매칭 UI 자체가 없으므로 모든 시트를 현재 층으로 간주
         const noFloorInfo = (window._importExcelFloors || []).length === 0;
+        // 2026-11-11 층 기준 배정 — 층마다 고른 탭대로 넣는다(화면 값은 누른 순간에 읽어 둔다)
+        const importPairs = noFloorInfo
+            ? sheets.map((sh, i) => ({ floorCode: state.currentFloor, sheetIdx: i }))
+            : collectImportFloorSheetPairs(
+                Array.from(document.querySelectorAll('.import-defect-floor-sheet-map')).map((sel) => ({ floorCode: sel.dataset.floor, value: sel.value })),
+                sheets.length
+            );
 
         const keysToSnap = [];
-        sheets.forEach((sheetInfo) => {
-            const floorCode = noFloorInfo ? state.currentFloor : floorBySheetName[sheetInfo.sheetName];
+        importPairs.forEach((pair) => {
+            const floorCode = pair.floorCode;
             if (!floorCode) return;
             const key = `${state.currentBuildingId}_${floorCode}`;
             if (keysToSnap.indexOf(key) < 0) keysToSnap.push(key);
         });
         if (!keysToSnap.length) {
-            window.showToast('가져올 시트가 선택되지 않았습니다. 시트별 층 배정을 확인해주세요.', 'warning', 5000);
+            window.showToast('넣을 탭이 지정된 층이 없습니다. 층별 시트 배정을 확인해주세요.', 'warning', 5000);
             return;
         }
         // 화면 선택값(열 매칭·병합 옵션)은 백업을 기다리기 **전에** 읽는다 — 기다리는 사이 창이
@@ -1316,9 +1373,10 @@
         // 0이 아니면 헤더가 안 맞거나 내용 칸이 빈 시트일 수 있어 사용자에게 알린다.
         let keptExistingOnImport = 0;
 
-        sheets.forEach(sheetInfo => {
-            const floorCode = noFloorInfo ? importFloorAtClick : floorBySheetName[sheetInfo.sheetName];
-            if (!floorCode) return; // "(가져오지 않음)"으로 지정된 시트는 건너뜀
+        importPairs.forEach((pair) => {
+            const sheetInfo = sheets[pair.sheetIdx];
+            const floorCode = pair.floorCode; // 「(넣지 않음)」 층은 importPairs에 없다
+            if (!sheetInfo || !floorCode) return;
 
             const key = `${importBuildingAtClick}_${floorCode}`;
             if (!state.defects[key]) state.defects[key] = [];
@@ -1570,7 +1628,7 @@
         });
 
         if (totalImported === 0 && totalMatched === 0) {
-            window.showToast('가져올 시트가 선택되지 않았습니다. 시트별 층 배정을 확인해주세요.', 'warning', 5000);
+            window.showToast('가져온 내용이 없습니다. 층별 시트 배정과 탭 내용을 확인해주세요.', 'warning', 5000);
             return;
         }
 
@@ -1708,7 +1766,7 @@
             ["6. '조사내용'은 결함 종류입니다 (예: 균열, 누수, 백태, 철근노출, 조적벽체 균열 등). 상태가 양호한 항목은 '상태양호'라고 입력하면 결함크기·균열폭·균열길이·결함원인추정 칸은 비워도 자동으로 무시됩니다."],
             ["7. '결함크기'는 자유 텍스트입니다. 균열의 경우 균열폭/균열길이를 별도 칸에 나눠 적거나, 결함크기 칸에 '0.15/1.2'처럼 슬래시로 합쳐 적어도 자동으로 나뉘어 인식됩니다."],
             ["8. '진행여부' / '누수여부'는 해당되면 '진행중' / '누수중'처럼 아무 문자나 입력하고, 해당 없으면 '-' 또는 빈 칸으로 두세요."],
-            ["9. 작성이 끝나면 이 파일을 저장한 뒤, 이 화면의 '📥 외부 엑셀 결함표 가져오기' 버튼으로 업로드하세요. 가져오기 화면에서 시트 ↔ 층 배정이 시트 이름으로 자동 추정되며, 다르면 직접 바꿀 수 있습니다."],
+            ["9. 작성이 끝나면 이 파일을 저장한 뒤, 이 화면의 '📥 외부 엑셀 결함표 가져오기' 버튼으로 업로드하세요. 가져오기 화면에 건물의 모든 층이 나오고, 층마다 넣을 탭(시트)이 탭 이름으로 자동 추정됩니다. 다르면 층별로 직접 바꿀 수 있습니다."],
             ["10. 엑셀에는 도면 위 위치(좌표) 정보가 없어, 가져온 결함은 각 층 도면 좌측 상단에 임시로 배치됩니다. 가져오기 후 좌측 결함 목록에서 각 항목을 도면 위 정확한 위치로 직접 드래그해주세요."]
         ];
         const ws2 = XLSX.utils.aoa_to_sheet(notes);
