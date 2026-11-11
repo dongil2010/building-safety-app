@@ -71,25 +71,22 @@ assert.ok(L.segCross({ x: 0, y: 0 }, { x: 10, y: 10 }, { x: 0, y: 10 }, { x: 10,
 assert.ok(!L.segCross({ x: 0, y: 0 }, { x: 10, y: 10 }, { x: 10, y: 10 }, { x: 20, y: 0 }), '같은 끝점은 교차 아님');
 assert.ok(L.segHitsRect({ x: 0, y: 5 }, { x: 20, y: 5 }, { x1: 5, y1: 0, x2: 15, y2: 10 }));
 
-// 9) 방사형(2026-11-11): 「모든 박스」(fresh)는 도면 가운데에서 바깥쪽으로 놓고, 점 가림·지시선 교차가 없어야 함
+// 9) 45°(2026-11-11): 「모든 박스」(fresh)는 지시선이 45° 대각선에 가깝게 놓고(방사형 아님 — 어느 대각선이든), 점 가림·지시선 교차가 없어야 함
 {
     const W2 = 2000; const H2 = 1500;
     let sd = 7; const rn = () => (sd = (sd * 16807) % 2147483647) / 2147483647;
     const pts = [];
     for (let i = 0; i < 60; i++) pts.push(mk('r' + i, 100 + rn() * (W2 - 200), 100 + rn() * (H2 - 200)));
     const rr = L.layoutBoxes(pts, { bounds: { w: W2, h: H2 }, fresh: true });
-    assert.strictEqual(rr.after, 0, `방사형 충돌 없음 ${rr.before}→${rr.after}`);
+    assert.strictEqual(rr.after, 0, `충돌 없음 ${rr.before}→${rr.after}`);
     const placedAt = (it) => rr.moves[it.id] || { x: it.cx, y: it.cy };
     const cl = (v, lo, hi) => Math.max(lo, Math.min(hi, v));
-    // 기준 = 마킹 전체 평균. 지시선(점 → 박스에서 가장 가까운 점)이 평균 반대쪽 45° 대각선에 가까워야 함
-    const mx = pts.reduce((a, it) => a + it.targets[0].x, 0) / pts.length;
-    const my = pts.reduce((a, it) => a + it.targets[0].y, 0) / pts.length;
+    // 지시선(점 → 박스에서 가장 가까운 점)이 가장 가까운 45° 대각선에서 벗어난 각도
     let devSum = 0; let exact45 = 0;
     const leads = pts.map((it) => {
         const m = placedAt(it); const T = it.targets[0];
-        const out = Math.atan2(T.y - my > 0 ? 1 : -1, T.x - mx >= 0 ? 1 : -1);
-        const got = Math.atan2(cl(T.y, m.y - ext.t, m.y + ext.b) - T.y, cl(T.x, m.x - ext.l, m.x + ext.r) - T.x);
-        let d = Math.abs(out - got); if (d > Math.PI) d = 2 * Math.PI - d;
+        const ax = cl(T.x, m.x - ext.l, m.x + ext.r); const ay = cl(T.y, m.y - ext.t, m.y + ext.b);
+        const d = Math.abs(Math.atan2(Math.abs(ay - T.y), Math.abs(ax - T.x)) - Math.PI / 4);
         devSum += d;
         if (d < 1e-6) exact45 += 1;
         // 박스가 어떤 마킹 점도 가리지 않음
@@ -97,20 +94,17 @@ assert.ok(L.segHitsRect({ x: 0, y: 5 }, { x: 20, y: 5 }, { x1: 5, y1: 0, x2: 15,
             const q = o.targets[0];
             assert.ok(!(q.x > m.x - ext.l && q.x < m.x + ext.r && q.y > m.y - ext.t && q.y < m.y + ext.b), `박스가 점을 가림 ${it.id}/${o.id}`);
         });
-        return { a: { x: cl(T.x, m.x - ext.l, m.x + ext.r), y: cl(T.y, m.y - ext.t, m.y + ext.b) }, b: T };
+        return { a: { x: ax, y: ay }, b: T };
     });
-    assert.ok(devSum / pts.length < 10 * Math.PI / 180, `45° 대각선 평균 편차 ${(devSum / pts.length * 57.3).toFixed(1)}°`);
-    assert.ok(exact45 >= pts.length * 0.7, `대부분 딱 45° (${exact45}/${pts.length})`);
+    assert.ok(devSum / pts.length < 5 * Math.PI / 180, `45° 대각선 평균 편차 ${(devSum / pts.length * 57.3).toFixed(1)}°`);
+    assert.ok(exact45 >= pts.length * 0.8, `대부분 딱 45° (${exact45}/${pts.length})`);
     for (let i = 0; i < leads.length; i++) {
         for (let j = i + 1; j < leads.length; j++) assert.ok(!L.segCross(leads[i].a, leads[i].b, leads[j].a, leads[j].b), `지시선 교차 ${i}/${j}`);
     }
-    // 기준점을 따로 주면 그 반대쪽: 오른쪽 아래 점 → 박스는 점보다 오른쪽 아래, 지시선은 딱 45°
-    const one = L.layoutBoxes([mk('s', 1500, 1100)], { bounds: { w: W2, h: H2 }, center: { x: 1000, y: 750 }, fresh: true }).moves.s;
-    assert.ok(one && one.x > 1500 && one.y > 1100, '바깥쪽으로 ' + JSON.stringify(one));
-    assert.ok(Math.abs((one.x - ext.l - 1500) - (one.y - ext.t - 1100)) < 1e-6, '지시선 45° ' + JSON.stringify(one));
-    // 두 점: 평균의 왼쪽 위 점은 왼쪽 위로, 오른쪽 아래 점은 오른쪽 아래로
-    const duo = L.layoutBoxes([mk('u', 900, 700), mk('v', 1100, 800)], { bounds: { w: W2, h: H2 }, fresh: true }).moves;
-    assert.ok(duo.u.x < 900 && duo.u.y < 700 && duo.v.x > 1100 && duo.v.y > 800, '마킹 평균 기준 ' + JSON.stringify(duo));
+    // 한 점: 지금 박스가 있는 쪽(오른쪽 위) 대각선으로, 지시선은 딱 45°
+    const one = L.layoutBoxes([mk('s', 1500, 1100)], { bounds: { w: W2, h: H2 }, fresh: true }).moves.s;
+    assert.ok(one && one.x > 1500 && one.y < 1100, '지금 있는 쪽 대각선 ' + JSON.stringify(one));
+    assert.ok(Math.abs((one.x - ext.l - 1500) - (1100 - (one.y + ext.b))) < 1e-6, '지시선 45° ' + JSON.stringify(one));
 }
 
 // 앱 연결

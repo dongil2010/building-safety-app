@@ -2,11 +2,12 @@
  * NO. 박스(번호칸) 자동 정리 — 순수 계산 모듈 (DOM 없음, 2026-09-30)
  *
  * 마킹 점(화살표 끝)·영역은 절대 안 움직이고 박스 자리만 고른다.
- * - 후보(2026-11-11 방사형·45°): 박스마다 기준점(화살표 끝들의 가운데)에서 **마킹 전체 평균 위치의 반대쪽(바깥) 대각선(45°)**을
- *         기본으로(지시선이 딱 45°가 되게 박스 모서리를 그 선 위에 둔다), 그 방향 ±15°…±90° × 거리 7단계 + 지금 자리. 그래도 충돌이 남는 박스만 360° × 더 먼 거리까지 다시 찾는다.
+ * - 후보(2026-11-11 45°): 박스마다 기준점(화살표 끝들의 가운데)에서 **대각선 네 방향(45°)**을 기본으로
+ *         (지시선이 딱 45°가 되게 박스 모서리를 그 선 위에 둔다. 방사형 아님 — 어느 대각선이든 같고, 지금 박스가 있는 쪽부터 본다),
+ *         대각선 ±15° × 거리 7단계 + 지금 자리. 그래도 충돌이 남는 박스만 360° × 더 먼 거리까지 다시 찾는다.
  * - 비용: 박스끼리 겹침, 박스가 마킹 점을 가림, 박스가 다른 지시선을 가림(또는 내 지시선이 다른 박스를 지남),
  *         지시선끼리 교차, 지시선이 다른 마킹 점을 지남 — 이것들은 「충돌」(강하게).
- *         방사 방향에서 벗어난 각도(중간), 지시선 길이(아주 약하게 — 길어져도 됨), 도면 밖,
+ *         지시선이 45° 대각선에서 벗어난 각도(중간), 지시선 길이(아주 약하게 — 길어져도 됨), 도면 밖,
  *         지금 자리에서 옮긴 거리(opts.fresh면 0 — 「모든 박스」는 지금 자리에 매이지 않고 새로 놓는다).
  * - 탐욕 배치(붐비는 박스부터) → 개선 몇 번. 같은 입력이면 늘 같은 결과(난수 없음, 동점은 후보 순서).
  * - 이웃(닿을 수 있는 범위가 겹치는 박스)만 비교해 수백 개도 빠르게.
@@ -17,7 +18,7 @@
  *   targets: [{ x, y }] 또는 [{ rect: { x1, y1, x2, y2 } }](영역: 지시선이 영역 테두리에 꽂힘),
  *   movable: bool
  * }
- * opts: { bounds: { w, h }, center: { x, y }(방사형 기준점 — 없으면 마킹 전체 평균), fresh: bool, obstacles: [{ x1, y1, x2, y2 }](범례 등 — 박스가 피함), unit(박스 높이 기준, 없으면 중앙값) }
+ * opts: { bounds: { w, h }, fresh: bool, obstacles: [{ x1, y1, x2, y2 }](범례 등 — 박스가 피함), unit(박스 높이 기준, 없으면 중앙값) }
  * 결과: { moves: { id: { x, y } }, before: 충돌 수, after: 충돌 수, cost }
  */
 (function (root) {
@@ -30,7 +31,7 @@
         leaderBox: 600,   // 지시선이 다른 박스를 지남
         cross: 900,       // 지시선끼리 교차
         leaderPoint: 500, // 지시선이 다른 마킹 점을 지남
-        radial: 28,       // 방사 방향(도면 중심 → 마킹 점)에서 벗어난 각도(라디안당)
+        diag: 60,         // 지시선이 45° 대각선에서 벗어난 각도(라디안당)
         length: 0.5,      // 지시선 길이(단위당) — 길어져도 됨, 같은 조건이면 가까운 쪽
         outside: 2000,    // 도면 밖
         obstacle: 600,    // 범례 등 가림
@@ -158,16 +159,9 @@
         const obstacles = (Array.isArray(o.obstacles) ? o.obstacles : []).filter((r) => r && [r.x1, r.y1, r.x2, r.y2].every((v) => Number.isFinite(Number(v))));
         const P = { list, unit, bounds, obstacles, fresh: !!o.fresh };
         P.anchors = list.map(anchorOf);
-        let center = null;
-        if (o.center && Number.isFinite(num(o.center.x, NaN)) && Number.isFinite(num(o.center.y, NaN))) center = { x: Number(o.center.x), y: Number(o.center.y) };
-        else if (list.length) center = P.anchors.reduce((a, p) => ({ x: a.x + p.x / list.length, y: a.y + p.y / list.length }), { x: 0, y: 0 });
-        else if (bounds) center = { x: (bounds.x1 + bounds.x2) / 2, y: (bounds.y1 + bounds.y2) / 2 };
-        else center = { x: 0, y: 0 };
-        P.center = center;
-        // 기본 방향(단위 벡터) = 마킹 전체 평균에서 바깥쪽인 **대각선(45°)**. 평균의 오른쪽 위에 있는 점 → 오른쪽 위 45°.
-        // 평균과 좌우(또는 상하)가 같은 점은 오른쪽(위쪽)으로.
+        // 먼저 보는 대각선 = 지금 박스가 있는 쪽(같은 값이면 덜 움직이게). 정확히 위·옆이면 오른쪽 위.
         const Q = Math.SQRT1_2;
-        P.dirs = P.anchors.map((a) => ({ x: (a.x - center.x >= 0 ? 1 : -1) * Q, y: (a.y - center.y > 0 ? 1 : -1) * Q }));
+        P.dirs = P.anchors.map((a, i) => ({ x: (list[i].cx0 - a.x >= 0 ? 1 : -1) * Q, y: (list[i].cy0 - a.y > 0 ? 1 : -1) * Q }));
         return P;
     }
 
@@ -177,10 +171,10 @@
         return pts.reduce((a, p) => ({ x: a.x + p.x / pts.length, y: a.y + p.y / pts.length }), { x: 0, y: 0 });
     }
 
-    const ANGLES = [0, 15, -15, 30, -30, 45, -45, 65, -65, 90, -90]; // 방사 방향 기준(도)
+    // 먼저 보는 대각선 기준(도): 대각선 넷(딱 45°) → 대각선 ±15°
+    const ANGLES = [0, 90, -90, 180, 15, -15, 75, -75, 105, -105, 165, -165];
     const DISTS = [1.2, 2, 3, 4.5, 6.5, 9, 12];
-    const ANGLES_WIDE = []; // 2단계: 360°를 15° 간격(방사 방향에서 가까운 순)
-    for (let k = 0; k <= 12; k++) { ANGLES_WIDE.push(k * 15); if (k > 0 && k < 12) ANGLES_WIDE.push(-k * 15); }
+    const ANGLES_WIDE = ANGLES.concat([30, -30, 60, -60, 120, -120, 150, -150, 45, -45, 135, -135]); // 2단계: 360°를 15° 간격(축 방향은 맨 끝)
     const DISTS_WIDE = [1.2, 2, 3, 4.5, 6.5, 9, 12, 16, 21];
 
     /** 가운데에서 (ux,uy) 쪽 테두리까지 거리 — 사각형 반폭 기준 */
@@ -258,14 +252,14 @@
         pointsOf(it).forEach((p) => { if (inRect(p, boxP)) { cost += W.point; hard += 1; } });
         leads.forEach((l) => { cost += W.length * Math.hypot(l.b.x - l.a.x, l.b.y - l.a.y) / u; });
         if (!P.fresh) cost += W.move * Math.hypot(x - it.cx0, y - it.cy0) / u;
-        // 방사 방향에서 벗어난 각도 (새로 놓는 게 아니면 지금 자리는 따지지 않음 — 충돌 없는 박스가 괜히 안 움직이게)
+        // 지시선이 가장 가까운 45° 대각선에서 벗어난 각도 — 어느 대각선이든 같다 (새로 놓는 게 아니면 지금 자리는 따지지 않음 — 충돌 없는 박스가 괜히 안 움직이게)
         if (P.fresh || Math.abs(x - it.cx0) > 1e-6 || Math.abs(y - it.cy0) > 1e-6) {
-            const an = P.anchors[i]; const dr = P.dirs[i];
+            const an = P.anchors[i];
             // 지시선 각도 = 기준점 → 박스에서 가장 가까운 점
             const vx = clamp(an.x, box.x1, box.x2) - an.x; const vy = clamp(an.y, box.y1, box.y2) - an.y;
             const vl = Math.hypot(vx, vy);
-            const dev = vl > 1e-6 ? Math.acos(clamp((vx * dr.x + vy * dr.y) / vl, -1, 1)) : Math.PI;
-            cost += W.radial * dev;
+            const dev = vl > 1e-6 ? Math.abs(Math.atan2(Math.abs(vy), Math.abs(vx)) - Math.PI / 4) : Math.PI / 4;
+            cost += W.diag * dev;
         }
         const lp = 0.3 * u; // 지시선이 다른 마킹 점을 지난다고 보는 거리
         if (P.bounds) {

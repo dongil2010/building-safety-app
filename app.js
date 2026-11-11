@@ -42214,7 +42214,7 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
         });
     }
 
-// @@app-part 10-marking.js sha=0236e6435f65 — 원본은 app/10-marking.js (여기 말고 거기서 고칠 것)
+// @@app-part 10-marking.js sha=e89236dc4745 — 원본은 app/10-marking.js (여기 말고 거기서 고칠 것)
     // --- 9. BUTTON CONTROLS & LISTENERS ---
 
     // Main Navigation Tabs Click Listener
@@ -44596,7 +44596,7 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
         const defects = filterMapPlacedDefects(getCurrentFloorDefects());
         const { items, membersById } = buildBoxAutoLayoutItems(defects, mode);
         const dims = getFloorPlanDisplayDims();
-        // 방사형(2026-11-11): 마킹 전체 평균 위치에서 바깥쪽 45° 대각선으로 박스를 뺀다. 「모든 박스」는 지금 자리에 매이지 않고 새로 놓음(fresh)
+        // 45°(2026-11-11): 지시선이 45° 대각선이 되게 박스를 놓는다(방사형 아님). 「모든 박스」는 지금 자리에 매이지 않고 새로 놓음(fresh)
         const opts = { bounds: { w: dims.w, h: dims.h }, obstacles: boxAutoLayoutObstacles(), fresh: mode === 'all' };
         if (mode !== 'all') {
             const conf = L.conflictsAtCurrent(items, opts);
@@ -44639,9 +44639,9 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
             window.showToast?.('이 층에 마킹이 없습니다.', 'info', 2000);
             return;
         }
-        const pick = await window.appChoose('NO. 박스를 마킹들의 가운데에서 바깥쪽(방사형, 45° 대각선)으로,마킹 점·다른 박스와 겹치지 않고 지시선끼리 엇갈리지 않는 자리로 옮깁니다.\n마킹 점(화살표 끝)·영역은 움직이지 않습니다.', [
+        const pick = await window.appChoose('NO. 박스를 지시선이 45° 대각선에 가깝게, 마킹 점·다른 박스와 겹치지 않고 지시선끼리 엇갈리지 않는 자리로 옮깁니다.\n마킹 점(화살표 끝)·영역은 움직이지 않습니다.', [
             { label: '겹친 박스만', detail: '직접 끌어 옮긴 박스는 그대로 둡니다' },
-            { label: '모든 박스', detail: '직접 옮긴 박스도 포함해 이 층 박스를 모두 방사형으로 다시 놓습니다' }
+            { label: '모든 박스', detail: '직접 옮긴 박스도 포함해 이 층 박스를 모두 45° 자리로 다시 놓습니다' }
         ], { title: '박스 자동 정리', okText: '정리', defaultIndex: 0 });
         if (pick == null) return;
         const mode = pick === 1 ? 'all' : 'overlap';
