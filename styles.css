@@ -10957,6 +10957,27 @@ body.bsa-tab-stats .app-content {
     word-break: break-word;
 }
 
+/* 회차선택: 담당자 밑 메모(비고/특이사항). 줄바꿈 그대로 */
+.dashboard-site-notes {
+    flex: 1 1 100%;
+    margin-top: 0.3rem;
+    padding: 0.45rem 0.65rem;
+    border-radius: 0.55rem;
+    background: #fffbeb;
+    border-left: 3px solid #f59e0b;
+    color: #1e293b;
+    font-size: 0.9rem;
+    font-weight: 500;
+    line-height: 1.45;
+    white-space: pre-wrap;
+    overflow-wrap: anywhere;
+    word-break: break-word;
+}
+
+.dashboard-site-notes[hidden] {
+    display: none !important;
+}
+
 .dashboard-site-contact[hidden] {
     display: none !important;
 }

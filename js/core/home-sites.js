@@ -85,6 +85,17 @@
         return bits.length ? ('현장 담당자 ' + bits.join(' · ')) : SITE_CONTACT_EMPTY;
     }
 
+    /** 회차선택 화면 메모: 각 회차 건물의 notes(비고/특이사항)를 겹치지 않게 모아 줄바꿈으로 잇는다. 없으면 빈 문자열 */
+    function formatSiteNotes(members) {
+        var seen = {};
+        var out = [];
+        (members || []).forEach(function (b) {
+            var v = String((b && b.notes) || '').trim();
+            if (v && !seen[v]) { seen[v] = 1; out.push(v); }
+        });
+        return out.join('\n');
+    }
+
     /** 이른 점검일이 위. 점검일 없는 현장은 맨 아래(그 안에서는 이름순). 같은 날짜는 이름순 */
     function compareSites(a, b) {
         var da = a.date || '';
@@ -109,6 +120,7 @@
         todayLocal: todayLocal,
         validDate: validDate,
         formatSiteContactLine: formatSiteContactLine,
+        formatSiteNotes: formatSiteNotes,
         SITE_CONTACT_EMPTY: SITE_CONTACT_EMPTY
     };
     root.BSA = root.BSA || {};

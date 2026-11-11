@@ -791,6 +791,7 @@
             const sumEl = document.getElementById('dashboardSummary');
             const tabEl = document.getElementById('dashboardTabs');
             const contactEl = document.getElementById('dashboardSiteContact');
+            const notesEl = document.getElementById('dashboardSiteNotes');
             const HS = window.BSA && window.BSA.homeSites;
             if (selectedSiteKey) {
                 if (sumEl) sumEl.hidden = true;
@@ -805,10 +806,17 @@
                 contactEl.hidden = false;
                 contactEl.textContent = line;
                 contactEl.classList.toggle('is-empty', line === ((HS && HS.SITE_CONTACT_EMPTY) || '현장 담당자·연락처 미등록'));
+                // 담당자 밑에 메모(비고/특이사항) — 있을 때만
+                if (notesEl) {
+                    const notes = HS && typeof HS.formatSiteNotes === 'function' ? HS.formatSiteNotes(siteMembers) : '';
+                    notesEl.textContent = notes;
+                    notesEl.hidden = !notes;
+                }
             } else if (contactEl) {
                 contactEl.hidden = true;
                 contactEl.textContent = '';
                 contactEl.classList.remove('is-empty');
+                if (notesEl) { notesEl.hidden = true; notesEl.textContent = ''; }
             }
         }
         if (selectedSiteKey && window.state.dashboardRoundKey) {

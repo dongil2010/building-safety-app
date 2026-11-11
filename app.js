@@ -5767,7 +5767,7 @@ document.addEventListener('DOMContentLoaded', () => {
         }
     }
 
-// @@app-part 02-buildings.js sha=fba9a11292b2 — 원본은 app/02-buildings.js (여기 말고 거기서 고칠 것)
+// @@app-part 02-buildings.js sha=70fb32e03a0d — 원본은 app/02-buildings.js (여기 말고 거기서 고칠 것)
     // --- 5. TAB MANAGER (진입 로직은 js/tabs/*.js) ---
     // ---- 마지막 작업 위치 기억·복원 (js/core/last-location.js, 2026-10-28) ----
     // 로그인 직후 복원 시도가 끝나기 전에는 기록·삭제를 하지 않는다(부팅 중 switchTab('tab-home')이 기록을 지우지 않게).
@@ -6560,6 +6560,7 @@ document.addEventListener('DOMContentLoaded', () => {
             const sumEl = document.getElementById('dashboardSummary');
             const tabEl = document.getElementById('dashboardTabs');
             const contactEl = document.getElementById('dashboardSiteContact');
+            const notesEl = document.getElementById('dashboardSiteNotes');
             const HS = window.BSA && window.BSA.homeSites;
             if (selectedSiteKey) {
                 if (sumEl) sumEl.hidden = true;
@@ -6574,10 +6575,17 @@ document.addEventListener('DOMContentLoaded', () => {
                 contactEl.hidden = false;
                 contactEl.textContent = line;
                 contactEl.classList.toggle('is-empty', line === ((HS && HS.SITE_CONTACT_EMPTY) || '현장 담당자·연락처 미등록'));
+                // 담당자 밑에 메모(비고/특이사항) — 있을 때만
+                if (notesEl) {
+                    const notes = HS && typeof HS.formatSiteNotes === 'function' ? HS.formatSiteNotes(siteMembers) : '';
+                    notesEl.textContent = notes;
+                    notesEl.hidden = !notes;
+                }
             } else if (contactEl) {
                 contactEl.hidden = true;
                 contactEl.textContent = '';
                 contactEl.classList.remove('is-empty');
+                if (notesEl) { notesEl.hidden = true; notesEl.textContent = ''; }
             }
         }
         if (selectedSiteKey && window.state.dashboardRoundKey) {
