@@ -47660,7 +47660,7 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
         inputImportCadPins.addEventListener('change', window.importCadPinsJson);
     }
 
-// @@app-part 12-survey-table.js sha=5b428077d707 — 원본은 app/12-survey-table.js (여기 말고 거기서 고칠 것)
+// @@app-part 12-survey-table.js sha=7f63f7da7608 — 원본은 app/12-survey-table.js (여기 말고 거기서 고칠 것)
     // --- 10. SURVEY TABLE & ALBUM RENDERING ---
 
     // 상태조사표 컬럼 기본 정의 (화면/PDF/엑셀 공통). size와 crackWidth/crackLength는 상호 배타적으로
@@ -48381,6 +48381,17 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
         const main = p.main === Number.MAX_SAFE_INTEGER ? 0 : p.main;
         const suffix = p.suffix || 1;
         return { main, suffix, extra: suffix >= 2 };
+    }
+
+    /** 사진번호 매기는 순서: 마킹 번호 낮은 것부터(한글 상태조사표와 같은 정렬). 원래 배열은 그대로 둔다. */
+    function sortDefectsByMarkNoForPhotos(defects) {
+        return (defects || []).slice().sort((a, b) => {
+            const pa = parseSurveyDefectNo(a);
+            const pb = parseSurveyDefectNo(b);
+            if (pa.main !== pb.main) return pa.main - pb.main;
+            if (pa.suffix !== pb.suffix) return pa.suffix - pb.suffix;
+            return String(a.no || '').localeCompare(String(b.no || ''));
+        });
     }
 
     function getSurveyRowsForReport(defects) {
@@ -49477,7 +49488,8 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
         // 매겨서 사진첩(renderPhotoAlbum)의 번호와 어긋나지 않게 함
         const defectPhotoLabels = {};
         let pCounter = 0;
-        rawDefects.forEach((d, dIdx) => {
+        sortDefectsByMarkNoForPhotos(rawDefects).forEach((d) => {
+            const dIdx = rawDefects.indexOf(d);
             const defectKey = d.id || `idx_${dIdx}`;
             defectPhotoLabels[defectKey] = [];
             getDefectOutputPhotos(d).forEach(() => {
@@ -52152,7 +52164,7 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
         }
     }
 
-// @@app-part 13-report-export.js sha=3d06d0802c7d — 원본은 app/13-report-export.js (여기 말고 거기서 고칠 것)
+// @@app-part 13-report-export.js sha=d6c6d6c19e94 — 원본은 app/13-report-export.js (여기 말고 거기서 고칠 것)
     // --- REPORT PREVIEW MODAL (Instant Modal Open & Pure White Paper Theme) ---
     window.openReportPreviewModalFunc = async function(opts) {
         const manageLoading = !(opts && opts.skipLoading);
@@ -52248,7 +52260,8 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
                 const photoItems = [];
                 let pCounter = 0;
 
-                defects.forEach((d, dIdx) => {
+                sortDefectsByMarkNoForPhotos(defects).forEach((d) => {
+                    const dIdx = defects.indexOf(d);
                     const defectKey = d.id || `idx_${dIdx}`;
                     defectPhotoLabels[defectKey] = [];
 

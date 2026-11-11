@@ -94,7 +94,8 @@
                 const photoItems = [];
                 let pCounter = 0;
 
-                defects.forEach((d, dIdx) => {
+                sortDefectsByMarkNoForPhotos(defects).forEach((d) => {
+                    const dIdx = defects.indexOf(d);
                     const defectKey = d.id || `idx_${dIdx}`;
                     defectPhotoLabels[defectKey] = [];
 

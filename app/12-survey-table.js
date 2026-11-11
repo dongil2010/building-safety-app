@@ -721,6 +721,17 @@
         return { main, suffix, extra: suffix >= 2 };
     }
 
+    /** 사진번호 매기는 순서: 마킹 번호 낮은 것부터(한글 상태조사표와 같은 정렬). 원래 배열은 그대로 둔다. */
+    function sortDefectsByMarkNoForPhotos(defects) {
+        return (defects || []).slice().sort((a, b) => {
+            const pa = parseSurveyDefectNo(a);
+            const pb = parseSurveyDefectNo(b);
+            if (pa.main !== pb.main) return pa.main - pb.main;
+            if (pa.suffix !== pb.suffix) return pa.suffix - pb.suffix;
+            return String(a.no || '').localeCompare(String(b.no || ''));
+        });
+    }
+
     function getSurveyRowsForReport(defects) {
         const list = defects || [];
         if (list.length) repairLegacyMarkingSuffixGroups(list);
@@ -1815,7 +1826,8 @@
         // 매겨서 사진첩(renderPhotoAlbum)의 번호와 어긋나지 않게 함
         const defectPhotoLabels = {};
         let pCounter = 0;
-        rawDefects.forEach((d, dIdx) => {
+        sortDefectsByMarkNoForPhotos(rawDefects).forEach((d) => {
+            const dIdx = rawDefects.indexOf(d);
             const defectKey = d.id || `idx_${dIdx}`;
             defectPhotoLabels[defectKey] = [];
             getDefectOutputPhotos(d).forEach(() => {
