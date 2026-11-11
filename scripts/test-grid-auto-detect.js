@@ -534,3 +534,16 @@ assert.ok(app.includes('seriesKeys.forEach((sk) =>') && app.includes('data-act="
 assert.ok(app.includes('data-f="autoAxes"') && app.includes("case 'autoAxes':") && app.includes("ap.axes === 'cols'"));
 assert.ok(app.includes('data-f="autoOuter"') && app.includes("case 'autoOuter':") && app.includes('outerOnly: ge.autoOuter'));
 console.log('test-grid-auto-detect: ok');
+
+// 12) ★ 2026-11-11 풍선이 실선에서 조금 떨어져 그려진 도면(X5 풍선이 왼쪽 회색 선보다 오른쪽): 한 줄뿐이면 그 선에 맞춤
+const farOne = markersOnly();
+farOne.segments.push([747, 300, 747, 2500]); // 풍선 x=800 에서 53px 왼쪽
+r = D.detect(farOne, dims);
+assert.ok(Math.abs(r.cols[0].x - 747) < 1, '떨어진 실선 한 줄에 맞춤');
+assert.ok(Math.abs(r.cols[1].x - 1400) < 1, '다른 열은 풍선 가운데 그대로');
+// 옆에 선이 둘이면(입면도처럼 촘촘한 경우) 애매하므로 풍선 가운데를 쓴다
+const farTwo = markersOnly();
+farTwo.segments.push([747, 300, 747, 2500], [760, 300, 760, 2500]);
+r = D.detect(farTwo, dims);
+assert.ok(Math.abs(r.cols[0].x - 800) < 1, '후보가 여럿이면 풍선 가운데 유지');
+console.log('test-grid-auto-detect: 12 cases ok');

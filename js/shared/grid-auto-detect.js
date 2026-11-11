@@ -613,14 +613,28 @@
             // 지시선이 있으면 그 끝에서부터 얼마나 떨어져 시작하는지(풍선 ~ 지시선 ~ 틈 ~ 통심선)
             const cm = axis === 'col' ? (Number.isFinite(m.tipY) ? m.tipY : m.y) : (Number.isFinite(m.tipX) ? m.tipX : m.x);
             let best = null;
+            const fits = (ch, d, maxD) => {
+                if (d > maxD) return false;
+                if (Math.min(Math.abs(ch.a0 - cm), Math.abs(ch.a1 - cm)) > near) return false;
+                const overlap = Math.min(ch.a1, a1) - Math.max(ch.a0, a0);
+                return overlap >= (a1 - a0) * 0.5;
+            };
             chains.forEach((ch) => {
                 const d = Math.abs(ch.pos - pos);
-                if (d > tight) return;
-                if (Math.min(Math.abs(ch.a0 - cm), Math.abs(ch.a1 - cm)) > near) return;
-                const overlap = Math.min(ch.a1, a1) - Math.max(ch.a0, a0);
-                if (overlap < (a1 - a0) * 0.5) return;
+                if (!fits(ch, d, tight)) return;
                 if (!best || d < best.d) best = { d, ch };
             });
+            // 2026-11-11 풍선이 통심선에서 조금 떨어져 그려진 도면(X5 풍선이 실선보다 오른쪽에 있음): 좁은 범위에 선이 없으면
+            // 조금 더 넓게 찾되, 후보가 한 줄뿐일 때만 쓴다(입면도처럼 옆 선이 여럿이면 풍선 가운데를 그대로 둔다).
+            if (!best) {
+                const wide = Math.max(rr * 2.5, L * 0.02);
+                const cands = [];
+                chains.forEach((ch) => {
+                    const d = Math.abs(ch.pos - pos);
+                    if (d > tight && fits(ch, d, wide)) cands.push({ d, ch });
+                });
+                if (cands.length === 1) best = cands[0];
+            }
             if (best) {
                 pos = best.ch.pos;
                 a0 = Math.min(a0, best.ch.a0);
