@@ -71,6 +71,38 @@ assert.ok(L.segCross({ x: 0, y: 0 }, { x: 10, y: 10 }, { x: 0, y: 10 }, { x: 10,
 assert.ok(!L.segCross({ x: 0, y: 0 }, { x: 10, y: 10 }, { x: 10, y: 10 }, { x: 20, y: 0 }), '같은 끝점은 교차 아님');
 assert.ok(L.segHitsRect({ x: 0, y: 5 }, { x: 20, y: 5 }, { x1: 5, y1: 0, x2: 15, y2: 10 }));
 
+// 9) 방사형(2026-11-11): 「모든 박스」(fresh)는 도면 가운데에서 바깥쪽으로 놓고, 점 가림·지시선 교차가 없어야 함
+{
+    const W2 = 2000; const H2 = 1500;
+    let sd = 7; const rn = () => (sd = (sd * 16807) % 2147483647) / 2147483647;
+    const pts = [];
+    for (let i = 0; i < 60; i++) pts.push(mk('r' + i, 100 + rn() * (W2 - 200), 100 + rn() * (H2 - 200)));
+    const rr = L.layoutBoxes(pts, { bounds: { w: W2, h: H2 }, fresh: true });
+    assert.strictEqual(rr.after, 0, `방사형 충돌 없음 ${rr.before}→${rr.after}`);
+    const placedAt = (it) => rr.moves[it.id] || { x: it.cx, y: it.cy };
+    const cl = (v, lo, hi) => Math.max(lo, Math.min(hi, v));
+    let devSum = 0;
+    const leads = pts.map((it) => {
+        const m = placedAt(it); const T = it.targets[0];
+        const out = Math.atan2(T.y - H2 / 2, T.x - W2 / 2); const got = Math.atan2(m.y - T.y, m.x - T.x);
+        let d = Math.abs(out - got); if (d > Math.PI) d = 2 * Math.PI - d;
+        devSum += d;
+        // 박스가 어떤 마킹 점도 가리지 않음
+        pts.forEach((o) => {
+            const q = o.targets[0];
+            assert.ok(!(q.x > m.x - ext.l && q.x < m.x + ext.r && q.y > m.y - ext.t && q.y < m.y + ext.b), `박스가 점을 가림 ${it.id}/${o.id}`);
+        });
+        return { a: { x: cl(T.x, m.x - ext.l, m.x + ext.r), y: cl(T.y, m.y - ext.t, m.y + ext.b) }, b: T };
+    });
+    assert.ok(devSum / pts.length < 15 * Math.PI / 180, `바깥 방향 평균 편차 ${(devSum / pts.length * 57.3).toFixed(1)}°`);
+    for (let i = 0; i < leads.length; i++) {
+        for (let j = i + 1; j < leads.length; j++) assert.ok(!L.segCross(leads[i].a, leads[i].b, leads[j].a, leads[j].b), `지시선 교차 ${i}/${j}`);
+    }
+    // 한 점만 있어도 바깥쪽: 오른쪽 아래 점 → 박스는 점보다 오른쪽 아래
+    const one = L.layoutBoxes([mk('s', 1500, 1100)], { bounds: { w: W2, h: H2 }, fresh: true }).moves.s;
+    assert.ok(one && one.x > 1500 && one.y > 1100, '바깥쪽으로 ' + JSON.stringify(one));
+}
+
 // 앱 연결
 const app = read('app.js');
 const idx = read('index.html');
@@ -80,6 +112,7 @@ const blk = app.slice(app.indexOf('function buildBoxAutoLayoutItems('), app.inde
 assert.ok(blk.includes('pickDefectGroupRepresentative(gm)'), '통합 묶음 = 박스 하나');
 assert.ok(blk.includes('getBookmarkChromeGlyphHeight(scale)'), '「중요」 글자 크기');
 assert.ok(blk.includes("movable: mode === 'all' ? true : !manual"), '직접 옮긴 박스 제외(모든 박스면 포함)');
+assert.ok(app.includes("fresh: mode === 'all'"), '모든 박스 = 방사형으로 새로 놓음');
 assert.ok(blk.includes('if (typeof pushDefectHistory === \'function\') pushDefectHistory();'), '되돌리기 한 번');
 const apply = blk.slice(blk.indexOf('function applyMarkingBoxAutoLayout('));
 assert.ok(apply.includes('m.x = mv.x;') && apply.includes('m.y = mv.y;') && !/m\.targetX\s*=|m\.targetY\s*=|m\.area[XY][12]\s*=/.test(apply), '박스 x·y만 바꿈');

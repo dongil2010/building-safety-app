@@ -2,9 +2,12 @@
  * NO. 박스(번호칸) 자동 정리 — 순수 계산 모듈 (DOM 없음, 2026-09-30)
  *
  * 마킹 점(화살표 끝)·영역은 절대 안 움직이고 박스 자리만 고른다.
- * - 후보: 박스마다 기준점(화살표 끝들의 가운데) 둘레 8방향 × 거리 4단계 + 지금 자리.
+ * - 후보(2026-11-11 방사형): 박스마다 기준점(화살표 끝들의 가운데)에서 **도면 중심 반대쪽(바깥)** 방향을 기본으로,
+ *         그 방향 ±15°…±90° × 거리 7단계 + 지금 자리. 그래도 충돌이 남는 박스만 360° × 더 먼 거리까지 다시 찾는다.
  * - 비용: 박스끼리 겹침, 박스가 마킹 점을 가림, 박스가 다른 지시선을 가림(또는 내 지시선이 다른 박스를 지남),
- *         지시선끼리 교차, 지시선 길이, 도면 밖, 지금 자리에서 옮긴 거리(작게 — 이유 없이 안 움직이게).
+ *         지시선끼리 교차, 지시선이 다른 마킹 점을 지남 — 이것들은 「충돌」(강하게).
+ *         방사 방향에서 벗어난 각도(중간), 지시선 길이(아주 약하게 — 길어져도 됨), 도면 밖,
+ *         지금 자리에서 옮긴 거리(opts.fresh면 0 — 「모든 박스」는 지금 자리에 매이지 않고 새로 놓는다).
  * - 탐욕 배치(붐비는 박스부터) → 개선 몇 번. 같은 입력이면 늘 같은 결과(난수 없음, 동점은 후보 순서).
  * - 이웃(닿을 수 있는 범위가 겹치는 박스)만 비교해 수백 개도 빠르게.
  *
@@ -14,7 +17,7 @@
  *   targets: [{ x, y }] 또는 [{ rect: { x1, y1, x2, y2 } }](영역: 지시선이 영역 테두리에 꽂힘),
  *   movable: bool
  * }
- * opts: { bounds: { w, h }, obstacles: [{ x1, y1, x2, y2 }](범례 등 — 박스가 피함), unit(박스 높이 기준, 없으면 중앙값) }
+ * opts: { bounds: { w, h }(가운데 = 방사형 기준점), center: { x, y }(따로 줄 때), fresh: bool, obstacles: [{ x1, y1, x2, y2 }](범례 등 — 박스가 피함), unit(박스 높이 기준, 없으면 중앙값) }
  * 결과: { moves: { id: { x, y } }, before: 충돌 수, after: 충돌 수, cost }
  */
 (function (root) {
@@ -23,10 +26,12 @@
     const W = {
         box: 1000,        // 박스끼리 겹침(1쌍)
         boxArea: 300,     // + 겹친 넓이(단위² 기준)
-        point: 800,       // 박스가 마킹 점을 가림(점 하나)
-        leaderBox: 400,   // 지시선이 다른 박스를 지남
-        cross: 120,       // 지시선끼리 교차
-        length: 2,        // 지시선 길이(단위당)
+        point: 3000,      // 박스가 마킹 점을 가림(점 하나) — 가장 강하게
+        leaderBox: 600,   // 지시선이 다른 박스를 지남
+        cross: 900,       // 지시선끼리 교차
+        leaderPoint: 500, // 지시선이 다른 마킹 점을 지남
+        radial: 28,       // 방사 방향(도면 중심 → 마킹 점)에서 벗어난 각도(라디안당)
+        length: 0.5,      // 지시선 길이(단위당) — 길어져도 됨, 같은 조건이면 가까운 쪽
         outside: 2000,    // 도면 밖
         obstacle: 600,    // 범례 등 가림
         area: 40,         // 다른 영역 마킹 위에 올라감(약하게)
@@ -151,7 +156,21 @@
         const unit = num(o.unit, 0) > 0 ? Number(o.unit) : Math.max(4, median(list.map((it) => it.ext.t + it.ext.b)) || 20);
         const bounds = o.bounds && num(o.bounds.w, 0) > 0 && num(o.bounds.h, 0) > 0 ? { x1: 0, y1: 0, x2: Number(o.bounds.w), y2: Number(o.bounds.h) } : null;
         const obstacles = (Array.isArray(o.obstacles) ? o.obstacles : []).filter((r) => r && [r.x1, r.y1, r.x2, r.y2].every((v) => Number.isFinite(Number(v))));
-        return { list, unit, bounds, obstacles };
+        const P = { list, unit, bounds, obstacles, fresh: !!o.fresh };
+        P.anchors = list.map(anchorOf);
+        let center = null;
+        if (o.center && Number.isFinite(num(o.center.x, NaN)) && Number.isFinite(num(o.center.y, NaN))) center = { x: Number(o.center.x), y: Number(o.center.y) };
+        else if (bounds) center = { x: (bounds.x1 + bounds.x2) / 2, y: (bounds.y1 + bounds.y2) / 2 };
+        else if (list.length) center = P.anchors.reduce((a, p) => ({ x: a.x + p.x / list.length, y: a.y + p.y / list.length }), { x: 0, y: 0 });
+        else center = { x: 0, y: 0 };
+        P.center = center;
+        // 방사 방향(단위 벡터). 중심에 딱 붙은 점은 위쪽
+        P.dirs = P.anchors.map((a) => {
+            const dx = a.x - center.x; const dy = a.y - center.y;
+            const d = Math.hypot(dx, dy);
+            return d > unit * 0.05 ? { x: dx / d, y: dy / d } : { x: 0, y: -1 };
+        });
+        return P;
     }
 
     function anchorOf(it) {
@@ -160,13 +179,27 @@
         return pts.reduce((a, p) => ({ x: a.x + p.x / pts.length, y: a.y + p.y / pts.length }), { x: 0, y: 0 });
     }
 
-    const DIRS = [[0, -1], [1, -1], [1, 0], [1, 1], [0, 1], [-1, 1], [-1, 0], [-1, -1]]; // 위부터 시계 방향
-    const DISTS = [1.1, 1.9, 2.9, 4.2, 6];
+    const ANGLES = [0, 15, -15, 30, -30, 45, -45, 65, -65, 90, -90]; // 방사 방향 기준(도)
+    const DISTS = [1.2, 2, 3, 4.5, 6.5, 9, 12];
+    const ANGLES_WIDE = []; // 2단계: 360°를 15° 간격(방사 방향에서 가까운 순)
+    for (let k = 0; k <= 12; k++) { ANGLES_WIDE.push(k * 15); if (k > 0 && k < 12) ANGLES_WIDE.push(-k * 15); }
+    const DISTS_WIDE = [1.2, 2, 3, 4.5, 6.5, 9, 12, 16, 21];
 
-    function candidatesFor(it, unit, bounds) {
+    /** 가운데에서 (ux,uy) 쪽 테두리까지 거리 — 사각형 반폭 기준 */
+    function reachAlong(ux, uy, ex, ey) {
+        const ax = Math.abs(ux); const ay = Math.abs(uy);
+        if (ax < 1e-9) return ey;
+        if (ay < 1e-9) return ex;
+        return Math.min(ex / ax, ey / ay);
+    }
+
+    function candidatesFor(P, i, wide) {
+        const it = P.list[i];
         const out = [{ x: it.cx0, y: it.cy0 }];
         if (!it.movable) return out;
-        const a = anchorOf(it);
+        const a = P.anchors[i];
+        const d0 = P.dirs[i];
+        const base = Math.atan2(d0.y, d0.x);
         // 영역은 영역 테두리 밖에서 시작
         let hw = 0; let hh = 0;
         it.targets.forEach((t) => {
@@ -174,12 +207,17 @@
             hw = Math.max(hw, (t.rect.x2 - t.rect.x1) / 2);
             hh = Math.max(hh, (t.rect.y2 - t.rect.y1) / 2);
         });
-        DISTS.forEach((dk) => {
-            DIRS.forEach(([ux, uy]) => {
-                const diag = ux !== 0 && uy !== 0;
-                const g = dk * unit * (diag ? 0.72 : 1);
-                let x = a.x + ux * (g + hw) + (ux > 0 ? it.ext.l : (ux < 0 ? -it.ext.r : 0));
-                let y = a.y + uy * (g + hh) + (uy > 0 ? it.ext.t : (uy < 0 ? -it.ext.b : 0));
+        const bounds = P.bounds;
+        (wide ? DISTS_WIDE : DISTS).forEach((dk) => {
+            (wide ? ANGLES_WIDE : ANGLES).forEach((deg) => {
+                const th = base + deg * Math.PI / 180;
+                const ux = Math.cos(th); const uy = Math.sin(th);
+                // 박스에서 마킹 점 쪽을 보는 변까지 + 영역 반폭 + 간격
+                const boxReach = reachAlong(ux, uy, ux > 0 ? it.ext.l : it.ext.r, uy > 0 ? it.ext.t : it.ext.b);
+                const areaReach = (hw || hh) ? reachAlong(ux, uy, hw, hh) : 0;
+                const g = dk * P.unit + boxReach + areaReach;
+                let x = a.x + ux * g;
+                let y = a.y + uy * g;
                 if (bounds) {
                     x = clamp(x, bounds.x1 + it.ext.l, bounds.x2 - it.ext.r);
                     y = clamp(y, bounds.y1 + it.ext.t, bounds.y2 - it.ext.b);
@@ -188,6 +226,14 @@
             });
         });
         return out;
+    }
+
+    /** 점 p에서 선분 ab까지 거리 */
+    function distToSeg(p, a, b) {
+        const dx = b.x - a.x; const dy = b.y - a.y;
+        const l2 = dx * dx + dy * dy;
+        const t = l2 > 1e-12 ? clamp(((p.x - a.x) * dx + (p.y - a.y) * dy) / l2, 0, 1) : 0;
+        return Math.hypot(p.x - (a.x + t * dx), p.y - (a.y + t * dy));
     }
 
     function unionRect(a, b) {
@@ -214,7 +260,16 @@
         // 내 마킹 점도 가리면 안 됨
         pointsOf(it).forEach((p) => { if (inRect(p, boxP)) { cost += W.point; hard += 1; } });
         leads.forEach((l) => { cost += W.length * Math.hypot(l.b.x - l.a.x, l.b.y - l.a.y) / u; });
-        cost += W.move * Math.hypot(x - it.cx0, y - it.cy0) / u;
+        if (!P.fresh) cost += W.move * Math.hypot(x - it.cx0, y - it.cy0) / u;
+        // 방사 방향에서 벗어난 각도 (새로 놓는 게 아니면 지금 자리는 따지지 않음 — 충돌 없는 박스가 괜히 안 움직이게)
+        if (P.fresh || Math.abs(x - it.cx0) > 1e-6 || Math.abs(y - it.cy0) > 1e-6) {
+            const an = P.anchors[i]; const dr = P.dirs[i];
+            const vx = x - an.x; const vy = y - an.y;
+            const vl = Math.hypot(vx, vy);
+            const dev = vl > 1e-6 ? Math.acos(clamp((vx * dr.x + vy * dr.y) / vl, -1, 1)) : Math.PI;
+            cost += W.radial * dev;
+        }
+        const lp = 0.3 * u; // 지시선이 다른 마킹 점을 지난다고 보는 거리
         if (P.bounds) {
             const inside = overlapArea(box, P.bounds);
             const all = (box.x2 - box.x1) * (box.y2 - box.y1);
@@ -235,6 +290,17 @@
             if (ov > 0) { cost += W.box + W.boxArea * ov / (u * u); hard += 1; }
             const jl = P.leadCache[j];
             jl.forEach((l) => { if (segHitsRect(l.a, l.b, box)) { cost += W.leaderBox; hard += 1; } });
+            // 내 지시선이 남의 마킹 점을, 남의 지시선이 내 마킹 점을 지나면 안 됨(그 지시선 끝에 붙어 있는 점은 어쩔 수 없으니 제외)
+            pointsOf(jt).forEach((p) => {
+                leads.forEach((l) => {
+                    if (Math.hypot(p.x - l.b.x, p.y - l.b.y) > lp && distToSeg(p, l.a, l.b) < lp) { cost += W.leaderPoint; hard += 1; }
+                });
+            });
+            pointsOf(it).forEach((p) => {
+                jl.forEach((l) => {
+                    if (Math.hypot(p.x - l.b.x, p.y - l.b.y) > lp && distToSeg(p, l.a, l.b) < lp) { cost += W.leaderPoint; hard += 1; }
+                });
+            });
             leads.forEach((l) => {
                 if (segHitsRect(l.a, l.b, jb)) { cost += W.leaderBox; hard += 1; }
                 jl.forEach((l2) => { if (segCross(l.a, l.b, l2.a, l2.b)) { cost += W.cross; hard += 1; } });
@@ -302,8 +368,9 @@
     function layoutBoxes(items, opts) {
         const P = prepare(items, opts);
         const n = P.list.length;
-        const passes = Math.max(0, Math.round(num(opts && opts.passes, 6)));
-        const cands = P.list.map((it) => candidatesFor(it, P.unit, P.bounds));
+        const passes = Math.max(0, Math.round(num(opts && opts.passes, 8)));
+        const stay = P.fresh ? 0 : W.stay;
+        const cands = P.list.map((it, i) => candidatesFor(P, i, false));
         P.neighbors = buildNeighbors(P, cands);
         const pos = P.list.map((it) => ({ x: it.cx0, y: it.cy0 }));
         P.leadCache = P.list.map((it, i) => leadersFor(it, pos[i].x, pos[i].y));
@@ -318,7 +385,7 @@
         const pick = (i, pl) => {
             let best = -1; let bestC = Infinity;
             cands[i].forEach((c, k) => {
-                const v = costAt(P, i, c.x, c.y, pos, pl) - (k === 0 ? W.stay : 0);
+                const v = costAt(P, i, c.x, c.y, pos, pl) - (k === 0 ? stay : 0);
                 if (v < bestC - 1e-9) { bestC = v; best = k; }
             });
             return { k: best, cost: bestC };
@@ -332,22 +399,33 @@
             if (r.k >= 0) setPos(i, cands[i][r.k]);
             placed[i] = true;
         });
-        for (let pass = 0; pass < passes; pass++) {
-            let changed = 0;
-            movers.forEach((i) => {
-                const it = P.list[i];
-                const atStart = Math.abs(pos[i].x - it.cx0) < 1e-6 && Math.abs(pos[i].y - it.cy0) < 1e-6;
-                const cur = costAt(P, i, pos[i].x, pos[i].y, pos, allPlaced) - (atStart ? W.stay : 0);
-                const r = pick(i, allPlaced);
-                if (r.k >= 0 && r.cost < cur - 1e-6) {
-                    const c = cands[i][r.k];
-                    if (Math.abs(c.x - pos[i].x) > 1e-6 || Math.abs(c.y - pos[i].y) > 1e-6) {
-                        setPos(i, c);
-                        changed += 1;
+        const improve = () => {
+            for (let pass = 0; pass < passes; pass++) {
+                let changed = 0;
+                movers.forEach((i) => {
+                    const it = P.list[i];
+                    const atStart = Math.abs(pos[i].x - it.cx0) < 1e-6 && Math.abs(pos[i].y - it.cy0) < 1e-6;
+                    const cur = costAt(P, i, pos[i].x, pos[i].y, pos, allPlaced) - (atStart ? stay : 0);
+                    const r = pick(i, allPlaced);
+                    if (r.k >= 0 && r.cost < cur - 1e-6) {
+                        const c = cands[i][r.k];
+                        if (Math.abs(c.x - pos[i].x) > 1e-6 || Math.abs(c.y - pos[i].y) > 1e-6) {
+                            setPos(i, c);
+                            changed += 1;
+                        }
                     }
-                }
-            });
-            if (!changed) break;
+                });
+                if (!changed) break;
+            }
+        };
+        improve();
+        // 2단계: 그래도 충돌이 남은 박스만 360°·더 먼 거리까지 넓혀 다시 찾는다
+        const hardOf = (i) => { const d = {}; costAt(P, i, pos[i].x, pos[i].y, pos, allPlaced, d); return d.hard; };
+        const stuck = movers.filter((i) => hardOf(i) > 0);
+        if (stuck.length) {
+            stuck.forEach((i) => { cands[i] = candidatesFor(P, i, true); });
+            P.neighbors = buildNeighbors(P, cands.map((c, i) => c.concat([pos[i]])));
+            improve();
         }
         let after = countConflicts(P, pos);
         // 나빠지면(드묾) 그대로 둠
