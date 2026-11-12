@@ -494,9 +494,13 @@
             if (!cleaned) return null;
             return JSON.parse(cleaned);
         }
+        let _lastRemoteVersionCheckAt = 0;
         async function checkRemoteWebVersion() {
             if (window._authSubmitInFlight || window._justRegistering || isLoginOverlayOpen()) return;
             if (navigator.onLine === false) return;
+            // 2026-11-12 배터리: 포커스·visibilitychange·pageshow가 한꺼번에 와도 15초 안에는 한 번만 받는다
+            if (Date.now() - _lastRemoteVersionCheckAt < 15000) return;
+            _lastRemoteVersionCheckAt = Date.now();
             // 창에 돌아올 때 옛 버전인지 먼저 판단해 안내 띠를 띄운다(동기화 차단과 같은 기준)
             if (typeof window.refreshAppVersionGate === 'function') {
                 try { await window.refreshAppVersionGate(true); } catch (_e) { /* ignore */ }
@@ -547,8 +551,13 @@
             if (e.persisted) checkRemoteWebVersion();
         });
         // 첫 로드 직후 자동 reload는 로그인·초기화와 겹치므로 생략 (탭 복귀·포커스 시만 확인)
+        // 2026-11-12 배터리: 45초마다 web-version.json을 두 번씩(옛 버전 판정 + 새 버전 확인) 받아 화면이 꺼져 있어도
+        // 휴대폰 통신을 계속 깨웠다. 이제 앱이 보일 때만 5분마다. 앱으로 돌아올 때·포커스 때는 위에서 바로 확인한다.
         if (isNativeAndroidApp()) {
-            setInterval(checkRemoteWebVersion, 45000);
+            setInterval(() => {
+                if (document.visibilityState === 'hidden') return;
+                checkRemoteWebVersion();
+            }, 5 * 60 * 1000);
         }
         if (typeof initMobileBackButton === 'function') initMobileBackButton();
     })();
@@ -578,7 +587,14 @@
             } catch (_e) { /* ignore */ }
         };
         beat();
-        setInterval(beat, 4000);
+        // 2026-11-12 배터리: 4초마다 localStorage에 쓰던 것을 화면이 보일 때만으로(뒤에 있는 탭은 「열려 있음」으로 안 센다)
+        setInterval(() => {
+            if (document.visibilityState === 'hidden') return;
+            beat();
+        }, 4000);
+        document.addEventListener('visibilitychange', () => {
+            if (document.visibilityState === 'visible') beat();
+        });
         window.addEventListener('beforeunload', () => {
             try {
                 const prev = JSON.parse(localStorage.getItem(KEY) || '{}');

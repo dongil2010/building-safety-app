@@ -596,6 +596,8 @@
         let started = false;
         sketchSeqStore();   // 저장된 번호표를 손글씨 모듈에 연결(오프라인에서도 같은 번호)
         setInterval(() => {
+            // 2026-11-12 배터리: 앱이 뒤에 있거나 화면이 꺼져 있으면 쉰다(보이면 4초 안에 다시 돈다)
+            if (document.visibilityState === 'hidden') return;
             if (!db || !window.state.companyId || navigator.onLine === false) return;
             const me = sketchMe();
             if (!me.uid) return;

@@ -1,5 +1,5 @@
 // @@app-parts 자동 생성 파일 — 여기를 고치지 말고 app/ 조각을 고친 뒤 `node scripts/app-parts.js join` (CLAUDE.md 「app.js 조각」)
-// @@app-part 01-base.js sha=747a17371d4d — 원본은 app/01-base.js (여기 말고 거기서 고칠 것)
+// @@app-part 01-base.js sha=9e47335f166e — 원본은 app/01-base.js (여기 말고 거기서 고칠 것)
 /* ==========================================================================
    스마트 건축물 안전점검 현장점검 시스템 — UI 부트스트랩
    전역 상태·IndexedDB·이미지 헬퍼: js/core/state.js
@@ -713,7 +713,12 @@ document.addEventListener('DOMContentLoaded', () => {
     window.addEventListener('resize', scheduleFloatingIndicatorSafeArea);
     window.addEventListener('orientationchange', scheduleFloatingIndicatorSafeArea);
     document.addEventListener('click', () => setTimeout(scheduleFloatingIndicatorSafeArea, 60), true);
-    setInterval(scheduleFloatingIndicatorSafeArea, 1200);
+    // 2026-11-12 배터리: 클릭·크기 변경 때 이미 다시 잰다. 주기 확인은 화면이 보일 때만, 덜 자주(1.2초 → 3초).
+    // 매번 도구막대 전부의 위치를 재서(레이아웃 강제) 앱이 뒤에 있어도 CPU를 깨우고 있었다.
+    setInterval(() => {
+        if (document.visibilityState === 'hidden') return;
+        scheduleFloatingIndicatorSafeArea();
+    }, 3000);
 
     // --- 3.5c 빈 마킹 번호 알림 (2026-10-20) ---
     // 온라인이고 결함위치도 탭이 보일 때, 이 층(외부는 외부 전체) 마킹 번호에 빈 칸이 있으면 아래 왼쪽에 작게 알린다.
@@ -771,7 +776,14 @@ document.addEventListener('DOMContentLoaded', () => {
         _gapNoticeTimer = setTimeout(updateDefectNumberGapNotice, 400);
     }
     window.scheduleDefectNumberGapNotice = scheduleDefectNumberGapNotice;
-    setInterval(scheduleDefectNumberGapNotice, 2500);
+    // 2026-11-12 배터리: 화면이 꺼졌거나 앱이 뒤에 있으면 빈 번호를 다시 세지 않는다(보일 때 바로 다시 센다)
+    setInterval(() => {
+        if (document.visibilityState === 'hidden') return;
+        scheduleDefectNumberGapNotice();
+    }, 4000);
+    document.addEventListener('visibilitychange', () => {
+        if (document.visibilityState === 'visible') scheduleDefectNumberGapNotice();
+    });
     window.addEventListener('online', scheduleDefectNumberGapNotice);
     window.addEventListener('offline', scheduleDefectNumberGapNotice);
 
@@ -28306,7 +28318,7 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
         ctx.restore();
     }
 
-// @@app-part 07-defect-component.js sha=fecf284a4b7c — 원본은 app/07-defect-component.js (여기 말고 거기서 고칠 것)
+// @@app-part 07-defect-component.js sha=af68f7c89112 — 원본은 app/07-defect-component.js (여기 말고 거기서 고칠 것)
     // --- Dynamic Defect Component(부재 명칭) — 분류별 플랫 프리셋 ---
     // 2026-09-28 접합부는 거더/빔 구분이 필요 없음 — 큰보·작은보 → 보, 철골거더·철골빔 → 철골보
     // 2026-11-04 보(G)·보(B) 다시 넣음(사용자) — 통계 평가 표가 접합부 결함을 맞닿은 부재 줄(큰보·작은보·슬래브…)에 같이 세서
@@ -28904,6 +28916,8 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
         let started = false;
         sketchSeqStore();   // 저장된 번호표를 손글씨 모듈에 연결(오프라인에서도 같은 번호)
         setInterval(() => {
+            // 2026-11-12 배터리: 앱이 뒤에 있거나 화면이 꺼져 있으면 쉰다(보이면 4초 안에 다시 돈다)
+            if (document.visibilityState === 'hidden') return;
             if (!db || !window.state.companyId || navigator.onLine === false) return;
             const me = sketchMe();
             if (!me.uid) return;
@@ -62887,7 +62901,7 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
         btnDownloadImportTemplate.addEventListener('click', window.downloadImportDefectExcelTemplate);
     }
 
-// @@app-part 15-firebase-sync.js sha=ca7e8ac4c683 — 원본은 app/15-firebase-sync.js (여기 말고 거기서 고칠 것)
+// @@app-part 15-firebase-sync.js sha=03ccfe0feb75 — 원본은 app/15-firebase-sync.js (여기 말고 거기서 고칠 것)
     // ==========================================================================
     // 🌐 FIREBASE REALTIME SYNC ENGINE (구글 파이어베이스 실시간 1초 동기화)
     // ==========================================================================
@@ -63383,9 +63397,13 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
             if (!cleaned) return null;
             return JSON.parse(cleaned);
         }
+        let _lastRemoteVersionCheckAt = 0;
         async function checkRemoteWebVersion() {
             if (window._authSubmitInFlight || window._justRegistering || isLoginOverlayOpen()) return;
             if (navigator.onLine === false) return;
+            // 2026-11-12 배터리: 포커스·visibilitychange·pageshow가 한꺼번에 와도 15초 안에는 한 번만 받는다
+            if (Date.now() - _lastRemoteVersionCheckAt < 15000) return;
+            _lastRemoteVersionCheckAt = Date.now();
             // 창에 돌아올 때 옛 버전인지 먼저 판단해 안내 띠를 띄운다(동기화 차단과 같은 기준)
             if (typeof window.refreshAppVersionGate === 'function') {
                 try { await window.refreshAppVersionGate(true); } catch (_e) { /* ignore */ }
@@ -63436,8 +63454,13 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
             if (e.persisted) checkRemoteWebVersion();
         });
         // 첫 로드 직후 자동 reload는 로그인·초기화와 겹치므로 생략 (탭 복귀·포커스 시만 확인)
+        // 2026-11-12 배터리: 45초마다 web-version.json을 두 번씩(옛 버전 판정 + 새 버전 확인) 받아 화면이 꺼져 있어도
+        // 휴대폰 통신을 계속 깨웠다. 이제 앱이 보일 때만 5분마다. 앱으로 돌아올 때·포커스 때는 위에서 바로 확인한다.
         if (isNativeAndroidApp()) {
-            setInterval(checkRemoteWebVersion, 45000);
+            setInterval(() => {
+                if (document.visibilityState === 'hidden') return;
+                checkRemoteWebVersion();
+            }, 5 * 60 * 1000);
         }
         if (typeof initMobileBackButton === 'function') initMobileBackButton();
     })();
@@ -63467,7 +63490,14 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
             } catch (_e) { /* ignore */ }
         };
         beat();
-        setInterval(beat, 4000);
+        // 2026-11-12 배터리: 4초마다 localStorage에 쓰던 것을 화면이 보일 때만으로(뒤에 있는 탭은 「열려 있음」으로 안 센다)
+        setInterval(() => {
+            if (document.visibilityState === 'hidden') return;
+            beat();
+        }, 4000);
+        document.addEventListener('visibilitychange', () => {
+            if (document.visibilityState === 'visible') beat();
+        });
         window.addEventListener('beforeunload', () => {
             try {
                 const prev = JSON.parse(localStorage.getItem(KEY) || '{}');
