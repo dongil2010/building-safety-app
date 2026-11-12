@@ -197,8 +197,10 @@
             if (structMember) push(out, r, 'warn', 'struct-member-nonstructural', '구조 부재(' + structMember + ')인데 비구조체로 체크되어 있습니다 — 한글 조사표·보고서 요약에 비구조체로 나갑니다.');
             if (isMasonryStructural(r)) push(out, r, 'warn', 'masonry-structural', '조적·블록·ALC 벽체(「' + trim(r.component) + '」)인데 구조체로 체크되어 있습니다 — 한글 조사표·보고서 요약에 구조체로 나갑니다. 비구조체로 바꿔 주세요.');
             else if (isPlasterOnlyStructural(r)) push(out, r, 'warn', 'plaster-structural', '미장 결함인데 구조체로 체크되어 있습니다 — 미장은 대부분 비구조체입니다. 맞는지 확인하세요.');
-            // 칸 섞임: 부재 칸에 결함 글(「슬래브 콘크리트 파취 및…」「철골보 이음부 상태양호」)
             var comp = trim(r.component);
+            // 2026-11-12 부재 이름에 「부재」라고 적힌 것(사용자: 검토에서 잡기) — 기둥·보·벽체 같은 실제 부재 이름으로 바꾸게
+            if (/부재/.test(squash(comp))) push(out, r, 'warn', 'component-placeholder', '부재 이름에 「부재」라고 적혀 있습니다: 「' + comp + '」 — 기둥·보·벽체 같은 실제 부재 이름으로 바꾸세요.');
+            // 칸 섞임: 부재 칸에 결함 글(「슬래브 콘크리트 파취 및…」「철골보 이음부 상태양호」)
             var cm = comp.match(/상태양호|보수완료|균열|파취|박락|박리|탈락|누수|들뜸|파손|녹\s?발생/);
             if (cm) push(out, r, 'warn', 'mixed-field', '부재 칸에 결함 내용(「' + cm[0] + '」)이 들어 있습니다: 「' + comp + '」 — 결함 종류 칸으로.');
             // 결함 종류 칸에 치수(「높이 부족 H:630mm」)

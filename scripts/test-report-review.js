@@ -242,4 +242,11 @@ const msHit = R.reviewRows([row({ component: '조적벽체', category: '구조�
 assert.strictEqual(msHit.level, 'warn');
 assert.ok(/조적벽체/.test(msHit.msg) && /비구조체로 바꿔/.test(msHit.msg));
 
+// 2026-11-12 부재 이름에 「부재」
+const CP = 'component-placeholder';
+assert.ok(rules([row({ component: '부재' })]).includes(CP), '「부재」만');
+assert.ok(rules([row({ component: '구조 부재' })]).includes(CP), '「구조 부재」');
+assert.ok(!rules([row({ component: '기둥' })]).includes(CP));
+assert.strictEqual(R.reviewRows([row({ component: '부재' })]).find((x) => x.rule === CP).level, 'warn');
+
 console.log('test-report-review: ok');
