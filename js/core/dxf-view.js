@@ -287,7 +287,8 @@
 
         // 2) 선 — 기본 굵기는 한 묶음으로, 굵은 폴리선은 굵기별로
         var baseLw = model.lw;
-        var basePx = Math.max(minPx, baseLw * k);
+        // 기본 선은 캐드 화면처럼 확대해도 늘 1픽셀(2026-11-12 사용자: 선이 두껍다). 폭을 준 폴리선만 실제 폭대로 굵어진다.
+        var basePx = minPx;
         var wide = null; // 굵기(픽셀, 0.5 단위) → 폴리선 번호 목록
         ctx.strokeStyle = '#000000';
         ctx.lineWidth = basePx;
@@ -506,8 +507,7 @@
             var cctx = cache.canvas.getContext('2d');
             cctx.setTransform(1, 0, 0, 1, 0, 0);
             cctx.clearRect(0, 0, W, H);
-            var dprGuess = (typeof root !== 'undefined' && root.devicePixelRatio) || 1;
-            var res = render(cctx, model, M, W, H, { minLinePx: dprGuess >= 2 ? 1.5 : 1 });
+            var res = render(cctx, model, M, W, H, { minLinePx: 1 });
             cache.model = model; cache.M = M; cache.W = W; cache.H = H; cache.ms = res.ms;
             forceNext = false;
             fresh = true;
