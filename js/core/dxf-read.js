@@ -888,6 +888,12 @@
                 case 'ARC': {
                     var sa = gn(e, 50, 0), ea = gn(e, 51, 360);
                     var sw = ea - sa;
+                    // 2026-11-12 시작각 = 끝각이면 길이 0인 호 — 캐드는 아무것도 안 그린다. 예전엔 360°를 더해
+                    // 반지름 그대로 온 원이 생겼다(농협광주 지상2층 주차 레이어 R=25000 → 도면 위 큰 원).
+                    if (Math.abs(sw) < 1e-9) {
+                        stats.skipped.zeroArc = (stats.skipped.zeroArc || 0) + 1;
+                        break;
+                    }
                     while (sw <= 0) sw += 360;
                     pts = arcPoints(gn(e, 10, 0), gn(e, 20, 0), gn(e, 40, 0), sa * Math.PI / 180, sw * Math.PI / 180, tol, []);
                     addPoly(pts, ocsMatrix(e, m), false, layer);

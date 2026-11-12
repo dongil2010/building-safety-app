@@ -80,6 +80,16 @@ function bbox(pts) {
     const g = flatOf([{ name: 'ENTITIES', items: ent('ARC', [[10, 0], [20, 0], [40, 10], [50, 350], [51, 10]]) }]);
     const gb = bbox(g.polylines[0].pts);
     assert(gb.x0 > 9.8, '짧은 호');
+    // 2026-11-12 시작각 = 끝각(길이 0인 호)은 그리지 않는다 — 예전엔 온 원이 생겼다(농협광주 지상2층 R=25000)
+    const z = flatOf([{ name: 'ENTITIES', items: []
+        .concat(ent('ARC', [[10, 0], [20, 0], [40, 25000], [50, 71.47095217354884], [51, 71.47095217354884]]))
+        .concat(ent('LINE', [[10, 0], [20, 0], [11, 1], [21, 1]])) }]);
+    assert.strictEqual(z.polylines.length, 1, '길이 0 호는 빠짐');
+    assert.strictEqual(z.stats.skipped.zeroArc, 1);
+    // 0° → 360°는 그대로 온 원
+    const full = flatOf([{ name: 'ENTITIES', items: ent('ARC', [[10, 0], [20, 0], [40, 10], [50, 0], [51, 360]]) }]);
+    const fb = bbox(full.polylines[0].pts);
+    near(fb.x0, -10, 1e-6); near(fb.x1, 10, 1e-6);
     console.log('CIRCLE·ARC: ok');
 }
 
