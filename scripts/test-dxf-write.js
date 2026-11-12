@@ -306,3 +306,34 @@ const glue = fs.readFileSync(path.join(__dirname, '..', 'js', 'dxf-marking-expor
 assert.ok(/window\.buildVectorPinPlansForDefects\(/.test(glue), 'DXF 연결이 같은 함수 사용');
 
 console.log('test-dxf-write: ok');
+
+// 2026-11-12 처음 화면(VPORT) + 원본 도면 같이 넣기(BSA_DRAWING) — 우리 DXF 읽기로 다시 읽어 확인
+(function () {
+    const R = require('../js/core/dxf-read.js');
+    const model = {
+        n: 3,
+        coords: new Float32Array([0, 0, 100, 0, /**/ 10, 10, 50, 10, 50, 40, /**/ 60, 60, 80, 60, 80, 80, 60, 80]),
+        start: new Uint32Array([0, 2, 5]), count: new Uint32Array([2, 3, 4]), flags: new Uint8Array([0, 0, 1]),
+        texts: [[20, 30, 5, 90, 1, 2, 'X1'], [5, 5, 4, 0, 0, 0, '계단실']]
+    };
+    const text = api.buildMarkingDxf({
+        plans: [], legendPlan: null, unitPerPx: 1,
+        drawing: { model, toWorld: (px, py) => ({ x: px * 10 + 1000, y: py * 10 + 2000 }), unitPerPt: 10 }
+    });
+    const lines = text.split('\r\n');
+    const at = lines.indexOf('VPORT');
+    assert.ok(at > 0 && lines.indexOf('*ACTIVE') > at, '처음 화면 표(VPORT *ACTIVE)');
+    const i12 = lines.indexOf('12', lines.indexOf('*ACTIVE'));
+    assert.ok(Math.abs(Number(lines[i12 + 1]) - 1500) < 1e-6, '화면 가운데 x = 내용 가운데');
+    const i40 = lines.indexOf('40', lines.indexOf('*ACTIVE'));
+    assert.ok(Number(lines[i40 + 1]) >= 800, '화면 높이가 내용을 다 담는다');
+    const doc = R.parseDxf(text);
+    const flat = R.flattenDxf(doc);
+    assert.strictEqual(flat.polylines.length, 3, '선 3개가 다시 읽힌다');
+    assert.strictEqual(flat.texts.length, 2);
+    const t1 = flat.texts.find((t) => t.text === 'X1');
+    assert.ok(t1 && Math.abs(t1.x - 1200) < 1e-6 && Math.abs(t1.y - 2300) < 1e-6 && Math.abs(t1.h - 50) < 1e-6 && Math.abs(t1.rot - 90) < 1e-6, '글자 위치·높이·회전');
+    assert.ok(flat.texts.some((t) => t.text === '계단실'), '한글 글자');
+    assert.ok(Math.abs(flat.bounds.minX - 1000) < 60 && Math.abs(flat.bounds.maxX - 2000) < 60, '원래 좌표 그대로');
+    console.log('처음 화면 + 원본 도면 넣기: ok');
+})();

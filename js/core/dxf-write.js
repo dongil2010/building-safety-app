@@ -14,7 +14,8 @@
         { name: 'BSA_LEADER', aci: 1 },
         { name: 'BSA_AREA', aci: 1 },
         { name: 'BSA_LEGEND', aci: 8 },
-        { name: 'BSA_REF', aci: 8 }
+        { name: 'BSA_REF', aci: 8 },
+        { name: 'BSA_DRAWING', aci: 7 }
     ];
     var FONT_FILE = 'malgun.ttf';
     var TEXT_STYLE = 'BSA_KR';
@@ -258,6 +259,50 @@
             pt(11, c);
         }
 
+        /* ----- 원본 도면(DXF로 올린 층) — 선·글자를 BSA_DRAWING 레이어에 같이 넣는다(2026-11-12) -----
+         * 마킹만 든 파일은 캐드에서 열면 빈 화면처럼 보였다. 도면까지 넣어 파일 하나로 결함위치도가 되게 한다.
+         * drawing = { model(js/core/dxf-view.js 모델, PDF 점 좌표), toWorld(px, py) → {x,y}, unitPerPt } */
+        var drawing = opts.drawing;
+        if (drawing && drawing.model && typeof drawing.toWorld === 'function') {
+            var dm = drawing.model, dW = drawing.toWorld;
+            var upt = Number(drawing.unitPerPt);
+            if (!(upt > 0) || !isFinite(upt)) upt = 1;
+            var DL = 'BSA_DRAWING';
+            for (var di = 0; di < dm.n; di++) {
+                var dc = dm.count[di], ds = dm.start[di] * 2;
+                if (dc < 2) continue;
+                var dclosed = !!(dm.flags[di] & 1) || !!(dm.flags[di] & 2);
+                if (dc === 2 && !dclosed) {
+                    var la = dW(dm.coords[ds], dm.coords[ds + 1]), lb = dW(dm.coords[ds + 2], dm.coords[ds + 3]);
+                    if (!la || !lb || !finite(la.x, la.y, lb.x, lb.y)) continue;
+                    ents.push('0', 'LINE', '8', DL, '10', num(la.x), '20', num(la.y), '30', '0', '11', num(lb.x), '21', num(lb.y), '31', '0');
+                    grow(la.x, la.y); grow(lb.x, lb.y);
+                    continue;
+                }
+                ents.push('0', 'POLYLINE', '8', DL, '66', '1', '10', '0', '20', '0', '30', '0', '70', dclosed ? '1' : '0');
+                for (var dq = 0; dq < dc; dq++) {
+                    var dv = dW(dm.coords[ds + dq * 2], dm.coords[ds + dq * 2 + 1]);
+                    if (!dv || !finite(dv.x, dv.y)) continue;
+                    ents.push('0', 'VERTEX', '8', DL, '10', num(dv.x), '20', num(dv.y), '30', '0');
+                    grow(dv.x, dv.y);
+                }
+                ents.push('0', 'SEQEND', '8', DL);
+            }
+            (dm.texts || []).forEach(function (t) {
+                var tp = dW(t[0], t[1]);
+                var th = Number(t[2]) * upt;
+                var ts = encodeText(t[6]);
+                if (!tp || !finite(tp.x, tp.y) || !(th > 0) || !ts) return;
+                var ha = t[4] === 1 || t[4] === 2 ? t[4] : 0;
+                var va = t[5] >= 1 && t[5] <= 3 ? t[5] : 0;
+                ents.push('0', 'TEXT', '8', DL, '10', num(tp.x), '20', num(tp.y), '30', '0', '40', num(th), '1', ts);
+                if (t[3]) ents.push('50', num(t[3]));
+                ents.push('7', TEXT_STYLE);
+                if (ha || va) ents.push('72', String(ha), '73', String(va), '11', num(tp.x), '21', num(tp.y), '31', '0');
+                grow(tp.x, tp.y);
+            });
+        }
+
         /* ----- 참고선(원본 도면 선) ----- */
         refSegments.forEach(function (s) {
             if (!s) return;
@@ -409,6 +454,19 @@
         o(0, 'ENDSEC');
 
         o(0, 'SECTION'); o(2, 'TABLES');
+        // 처음 열었을 때 화면: 내용 전체가 보이게(이 표가 없으면 캐드가 원점 근처 빈 곳을 보여 줘 「아무것도 없는」 것처럼 보인다)
+        var vW = Math.max(eMax.x - eMin.x, 1e-6), vH = Math.max(eMax.y - eMin.y, 1e-6);
+        var vAspect = 1.6;
+        var vHeight = Math.max(vH, vW / vAspect) * 1.08;
+        o(0, 'TABLE'); o(2, 'VPORT'); o(70, 1);
+        o(0, 'VPORT'); o(2, '*ACTIVE'); o(70, 0);
+        o(10, '0'); o(20, '0'); o(11, '1'); o(21, '1');
+        o(12, num((eMin.x + eMax.x) / 2)); o(22, num((eMin.y + eMax.y) / 2));
+        o(13, '0'); o(23, '0'); o(14, '1'); o(24, '1'); o(15, '0'); o(25, '0');
+        o(16, '0'); o(26, '0'); o(36, '1'); o(17, '0'); o(27, '0'); o(37, '0');
+        o(40, num(vHeight)); o(41, num(vAspect)); o(42, '50'); o(43, '0'); o(44, '0');
+        o(50, '0'); o(51, '0'); o(71, 0); o(72, 100); o(73, 1); o(74, 1); o(75, 0); o(76, 0); o(77, 0); o(78, 0);
+        o(0, 'ENDTAB');
         o(0, 'TABLE'); o(2, 'LTYPE'); o(70, 2);
         o(0, 'LTYPE'); o(2, 'CONTINUOUS'); o(70, 0); o(3, 'Solid line'); o(72, 65); o(73, 0); o(40, '0');
         o(0, 'LTYPE'); o(2, 'DASHED'); o(70, 0); o(3, 'Dashed __ __ __'); o(72, 65); o(73, 2);

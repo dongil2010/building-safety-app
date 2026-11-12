@@ -83,6 +83,8 @@ unit = DXF $INSUNITS (4=mm, 없으면 0). src = 원본 파일 이름.
 - R12(AC1009) ASCII, 줄바꿈 CRLF. 한글은 `\U+XXXX`로 적어 어느 캐드에서나 깨지지 않게. 글꼴 스타일 `BSA_KR` = `malgun.ttf`.
 - 레이어(영문): `BSA_PIN_BOX`, `BSA_PIN_TEXT`, `BSA_LEADER`, `BSA_AREA`, `BSA_LEGEND`, `BSA_REF`. 색은 가장 가까운 ACI.
 - DXF로 올린 층 → 원래 캐드 좌표. 일반 PDF 층 → 종이 mm(점×25.4/72), 왼쪽 아래 원점. 그림 층 → 픽셀 단위(y 뒤집음).
+- 처음 화면(VPORT *ACTIVE)을 내용 전체에 맞춰 적는다 — 없으면 캐드가 원점 근처 빈 곳을 열어 「레이어만 있고 아무것도 없는」 것처럼 보인다(2026-11-12 사용자 보고).
+- DXF로 올린 층은 원본 도면 선·글자도 `BSA_DRAWING` 레이어에 같이 넣는다(화면 벡터 모델에서, 원래 캐드 좌표). 원래 레이어·색은 없다(한 레이어, 흰색).
 - 일반 PDF 층은 `BSA_PDF_SNAP.getDetectionData`의 선분을 `BSA_REF`에 같이 넣어 캐드에서 맞추기 쉽게(있을 때만).
 
 ## 일부러 뺀 것(다음 단계 후보)
