@@ -46593,7 +46593,7 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
         });
     }
 
-// @@app-part 11-cad-import.js sha=fae629e1d695 — 원본은 app/11-cad-import.js (여기 말고 거기서 고칠 것)
+// @@app-part 11-cad-import.js sha=b4c65ff1b91d — 원본은 app/11-cad-import.js (여기 말고 거기서 고칠 것)
     // --- 9-1. CAD Defect Pins 2-Point Calibration Engine (v2.0) ---
     window.cadCalibrationState = null;
 
@@ -47983,8 +47983,17 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
         const usable = (u) => (typeof isUsableRasterDrawingUrl === 'function')
             ? isUsableRasterDrawingUrl(u)
             : (typeof u === 'string' && (u.startsWith('data:image/') || u.startsWith('blob:')));
+        // ⚠️ 여기서는 **읽기만** 한다(2026-11-12). 예전엔 「받아서 기기에 저장」하는 함수(fetchAndCacheCloudFloorDrawingTier·
+        // resolveFloorPdfDataUrlAsync·idbGetFloorDrawingTier)를 불렀는데, 그 저장이 끝나기를 기다리지 않아
+        // 바로 뒤 교체 단계가 옛 그림을 지운 다음에 옛 그림이 다시 기기에 써지고 「저장됨」 표시까지 남아
+        // 새 도면을 넣어도 옛 도면이 계속 보였다. 서버도 저장하지 않는 낮은 단계 읽기 함수만 쓴다.
         const sources = [
-            async () => (typeof idbGetFloorDrawingTier === 'function') ? idbGetFloorDrawingTier(bldg.id, floorCode, 4000) : null,
+            async () => (typeof idbGet === 'function') ? idbGet('floorDrawingTiers', `${bldg.id}_${floorCode}_4000`) : null,
+            async () => {
+                if (typeof idbGet !== 'function') return null;
+                const bundled = await idbGet('floorDrawingTiers', floorKey);
+                return (bundled && typeof bundled === 'object') ? (bundled['4000'] || bundled[4000] || null) : null;
+            },
             async () => {
                 const tiers = bldg.floorDrawingTiers && bldg.floorDrawingTiers[floorCode];
                 if (!tiers || typeof tiers !== 'object') return null;
@@ -47994,14 +48003,20 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
             async () => (typeof idbGet === 'function') ? idbGet('floorDrawings', floorKey) : null,
             async () => (state.currentBuildingId === bldg.id && state.currentFloor === floorCode && state.bgImage)
                 ? { img: state.bgImage } : null,
-            async () => (typeof fetchAndCacheCloudFloorDrawingTier === 'function' && navigator.onLine !== false)
-                ? fetchAndCacheCloudFloorDrawingTier(bldg, floorCode, 4000) : null,
+            async () => (typeof fetchCloudFloorDrawingTier === 'function' && navigator.onLine !== false)
+                ? fetchCloudFloorDrawingTier(bldg.id, floorCode, 4000) : null,
             async () => (typeof fetchCloudFloorDrawingDataUrl === 'function' && navigator.onLine !== false)
                 ? fetchCloudFloorDrawingDataUrl(bldg.id, floorCode) : null,
             async () => {
-                if (typeof window.resolveFloorPdfDataUrlAsync !== 'function' || typeof window.renderPdfDataUrlToImage !== 'function') return null;
-                const pdf = await window.resolveFloorPdfDataUrlAsync(bldg, floorCode);
-                if (!(typeof pdf === 'string' && pdf.startsWith('data:application/pdf'))) return null;
+                if (typeof window.renderPdfDataUrlToImage !== 'function') return null;
+                if (typeof isFloorPdfRemovedHere === 'function' && isFloorPdfRemovedHere(bldg, floorCode)) return null;
+                const isPdf = (u) => typeof u === 'string' && u.startsWith('data:application/pdf');
+                let pdf = bldg.floorDrawingPdfs && bldg.floorDrawingPdfs[floorCode];
+                if (!isPdf(pdf) && typeof idbGet === 'function') pdf = await idbGet('floorDrawingPdfs', floorKey);
+                if (!isPdf(pdf) && typeof fetchFloorDrawingPdfFromCloud === 'function' && navigator.onLine !== false) {
+                    pdf = await fetchFloorDrawingPdfFromCloud(bldg.id, floorCode);
+                }
+                if (!isPdf(pdf)) return null;
                 return window.renderPdfDataUrlToImage(pdf, window.FLOOR_DRAWING_PDF_PREVIEW_DIM || 4000, 6000000, undefined, { quality: 0.85 });
             }
         ];

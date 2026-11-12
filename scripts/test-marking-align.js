@@ -114,4 +114,16 @@ t('옛 도면 색칠: 흰 바탕 투명, 검은 선 빨강', () => {
     assert.deepStrictEqual(Array.from(px.slice(4)), [200, 0, 0, 255]);
 });
 
+t('옛 도면 보관은 읽기만 — 기기에 저장하는 함수를 부르지 않는다(새 도면이 옛 도면으로 되돌아가던 문제)', () => {
+    const src = require('fs').readFileSync(require('path').join(__dirname, '..', 'app', '11-cad-import.js'), 'utf8');
+    const start = src.indexOf('async function captureFloorDrawingForAlign(');
+    const end = src.indexOf('async function captureFloorDrawingForAlignSafe(');
+    assert.ok(start > 0 && end > start, '함수 찾기');
+    const body = src.slice(start, end).split('\n').filter((l) => !/^\s*\/\//.test(l)).join('\n');
+    ['fetchAndCacheCloudFloorDrawingTier', 'resolveFloorPdfDataUrlAsync', 'resolveBuildingFloorPdf', 'applyResolvedPdfToBuilding',
+        'idbGetFloorDrawingTier', 'cacheFloorDrawingTierToDevice', 'idbSet('].forEach((name) => {
+        assert.ok(!body.includes(name), `${name} 를 부르면 안 됨`);
+    });
+});
+
 console.log(`marking-align: ${n}개 통과`);
