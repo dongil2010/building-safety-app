@@ -157,9 +157,11 @@
         return `${prefix}_${Date.now().toString(36)}${Math.random().toString(36).slice(2, 7)}`;
     }
 
-    function defaultBand(w, h) {
-        const m = Math.min(num(w, 4000), num(h, 3000));
-        return Math.max(4, Math.round(m * 0.008));
+    // 2026-11-12 사용자 요청: 행·열 기본 폭은 도면 크기와 상관없이 10(도면 px). 예전엔 짧은 변의 0.8%(4000px 도면이면 약 22).
+    // 이미 저장된 그룹의 폭(band)은 그대로 — 새로 만드는 그룹과 폭을 안 준 그룹에만 적용된다.
+    const DEFAULT_BAND = 10;
+    function defaultBand(_w, _h) {
+        return DEFAULT_BAND;
     }
 
     function sanitizePts(pts) {
