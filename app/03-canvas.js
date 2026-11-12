@@ -427,6 +427,10 @@
         if (!bldg || !bldg.id || !floorCode) return;
         const bldgId = bldg.id;
         const floorKey = `${bldgId}_${floorCode}`;
+        // 2026-11-12 지우기 전에 옛 도면 그림을 보관 — 바꾼 뒤 「마킹 맞추기」에서 새 도면 위에 겹쳐 기준점을 찍는다(실패해도 교체는 계속)
+        if (typeof window.captureFloorDrawingForAlign === 'function') {
+            await window.captureFloorDrawingForAlign(bldg, floorCode);
+        }
         // 교체 세대: 진행 중이던 클라우드/IDB 티어 fetch가 새 도면을 덮지 못하게 함
         if (!bldg._drawingEpoch) bldg._drawingEpoch = {};
         bldg._drawingEpoch[floorCode] = (bldg._drawingEpoch[floorCode] || 0) + 1;
@@ -1427,6 +1431,8 @@
 
         if (state.bgImage) {
             drawFloorPlanLayers(ctx, imgW, imgH);
+            // 2026-11-12 도면 교체 후 마킹 맞추기: 옛 도면을 새 도면 위(마킹 아래)에 빨갛게
+            if (typeof drawDrawingAlignGhost === 'function') drawDrawingAlignGhost(ctx);
             // 행·열(통심) 선 — 도면 바로 위, 마킹보다 아래 (화면 전용)
             try {
                 if (typeof drawFloorGridOverlay === 'function') drawFloorGridOverlay(ctx, imgW, imgH);
@@ -1434,7 +1440,11 @@
                 console.warn('[grid-lines] draw', gridErr);
             }
 
-            const currentDefects = getCurrentFloorMapPlacedDefects();
+            let currentDefects = getCurrentFloorMapPlacedDefects();
+            // 마킹 맞추기 미리보기 — 옮긴 복사본으로만 그린다(자료는 확정 때 바뀜)
+            if (window.drawingAlignState && typeof drawingAlignPreviewList === 'function') {
+                currentDefects = drawingAlignPreviewList(currentDefects);
+            }
             renderDefectsGrouped(ctx, currentDefects, drawPin);
             drawMemberGbNeededMarkers(ctx, currentDefects);
 
@@ -1600,6 +1610,7 @@
                 ctx.fillText('📍 기준점 1', p1.x + r + 4, p1.y - 4);
                 ctx.restore();
             }
+            if (window.drawingAlignState && typeof drawDrawingAlignMarks === 'function') drawDrawingAlignMarks(ctx);
         }
 
         ctx.restore(); // Restore drawing rotation matrix
