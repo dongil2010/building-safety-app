@@ -1381,22 +1381,60 @@
         const existing = await drawingAlignDbOp('get', floorKey);
         if (existing && existing.src) return false;
 
-        let src = null;
-        if (typeof idbGetFloorDrawingTier === 'function') {
-            src = await idbGetFloorDrawingTier(bldg.id, floorCode, 4000).catch(() => null);
+        // 2026-11-12 여러 층을 한꺼번에 바꾸면 이 기기에서 안 열어 본 층은 그림이 서버 주소(https)뿐이라
+        // 캔버스로 못 읽어(CORS) 옛 도면이 비었다 → 도면 화면이 그림을 찾는 순서대로 하나씩 시도:
+        // 기기(4000 티어·메모리·IndexedDB) → 열린 층 화면 → 서버 4000 티어 → 서버 원본 그림 → 옛 PDF를 직접 그림
+        if (typeof window.updateLoadingText === 'function') window.updateLoadingText(`옛 도면 보관 중... (${floorCode})`);
+        const usable = (u) => (typeof isUsableRasterDrawingUrl === 'function')
+            ? isUsableRasterDrawingUrl(u)
+            : (typeof u === 'string' && (u.startsWith('data:image/') || u.startsWith('blob:')));
+        const sources = [
+            async () => (typeof idbGetFloorDrawingTier === 'function') ? idbGetFloorDrawingTier(bldg.id, floorCode, 4000) : null,
+            async () => {
+                const tiers = bldg.floorDrawingTiers && bldg.floorDrawingTiers[floorCode];
+                if (!tiers || typeof tiers !== 'object') return null;
+                return ['4000', '8000', '2000', '16000'].map((k) => tiers[k]).find(usable) || null;
+            },
+            async () => bldg.floorDrawings && bldg.floorDrawings[floorCode],
+            async () => (typeof idbGet === 'function') ? idbGet('floorDrawings', floorKey) : null,
+            async () => (state.currentBuildingId === bldg.id && state.currentFloor === floorCode && state.bgImage)
+                ? { img: state.bgImage } : null,
+            async () => (typeof fetchAndCacheCloudFloorDrawingTier === 'function' && navigator.onLine !== false)
+                ? fetchAndCacheCloudFloorDrawingTier(bldg, floorCode, 4000) : null,
+            async () => (typeof fetchCloudFloorDrawingDataUrl === 'function' && navigator.onLine !== false)
+                ? fetchCloudFloorDrawingDataUrl(bldg.id, floorCode) : null,
+            async () => {
+                if (typeof window.resolveFloorPdfDataUrlAsync !== 'function' || typeof window.renderPdfDataUrlToImage !== 'function') return null;
+                const pdf = await window.resolveFloorPdfDataUrlAsync(bldg, floorCode);
+                if (!(typeof pdf === 'string' && pdf.startsWith('data:application/pdf'))) return null;
+                return window.renderPdfDataUrlToImage(pdf, window.FLOOR_DRAWING_PDF_PREVIEW_DIM || 4000, 6000000, undefined, { quality: 0.85 });
+            }
+        ];
+        let img = null;
+        for (const get of sources) {
+            try {
+                const v = await get();
+                if (!v) continue;
+                if (v.img) {
+                    // 화면에 떠 있는 그림 — 캔버스로 읽을 수 있는지(CORS) 먼저 확인
+                    const t = document.createElement('canvas'); t.width = 1; t.height = 1;
+                    const tc = t.getContext('2d'); tc.drawImage(v.img, 0, 0, 1, 1); tc.getImageData(0, 0, 1, 1);
+                    img = v.img;
+                } else {
+                    if (!usable(v) || String(v).startsWith('data:application/pdf')) continue;
+                    img = await loadImageForAlign(v);
+                }
+                if (img && (img.naturalWidth || img.width) > 0) break;
+                img = null;
+            } catch (e) {
+                img = null;
+                console.warn('[마킹 맞추기] 옛 도면 후보 실패 — 다음으로', floorCode, e);
+            }
         }
-        const mem = bldg.floorDrawings && bldg.floorDrawings[floorCode];
-        if (!src && typeof mem === 'string' && mem.length > 32) src = mem;
-        if (!src && typeof idbGet === 'function') {
-            const v = await idbGet('floorDrawings', floorKey);
-            if (typeof v === 'string' && v.length > 32) src = v;
+        if (!img) {
+            console.warn('[마킹 맞추기] 옛 도면을 못 찾아 보관하지 못함', floorKey);
+            return false;
         }
-        if (!src && state.currentBuildingId === bldg.id && state.currentFloor === floorCode && state.bgImage) {
-            src = state.bgImage.currentSrc || state.bgImage.src || null;
-        }
-        if (!src) return false;
-
-        const img = await loadImageForAlign(src);
         const nw = img.naturalWidth || img.width, nh = img.naturalHeight || img.height;
         if (!(nw > 0 && nh > 0)) return false;
 
@@ -1440,16 +1478,20 @@
         return true;
     }
 
-    /** 교체 흐름에서 부른다 — 최대 15초, 실패해도 교체를 막지 않는다 */
+    /** 교체 흐름에서 부른다 — 층마다 최대 45초(서버에서 받거나 PDF를 그릴 수 있음), 실패해도 교체를 막지 않는다 */
     async function captureFloorDrawingForAlignSafe(bldg, floorCode) {
+        const loadingEl = document.querySelector('#globalLoadingOverlay .loading-text');
+        const prevText = loadingEl ? loadingEl.textContent : '';
         try {
             return await Promise.race([
                 captureFloorDrawingForAlign(bldg, floorCode),
-                new Promise((resolve) => setTimeout(() => resolve(false), 15000))
+                new Promise((resolve) => setTimeout(() => resolve(false), 45000))
             ]);
         } catch (e) {
             console.warn('[마킹 맞추기] 옛 도면 보관 실패(교체는 계속)', e);
             return false;
+        } finally {
+            if (loadingEl && prevText) loadingEl.textContent = prevText;
         }
     }
     window.captureFloorDrawingForAlign = captureFloorDrawingForAlignSafe;
