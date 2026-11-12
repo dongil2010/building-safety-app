@@ -3412,7 +3412,8 @@ ${roundMobile ? '' : `<button type="button" class="icon-btn icon-btn-trash" titl
                                 }
                             } catch (err) {
                                 console.error('Drawing compression error:', err);
-                                window.showToast(`도면 ${item.floorCode || (i + 1)} 변환 실패 — 다음 도면으로 진행합니다`, 'warning');
+                                // 2026-11-12 DXF 등 이유를 아는 실패는 그 안내를 같이 보여 준다(bsaUserMessage)
+                                window.showToast(`도면 ${item.floorCode || (i + 1)} 변환 실패 — 다음 도면으로 진행합니다${(err && err.bsaUserMessage) ? ' — ' + err.bsaUserMessage : ''}`, 'warning', (err && err.bsaUserMessage) ? 9000 : undefined);
                             }
                         }
                     }
@@ -3931,7 +3932,7 @@ ${roundMobile ? '' : `<button type="button" class="icon-btn icon-btn-trash" titl
                 if (!code || !target) return;
                 const picker = document.createElement('input');
                 picker.type = 'file';
-                picker.accept = 'image/*,application/pdf,.pdf';
+                picker.accept = 'image/*,application/pdf,.pdf,.dxf';
                 picker.addEventListener('change', () => {
                     const file = (picker.files || [])[0];
                     if (!file) return;
@@ -4536,7 +4537,8 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
                                     removeDrawinglessFloorFromBuilding(bldg, item.floorCode);
                                     saveStateToLocalStorage();
                                 }
-                                window.showToast(`도면 ${item.floorCode || (i + 1)} 변환 실패 — 다음 도면으로 진행합니다`, 'warning');
+                                // 2026-11-12 DXF 등 이유를 아는 실패는 그 안내를 같이 보여 준다(bsaUserMessage)
+                                window.showToast(`도면 ${item.floorCode || (i + 1)} 변환 실패 — 다음 도면으로 진행합니다${(err && err.bsaUserMessage) ? ' — ' + err.bsaUserMessage : ''}`, 'warning', (err && err.bsaUserMessage) ? 9000 : undefined);
                             }
                         }
                     }

@@ -68,6 +68,17 @@
   };
 
   window.prepareFloorDrawingUpload = async function (file) {
+    // 2026-11-12 캐드 DXF: 브라우저에서 벡터 PDF File로 바꾼 뒤 아래 PDF 길을 그대로 탄다(docs/cad-dxf-작업계획.md)
+    if (file && /\.dxf$/i.test(file.name || '')) {
+      const conv = window.BSA && window.BSA.dxfToPdf;
+      if (!conv || typeof conv.dxfFileToPdfFile !== 'function') {
+        const msg = 'DXF 변환 모듈이 로드되지 않았습니다. 새로고침(Ctrl+F5) 뒤 다시 해 주세요.';
+        const err = new Error(msg);
+        err.bsaUserMessage = msg;
+        throw err;
+      }
+      file = await conv.dxfFileToPdfFile(file);
+    }
     const isPdf = !!file && (file.type === 'application/pdf' || /\.pdf$/i.test(file.name || ''));
     if (!isPdf) {
       const readFull = () => new Promise((resolve, reject) => {
@@ -730,6 +741,46 @@
     }
   }
 
+  /**
+   * 결함 목록 → 핀 그리기 계획 목록 (그룹은 대표 1개로 묶음).
+   * 벡터 PDF 와 마킹 DXF 내보내기가 같이 쓴다(2026-11-12).
+   */
+  window.buildVectorPinPlansForDefects = function (defects, measureCtx) {
+    if (typeof window.buildVectorPinDrawPlan !== 'function') {
+      throw new Error('벡터 핀 계산기가 없습니다. Ctrl+F5로 새로고침 후 다시 시도하세요.');
+    }
+    const list = (Array.isArray(defects) ? defects : []).filter(d => d && !d.mapUnregistered);
+    const seenGroup = new Set();
+    const plans = [];
+    list.forEach((d) => {
+      if (d.groupId) {
+        if (seenGroup.has(d.groupId)) return;
+        seenGroup.add(d.groupId);
+        const members = list.filter(m => m.groupId === d.groupId && !m.surveyExtra);
+        const arrows = members
+          .filter(m => m.targetX !== undefined && m.targetY !== undefined)
+          .map(m => ({
+            targetX: m.targetX,
+            targetY: m.targetY,
+            forceArrowDir: m.forceArrowDir,
+            arrowOctant: m.arrowOctant,
+            areaSource: (m.shapeType === 'area' && m.areaX1 !== undefined) ? m : null
+          }));
+        const representative = members.slice().sort((a, b) => {
+          const sa = String(a.no || '');
+          const sb = String(b.no || '');
+          return sa.localeCompare(sb, undefined, { numeric: true });
+        })[0] || d;
+        const plan = window.buildVectorPinDrawPlan(representative, arrows, measureCtx);
+        if (plan) plans.push(plan);
+        return;
+      }
+      const plan = window.buildVectorPinDrawPlan(d, null, measureCtx);
+      if (plan) plans.push(plan);
+    });
+    return plans;
+  };
+
   window.exportFloorPlanVectorPdf = async function (pdfDataUrl, defects, imgW, imgH, options) {
     if (typeof PDFLib === 'undefined') {
       throw new Error('pdf-lib가 로드되지 않았습니다.');
@@ -770,40 +821,7 @@
     const measureCtx = measureCanvas.getContext('2d');
 
     let plans = Array.isArray(opts.plans) ? opts.plans.filter(Boolean) : null;
-    if (!plans) {
-      if (typeof window.buildVectorPinDrawPlan !== 'function') {
-        throw new Error('벡터 핀 계산기가 없습니다. Ctrl+F5로 새로고침 후 다시 시도하세요.');
-      }
-      const list = (Array.isArray(defects) ? defects : []).filter(d => d && !d.mapUnregistered);
-      const seenGroup = new Set();
-      plans = [];
-      list.forEach((d) => {
-        if (d.groupId) {
-          if (seenGroup.has(d.groupId)) return;
-          seenGroup.add(d.groupId);
-          const members = list.filter(m => m.groupId === d.groupId && !m.surveyExtra);
-          const arrows = members
-            .filter(m => m.targetX !== undefined && m.targetY !== undefined)
-            .map(m => ({
-              targetX: m.targetX,
-              targetY: m.targetY,
-              forceArrowDir: m.forceArrowDir,
-              arrowOctant: m.arrowOctant,
-              areaSource: (m.shapeType === 'area' && m.areaX1 !== undefined) ? m : null
-            }));
-          const representative = members.slice().sort((a, b) => {
-            const sa = String(a.no || '');
-            const sb = String(b.no || '');
-            return sa.localeCompare(sb, undefined, { numeric: true });
-          })[0] || d;
-          const plan = window.buildVectorPinDrawPlan(representative, arrows, measureCtx);
-          if (plan) plans.push(plan);
-          return;
-        }
-        const plan = window.buildVectorPinDrawPlan(d, null, measureCtx);
-        if (plan) plans.push(plan);
-      });
-    }
+    if (!plans) plans = window.buildVectorPinPlansForDefects(defects, measureCtx);
 
     for (const p of plans) {
       const color = hexToPdfRgb(rgb, p.color);

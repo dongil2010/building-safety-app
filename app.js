@@ -1,5 +1,5 @@
 // @@app-parts 자동 생성 파일 — 여기를 고치지 말고 app/ 조각을 고친 뒤 `node scripts/app-parts.js join` (CLAUDE.md 「app.js 조각」)
-// @@app-part 01-base.js sha=0e795b757d20 — 원본은 app/01-base.js (여기 말고 거기서 고칠 것)
+// @@app-part 01-base.js sha=747a17371d4d — 원본은 app/01-base.js (여기 말고 거기서 고칠 것)
 /* ==========================================================================
    스마트 건축물 안전점검 현장점검 시스템 — UI 부트스트랩
    전역 상태·IndexedDB·이미지 헬퍼: js/core/state.js
@@ -1639,6 +1639,13 @@ document.addEventListener('DOMContentLoaded', () => {
         } catch (e) {
             console.warn('PDF ref 좌표계 설정 실패:', e);
         }
+        // 2026-11-12 DXF로 올린 층이면 화면 벡터 모델을 읽어 둔다(뒤에서). 다 읽으면 화면을 벡터로 다시 그린다.
+        if (window.BSA && window.BSA.dxfView && typeof window.BSA.dxfView.ensureModel === 'function') {
+            window.BSA.dxfView.ensureModel(`${bldg.id}_${floorCode}`, pdfUrl).then((model) => {
+                if (model && state.currentBuildingId === bldg.id && state.currentFloor === floorCode
+                    && typeof drawCanvas === 'function') drawCanvas();
+            });
+        }
         // 캐드 벡터 스냅용 선분. 그림만 있고 PDF 원본이 없으면 여기까지 오지 않는다.
         if (window.BSA_PDF_SNAP && typeof window.BSA_PDF_SNAP.ensureGeometry === 'function') {
             await window.BSA_PDF_SNAP.ensureGeometry(pdfUrl, bldg.id, floorCode, window.FLOOR_DRAWING_PDF_PREVIEW_DIM || 4000);
@@ -1690,6 +1697,7 @@ document.addEventListener('DOMContentLoaded', () => {
     /** 절대 scale 하한(레거시). 상·하한은 fit 대비 비율로 통일 */
     const VIEW_MIN_SCALE = 0.1;
     const VIEW_MAX_ZOOM_VS_FIT = 50;
+    const VIEW_MAX_ZOOM_VS_FIT_DXF = 1000;
     const VIEW_MIN_ZOOM_VS_FIT = 0.08;
 
     function getViewScaleLimits(getFitFn) {
@@ -1700,7 +1708,28 @@ document.addEventListener('DOMContentLoaded', () => {
         };
     }
 
+    /**
+     * 2026-11-12 캐드 DXF로 올린 층의 화면 벡터 모델(js/core/dxf-view.js) — 읽어 둔 것이 있을 때만.
+     * 있으면 도면을 그림(JPEG) 대신 선·글자로 직접 그린다. 끄기: BSA_PDF_VECTOR.dxfLiveView = false
+     */
+    function getDxfViewModelForCurrentFloor() {
+        const V = window.BSA && window.BSA.dxfView;
+        if (!V || (window.BSA_PDF_VECTOR && window.BSA_PDF_VECTOR.dxfLiveView === false)) return null;
+        const bldg = state.currentBuilding;
+        const fc = state.currentFloor;
+        if (!bldg || !fc) return null;
+        if (typeof window.isFloorPdfRemoved === 'function' && window.isFloorPdfRemoved(bldg, fc)) return null;
+        const pdfUrl = (typeof window.getFloorPdfDataUrl === 'function') ? window.getFloorPdfDataUrl(bldg, fc) : null;
+        return V.getModel(`${bldg.id}_${fc}`, pdfUrl || undefined);
+    }
+
     function getMapViewScaleLimits() {
+        // 벡터로 그리는 DXF 층은 확대해도 안 깨지므로 훨씬 깊이 확대할 수 있게 한다
+        if (getDxfViewModelForCurrentFloor()) {
+            const lim = getViewScaleLimits(getMapFitScale);
+            lim.max = Math.max(lim.max, Math.max(getMapFitScale() || 0.05, 0.05) * VIEW_MAX_ZOOM_VS_FIT_DXF);
+            return lim;
+        }
         return getViewScaleLimits(getMapFitScale);
     }
 
@@ -1947,6 +1976,25 @@ document.addEventListener('DOMContentLoaded', () => {
             applyFloorDrawingDarken(ctx, darken, () => ctx.drawImage(patch.canvas, patch.x, patch.y, patch.w, patch.h));
             ctx.restore();
         };
+
+        // 2026-11-12 DXF 층: 그림을 늘리지 않고 선·글자를 지금 배율로 직접 그린다(화면 전용 — 출력은 그대로)
+        if (ctx === state.ctx) {
+            const dxfModel = getDxfViewModelForCurrentFloor();
+            if (dxfModel) {
+                let drew = false;
+                try {
+                    drew = window.BSA.dxfView.drawOnCanvas(ctx, dxfModel, imgW, imgH, {
+                        fallback: () => drawBg(state.bgImage, 1),
+                        darken: (blit) => applyFloorDrawingDarken(ctx, darken, blit),
+                        requestRedraw: () => { if (typeof drawCanvas === 'function') drawCanvas(); }
+                    });
+                } catch (dxfErr) {
+                    console.warn('[DXF 화면] 벡터 그리기 실패 — 그림으로 표시', dxfErr);
+                    drew = false;
+                }
+                if (drew) return;
+            }
+        }
 
         if (!_floorBlend) {
             if (state.bgImage) {
@@ -5767,7 +5815,7 @@ document.addEventListener('DOMContentLoaded', () => {
         }
     }
 
-// @@app-part 02-buildings.js sha=70fb32e03a0d — 원본은 app/02-buildings.js (여기 말고 거기서 고칠 것)
+// @@app-part 02-buildings.js sha=2fe348480911 — 원본은 app/02-buildings.js (여기 말고 거기서 고칠 것)
     // --- 5. TAB MANAGER (진입 로직은 js/tabs/*.js) ---
     // ---- 마지막 작업 위치 기억·복원 (js/core/last-location.js, 2026-10-28) ----
     // 로그인 직후 복원 시도가 끝나기 전에는 기록·삭제를 하지 않는다(부팅 중 switchTab('tab-home')이 기록을 지우지 않게).
@@ -9181,7 +9229,8 @@ ${roundMobile ? '' : `<button type="button" class="icon-btn icon-btn-trash" titl
                                 }
                             } catch (err) {
                                 console.error('Drawing compression error:', err);
-                                window.showToast(`도면 ${item.floorCode || (i + 1)} 변환 실패 — 다음 도면으로 진행합니다`, 'warning');
+                                // 2026-11-12 DXF 등 이유를 아는 실패는 그 안내를 같이 보여 준다(bsaUserMessage)
+                                window.showToast(`도면 ${item.floorCode || (i + 1)} 변환 실패 — 다음 도면으로 진행합니다${(err && err.bsaUserMessage) ? ' — ' + err.bsaUserMessage : ''}`, 'warning', (err && err.bsaUserMessage) ? 9000 : undefined);
                             }
                         }
                     }
@@ -9700,7 +9749,7 @@ ${roundMobile ? '' : `<button type="button" class="icon-btn icon-btn-trash" titl
                 if (!code || !target) return;
                 const picker = document.createElement('input');
                 picker.type = 'file';
-                picker.accept = 'image/*,application/pdf,.pdf';
+                picker.accept = 'image/*,application/pdf,.pdf,.dxf';
                 picker.addEventListener('change', () => {
                     const file = (picker.files || [])[0];
                     if (!file) return;
@@ -10305,7 +10354,8 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
                                     removeDrawinglessFloorFromBuilding(bldg, item.floorCode);
                                     saveStateToLocalStorage();
                                 }
-                                window.showToast(`도면 ${item.floorCode || (i + 1)} 변환 실패 — 다음 도면으로 진행합니다`, 'warning');
+                                // 2026-11-12 DXF 등 이유를 아는 실패는 그 안내를 같이 보여 준다(bsaUserMessage)
+                                window.showToast(`도면 ${item.floorCode || (i + 1)} 변환 실패 — 다음 도면으로 진행합니다${(err && err.bsaUserMessage) ? ' — ' + err.bsaUserMessage : ''}`, 'warning', (err && err.bsaUserMessage) ? 9000 : undefined);
                             }
                         }
                     }
@@ -10559,7 +10609,7 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
         });
     }
 
-// @@app-part 03-canvas.js sha=dbb7c0a4e77a — 원본은 app/03-canvas.js (여기 말고 거기서 고칠 것)
+// @@app-part 03-canvas.js sha=8380b0bfc1b6 — 원본은 app/03-canvas.js (여기 말고 거기서 고칠 것)
     // --- 8. DRAWING CANVAS ENGINE (PAN/ZOOM/ROTATE & PINS) ---
 
     function setupCanvas() {
@@ -11262,6 +11312,11 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
 
     function scheduleFloorDrawingTierSync() {
         if (floorDrawingTierSyncTimer) clearTimeout(floorDrawingTierSyncTimer);
+        // 2026-11-12 DXF 층은 화면을 선으로 직접 그리므로 확대용 큰 그림(8000/16000)을 받지 않는다
+        if (typeof getDxfViewModelForCurrentFloor === 'function' && getDxfViewModelForCurrentFloor()) {
+            floorDrawingTierSyncTimer = null;
+            return;
+        }
         try {
             const bldg = state.currentBuilding;
             const fc = state.currentFloor;

@@ -39,7 +39,7 @@
     <meta name="apple-mobile-web-app-status-bar-style" content="default">
     <meta name="apple-mobile-web-app-title" content="스마트 안전점검">
     <link rel="stylesheet" href="https://cdn.jsdelivr.net/gh/orioncactus/pretendard@v1.3.9/dist/web/static/pretendard.min.css">
-    <link rel="stylesheet" href="styles.css?v=20261111_174330">
+    <link rel="stylesheet" href="styles.css?v=20261112_185123">
 
     <!-- FontAwesome icons for clean engineering UI -->
     <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
@@ -365,6 +365,9 @@
                                 </button>
                                 <button type="button" id="btnImportCadPins" class="btn-rotate-hero pc-only-chrome" style="background:linear-gradient(135deg, #0284c7, #0369a1); color:#fff; border-color:#38bdf8;" title="AutoCAD(CAD2APP) JSON을 현재 층에 매핑. 전차 미표기(미등록) 마킹이 있으면 그 조사내용을 캐드 위치에 붙입니다">
                                     <i class="fa-solid fa-compass-drafting"></i> 📐 CAD 핀
+                                </button>
+                                <button type="button" id="btnExportMarkingDxf" class="btn-rotate-hero pc-only-chrome" style="background:linear-gradient(135deg, #0369a1, #075985); color:#fff; border-color:#7dd3fc;" title="이 층 마킹(핀·지시선·박스·영역)을 DXF로 저장합니다. 캐드에서 열면 도면 위 같은 자리에 겹칩니다(DXF로 올린 층은 원래 캐드 좌표 그대로)">
+                                    <i class="fa-solid fa-file-export"></i> 📐 마킹 DXF
                                 </button>
                                 <button type="button" id="btnClearDefectContents" class="btn-rotate-hero pc-only-chrome" style="background:linear-gradient(135deg, #b45309, #92400e); color:#fff; border-color:#fbbf24;" title="이 층(이 동·이번 회차) 마킹의 결함 내용(종류·부재·크기·비고·진행·이번 회차 사진)만 비웁니다. 핀·박스·지시선·번호는 그대로. 되돌리기(Ctrl+Z) 가능">
                                     <i class="fa-solid fa-eraser"></i> 내용 비우기 (핀 위치 유지)
@@ -2932,8 +2935,8 @@
                             </label>
                             <label class="add-drawing-file-label add-drawing-file-label-pdf" for="inputBuildingDrawingsPdf">
                                 <i class="fa-solid fa-file-pdf"></i>
-                                <span>캐드 PDF</span>
-                                <input type="file" id="inputBuildingDrawingsPdf" multiple accept="application/pdf,.pdf" class="add-drawing-file-input">
+                                <span>캐드 PDF·DXF</span>
+                                <input type="file" id="inputBuildingDrawingsPdf" multiple accept="application/pdf,.pdf,.dxf" class="add-drawing-file-input">
                             </label>
                         </div>
                         <div id="drawingSortPreview" class="add-drawing-preview"></div>
@@ -3189,8 +3192,8 @@
                                 <input type="file" id="inputEditBuildingDrawings" multiple accept="image/*" class="form-control edit-drawing-file-input">
                             </div>
                             <div class="edit-drawing-file-field">
-                                <label for="inputEditBuildingDrawingsPdf" class="edit-drawing-file-label">📄 캐드 PDF 파일</label>
-                                <input type="file" id="inputEditBuildingDrawingsPdf" multiple accept="application/pdf,.pdf" class="form-control edit-drawing-file-input">
+                                <label for="inputEditBuildingDrawingsPdf" class="edit-drawing-file-label">📄 캐드 PDF·DXF 파일</label>
+                                <input type="file" id="inputEditBuildingDrawingsPdf" multiple accept="application/pdf,.pdf,.dxf" class="form-control edit-drawing-file-input">
                             </div>
                         </div>
                         <div id="editDrawingSortPreview" class="add-drawing-preview"></div>
@@ -3562,104 +3565,109 @@
 
     <!-- Core → 탭 분류 → 기존 엔진(app.js) -->
     <!-- 오류 기록은 맨 먼저 — 아래 스크립트들이 읽히다 터져도 잡아야 한다 -->
-    <script src="js/core/error-log.js?v=20261111_174330"></script>
-    <script src="js/core/silent-update.js?v=20261111_174330"></script>
-    <script src="js/core/offline-precache.js?v=20261111_174330"></script>
-    <script src="js/core/floor-identity.js?v=20261111_174330"></script>
-    <script src="js/core/floor-rename.js?v=20261111_174330"></script>
-    <script src="js/core/prev-summary.js?v=20261111_174330"></script>
-    <script src="js/core/survey-xlsx.js?v=20261111_174330"></script>
-    <script src="js/core/state.js?v=20261111_174330"></script>
-    <script src="js/core/ndt-disp-transfer.js?v=20261111_174330"></script>
-    <script src="js/core/ndt-grade.js?v=20261111_174330"></script>
-    <script src="js/core/last-location.js?v=20261111_174330"></script>
-    <script src="js/core/home-sites.js?v=20261111_174330"></script>
-    <script src="js/tabs/registry.js?v=20261111_174330"></script>
-    <script src="js/pdf-vector-bridge.js?v=20261111_174330"></script>
-    <script src="js/pdf-vector-snap.js?v=20261111_174330"></script>
-    <script src="js/core/layout-mode.js?v=20261111_174330"></script>
-    <script src="js/core/performance.js?v=20261111_174330"></script>
-    <script src="js/shared/app-dialog.js?v=20261111_174330"></script>
-    <script src="js/core/mobile-app-update.js?v=20261111_174330"></script>
-    <script src="js/shared/app-update-button.js?v=20261111_174330"></script>
-    <script src="js/shared/measure-keypad.js?v=20261111_174330"></script>
-    <script src="js/shared/photo-zoom-viewer.js?v=20261111_174330"></script>
-    <script src="js/shared/photo-crop.js?v=20261111_174330"></script>
-    <script src="js/shared/photo-drop.js?v=20261111_174330"></script>
-    <script src="js/shared/hwpx-survey-row-fit.js?v=20261111_174330"></script>
-    <script src="js/shared/hwpx-font-8pt.js?v=20261111_174330"></script>
-    <script src="js/core/mobile-keyboard.js?v=20261111_174330"></script>
-    <script src="js/shared/typing-popup.js?v=20261111_174330"></script>
-    <script src="js/shared/typed-preset-mode.js?v=20261111_174330"></script>
-    <script src="js/shared/finish-member-chooser.js?v=20261111_174330"></script>
-    <script src="js/tabs/home.js?v=20261111_174330"></script>
-    <script src="js/tabs/map.js?v=20261111_174330"></script>
-    <script src="js/tabs/survey.js?v=20261111_174330"></script>
-    <script src="js/core/report-review.js?v=20261111_174330"></script>
-    <script src="js/core/good-type.js?v=20261111_174330"></script>
-    <script src="js/core/r-bar-check.js?v=20261111_174330"></script>
-    <script src="js/tabs/stats.js?v=20261111_174330"></script>
-    <script src="js/tabs/ndt.js?v=20261111_174330"></script>
-    <script src="js/shared/report.js?v=20261111_174330"></script>
-    <script src="js/shared/hwpx-survey-slots.js?v=20261111_174330"></script>
-    <script src="js/shared/hwpx-ndt-maps.js?v=20261111_174330"></script>
-    <script src="js/shared/cad-unmarked-place.js?v=20261111_174330"></script>
-    <script src="js/shared/arrow-survey-number.js?v=20261111_174330"></script>
-    <script src="js/shared/defect-merge.js?v=20261111_174330"></script>
-    <script src="js/shared/defect-sub-no.js?v=20261111_174330"></script>
-    <script src="js/shared/korean-text-wrap.js?v=20261111_174330"></script>
-    <script src="js/shared/hwpx-import.js?v=20261111_174330"></script>
-    <script src="js/shared/hwpx-validate.js?v=20261111_174330"></script>
-    <script src="js/shared/hwpx-crack-monitor.js?v=20261111_174330"></script>
-    <script src="js/shared/auth.js?v=20261111_174330"></script>
-    <script src="js/core/firebase-storage-assets.js?v=20261111_174330"></script>
-    <script src="js/core/drawing-floor-tombstone.js?v=20261111_174330"></script>
-    <script src="js/core/ls-quota.js?v=20261111_174330"></script>
-    <script src="js/core/cad-desktop-import.js?v=20261111_174330"></script>
-    <script src="js/shared/cad-frame-detect.js?v=20261111_174330"></script>
-    <script src="js/core/selected-hit.js?v=20261111_174330"></script>
-    <script src="js/core/ndt-split.js?v=20261111_174330"></script>
-    <script src="js/core/defect-content-clear.js?v=20261111_174330"></script>
-    <script src="js/core/drawing-resize.js?v=20261111_174330"></script>
-    <script src="js/core/data-health.js?v=20261111_174330"></script>
-    <script src="js/core/defect-lint.js?v=20261111_174330"></script>
-    <script src="js/core/round-done.js?v=20261111_174330"></script>
-    <script src="js/core/building-meta-merge.js?v=20261111_174330"></script>
-    <script src="js/core/edit-history.js?v=20261111_174330"></script>
-    <script src="js/core/no-conflict.js?v=20261111_174330"></script>
-    <script src="js/core/company-vocab.js?v=20261111_174330"></script>
-    <script src="js/core/sync-merge.js?v=20261111_174330"></script>
-    <script src="js/core/floor-sync-guard.js?v=20261111_174330"></script>
-    <script src="js/core/gauge-photo-store.js?v=20261111_174330"></script>
-    <script src="js/core/offline-prep.js?v=20261111_174330"></script>
-    <script src="js/core/sync-progress.js?v=20261111_174330"></script>
-    <script src="js/core/sync-retry.js?v=20261111_174330"></script>
-    <script src="js/core/root-doc-shards.js?v=20261111_174330"></script>
-    <script src="js/core/building-docs.js?v=20261111_174330"></script>
-    <script src="js/core/strength-age.js?v=20261111_174330"></script>
-    <script src="js/core/ndt-measure-opts.js?v=20261111_174330"></script>
-    <script src="js/core/company-settings-merge.js?v=20261111_174330"></script>
-    <script src="js/core/cache-purge-guard.js?v=20261111_174330"></script>
-    <script src="js/core/drawing-memo.js?v=20261111_174330"></script>
-    <script src="js/core/sketch-memo.js?v=20261111_174330"></script>
-    <script src="js/core/memo-author-sync.js?v=20261111_174330"></script>
-    <script src="js/core/guide-shapes.js?v=20261111_174330"></script>
-    <script src="js/core/struct-members.js?v=20261111_174330"></script>
-    <script src="js/core/prev-round-photo-match.js?v=20261111_174330"></script>
-    <script src="js/shared/defect-quick-presets.js?v=20261111_174330"></script>
-    <script src="js/shared/grid-lines.js?v=20261111_174330"></script>
-    <script src="js/shared/grid-auto-detect.js?v=20261111_174330"></script>
-    <script src="js/shared/box-auto-layout.js?v=20261111_174330"></script>
-    <script src="js/shared/crack-width-badge.js?v=20261111_174330"></script>
-    <script src="js/shared/print-crop.js?v=20261111_174330"></script>
-    <script src="js/core/legend-layout.js?v=20261111_174330"></script>
-    <script src="js/core/error-log-view.js?v=20261111_174330"></script>
-    <script src="js/core/photo-relay-native.js?v=20261111_174330"></script>
-    <script src="js/core/middle-drag-pan.js?v=20261111_174330"></script>
-    <script src="app.js?v=20261111_174330"></script>
+    <script src="js/core/error-log.js?v=20261112_185123"></script>
+    <script src="js/core/silent-update.js?v=20261112_185123"></script>
+    <script src="js/core/offline-precache.js?v=20261112_185123"></script>
+    <script src="js/core/floor-identity.js?v=20261112_185123"></script>
+    <script src="js/core/floor-rename.js?v=20261112_185123"></script>
+    <script src="js/core/prev-summary.js?v=20261112_185123"></script>
+    <script src="js/core/survey-xlsx.js?v=20261112_185123"></script>
+    <script src="js/core/state.js?v=20261112_185123"></script>
+    <script src="js/core/ndt-disp-transfer.js?v=20261112_185123"></script>
+    <script src="js/core/ndt-grade.js?v=20261112_185123"></script>
+    <script src="js/core/last-location.js?v=20261112_185123"></script>
+    <script src="js/core/home-sites.js?v=20261112_185123"></script>
+    <script src="js/tabs/registry.js?v=20261112_185123"></script>
+    <script src="js/core/dxf-read.js?v=20261112_185123"></script>
+    <script src="js/core/dxf-to-pdf.js?v=20261112_185123"></script>
+    <script src="js/core/dxf-view.js?v=20261112_185123"></script>
+    <script src="js/pdf-vector-bridge.js?v=20261112_185123"></script>
+    <script src="js/pdf-vector-snap.js?v=20261112_185123"></script>
+    <script src="js/core/dxf-write.js?v=20261112_185123"></script>
+    <script src="js/dxf-marking-export.js?v=20261112_185123"></script>
+    <script src="js/core/layout-mode.js?v=20261112_185123"></script>
+    <script src="js/core/performance.js?v=20261112_185123"></script>
+    <script src="js/shared/app-dialog.js?v=20261112_185123"></script>
+    <script src="js/core/mobile-app-update.js?v=20261112_185123"></script>
+    <script src="js/shared/app-update-button.js?v=20261112_185123"></script>
+    <script src="js/shared/measure-keypad.js?v=20261112_185123"></script>
+    <script src="js/shared/photo-zoom-viewer.js?v=20261112_185123"></script>
+    <script src="js/shared/photo-crop.js?v=20261112_185123"></script>
+    <script src="js/shared/photo-drop.js?v=20261112_185123"></script>
+    <script src="js/shared/hwpx-survey-row-fit.js?v=20261112_185123"></script>
+    <script src="js/shared/hwpx-font-8pt.js?v=20261112_185123"></script>
+    <script src="js/core/mobile-keyboard.js?v=20261112_185123"></script>
+    <script src="js/shared/typing-popup.js?v=20261112_185123"></script>
+    <script src="js/shared/typed-preset-mode.js?v=20261112_185123"></script>
+    <script src="js/shared/finish-member-chooser.js?v=20261112_185123"></script>
+    <script src="js/tabs/home.js?v=20261112_185123"></script>
+    <script src="js/tabs/map.js?v=20261112_185123"></script>
+    <script src="js/tabs/survey.js?v=20261112_185123"></script>
+    <script src="js/core/report-review.js?v=20261112_185123"></script>
+    <script src="js/core/good-type.js?v=20261112_185123"></script>
+    <script src="js/core/r-bar-check.js?v=20261112_185123"></script>
+    <script src="js/tabs/stats.js?v=20261112_185123"></script>
+    <script src="js/tabs/ndt.js?v=20261112_185123"></script>
+    <script src="js/shared/report.js?v=20261112_185123"></script>
+    <script src="js/shared/hwpx-survey-slots.js?v=20261112_185123"></script>
+    <script src="js/shared/hwpx-ndt-maps.js?v=20261112_185123"></script>
+    <script src="js/shared/cad-unmarked-place.js?v=20261112_185123"></script>
+    <script src="js/shared/arrow-survey-number.js?v=20261112_185123"></script>
+    <script src="js/shared/defect-merge.js?v=20261112_185123"></script>
+    <script src="js/shared/defect-sub-no.js?v=20261112_185123"></script>
+    <script src="js/shared/korean-text-wrap.js?v=20261112_185123"></script>
+    <script src="js/shared/hwpx-import.js?v=20261112_185123"></script>
+    <script src="js/shared/hwpx-validate.js?v=20261112_185123"></script>
+    <script src="js/shared/hwpx-crack-monitor.js?v=20261112_185123"></script>
+    <script src="js/shared/auth.js?v=20261112_185123"></script>
+    <script src="js/core/firebase-storage-assets.js?v=20261112_185123"></script>
+    <script src="js/core/drawing-floor-tombstone.js?v=20261112_185123"></script>
+    <script src="js/core/ls-quota.js?v=20261112_185123"></script>
+    <script src="js/core/cad-desktop-import.js?v=20261112_185123"></script>
+    <script src="js/shared/cad-frame-detect.js?v=20261112_185123"></script>
+    <script src="js/core/selected-hit.js?v=20261112_185123"></script>
+    <script src="js/core/ndt-split.js?v=20261112_185123"></script>
+    <script src="js/core/defect-content-clear.js?v=20261112_185123"></script>
+    <script src="js/core/drawing-resize.js?v=20261112_185123"></script>
+    <script src="js/core/data-health.js?v=20261112_185123"></script>
+    <script src="js/core/defect-lint.js?v=20261112_185123"></script>
+    <script src="js/core/round-done.js?v=20261112_185123"></script>
+    <script src="js/core/building-meta-merge.js?v=20261112_185123"></script>
+    <script src="js/core/edit-history.js?v=20261112_185123"></script>
+    <script src="js/core/no-conflict.js?v=20261112_185123"></script>
+    <script src="js/core/company-vocab.js?v=20261112_185123"></script>
+    <script src="js/core/sync-merge.js?v=20261112_185123"></script>
+    <script src="js/core/floor-sync-guard.js?v=20261112_185123"></script>
+    <script src="js/core/gauge-photo-store.js?v=20261112_185123"></script>
+    <script src="js/core/offline-prep.js?v=20261112_185123"></script>
+    <script src="js/core/sync-progress.js?v=20261112_185123"></script>
+    <script src="js/core/sync-retry.js?v=20261112_185123"></script>
+    <script src="js/core/root-doc-shards.js?v=20261112_185123"></script>
+    <script src="js/core/building-docs.js?v=20261112_185123"></script>
+    <script src="js/core/strength-age.js?v=20261112_185123"></script>
+    <script src="js/core/ndt-measure-opts.js?v=20261112_185123"></script>
+    <script src="js/core/company-settings-merge.js?v=20261112_185123"></script>
+    <script src="js/core/cache-purge-guard.js?v=20261112_185123"></script>
+    <script src="js/core/drawing-memo.js?v=20261112_185123"></script>
+    <script src="js/core/sketch-memo.js?v=20261112_185123"></script>
+    <script src="js/core/memo-author-sync.js?v=20261112_185123"></script>
+    <script src="js/core/guide-shapes.js?v=20261112_185123"></script>
+    <script src="js/core/struct-members.js?v=20261112_185123"></script>
+    <script src="js/core/prev-round-photo-match.js?v=20261112_185123"></script>
+    <script src="js/shared/defect-quick-presets.js?v=20261112_185123"></script>
+    <script src="js/shared/grid-lines.js?v=20261112_185123"></script>
+    <script src="js/shared/grid-auto-detect.js?v=20261112_185123"></script>
+    <script src="js/shared/box-auto-layout.js?v=20261112_185123"></script>
+    <script src="js/shared/crack-width-badge.js?v=20261112_185123"></script>
+    <script src="js/shared/print-crop.js?v=20261112_185123"></script>
+    <script src="js/core/legend-layout.js?v=20261112_185123"></script>
+    <script src="js/core/error-log-view.js?v=20261112_185123"></script>
+    <script src="js/core/photo-relay-native.js?v=20261112_185123"></script>
+    <script src="js/core/middle-drag-pan.js?v=20261112_185123"></script>
+    <script src="app.js?v=20261112_185123"></script>
 
     <script>
-        window.BSA_APP_VERSION = '20261111_174330';
+        window.BSA_APP_VERSION = '20261112_185123';
 
         (function () {
             var el = document.getElementById('appVersionText');
@@ -3678,6 +3686,17 @@
                     alert('벡터 PDF 모듈이 로드되지 않았습니다. Ctrl+F5로 새로고침 후 다시 시도하세요.');
                 }
             });
+            // 2026-11-12 마킹 DXF 내보내기(js/dxf-marking-export.js)
+            const btnDxf = document.getElementById('btnExportMarkingDxf');
+            if (btnDxf) btnDxf.addEventListener('click', function () {
+                if (typeof window.exportMarkingDxfWithScopeChoice === 'function') {
+                    window.exportMarkingDxfWithScopeChoice();
+                } else if (typeof window.exportCurrentFloorMarkingDxf === 'function') {
+                    window.exportCurrentFloorMarkingDxf();
+                } else {
+                    alert('마킹 DXF 모듈이 로드되지 않았습니다. Ctrl+F5로 새로고침 후 다시 시도하세요.');
+                }
+            });
         });
         if ('serviceWorker' in navigator) {
             window.addEventListener('load', function() {
@@ -3692,7 +3711,7 @@
                     if (window.caches && caches.keys) caches.keys().then(function(ks) { ks.forEach(function(k) { caches.delete(k); }); }).catch(function() {});
                     return;
                 }
-                navigator.serviceWorker.register('./sw.js?v=20261111_174330')
+                navigator.serviceWorker.register('./sw.js?v=20261112_185123')
 
                     .then(function(registration) {
                         console.log('✅ ServiceWorker Registered Successfully with scope:', registration.scope);

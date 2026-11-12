@@ -1638,6 +1638,13 @@ document.addEventListener('DOMContentLoaded', () => {
         } catch (e) {
             console.warn('PDF ref 좌표계 설정 실패:', e);
         }
+        // 2026-11-12 DXF로 올린 층이면 화면 벡터 모델을 읽어 둔다(뒤에서). 다 읽으면 화면을 벡터로 다시 그린다.
+        if (window.BSA && window.BSA.dxfView && typeof window.BSA.dxfView.ensureModel === 'function') {
+            window.BSA.dxfView.ensureModel(`${bldg.id}_${floorCode}`, pdfUrl).then((model) => {
+                if (model && state.currentBuildingId === bldg.id && state.currentFloor === floorCode
+                    && typeof drawCanvas === 'function') drawCanvas();
+            });
+        }
         // 캐드 벡터 스냅용 선분. 그림만 있고 PDF 원본이 없으면 여기까지 오지 않는다.
         if (window.BSA_PDF_SNAP && typeof window.BSA_PDF_SNAP.ensureGeometry === 'function') {
             await window.BSA_PDF_SNAP.ensureGeometry(pdfUrl, bldg.id, floorCode, window.FLOOR_DRAWING_PDF_PREVIEW_DIM || 4000);
@@ -1689,6 +1696,7 @@ document.addEventListener('DOMContentLoaded', () => {
     /** 절대 scale 하한(레거시). 상·하한은 fit 대비 비율로 통일 */
     const VIEW_MIN_SCALE = 0.1;
     const VIEW_MAX_ZOOM_VS_FIT = 50;
+    const VIEW_MAX_ZOOM_VS_FIT_DXF = 1000;
     const VIEW_MIN_ZOOM_VS_FIT = 0.08;
 
     function getViewScaleLimits(getFitFn) {
@@ -1699,7 +1707,28 @@ document.addEventListener('DOMContentLoaded', () => {
         };
     }
 
+    /**
+     * 2026-11-12 캐드 DXF로 올린 층의 화면 벡터 모델(js/core/dxf-view.js) — 읽어 둔 것이 있을 때만.
+     * 있으면 도면을 그림(JPEG) 대신 선·글자로 직접 그린다. 끄기: BSA_PDF_VECTOR.dxfLiveView = false
+     */
+    function getDxfViewModelForCurrentFloor() {
+        const V = window.BSA && window.BSA.dxfView;
+        if (!V || (window.BSA_PDF_VECTOR && window.BSA_PDF_VECTOR.dxfLiveView === false)) return null;
+        const bldg = state.currentBuilding;
+        const fc = state.currentFloor;
+        if (!bldg || !fc) return null;
+        if (typeof window.isFloorPdfRemoved === 'function' && window.isFloorPdfRemoved(bldg, fc)) return null;
+        const pdfUrl = (typeof window.getFloorPdfDataUrl === 'function') ? window.getFloorPdfDataUrl(bldg, fc) : null;
+        return V.getModel(`${bldg.id}_${fc}`, pdfUrl || undefined);
+    }
+
     function getMapViewScaleLimits() {
+        // 벡터로 그리는 DXF 층은 확대해도 안 깨지므로 훨씬 깊이 확대할 수 있게 한다
+        if (getDxfViewModelForCurrentFloor()) {
+            const lim = getViewScaleLimits(getMapFitScale);
+            lim.max = Math.max(lim.max, Math.max(getMapFitScale() || 0.05, 0.05) * VIEW_MAX_ZOOM_VS_FIT_DXF);
+            return lim;
+        }
         return getViewScaleLimits(getMapFitScale);
     }
 
@@ -1946,6 +1975,25 @@ document.addEventListener('DOMContentLoaded', () => {
             applyFloorDrawingDarken(ctx, darken, () => ctx.drawImage(patch.canvas, patch.x, patch.y, patch.w, patch.h));
             ctx.restore();
         };
+
+        // 2026-11-12 DXF 층: 그림을 늘리지 않고 선·글자를 지금 배율로 직접 그린다(화면 전용 — 출력은 그대로)
+        if (ctx === state.ctx) {
+            const dxfModel = getDxfViewModelForCurrentFloor();
+            if (dxfModel) {
+                let drew = false;
+                try {
+                    drew = window.BSA.dxfView.drawOnCanvas(ctx, dxfModel, imgW, imgH, {
+                        fallback: () => drawBg(state.bgImage, 1),
+                        darken: (blit) => applyFloorDrawingDarken(ctx, darken, blit),
+                        requestRedraw: () => { if (typeof drawCanvas === 'function') drawCanvas(); }
+                    });
+                } catch (dxfErr) {
+                    console.warn('[DXF 화면] 벡터 그리기 실패 — 그림으로 표시', dxfErr);
+                    drew = false;
+                }
+                if (drew) return;
+            }
+        }
 
         if (!_floorBlend) {
             if (state.bgImage) {

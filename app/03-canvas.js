@@ -701,6 +701,11 @@
 
     function scheduleFloorDrawingTierSync() {
         if (floorDrawingTierSyncTimer) clearTimeout(floorDrawingTierSyncTimer);
+        // 2026-11-12 DXF 층은 화면을 선으로 직접 그리므로 확대용 큰 그림(8000/16000)을 받지 않는다
+        if (typeof getDxfViewModelForCurrentFloor === 'function' && getDxfViewModelForCurrentFloor()) {
+            floorDrawingTierSyncTimer = null;
+            return;
+        }
         try {
             const bldg = state.currentBuilding;
             const fc = state.currentFloor;
