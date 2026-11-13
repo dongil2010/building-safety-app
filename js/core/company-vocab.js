@@ -94,6 +94,9 @@
         if (STANDALONE_FINISH.some((w) => compact(t).startsWith(compact(w)))) return t;
         if (compact(t).startsWith(compact(h))) return t;
         if (compact(t) === '접합부') return `${h} 접합부`; // 기둥-벽체 + 접합부 수직이격 → 기둥-벽체 접합부
+        // 「…접합부」는 어느 부재에 난 이음인지가 필요 — 원래 부재명이 안 들어 있으면 앞에 붙인다
+        // (벽체 + 하부 턱-슬래브 접합부 → 벽체 하부 턱-슬래브 접합부, 2026-11-13 글로벌모터스 의장공장 1층 112번)
+        if (/접합부$/.test(compact(t)) && !compact(t).includes(compact(h))) return `${h} ${t}`;
         if (hasHostWord(t)) return t; // 「철골 보 뿜칠」·「데크 슬래브 뿜칠」은 그대로
         return `${h} ${t}`;
     }

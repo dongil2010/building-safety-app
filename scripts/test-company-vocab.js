@@ -43,6 +43,11 @@ eq(conv('비구조체', '벽체', '보강재 균열'), '벽체 보강재', '균�
 eq(conv('마감재', '기둥', '보호몰탈 박락'), '기둥 보호몰탈', '박락');
 eq(conv('마감재', '벽체', '보온재 탈락'), '벽체 보온재', '탈락');
 assert.strictEqual(v.combineMember('샛기둥', '무수축 모르타르 보수부위'), '샛기둥 무수축 모르타르 보수부위');
+// 2026-11-13 「…접합부」 대상은 원래 부재명이 없으면 앞에 붙임(글로벌모터스 의장공장 1층 112번)
+eq(conv('비구조체', '벽체', '하부 턱-슬래브 접합부 이격'), '벽체 하부 턱-슬래브 접합부', '이격');
+assert.strictEqual(v.combineMember('벽체', '기둥-벽체 접합부'), '기둥-벽체 접합부');
+assert.strictEqual(v.combineMember('보', '기둥-보 접합부'), '기둥-보 접합부');
+assert.strictEqual(v.combineMember('보', '슬래브 접합부 뿜칠'), '슬래브 접합부 뿜칠');
 // 진짜 「보」는 그대로 바탕 부재로 본다
 assert.strictEqual(v.combineMember('기둥', '작은보 뿜칠'), '작은보 뿜칠');
 assert.strictEqual(v.combineMember('기둥', '보 하부 뿜칠'), '보 하부 뿜칠');
