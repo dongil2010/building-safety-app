@@ -14,10 +14,12 @@
         { name: 'BSA_LEADER', aci: 1 },
         { name: 'BSA_AREA', aci: 1 },
         { name: 'BSA_LEGEND', aci: 8 },
-        { name: 'BSA_REF', aci: 8 }
+        { name: 'BSA_REF', aci: 8 },
+        { name: 'BSA_DRAWING', aci: 7 }
     ];
     var FONT_FILE = 'malgun.ttf';
     var TEXT_STYLE = 'BSA_KR';
+    var CAP_RATIO = 0.72; // 화면 글꼴 크기(em) → 캐드 글자 높이(대문자 높이)
 
     /* ---------- 색: 16진수 → 가장 가까운 AutoCAD 색 번호(ACI) ---------- */
 
@@ -241,21 +243,112 @@
             pt(10, a); pt(11, b); pt(12, c); pt(13, c);
         }
 
-        /** 가운데 맞춤 글자 (72=1 가운데, 73=2 가운데줄 → 위치는 11/21 점) */
-        function addText(layer, aci, text, c, height) {
+        /**
+         * 채운 원(도넛) — R12에는 해치가 없어서, 폭이 반지름인 닫힌 원호 폴리선 둘로 속을 채운다(캐드 DONUT 명령과 같은 모양).
+         */
+        function addDisk(layer, aci, c, r) {
+            if (!c || !(r > 0)) return;
+            head('POLYLINE', layer, aci);
+            g(66, 1);
+            g(10, '0'); g(20, '0'); g(30, '0');
+            g(40, num(r)); g(41, num(r));
+            g(70, 1);
+            [-1, 1].forEach(function (sgn) {
+                g(0, 'VERTEX'); g(8, layer);
+                g(10, num(c.x + sgn * r / 2)); g(20, num(c.y)); g(30, '0');
+                g(40, num(r)); g(41, num(r));
+                g(42, '1');
+            });
+            g(0, 'SEQEND'); g(8, layer);
+            grow(c.x - r, c.y - r); grow(c.x + r, c.y + r);
+        }
+
+        /** 글자 폭 어림(캐드 글자 높이 h 기준, 맑은 고딕): 한글·한자 1.3h, 영문·숫자 0.78h, 좁은 글자 0.4h */
+        function estTextWidth(text, h) {
+            var str = String(text == null ? '' : text), w = 0;
+            for (var i = 0; i < str.length; i++) {
+                var cc = str.charCodeAt(i);
+                if (cc > 0x2E7F) w += 1.3;
+                else if (cc === 32 || cc === 46 || cc === 44 || cc === 58 || cc === 73 || cc === 105 || cc === 108 || cc === 49 || cc === 39) w += 0.42;
+                else if (cc > 126) w += 1.0;
+                else w += 0.78;
+            }
+            return w * h;
+        }
+
+        /**
+         * 가운데 맞춤 글자 (72=1 가운데, 73=2 가운데줄 → 위치는 11/21 점).
+         * emSize = 화면 글꼴 크기(em). 캐드 글자 높이는 대문자 높이라 0.72배로 적는다(그대로 쓰면 1.4배 크게 나와 박스를 넘쳤다).
+         * maxW = 들어가야 하는 칸 폭 — 어림 폭이 넘치면 글자 폭 비율(41)을 줄인다.
+         */
+        function addText(layer, aci, text, c, emSize, maxW) {
             if (!c) return;
             var s = encodeText(text);
             if (!s) return;
-            var h = Number(height);
+            var h = Number(emSize) * CAP_RATIO;
             if (!(h > 0) || !isFinite(h)) return;
+            var wf = 1;
+            if (maxW > 0 && isFinite(maxW)) {
+                var est = estTextWidth(text, h);
+                var room = maxW * 0.9;
+                if (est > room) {
+                    wf = room / est;
+                    if (wf < 0.6) { h = h * (wf / 0.6); wf = 0.6; } // 너무 납작해지면 높이도 줄인다
+                }
+            }
             head('TEXT', layer, aci);
             pt(10, c);
             g(40, num(h));
             g(1, s);
+            if (wf < 0.999) g(41, num(wf));
             g(7, TEXT_STYLE);
             g(72, 1);
             g(73, 2);
             pt(11, c);
+        }
+
+        /* ----- 원본 도면(DXF로 올린 층) — 선·글자를 BSA_DRAWING 레이어에 같이 넣는다(2026-11-12) -----
+         * 마킹만 든 파일은 캐드에서 열면 빈 화면처럼 보였다. 도면까지 넣어 파일 하나로 결함위치도가 되게 한다.
+         * drawing = { model(js/core/dxf-view.js 모델, PDF 점 좌표), toWorld(px, py) → {x,y}, unitPerPt } */
+        var drawing = opts.drawing;
+        if (drawing && drawing.model && typeof drawing.toWorld === 'function') {
+            var dm = drawing.model, dW = drawing.toWorld;
+            var upt = Number(drawing.unitPerPt);
+            if (!(upt > 0) || !isFinite(upt)) upt = 1;
+            var DL = 'BSA_DRAWING';
+            for (var di = 0; di < dm.n; di++) {
+                var dc = dm.count[di], ds = dm.start[di] * 2;
+                if (dc < 2) continue;
+                var dclosed = !!(dm.flags[di] & 1) || !!(dm.flags[di] & 2);
+                if (dc === 2 && !dclosed) {
+                    var la = dW(dm.coords[ds], dm.coords[ds + 1]), lb = dW(dm.coords[ds + 2], dm.coords[ds + 3]);
+                    if (!la || !lb || !finite(la.x, la.y, lb.x, lb.y)) continue;
+                    ents.push('0', 'LINE', '8', DL, '10', num(la.x), '20', num(la.y), '30', '0', '11', num(lb.x), '21', num(lb.y), '31', '0');
+                    grow(la.x, la.y); grow(lb.x, lb.y);
+                    continue;
+                }
+                ents.push('0', 'POLYLINE', '8', DL, '66', '1', '10', '0', '20', '0', '30', '0', '70', dclosed ? '1' : '0');
+                for (var dq = 0; dq < dc; dq++) {
+                    var dv = dW(dm.coords[ds + dq * 2], dm.coords[ds + dq * 2 + 1]);
+                    if (!dv || !finite(dv.x, dv.y)) continue;
+                    ents.push('0', 'VERTEX', '8', DL, '10', num(dv.x), '20', num(dv.y), '30', '0');
+                    grow(dv.x, dv.y);
+                }
+                ents.push('0', 'SEQEND', '8', DL);
+            }
+            (dm.texts || []).forEach(function (t) {
+                var tp = dW(t[0], t[1]);
+                var th = Number(t[2]) * upt;
+                var ts = encodeText(t[6]);
+                if (!tp || !finite(tp.x, tp.y) || !(th > 0) || !ts) return;
+                var ha = t[4] === 1 || t[4] === 2 ? t[4] : 0;
+                var va = t[5] >= 1 && t[5] <= 3 ? t[5] : 0;
+                ents.push('0', 'TEXT', '8', DL, '10', num(tp.x), '20', num(tp.y), '30', '0', '40', num(th), '1', ts);
+                if (t[3]) ents.push('50', num(t[3]));
+                ents.push('7', TEXT_STYLE);
+                if (ha || va) ents.push('72', String(ha), '73', String(va), '11', num(tp.x), '21', num(tp.y), '31', '0');
+                grow(tp.x, tp.y);
+            });
         }
 
         /* ----- 참고선(원본 도면 선) ----- */
@@ -333,7 +426,7 @@
                 if (!tip) return;
                 var headLenPx = Number(L.headLen) || 11;
                 if (L.useCircleTip) {
-                    addCircle('BSA_LEADER', aci, tip, Math.max(0.6 * upp, 4.5 * upp * (headLenPx / 11)));
+                    addDisk('BSA_LEADER', aci, tip, Math.max(0.6 * upp, 4.5 * upp * (headLenPx / 11)));
                     return;
                 }
                 var stemEnd = route.length && route[route.length - 1] ? route[route.length - 1] : tip;
@@ -356,10 +449,10 @@
             if (p.typeCallout && p.typeLabel) {
                 var c1 = p.col1W != null ? Number(p.col1W) : bw * 0.28;
                 addLine('BSA_PIN_BOX', aci, W(l + c1, t), W(l + c1, b));
-                addText('BSA_PIN_TEXT', textAci, String(p.label || 'NO.01'), W(l + c1 / 2, by), fontH);
-                addText('BSA_PIN_TEXT', textAci, String(p.typeLabel), W(l + c1 + (bw - c1) / 2, by), fontH);
+                addText('BSA_PIN_TEXT', textAci, String(p.label || 'NO.01'), W(l + c1 / 2, by), fontH, c1 * upp);
+                addText('BSA_PIN_TEXT', textAci, String(p.typeLabel), W(l + c1 + (bw - c1) / 2, by), fontH, (bw - c1) * upp);
             } else {
-                addText('BSA_PIN_TEXT', textAci, String(p.label || 'NO.01'), W(bx, by), fontH);
+                addText('BSA_PIN_TEXT', textAci, String(p.label || 'NO.01'), W(bx, by), fontH, bw * upp);
             }
         });
 
@@ -382,13 +475,13 @@
                 var yy = ly + headerH + i * rowH;
                 addLine('BSA_LEGEND', grayAci, W(lx, yy), W(lx + lw, yy));
             }
-            addText('BSA_LEGEND', headerAci, '구분', W(lx + col1W / 2, ly + headerH / 2), legFont);
-            addText('BSA_LEGEND', headerAci, '내 용', W(lx + col1W + col2W / 2, ly + headerH / 2), legFont);
+            addText('BSA_LEGEND', headerAci, '구분', W(lx + col1W / 2, ly + headerH / 2), legFont, col1W * upp);
+            addText('BSA_LEGEND', headerAci, '내 용', W(lx + col1W + col2W / 2, ly + headerH / 2), legFont, col2W * upp);
             legendPlan.items.forEach(function (item, k) {
                 var cy = ly + headerH + k * rowH + rowH / 2;
                 var ia = hexToAci(item.color);
-                addText('BSA_LEGEND', ia, item.colorName, W(lx + col1W / 2, cy), legFont);
-                addText('BSA_LEGEND', ia, item.label, W(lx + col1W + col2W / 2, cy), legFont);
+                addText('BSA_LEGEND', ia, item.colorName, W(lx + col1W / 2, cy), legFont, col1W * upp);
+                addText('BSA_LEGEND', ia, item.label, W(lx + col1W + col2W / 2, cy), legFont, col2W * upp);
             });
         }
 
@@ -409,6 +502,19 @@
         o(0, 'ENDSEC');
 
         o(0, 'SECTION'); o(2, 'TABLES');
+        // 처음 열었을 때 화면: 내용 전체가 보이게(이 표가 없으면 캐드가 원점 근처 빈 곳을 보여 줘 「아무것도 없는」 것처럼 보인다)
+        var vW = Math.max(eMax.x - eMin.x, 1e-6), vH = Math.max(eMax.y - eMin.y, 1e-6);
+        var vAspect = 1.6;
+        var vHeight = Math.max(vH, vW / vAspect) * 1.08;
+        o(0, 'TABLE'); o(2, 'VPORT'); o(70, 1);
+        o(0, 'VPORT'); o(2, '*ACTIVE'); o(70, 0);
+        o(10, '0'); o(20, '0'); o(11, '1'); o(21, '1');
+        o(12, num((eMin.x + eMax.x) / 2)); o(22, num((eMin.y + eMax.y) / 2));
+        o(13, '0'); o(23, '0'); o(14, '1'); o(24, '1'); o(15, '0'); o(25, '0');
+        o(16, '0'); o(26, '0'); o(36, '1'); o(17, '0'); o(27, '0'); o(37, '0');
+        o(40, num(vHeight)); o(41, num(vAspect)); o(42, '50'); o(43, '0'); o(44, '0');
+        o(50, '0'); o(51, '0'); o(71, 0); o(72, 100); o(73, 1); o(74, 1); o(75, 0); o(76, 0); o(77, 0); o(78, 0);
+        o(0, 'ENDTAB');
         o(0, 'TABLE'); o(2, 'LTYPE'); o(70, 2);
         o(0, 'LTYPE'); o(2, 'CONTINUOUS'); o(70, 0); o(3, 'Solid line'); o(72, 65); o(73, 0); o(40, '0');
         o(0, 'LTYPE'); o(2, 'DASHED'); o(70, 0); o(3, 'Dashed __ __ __'); o(72, 65); o(73, 2);

@@ -3148,6 +3148,13 @@
                 }
                 return;
             }
+            // 2026-11-12 마킹 맞추기: 끌면 화면 이동, 누르면 기준점(다른 도면 동작은 막음)
+            if (window.drawingAlignState && e.button === 0) {
+                e.preventDefault();
+                e.stopPropagation();
+                if (typeof drawingAlignPointerDown === 'function') drawingAlignPointerDown(e.clientX, e.clientY, false);
+                return;
+            }
             // 행·열(통심) 선 편집 중에는 선 긋기·옮기기만 (마킹 안 함)
             if (window.BSA_gridEdit && window.BSA_gridEdit.active && e.button === 0) {
                 e.preventDefault();
@@ -3236,6 +3243,12 @@
             if (typeof cancelCanvasPanAnimation === 'function') cancelCanvasPanAnimation();
             mapTouchStartedOnCanvas = true;
             mapSuppressMouseUntil = Date.now() + 700;
+            if (window.drawingAlignState && e.touches.length === 1) {
+                if (e.cancelable) e.preventDefault();
+                e.stopPropagation();
+                if (typeof drawingAlignPointerDown === 'function') drawingAlignPointerDown(e.touches[0].clientX, e.touches[0].clientY, true);
+                return;
+            }
             if (window.cadCalibrationState && e.touches.length === 1) {
                 if (e.cancelable) e.preventDefault();
                 e.stopPropagation();
@@ -6225,7 +6238,8 @@
             }
             drawCanvas();
             if (typeof renderDefectListPanel === 'function') renderDefectListPanel();
-            if (typeof renderSurveyTable === 'function') renderSurveyTable();
+            // 2026-11-13 조사표는 보고 있을 때만 다시 그린다(탭에 들어가면 다시 그림) — 타이핑마다 표 전체를 새로 만들어 느렸다
+            if (typeof renderSurveyTable === 'function' && state.currentTab === 'tab-survey') renderSurveyTable();
             flashDefectAutosaveBadge('done');
         }, 180);
     }

@@ -144,22 +144,29 @@ assert.strictEqual(texts[0].get(1), 'NO.01');
 assert.strictEqual(texts[0].get(62), String(api.hexToAci('#ef4444')));
 assert.strictEqual(parseFloat(texts[0].get(10)), 100 + 2 * 50);
 assert.strictEqual(parseFloat(texts[0].get(20)), 500 - 2 * 40);
-assert.strictEqual(parseFloat(texts[0].get(40)), 20); // 10px × 2
+assert.ok(Math.abs(parseFloat(texts[0].get(40)) - 14.4) < 1e-9); // 10px × 2 × 0.72(대문자 높이) — 박스 안에 들어가는 크기
+assert.strictEqual(texts[0].get(41), undefined, '칸에 들어가면 폭 비율 없음');
 assert.strictEqual(texts[2].get(1), '\\U+ADE0\\U+C5F4');
 assert.strictEqual(texts[2].get(62), '5');
 // typeCallout 글자 위치: 번호칸 가운데 150+15, 종류칸 가운데 150+30+35
 assert.strictEqual(parseFloat(texts[1].get(10)), 100 + 2 * 165);
 assert.strictEqual(parseFloat(texts[2].get(10)), 100 + 2 * 215);
-// 지시선: 폴리선 3개(열림), 화살촉 SOLID 1개(원·skip 제외), CIRCLE 1개
-const leaders = polys(d, 'BSA_LEADER');
+// 지시선: 폴리선 3개(열림), 화살촉 SOLID 1개(원·skip 제외), 끝 원 1개(속을 채운 도넛 폴리선)
+const leaderPolys = polys(d, 'BSA_LEADER');
+const leaders = leaderPolys.filter((l) => !l.closed);
 assert.strictEqual(leaders.length, 3);
-assert.ok(leaders.every((l) => !l.closed && l.v.length === 2));
+assert.ok(leaders.every((l) => l.v.length === 2));
 assert.strictEqual(count(d, 'SOLID', 'BSA_LEADER'), 1);
-assert.strictEqual(count(d, 'CIRCLE', 'BSA_LEADER'), 1);
-const circle = d.ents.find((e) => e.type === 'CIRCLE');
-assert.strictEqual(parseFloat(circle.get(10)), 100 + 2 * 220);
-assert.strictEqual(parseFloat(circle.get(20)), 500 - 2 * 90);
-assert.ok(Math.abs(parseFloat(circle.get(40)) - 9) < 1e-9); // 4.5px × 2
+assert.strictEqual(count(d, 'CIRCLE', 'BSA_LEADER'), 0, '빈 원 대신 채운 원');
+const disks = leaderPolys.filter((l) => l.closed);
+assert.strictEqual(disks.length, 1);
+assert.strictEqual(disks[0].v.length, 2);
+// 가운데 (220, 90)px → 세계 (540, 320), 반지름 4.5px × 2 = 9 → 꼭짓점은 가운데 ± 4.5, 폭 9, 반원(bulge 1) 둘
+const dxs = disks[0].v.map((v) => v.x).sort((p, q) => p - q);
+assert.ok(Math.abs(dxs[0] - 535.5) < 1e-9 && Math.abs(dxs[1] - 544.5) < 1e-9, "도넛 꼭짓점 x");
+assert.ok(disks[0].v.every((v) => Math.abs(v.y - 320) < 1e-9));
+assert.strictEqual(parseFloat(disks[0].e.get(40)), 9, "폭 = 반지름");
+assert.strictEqual(parseFloat(disks[0].e.get(41)), 9);
 // 화살촉: 꼭짓점 = 끝점, 길이 11px×2 = 22, 30도 반각
 const solid = d.ents.find((e) => e.type === 'SOLID');
 const tip = solid.pt(10), p1 = solid.pt(11), p2 = solid.pt(12);
@@ -306,3 +313,49 @@ const glue = fs.readFileSync(path.join(__dirname, '..', 'js', 'dxf-marking-expor
 assert.ok(/window\.buildVectorPinPlansForDefects\(/.test(glue), 'DXF 연결이 같은 함수 사용');
 
 console.log('test-dxf-write: ok');
+
+// 2026-11-12 처음 화면(VPORT) + 원본 도면 같이 넣기(BSA_DRAWING) — 우리 DXF 읽기로 다시 읽어 확인
+(function () {
+    const R = require('../js/core/dxf-read.js');
+    const model = {
+        n: 3,
+        coords: new Float32Array([0, 0, 100, 0, /**/ 10, 10, 50, 10, 50, 40, /**/ 60, 60, 80, 60, 80, 80, 60, 80]),
+        start: new Uint32Array([0, 2, 5]), count: new Uint32Array([2, 3, 4]), flags: new Uint8Array([0, 0, 1]),
+        texts: [[20, 30, 5, 90, 1, 2, 'X1'], [5, 5, 4, 0, 0, 0, '계단실']]
+    };
+    const text = api.buildMarkingDxf({
+        plans: [], legendPlan: null, unitPerPx: 1,
+        drawing: { model, toWorld: (px, py) => ({ x: px * 10 + 1000, y: py * 10 + 2000 }), unitPerPt: 10 }
+    });
+    const lines = text.split('\r\n');
+    const at = lines.indexOf('VPORT');
+    assert.ok(at > 0 && lines.indexOf('*ACTIVE') > at, '처음 화면 표(VPORT *ACTIVE)');
+    const i12 = lines.indexOf('12', lines.indexOf('*ACTIVE'));
+    assert.ok(Math.abs(Number(lines[i12 + 1]) - 1500) < 1e-6, '화면 가운데 x = 내용 가운데');
+    const i40 = lines.indexOf('40', lines.indexOf('*ACTIVE'));
+    assert.ok(Number(lines[i40 + 1]) >= 800, '화면 높이가 내용을 다 담는다');
+    const doc = R.parseDxf(text);
+    const flat = R.flattenDxf(doc);
+    assert.strictEqual(flat.polylines.length, 3, '선 3개가 다시 읽힌다');
+    assert.strictEqual(flat.texts.length, 2);
+    const t1 = flat.texts.find((t) => t.text === 'X1');
+    assert.ok(t1 && Math.abs(t1.x - 1200) < 1e-6 && Math.abs(t1.y - 2300) < 1e-6 && Math.abs(t1.h - 50) < 1e-6 && Math.abs(t1.rot - 90) < 1e-6, '글자 위치·높이·회전');
+    assert.ok(flat.texts.some((t) => t.text === '계단실'), '한글 글자');
+    assert.ok(Math.abs(flat.bounds.minX - 1000) < 60 && Math.abs(flat.bounds.maxX - 2000) < 60, '원래 좌표 그대로');
+    console.log('처음 화면 + 원본 도면 넣기: ok');
+})();
+
+// 2026-11-12 좁은 칸에 긴 글자: 폭 비율(41)을 줄여 칸 안에 넣는다
+(function () {
+    const t = api.buildMarkingDxf({
+        plans: [{ color: '#ef4444', fontSize: 10, boxX: 50, boxY: 50, boxW: 30, boxH: 14, label: 'NO.123-45', leaders: [] }],
+        unitPerPx: 1
+    });
+    const L = t.split(String.fromCharCode(13, 10));
+    const i = L.indexOf('NO.123-45');
+    assert.ok(i > 0);
+    assert.strictEqual(L[i + 1], '41', '폭 비율이 적힌다');
+    const wf = Number(L[i + 2]);
+    assert.ok(wf >= 0.6 && wf < 1, '폭 비율 0.6~1');
+    console.log('긴 글자 칸 맞춤: ok');
+})();

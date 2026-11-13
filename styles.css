@@ -19017,3 +19017,52 @@ body.defect-modal-open .map-sel-photo-bar { display: none !important; }
 }
 #defectModal .defect-renumber-btn:hover { background: rgba(239, 68, 68, 0.16); }
 #defectModal .defect-renumber-btn[hidden] { display: none; }
+
+/* 2026-11-12 도면 교체 후 마킹 위치 맞추기 막대 (app/11-cad-import.js) */
+.drawing-align-bar {
+    position: fixed;
+    top: 72px;
+    left: 50%;
+    transform: translateX(-50%);
+    z-index: 100000;
+    max-width: calc(100vw - 24px);
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    justify-content: center;
+    gap: 6px 8px;
+    padding: 9px 14px;
+    border-radius: 12px;
+    background: rgba(15, 23, 42, 0.96);
+    border: 1px solid rgba(253, 164, 175, 0.5);
+    box-shadow: 0 12px 36px rgba(0, 0, 0, 0.5);
+    color: #f8fafc;
+    font-size: 13px;
+    line-height: 1.35;
+}
+.drawing-align-bar .dab-title { color: #fda4af; font-weight: 800; white-space: nowrap; }
+.drawing-align-bar .dab-step b { color: #fde68a; }
+.drawing-align-bar .dab-sep { width: 1px; align-self: stretch; background: #475569; margin: 0 2px; }
+.drawing-align-bar .dab-note { color: #cbd5e1; font-size: 12px; }
+.drawing-align-bar .dab-hint { flex-basis: 100%; text-align: center; color: #94a3b8; font-size: 11px; }
+.drawing-align-bar .dab-chk { display: inline-flex; align-items: center; gap: 4px; cursor: pointer; white-space: nowrap; font-size: 12px; }
+.drawing-align-bar .dab-range { width: 80px; }
+.drawing-align-bar .dab-btn {
+    border: none;
+    border-radius: 6px;
+    padding: 5px 10px;
+    background: #334155;
+    color: #fff;
+    font-size: 12px;
+    font-weight: 700;
+    cursor: pointer;
+}
+.drawing-align-bar .dab-btn:hover { filter: brightness(1.15); }
+.drawing-align-bar .dab-btn.dab-sm { padding: 5px 8px; }
+.drawing-align-bar .dab-btn.dab-ok { background: #10b981; }
+.drawing-align-bar .dab-btn.dab-cancel { background: #ef4444; }
+#btnAlignMarkingsToDrawing.drawing-align-pending { animation: drawingAlignPulse 1.6s ease-in-out infinite; }
+@keyframes drawingAlignPulse {
+    0%, 100% { box-shadow: 0 0 0 0 rgba(244, 63, 94, 0.0); }
+    50% { box-shadow: 0 0 0 5px rgba(244, 63, 94, 0.55); }
+}

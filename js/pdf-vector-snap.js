@@ -8,8 +8,13 @@
  */
 (function () {
   const GRID_CELL = 50;       // floorPlanRef 픽셀 기준 그리드 셀 크기
-  const MIN_SEG_LEN = 3;      // 이보다 짧은 선분은 해칭/점선 노이즈로 보고 버림
-  const MAX_SEGMENTS = 8000;  // 초과 시 긴 선분 위주로만 남김
+  // 2026-11-12 DXF로 올린 도면은 곡선·폴리선이 아주 잘게 나뉘어(4000px 기준 1px 안팎 조각 수십만 개) 예전 기준(3px 미만 버림,
+  // 긴 것 8000개만)으로는 선의 절반 넘게 스냅에서 빠졌다(「DXF로 넣으니 스냅이 안 잡혀」). 이어진 짧은 조각은 하나로 합치고,
+  // 남길 수 있는 선분 수도 크게 늘린다. 찾기는 격자(GRID_CELL)+후보 상한(MAX_CANDIDATES)이라 선분이 많아도 느려지지 않는다.
+  const MIN_SEG_LEN = 3;      // 합친 뒤에도 이보다 짧으면 해칭/점선 노이즈로 보고 버림
+  const MAX_SEGMENTS = 150000; // 초과 시 긴 선분 위주로만 남김
+  const MERGE_PIECE_MAX = 6;   // 이보다 짧은 조각만 앞 조각과 합친다(긴 선의 꺾인 점·끝점은 그대로)
+  const MERGE_DEV_PX = 0.6;    // 합친 선분에서 원래 꺾인 점이 이만큼 넘게 벗어나면 합치지 않는다(곡선 모양 유지)
   const MAX_CANDIDATES = 300; // 스냅 판정 시 한 번에 볼 후보 선분 수 상한
   const MAX_PAIR_CHECKS = 4000;
 
@@ -106,16 +111,65 @@
     return raw;
   }
 
+  /** 점 p가 선분 a–b에서 떨어진 거리의 제곱(Math.hypot은 수천만 번 부르면 느리다) */
+  function dist2PointSeg(px, py, ax, ay, bx, by) {
+    const dx = bx - ax, dy = by - ay;
+    const l2 = dx * dx + dy * dy;
+    let t = l2 > 0 ? ((px - ax) * dx + (py - ay) * dy) / l2 : 0;
+    if (t < 0) t = 0; else if (t > 1) t = 1;
+    const ex = ax + dx * t - px, ey = ay + dy * t - py;
+    return ex * ex + ey * ey;
+  }
+
+  /**
+   * 선분 → 픽셀 좌표. 2026-11-12 이어진 짧은 조각(곡선을 잘게 나눈 것 등)은 모양이 MERGE_DEV_PX 안에서 유지되는 한 한 선분으로 합친다.
+   * 합친 뒤에도 MIN_SEG_LEN보다 짧으면 버린다(예전과 같은 노이즈 기준).
+   */
   function filterAndTransform(rawSegments, viewport) {
     const out = [];
+    // viewport 변환 행렬을 직접 쓴다(convertToViewportPoint를 선분마다 두 번 부르면 수십만 개에서 느리다)
+    const T = viewport.transform;
+    const tx = (x, y) => T[0] * x + T[2] * y + T[4];
+    const ty = (x, y) => T[1] * x + T[3] * y + T[5];
+    const DEV2 = MERGE_DEV_PX * MERGE_DEV_PX;
+    const MIN2 = MIN_SEG_LEN * MIN_SEG_LEN;
+    const PIECE2 = MERGE_PIECE_MAX * MERGE_PIECE_MAX;
+    const mids = new Float64Array(64); // 합치는 중인 선분의 중간 꺾인 점(최대 32개)
+    let nm = 0;
+    let open = false, ax = 0, ay = 0, bx = 0, by = 0;
+    const flush = () => {
+      if (!open) return;
+      const ex = bx - ax, ey = by - ay;
+      const l2 = ex * ex + ey * ey;
+      if (l2 >= MIN2) out.push([ax, ay, bx, by, Math.sqrt(l2)]);
+      open = false;
+    };
     for (const s of rawSegments) {
-      const p1 = viewport.convertToViewportPoint(s[0], s[1]);
-      const p2 = viewport.convertToViewportPoint(s[2], s[3]);
-      const dx = p2[0] - p1[0], dy = p2[1] - p1[1];
-      const len = Math.sqrt(dx * dx + dy * dy);
-      if (len < MIN_SEG_LEN) continue;
-      out.push([p1[0], p1[1], p2[0], p2[1], len]);
+      const x1 = tx(s[0], s[1]), y1 = ty(s[0], s[1]);
+      const x2 = tx(s[2], s[3]), y2 = ty(s[2], s[3]);
+      if (open) {
+        const joined = Math.abs(x1 - bx) < 0.05 && Math.abs(y1 - by) < 0.05;
+        // 꺾인 점 32개까지만 한 선분에 모은다(아주 긴 점선·곡선에서 계산이 제곱으로 느려지지 않게)
+        if (joined && nm < 32) {
+          const px = x2 - x1, py = y2 - y1, rx = bx - ax, ry = by - ay;
+          if (px * px + py * py < PIECE2 || rx * rx + ry * ry < PIECE2) {
+            let ok = dist2PointSeg(bx, by, ax, ay, x2, y2) <= DEV2;
+            for (let i = 0; ok && i < nm; i++) {
+              if (dist2PointSeg(mids[i * 2], mids[i * 2 + 1], ax, ay, x2, y2) > DEV2) ok = false;
+            }
+            if (ok) {
+              mids[nm * 2] = bx; mids[nm * 2 + 1] = by; nm++;
+              bx = x2; by = y2;
+              continue;
+            }
+          }
+        }
+        flush();
+      }
+      open = true; nm = 0;
+      ax = x1; ay = y1; bx = x2; by = y2;
     }
+    flush();
     if (out.length > MAX_SEGMENTS) {
       out.sort((a, b) => b[4] - a[4]);
       out.length = MAX_SEGMENTS;

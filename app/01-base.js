@@ -712,7 +712,12 @@ document.addEventListener('DOMContentLoaded', () => {
     window.addEventListener('resize', scheduleFloatingIndicatorSafeArea);
     window.addEventListener('orientationchange', scheduleFloatingIndicatorSafeArea);
     document.addEventListener('click', () => setTimeout(scheduleFloatingIndicatorSafeArea, 60), true);
-    setInterval(scheduleFloatingIndicatorSafeArea, 1200);
+    // 2026-11-12 배터리: 클릭·크기 변경 때 이미 다시 잰다. 주기 확인은 화면이 보일 때만, 덜 자주(1.2초 → 3초).
+    // 매번 도구막대 전부의 위치를 재서(레이아웃 강제) 앱이 뒤에 있어도 CPU를 깨우고 있었다.
+    setInterval(() => {
+        if (document.visibilityState === 'hidden') return;
+        scheduleFloatingIndicatorSafeArea();
+    }, 3000);
 
     // --- 3.5c 빈 마킹 번호 알림 (2026-10-20) ---
     // 온라인이고 결함위치도 탭이 보일 때, 이 층(외부는 외부 전체) 마킹 번호에 빈 칸이 있으면 아래 왼쪽에 작게 알린다.
@@ -770,7 +775,14 @@ document.addEventListener('DOMContentLoaded', () => {
         _gapNoticeTimer = setTimeout(updateDefectNumberGapNotice, 400);
     }
     window.scheduleDefectNumberGapNotice = scheduleDefectNumberGapNotice;
-    setInterval(scheduleDefectNumberGapNotice, 2500);
+    // 2026-11-12 배터리: 화면이 꺼졌거나 앱이 뒤에 있으면 빈 번호를 다시 세지 않는다(보일 때 바로 다시 센다)
+    setInterval(() => {
+        if (document.visibilityState === 'hidden') return;
+        scheduleDefectNumberGapNotice();
+    }, 4000);
+    document.addEventListener('visibilitychange', () => {
+        if (document.visibilityState === 'visible') scheduleDefectNumberGapNotice();
+    });
     window.addEventListener('online', scheduleDefectNumberGapNotice);
     window.addEventListener('offline', scheduleDefectNumberGapNotice);
 
@@ -3006,9 +3018,6 @@ document.addEventListener('DOMContentLoaded', () => {
 
     function saveStateToLocalStorage() {
         try {
-            if ((state.currentTab === 'tab-map') && typeof captureFloorSnapshotNow === 'function') {
-                captureFloorSnapshotNow();
-            }
             const rawBuildings = window.state.buildings || [];
             const rawDefects = window.state.defects || {};
 

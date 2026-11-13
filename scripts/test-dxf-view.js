@@ -141,6 +141,10 @@ function fakeCtx(W, H) {
         V.render(ctx, model, [0.0001, 0, 0, -0.0001, 600.5, 350.5], W, H, {});
         assert.strictEqual(ctx.log.rect, 1, '겹친 점은 하나만');
         assert.strictEqual(ctx.log.stroke, 0);
+        // 깊이 확대해도 기본 선은 1픽셀
+        ctx = fakeCtx(W, H);
+        V.render(ctx, model, [5, 0, 0, -5, 0, model.pageH * 5], W, H, {});
+        near(ctx.log.widths[0], 1, 1e-9, '확대해도 1픽셀');
         console.log('그리기: ok');
     }
 

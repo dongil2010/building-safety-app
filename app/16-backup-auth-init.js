@@ -4369,8 +4369,13 @@
             // 2026-10-20 건물이 없는(서버 목록에도 업로드 대기에도 없음·삭제됨) 층의 「올릴 것」 표시 정리.
             // 그대로 두면 매번 건너뛰기만 해서 「서버에 올리는 중 172/176」이 영원히 안 끝났다(현장명 없는 유령 건물 B1F).
             // 서버 건물 목록을 실제로 받았을 때만(첫 로드 전·오프라인이면 새 건물이 아직 목록에 없을 수 있다).
-            if (Array.isArray(serverData.buildings) && serverData.buildings.length) {
-                const orphanKeys = window.BSA.floorSyncGuard.orphanDirtyFloorKeys(
+            // 2026-11-12 floor-sync-guard.js가 이 기기에서 못 불러와졌으면(망 끊김·캐시) 정리만 건너뛴다 —
+            // 예전엔 여기서 「Cannot read properties of undefined (reading 'orphanDirtyFloorKeys')」로 동기화 전체가 멈췄다.
+            const orphanGuard = window.BSA && window.BSA.floorSyncGuard;
+            if (!orphanGuard || typeof orphanGuard.orphanDirtyFloorKeys !== 'function') {
+                console.warn('[동기화] floor-sync-guard.js가 없어 건물 없는 층 정리를 건너뜁니다');
+            } else if (Array.isArray(serverData.buildings) && serverData.buildings.length) {
+                const orphanKeys = orphanGuard.orphanDirtyFloorKeys(
                     Array.from(_dirtyFloorKeys), window.state.buildings, mergedDeletedBuildings
                 );
                 if (orphanKeys.length) {
@@ -7121,7 +7126,6 @@
         window.fitToScreen = fitToScreen;
         window.shouldAutoFitMapView = shouldAutoFitMapView;
         window.drawCanvas = drawCanvas;
-        window.captureFloorSnapshotNow = captureFloorSnapshotNow;
         window.setupNdtCanvas = setupNdtCanvas;
         window.resizeNdtCanvas = resizeNdtCanvas;
         window.renderNdtSummaryTable = renderNdtSummaryTable;

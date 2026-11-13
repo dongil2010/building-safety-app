@@ -100,6 +100,7 @@
     let toWorld = (ix, iy) => ({ x: ix, y: imgH - iy });
     let unitPerPx = 1;
     let refSegments = null;
+    let drawing = null;
 
     const size = pdfDataUrl ? await readPdfPageSize(pdfDataUrl) : null;
     if (size) {
@@ -113,6 +114,14 @@
         system = 'cad';
         toWorld = (ix, iy) => ({ x: (ix * sxPt) / s + ox, y: (size.h - iy * syPt) / s + oy });
         unitPerPx = ((sxPt + syPt) / 2) / s;
+        // DXF로 올린 층: 원본 도면 선·글자도 같이 넣는다(BSA_DRAWING 레이어) — 파일 하나로 열어도 도면이 보이게
+        try {
+          const view = window.BSA && window.BSA.dxfView;
+          const model = (view && typeof view.ensureModel === 'function') ? await view.ensureModel(key, pdfDataUrl) : null;
+          if (model) drawing = { model, toWorld: (px, py) => ({ x: px / s + ox, y: py / s + oy }), unitPerPt: 1 / s };
+        } catch (e) {
+          console.warn('[BSA_DXF] 원본 도면 넣기 건너뜀(마킹만 내보냄)', e);
+        }
       } else {
         const mm = 25.4 / 72;
         system = 'paper';
@@ -123,8 +132,8 @@
       }
     }
 
-    const text = api.buildMarkingDxf({ plans, legendPlan, refSegments: refSegments || [], toWorld, unitPerPx });
-    return { text, system, count: plans.length, floorCode: String(floorCode) };
+    const text = api.buildMarkingDxf({ plans, legendPlan, refSegments: refSegments || [], toWorld, unitPerPx, drawing });
+    return { text, system, count: plans.length, floorCode: String(floorCode), withDrawing: !!drawing };
   };
 
   /** 스냅용 선분(수직·수평) → 그림 픽셀 좌표 선분. 못 읽으면 빈 배열 */
@@ -184,7 +193,7 @@
         return;
       }
       window.downloadBlobFile(makeDxfBlob(info.text), `결함위치도_마킹_${safeName(floorCode || 'floor')}_${Date.now()}.dxf`);
-      toast(`마킹 DXF 내보내기 완료 (좌표: ${systemLabel(info.system)})`, 'success', 5000);
+      toast(`마킹 DXF 내보내기 완료 (좌표: ${systemLabel(info.system)}${info.withDrawing ? ', 원본 도면 포함' : ', 마킹만 — 캐드에서 원본 도면에 겹쳐 쓰세요'})`, 'success', 6000);
     } catch (err) {
       console.error(err);
       toast(`마킹 DXF 내보내기 실패: ${err.message || err}`, 'error', 6000);

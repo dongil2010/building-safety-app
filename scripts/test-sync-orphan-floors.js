@@ -29,7 +29,7 @@ assert.deepStrictEqual(G.orphanDirtyFloorKeys(['a_1F'], null, null), ['a_1F']);
 // app.js가 서버 목록을 받았을 때만 지우는지(소스 확인)
 const fs = require('fs');
 const appSrc = fs.readFileSync(path.join(root, 'app.js'), 'utf8');
-const at = appSrc.indexOf('floorSyncGuard.orphanDirtyFloorKeys(');
+const at = appSrc.indexOf('orphanGuard.orphanDirtyFloorKeys(');
 assert.ok(at > 0, 'app.js 동기화에서 고아 층 정리를 부른다');
 const before = appSrc.slice(at - 600, at);
 assert.ok(/Array\.isArray\(serverData\.buildings\) && serverData\.buildings\.length/.test(before), '서버 건물 목록을 받았을 때만');

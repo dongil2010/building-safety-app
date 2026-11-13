@@ -4316,12 +4316,49 @@
         return scored[0];
     }
 
+    // 2026-11-13 PC 렉: 그리는 동안(한 번의 renderDefectsGrouped) 그룹 멤버·균열폭 배지 설정을 한 번만 계산한다.
+    // 예전엔 마킹 하나마다 층 전체 결함을 2~3번 훑고(그룹 선택·「중요」 표시) localStorage를 읽어서, 마킹이 많으면 매 프레임이 느렸다.
+    let _pinDrawFrame = null;
+    function pinDrawGroupMembers(groupId) {
+        if (!_pinDrawFrame) return getDefectMarkingGroupMembers(groupId);
+        if (!_pinDrawFrame.groups) {
+            const groups = new Map();
+            const key = state.currentBuildingId ? `${state.currentBuildingId}_${state.currentFloor}` : '';
+            (state.defects[key] || []).forEach((d) => {
+                if (!d || !d.groupId || d.surveyExtra) return;
+                let arr = groups.get(d.groupId);
+                if (!arr) { arr = []; groups.set(d.groupId, arr); }
+                arr.push(d);
+            });
+            _pinDrawFrame.groups = groups;
+        }
+        if (!groupId || !state.currentBuildingId) return [];
+        return _pinDrawFrame.groups.get(groupId) || [];
+    }
+
     function renderDefectsGrouped(ctx, defects, drawFn) {
+        const outerFrame = _pinDrawFrame;
+        if (!outerFrame) _pinDrawFrame = { groups: null, cwPref: undefined };
+        try {
+            renderDefectsGroupedBody(ctx, defects, drawFn);
+        } finally {
+            if (!outerFrame) _pinDrawFrame = null;
+        }
+    }
+
+    function renderDefectsGroupedBody(ctx, defects, drawFn) {
         const renderedGroups = new Set();
+        const byGroup = new Map();
+        defects.forEach((d) => {
+            if (!d || !d.groupId) return;
+            let arr = byGroup.get(d.groupId);
+            if (!arr) { arr = []; byGroup.set(d.groupId, arr); }
+            arr.push(d);
+        });
         defects.forEach(defect => {
             if (defect.groupId) {
                 if (renderedGroups.has(defect.groupId)) return;
-                const groupMembers = defects.filter(d => d.groupId === defect.groupId);
+                const groupMembers = byGroup.get(defect.groupId) || [];
                 if (groupMembers.length > 1) {
                     renderedGroups.add(defect.groupId);
                     const representative = pickDefectGroupRepresentative(groupMembers) || defect;
@@ -4361,7 +4398,8 @@
         if (!defect) return false;
         if (defect.isBookmark) return true;
         if (!defect.groupId || typeof getDefectMarkingGroupMembers !== 'function') return false;
-        return getDefectMarkingGroupMembers(defect.groupId).some((m) => m && m.isBookmark);
+        const members = typeof pinDrawGroupMembers === 'function' ? pinDrawGroupMembers : getDefectMarkingGroupMembers;
+        return members(defect.groupId).some((m) => m && m.isBookmark);
     }
 
     /**
@@ -4423,7 +4461,13 @@
     }
     function crackWidthBadgeTextFor(defect) {
         const api = crackWidthBadgeApi();
-        if (!api || !readCrackWidthBadgePref()) return '';
+        if (!api) return '';
+        let on;
+        if (_pinDrawFrame) {
+            if (_pinDrawFrame.cwPref === undefined) _pinDrawFrame.cwPref = readCrackWidthBadgePref();
+            on = _pinDrawFrame.cwPref;
+        } else on = readCrackWidthBadgePref();
+        if (!on) return '';
         return api.formatBadgeText(defect) || '';
     }
     function syncCrackWidthBadgeUi() {
@@ -4594,7 +4638,7 @@
 
         const groupMemberSelected = !!(defect.groupId
             && typeof selectedDefectIds !== 'undefined'
-            && getDefectMarkingGroupMembers(defect.groupId).some((m) => selectedDefectIds.has(m.id)));
+            && pinDrawGroupMembers(defect.groupId).some((m) => selectedDefectIds.has(m.id)));
         const pinChromeSelected = !!(typeof selectedDefectIds !== 'undefined' && shouldDrawMapSelectionChrome()
             && ((defect.id && selectedDefectIds.has(defect.id)) || groupMemberSelected));
 

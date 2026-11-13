@@ -551,7 +551,7 @@ if (fs.existsSync(appPath)) {
                 floorPlanRef: { bldgId: 'b1', floorCode: '1F', w: 4000, h: 3000 },
                 floorGridLines: {
                     b1_1F: { autoLocation: false, groups: [
-                        { axis: 'col', prefix: 'A', start: 0, band: 24, lines: [vline(1000, { label: 'C1', band: 30 }), vline(2000)] },
+                        { axis: 'col', prefix: 'A', start: 0, band: G.defaultBand(4000, 3000), lines: [vline(1000, { label: 'C1', band: 30 }), vline(2000)] },
                         { axis: 'row', prefix: 'Y', start: 1, band: 20, lines: [hline(600)] }
                     ] },
                     b1_2F: { refW: 2000, refH: 3000, groups: [{ axis: 'col', lines: [vline(10)] }] }
