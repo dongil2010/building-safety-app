@@ -28373,7 +28373,7 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
         ctx.restore();
     }
 
-// @@app-part 07-defect-component.js sha=e92059729d9f — 원본은 app/07-defect-component.js (여기 말고 거기서 고칠 것)
+// @@app-part 07-defect-component.js sha=a9b1dd01b93b — 원본은 app/07-defect-component.js (여기 말고 거기서 고칠 것)
     // --- Dynamic Defect Component(부재 명칭) — 분류별 플랫 프리셋 ---
     // 2026-09-28 접합부는 거더/빔 구분이 필요 없음 — 큰보·작은보 → 보, 철골거더·철골빔 → 철골보
     // 2026-11-04 보(G)·보(B) 다시 넣음(사용자) — 통계 평가 표가 접합부 결함을 맞닿은 부재 줄(큰보·작은보·슬래브…)에 같이 세서
@@ -30535,6 +30535,14 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
     function getDefectFavoriteList(field, bucket) {
         const q = getDefectQuickPresetsApi();
         if (!q) return [];
+        // 2026-11-13 「분류|부재(|종류)」 칸에 ★를 아직 안 정했으면 윗 칸(결함 종류: 분류, 원인: 종류)의 ★를 쓴다
+        if ((field === 'type' || field === 'cause') && String(bucket || '').includes('|')) {
+            const favMap = field === 'type' ? window.state.favoriteDefectTypes : window.state.favoriteDefectCauses;
+            if (!(favMap && Array.isArray(favMap[bucket]))) {
+                const parts = String(bucket).split('|');
+                return getDefectFavoriteList(field, field === 'type' ? parts[0] : parts.slice(2).join('|'));
+            }
+        }
         if (field === 'component') {
             migrateDefectComponentStateShape();
             return q.getEffectiveFavorites(window.state.favoriteDefectComponents, 'component', bucket,
@@ -30573,12 +30581,12 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
         if (window.state.uid && typeof scheduleSyncUserDefectPinPresets === 'function') scheduleSyncUserDefectPinPresets();
     }
 
-    function computeDefectVisibleChips(field, bucket, ordered, selected, pinned) {
+    function computeDefectVisibleChips(field, bucket, ordered, selected, pinned, favBucket) {
         const q = getDefectQuickPresetsApi();
         if (!q) return { visible: (ordered || []).slice(), hidden: [] };
         return q.computeVisibleChips(ordered, {
             limit: (ordered || []).length, // 접지 않고 전부 표시
-            favorites: getDefectFavoriteList(field, bucket),
+            favorites: getDefectFavoriteList(field, favBucket || bucket),
             usage: q.getUsageCounts(window.state.defectPickUsage, field, bucket),
             selected: selected || [],
             pinned: pinned || []
@@ -30980,7 +30988,8 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
             const selectedTypeParts = parseDefectTypeList(currentType);
             const selectedTypeSet = new Set(selectedTypeParts);
             const typeChipOptions = getPinnedDefectTypeChips(currentCategory, currentComponent);
-            const typeSplit = computeDefectVisibleChips('type', currentCategory, typeChipOptions, selectedTypeParts, ['상태양호']);
+            const typeFavBucket = typeof defectTypeSettingsBucket === 'function' ? defectTypeSettingsBucket(currentCategory, currentComponent) : currentCategory;
+            const typeSplit = computeDefectVisibleChips('type', currentCategory, typeChipOptions, selectedTypeParts, ['상태양호'], typeFavBucket);
             renderDefectChips('quickDefectTypeChips', typeSplit, (v) => selectedTypeSet.has(v), (value) => {
                 if (value && value !== '상태양호' && !selectedTypeSet.has(value)) {
                     recordDefectPickUsage('type', currentCategory, value);
@@ -31321,7 +31330,9 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
             return false;
         }
         if (persist) {
-            const key = getCauseDisplayGroups(dType)[0]?.key || getCauseKey(dType);
+            const causeKey = getCauseDisplayGroups(dType)[0]?.key || getCauseKey(dType);
+            // 2026-11-13 원인 세팅은 「분류|부재|종류」 칸(아직 없으면 종류 칸)
+            const key = typeof causeSettingsBucket === 'function' ? causeSettingsBucket(causeKey) : causeKey;
             if (!window.state.customDefectCauses) window.state.customDefectCauses = {};
             if (!window.state.customDefectCauses[key]) window.state.customDefectCauses[key] = [];
             if (!window.state.customDefectCauses[key].includes(trimmed)) {
@@ -31447,7 +31458,7 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
         refreshDefectQuickPickBar();
     }
 
-// @@app-part 08-defect-presets.js sha=987a62c89545 — 원본은 app/08-defect-presets.js (여기 말고 거기서 고칠 것)
+// @@app-part 08-defect-presets.js sha=f5a03f79cdbe — 원본은 app/08-defect-presets.js (여기 말고 거기서 고칠 것)
     // --- Dynamic Defect Type Presets & Custom Adding ---
     const STEEL_MEMBER_DEFECTS = [
         '상태양호',
@@ -32036,10 +32047,16 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
         if (!b) return cat;
         const st = window.state;
         if (st.customDefectTypes && Array.isArray(st.customDefectTypes[b])) return b;
+        const favNow = typeof getDefectFavoriteList === 'function' ? getDefectFavoriteList('type', cat) : null;
         ['customDefectTypes', 'hiddenDefectTypes', 'defectTypeOrder'].forEach((f) => {
             if (!st[f] || typeof st[f] !== 'object') st[f] = {};
             st[f][b] = Array.isArray(st[f][cat]) ? st[f][cat].slice() : [];
         });
+        // ★도 부재별 — 지금 보이는 분류 ★를 그 부재 칸으로 복사
+        if (Array.isArray(favNow)) {
+            if (!st.favoriteDefectTypes || typeof st.favoriteDefectTypes !== 'object') st.favoriteDefectTypes = {};
+            st.favoriteDefectTypes[b] = favNow.slice();
+        }
         return b;
     }
 
@@ -32282,7 +32299,7 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
         const groups = getCauseDisplayGroups(t);
         const res = q.pickCausesAfterTypeChange({
             groupOptions: groups.map((g) => getCauseOptionsForKey(g.key, g.types)),
-            groupFavorites: groups.map((g) => getDefectFavoriteList('cause', g.key)),
+            groupFavorites: groups.map((g) => getDefectFavoriteList('cause', causeSettingsBucket(g.key))),
             selected: Array.isArray(selectedOverride) ? selectedOverride : getSelectedCausesFromUi(),
             autoPicked: window._defectAutoCauses || [],
             autoCheck: window.state.defectCauseAutoCheck !== false
@@ -34868,15 +34885,61 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
         });
     }
 
+    /**
+     * 2026-11-13 세팅은 트리: 분류 → 부재 → 결함 종류 → 원인. 같은 「균열」이라도 부재가 다르면 원인 세팅이 따로다.
+     * 저장 칸 「분류|부재|원인키」(예: 구조체|보(G)|균열). ⚙로 아직 안 고친 칸은 예전처럼 원인키 칸(균열)을 쓴다 —
+     * 기존 세팅이 그대로 보이고, ⚙를 열 때 그 칸으로 복사한 뒤 그 부재·종류만 고친다.
+     */
+    function causeTreeContext() {
+        return {
+            category: String(document.getElementById('defectCategory')?.value || '').trim(),
+            component: String(getDefectComboValue(
+                document.getElementById('defectComponent'),
+                document.getElementById('defectComponentInput')
+            ) || '').trim()
+        };
+    }
+    function causeTreeBucketKey(category, component, key) {
+        const cat = String(category || '').trim();
+        const comp = String(component || '').trim();
+        const k = String(key || '').trim();
+        return (cat && comp && k) ? `${cat}|${comp}|${k}` : '';
+    }
+    function causeSettingsBucket(key, tree) {
+        const t = tree || causeTreeContext();
+        const b = causeTreeBucketKey(t.category, t.component, key);
+        if (b && window.state.customDefectCauses && Array.isArray(window.state.customDefectCauses[b])) return b;
+        return key;
+    }
+    function ownCauseSettingsBucket(key, tree) {
+        const t = tree || causeTreeContext();
+        const b = causeTreeBucketKey(t.category, t.component, key);
+        if (!b) return key;
+        const st = window.state;
+        if (st.customDefectCauses && Array.isArray(st.customDefectCauses[b])) return b;
+        seedCauseSettingsFromLegacyKey(key);
+        const favNow = typeof getDefectFavoriteList === 'function' ? getDefectFavoriteList('cause', key) : null;
+        ['customDefectCauses', 'hiddenDefectCauses', 'defectCauseOrder'].forEach((f) => {
+            if (!st[f] || typeof st[f] !== 'object') st[f] = {};
+            st[f][b] = Array.isArray(st[f][key]) ? st[f][key].slice() : [];
+        });
+        if (Array.isArray(favNow)) {
+            if (!st.favoriteDefectCauses || typeof st.favoriteDefectCauses !== 'object') st.favoriteDefectCauses = {};
+            st.favoriteDefectCauses[b] = favNow.slice();
+        }
+        return b;
+    }
+
     function getCauseOptionsForKey(key, types) {
         if (!window.state.customDefectCauses) window.state.customDefectCauses = {};
         if (!window.state.hiddenDefectCauses) window.state.hiddenDefectCauses = {};
         seedCauseSettingsFromLegacyKey(key);
-        const hidden = window.state.hiddenDefectCauses[key] || [];
+        const bucket = causeSettingsBucket(key);
+        const hidden = window.state.hiddenDefectCauses[bucket] || [];
         const ctx = getCurrentDefectCauseContext();
         const presetList = getDefaultCausePresetList(key, types, ctx.category, ctx.component)
             .filter(c => !hidden.includes(c));
-        const customList = window.state.customDefectCauses[key] || [];
+        const customList = window.state.customDefectCauses[bucket] || [];
         const merged = [];
         const seen = new Set();
         [...presetList, ...customList].forEach((item) => {
@@ -34886,7 +34949,7 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
         });
         return applySavedOptionOrder(
             merged,
-            getEffectiveCauseOrder(key, ensureOptionOrderEntry('defectCauseOrder', key))
+            getEffectiveCauseOrder(key, ensureOptionOrderEntry('defectCauseOrder', bucket))
         );
     }
 
@@ -35313,7 +35376,7 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
     }
 
     function getOrderedVisibleOptionItems(ctx) {
-        const order = ctx.favField === 'cause' ? getEffectiveCauseOrder(ctx.favBucket, ctx.orderList) : ctx.orderList;
+        const order = ctx.favField === 'cause' ? getEffectiveCauseOrder(ctx.causeKey || ctx.favBucket, ctx.orderList) : ctx.orderList;
         const texts = applySavedOptionOrder(getDefaultVisibleOptionTexts(ctx), order);
         return texts.map((text) => ({
             text,
@@ -35364,7 +35427,7 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
             return {
                 title: compLabel ? `결함 종류 세팅 (${cat} · ${compLabel})` : `결함 종류 세팅 (${cat})`,
                 favField: 'type',
-                favBucket: cat,
+                favBucket: typeBucket,
                 presetList: getDefectTypePresetFor(cat, component),
                 hiddenList: window.state.hiddenDefectTypes[typeBucket],
                 customList: window.state.customDefectTypes[typeBucket],
@@ -35391,18 +35454,23 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
             seedCauseSettingsFromLegacyKey(key);
             if (!window.state.hiddenDefectCauses[key]) window.state.hiddenDefectCauses[key] = [];
             if (!window.state.customDefectCauses[key]) window.state.customDefectCauses[key] = [];
+            // 분류·부재를 골랐으면 「분류|부재|종류」 칸만 고친다 — 같은 종류라도 다른 부재는 그대로 (2026-11-13)
+            const tree = causeTreeContext();
+            const causeBucket = ownCauseSettingsBucket(key, tree);
+            const treeLabel = causeBucket !== key ? `${tree.category} · ${tree.component} · ${key}` : key;
             return {
-                title: `발생 원인 세팅 (${key})`,
+                title: `발생 원인 세팅 (${treeLabel})`,
                 favField: 'cause',
-                favBucket: key,
+                favBucket: causeBucket,
+                causeKey: key,
                 presetList: (() => {
                     const cctx = getCurrentDefectCauseContext();
                     const g = getCauseDisplayGroups(dType).find(x => x.key === key);
                     return getDefaultCausePresetList(key, g ? g.types : undefined, cctx.category, cctx.component);
                 })(),
-                hiddenList: window.state.hiddenDefectCauses[key],
-                customList: window.state.customDefectCauses[key],
-                orderList: ensureOptionOrderEntry('defectCauseOrder', key),
+                hiddenList: window.state.hiddenDefectCauses[causeBucket],
+                customList: window.state.customDefectCauses[causeBucket],
+                orderList: ensureOptionOrderEntry('defectCauseOrder', causeBucket),
                 labelFor: (item) => item,
                 refresh: () => updateDefectCauseDropdown(dType, getDefectComboValue(
                     document.getElementById('defectCause'),
@@ -35586,13 +35654,15 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
         const keys = [];
         const seen = new Set();
         const pushKey = (k) => { if (k && !seen.has(k)) { seen.add(k); keys.push(k); } };
-        pushKey(ctx.favBucket);
+        const curKey = ctx.causeKey || ctx.favBucket;
+        pushKey(curKey);
         Object.keys(defectCausePreset).forEach(pushKey);
-        Object.keys(window.state.customDefectCauses || {}).forEach(pushKey);
+        // 「분류|부재|종류」 칸은 종류 목록에 넣지 않는다(지금 부재 기준으로 열린다)
+        Object.keys(window.state.customDefectCauses || {}).filter((k) => !String(k).includes('|')).forEach(pushKey);
         const autoOn = window.state.defectCauseAutoCheck !== false;
         host.innerHTML = `
             <label class="option-manager-extra-row">결함 종류
-                <select id="optionManagerCauseKey" class="form-select">${keys.map((k) => `<option value="${escapeHtml(k)}"${k === ctx.favBucket ? ' selected' : ''}>${escapeHtml(k)}</option>`).join('')}</select>
+                <select id="optionManagerCauseKey" class="form-select">${keys.map((k) => `<option value="${escapeHtml(k)}"${k === curKey ? ' selected' : ''}>${escapeHtml(k)}</option>`).join('')}</select>
             </label>
             <label class="option-manager-extra-row option-manager-extra-check">
                 <input type="checkbox" id="optionManagerCauseAuto"${autoOn ? ' checked' : ''}> 결함 종류를 고르면 원인 자동 체크

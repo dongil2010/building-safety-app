@@ -2160,6 +2160,14 @@
     function getDefectFavoriteList(field, bucket) {
         const q = getDefectQuickPresetsApi();
         if (!q) return [];
+        // 2026-11-13 「분류|부재(|종류)」 칸에 ★를 아직 안 정했으면 윗 칸(결함 종류: 분류, 원인: 종류)의 ★를 쓴다
+        if ((field === 'type' || field === 'cause') && String(bucket || '').includes('|')) {
+            const favMap = field === 'type' ? window.state.favoriteDefectTypes : window.state.favoriteDefectCauses;
+            if (!(favMap && Array.isArray(favMap[bucket]))) {
+                const parts = String(bucket).split('|');
+                return getDefectFavoriteList(field, field === 'type' ? parts[0] : parts.slice(2).join('|'));
+            }
+        }
         if (field === 'component') {
             migrateDefectComponentStateShape();
             return q.getEffectiveFavorites(window.state.favoriteDefectComponents, 'component', bucket,
@@ -2198,12 +2206,12 @@
         if (window.state.uid && typeof scheduleSyncUserDefectPinPresets === 'function') scheduleSyncUserDefectPinPresets();
     }
 
-    function computeDefectVisibleChips(field, bucket, ordered, selected, pinned) {
+    function computeDefectVisibleChips(field, bucket, ordered, selected, pinned, favBucket) {
         const q = getDefectQuickPresetsApi();
         if (!q) return { visible: (ordered || []).slice(), hidden: [] };
         return q.computeVisibleChips(ordered, {
             limit: (ordered || []).length, // 접지 않고 전부 표시
-            favorites: getDefectFavoriteList(field, bucket),
+            favorites: getDefectFavoriteList(field, favBucket || bucket),
             usage: q.getUsageCounts(window.state.defectPickUsage, field, bucket),
             selected: selected || [],
             pinned: pinned || []
@@ -2605,7 +2613,8 @@
             const selectedTypeParts = parseDefectTypeList(currentType);
             const selectedTypeSet = new Set(selectedTypeParts);
             const typeChipOptions = getPinnedDefectTypeChips(currentCategory, currentComponent);
-            const typeSplit = computeDefectVisibleChips('type', currentCategory, typeChipOptions, selectedTypeParts, ['상태양호']);
+            const typeFavBucket = typeof defectTypeSettingsBucket === 'function' ? defectTypeSettingsBucket(currentCategory, currentComponent) : currentCategory;
+            const typeSplit = computeDefectVisibleChips('type', currentCategory, typeChipOptions, selectedTypeParts, ['상태양호'], typeFavBucket);
             renderDefectChips('quickDefectTypeChips', typeSplit, (v) => selectedTypeSet.has(v), (value) => {
                 if (value && value !== '상태양호' && !selectedTypeSet.has(value)) {
                     recordDefectPickUsage('type', currentCategory, value);
@@ -2946,7 +2955,9 @@
             return false;
         }
         if (persist) {
-            const key = getCauseDisplayGroups(dType)[0]?.key || getCauseKey(dType);
+            const causeKey = getCauseDisplayGroups(dType)[0]?.key || getCauseKey(dType);
+            // 2026-11-13 원인 세팅은 「분류|부재|종류」 칸(아직 없으면 종류 칸)
+            const key = typeof causeSettingsBucket === 'function' ? causeSettingsBucket(causeKey) : causeKey;
             if (!window.state.customDefectCauses) window.state.customDefectCauses = {};
             if (!window.state.customDefectCauses[key]) window.state.customDefectCauses[key] = [];
             if (!window.state.customDefectCauses[key].includes(trimmed)) {
