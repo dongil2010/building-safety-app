@@ -31458,7 +31458,7 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
         refreshDefectQuickPickBar();
     }
 
-// @@app-part 08-defect-presets.js sha=f5a03f79cdbe — 원본은 app/08-defect-presets.js (여기 말고 거기서 고칠 것)
+// @@app-part 08-defect-presets.js sha=f40c91f3197e — 원본은 app/08-defect-presets.js (여기 말고 거기서 고칠 것)
     // --- Dynamic Defect Type Presets & Custom Adding ---
     const STEEL_MEMBER_DEFECTS = [
         '상태양호',
@@ -32029,28 +32029,43 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
      * 저장 칸: 「분류|부재」(예: 구조체|보(G)). 그 부재를 ⚙에서 아직 안 고쳤으면 예전처럼 분류 칸(구조체)을 쓴다 —
      * 기존 세팅은 그대로 보이고, ⚙를 처음 열 때 분류 세팅을 그 부재 칸으로 복사한 뒤 그 부재만 고친다.
      */
+    /** 세팅 칸의 부재 이름 — 2026-11-13 보(G)·보(B)는 「보」, 철골보(G)·(B)는 「철골보」 한 칸 */
+    function settingsComponentName(component) {
+        return String(component || '').trim().replace(/\s*\(\s*[GgBb]\s*\)\s*$/, '').trim();
+    }
+    /** 이미 만든 칸 찾기: 묶은 이름 칸, 없으면 예전 이름 칸(보(G) 등) — parts: 칸 이름 앞·뒤에 붙는 분류·종류 */
+    function findOwnedSettingsBucket(map, prefix, component, suffix) {
+        if (!map || typeof map !== 'object') return '';
+        const norm = settingsComponentName(component);
+        if (!norm) return '';
+        const exact = prefix + norm + suffix;
+        if (Array.isArray(map[exact])) return exact;
+        return Object.keys(map).find((k) => Array.isArray(map[k]) && k.startsWith(prefix) && k.endsWith(suffix)
+            && k.length > prefix.length + suffix.length
+            && settingsComponentName(k.slice(prefix.length, k.length - suffix.length)) === norm) || '';
+    }
     function defectTypeComponentBucketKey(category, component) {
         const cat = String(category || '').trim();
-        const comp = String(component || '').trim();
+        const comp = settingsComponentName(component);
         return (cat && comp) ? `${cat}|${comp}` : '';
     }
     function defectTypeSettingsBucket(category, component) {
         const cat = String(category || '').trim();
-        const b = defectTypeComponentBucketKey(cat, component);
-        if (b && window.state.customDefectTypes && Array.isArray(window.state.customDefectTypes[b])) return b;
-        return cat;
+        if (!cat) return cat;
+        return findOwnedSettingsBucket(window.state.customDefectTypes, `${cat}|`, component, '') || cat;
     }
-    /** ⚙로 고치기 전: 이 부재 칸이 없으면 분류 세팅을 복사해 만든다 → 그 칸 이름 */
+    /** ⚙로 고치기 전: 이 부재 칸이 없으면 (예전 보(G) 칸 또는) 분류 세팅을 복사해 만든다 → 그 칸 이름 */
     function ownDefectTypeSettingsBucket(category, component) {
         const cat = String(category || '').trim();
         const b = defectTypeComponentBucketKey(cat, component);
         if (!b) return cat;
         const st = window.state;
         if (st.customDefectTypes && Array.isArray(st.customDefectTypes[b])) return b;
-        const favNow = typeof getDefectFavoriteList === 'function' ? getDefectFavoriteList('type', cat) : null;
+        const src = findOwnedSettingsBucket(st.customDefectTypes, `${cat}|`, component, '') || cat;
+        const favNow = typeof getDefectFavoriteList === 'function' ? getDefectFavoriteList('type', src) : null;
         ['customDefectTypes', 'hiddenDefectTypes', 'defectTypeOrder'].forEach((f) => {
             if (!st[f] || typeof st[f] !== 'object') st[f] = {};
-            st[f][b] = Array.isArray(st[f][cat]) ? st[f][cat].slice() : [];
+            st[f][b] = Array.isArray(st[f][src]) ? st[f][src].slice() : [];
         });
         // ★도 부재별 — 지금 보이는 분류 ★를 그 부재 칸으로 복사
         if (Array.isArray(favNow)) {
@@ -34901,15 +34916,19 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
     }
     function causeTreeBucketKey(category, component, key) {
         const cat = String(category || '').trim();
-        const comp = String(component || '').trim();
+        const comp = settingsComponentName(component);
         const k = String(key || '').trim();
         return (cat && comp && k) ? `${cat}|${comp}|${k}` : '';
     }
+    function findOwnedCauseBucket(t, key) {
+        const cat = String(t.category || '').trim();
+        const k = String(key || '').trim();
+        if (!cat || !k) return '';
+        return findOwnedSettingsBucket(window.state.customDefectCauses, `${cat}|`, t.component, `|${k}`);
+    }
     function causeSettingsBucket(key, tree) {
         const t = tree || causeTreeContext();
-        const b = causeTreeBucketKey(t.category, t.component, key);
-        if (b && window.state.customDefectCauses && Array.isArray(window.state.customDefectCauses[b])) return b;
-        return key;
+        return findOwnedCauseBucket(t, key) || key;
     }
     function ownCauseSettingsBucket(key, tree) {
         const t = tree || causeTreeContext();
@@ -34918,10 +34937,11 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
         const st = window.state;
         if (st.customDefectCauses && Array.isArray(st.customDefectCauses[b])) return b;
         seedCauseSettingsFromLegacyKey(key);
-        const favNow = typeof getDefectFavoriteList === 'function' ? getDefectFavoriteList('cause', key) : null;
+        const src = findOwnedCauseBucket(t, key) || key;
+        const favNow = typeof getDefectFavoriteList === 'function' ? getDefectFavoriteList('cause', src) : null;
         ['customDefectCauses', 'hiddenDefectCauses', 'defectCauseOrder'].forEach((f) => {
             if (!st[f] || typeof st[f] !== 'object') st[f] = {};
-            st[f][b] = Array.isArray(st[f][key]) ? st[f][key].slice() : [];
+            st[f][b] = Array.isArray(st[f][src]) ? st[f][src].slice() : [];
         });
         if (Array.isArray(favNow)) {
             if (!st.favoriteDefectCauses || typeof st.favoriteDefectCauses !== 'object') st.favoriteDefectCauses = {};
@@ -35423,7 +35443,7 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
             if (!window.state.customDefectTypes[cat]) window.state.customDefectTypes[cat] = [];
             // 부재를 골랐으면 그 부재 칸만 고친다(다른 부재는 그대로) — 2026-11-13
             const typeBucket = ownDefectTypeSettingsBucket(cat, component);
-            const compLabel = String(component || '').trim();
+            const compLabel = settingsComponentName(component);
             return {
                 title: compLabel ? `결함 종류 세팅 (${cat} · ${compLabel})` : `결함 종류 세팅 (${cat})`,
                 favField: 'type',
@@ -35457,7 +35477,7 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
             // 분류·부재를 골랐으면 「분류|부재|종류」 칸만 고친다 — 같은 종류라도 다른 부재는 그대로 (2026-11-13)
             const tree = causeTreeContext();
             const causeBucket = ownCauseSettingsBucket(key, tree);
-            const treeLabel = causeBucket !== key ? `${tree.category} · ${tree.component} · ${key}` : key;
+            const treeLabel = causeBucket !== key ? `${tree.category} · ${settingsComponentName(tree.component)} · ${key}` : key;
             return {
                 title: `발생 원인 세팅 (${treeLabel})`,
                 favField: 'cause',
