@@ -1586,6 +1586,27 @@ ${roundMobile ? '' : `<button type="button" class="icon-btn icon-btn-trash" titl
         });
     })();
 
+    /**
+     * 층 순서(floorsList·drawingFloorCodes·직접 정한 순서 표시·시각)를 같은 id의 다른 건물 객체에도 맞춘다.
+     * 수정 창(currentEditingBuilding)이 연 뒤 동기화가 state.buildings를 새 객체로 바꾸면 둘이 갈라진다.
+     */
+    function copyFloorOrderToLiveBuildings(src) {
+        if (!src || !src.id) return;
+        const targets = [
+            (window.state.buildings || []).find((x) => x && x.id === src.id),
+            window.state.currentBuilding,
+            window.currentEditingBuilding
+        ];
+        targets.forEach((o) => {
+            if (!o || o === src || o.id !== src.id) return;
+            o.floorsList = (src.floorsList || []).map((f) => Object.assign({}, f));
+            o.drawingFloorCodes = (src.drawingFloorCodes || []).slice();
+            if (src.floorsOrderManual) o.floorsOrderManual = true;
+            if (src.floorsOrderUpdatedAt) o.floorsOrderUpdatedAt = src.floorsOrderUpdatedAt;
+            if (typeof markBuildingMetaDirty === 'function') markBuildingMetaDirty(o);
+        });
+    }
+
     window.getBuildingAvailableFloors = function(bldg) {
         if (!bldg) return [];
         const extras = [];
@@ -3985,6 +4006,13 @@ ${roundMobile ? '' : `<button type="button" class="icon-btn icon-btn-trash" titl
                 markFloorOrderManual(b, true);
                 b.drawingFloorCodes = next.map((f) => f.floorCode).filter(Boolean);
                 if (typeof markBuildingMetaDirty === 'function') markBuildingMetaDirty(b);
+                // 2026-11-13 「도면 순서를 바꿔도 몇 번 해야 바뀐다」: 수정 창이 연 건물이 동기화로 새 사본으로 바뀌어 있으면
+                // 순서가 옛 사본에만 적혀 저장·점검층 목록에 안 들어갔다 — 지금 쓰는 건물에도 같이 넣고 바로 저장한다
+                copyFloorOrderToLiveBuildings(b);
+                saveStateToLocalStorage();
+                if (window.state.currentBuildingId === b.id) {
+                    populateFloorSelectDropdown(window.state.currentBuilding || b);
+                }
                 renderEditDrawingPreview();
             });
         }
@@ -4569,6 +4597,8 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
                 // 다른 기기의 새 순서를 이기지 않게 한다
                 markFloorOrderManual(bldg, !!window.editDrawingPreviewManualOrder);
             }
+            // 수정 창 사본과 목록의 건물이 갈라져 있으면 층 순서도 목록 쪽에 넣는다(저장은 목록 쪽을 쓴다)
+            copyFloorOrderToLiveBuildings(bldg);
 
             // Update building metadata
             const prevSiteName = getBuildingSiteName(bldg);

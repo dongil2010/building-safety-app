@@ -3368,9 +3368,29 @@
      * 화면에 보일 원인 목록 = 앱 기본(부재·균열 방향별) − 숨김 + 계정이 추가한 원인, 계정 순서 적용.
      * (2026-09-28: 벽체 접합부 원인을 모든 종류 앞에 끼워 넣던 것 제거 — 접합부는 문맥별 목록으로)
      */
+    /**
+     * 2026-11-13 「공극」「재료분리」는 전엔 원인 키가 따로 없어 「기타」「신축이음/재료분리 손상」 세팅을 썼다.
+     * 전용 키로 바꾼 뒤 ⚙에서 직접 추가·숨긴 원인이 사라져 보였다 — 새 키에 아무 세팅이 없으면 옛 키의
+     * 직접 추가·숨김을 한 번 복사한다(순서는 복사하지 않음: 맨 위 기본 원인 「다짐 시공미흡」 유지).
+     */
+    function seedCauseSettingsFromLegacyKey(key) {
+        const legacy = { '공극': '기타', '재료분리': '신축이음/재료분리 손상' }[key];
+        if (!legacy) return;
+        const st = window.state;
+        const has = (f) => !!(st[f] && Array.isArray(st[f][key]) && st[f][key].length);
+        if (has('customDefectCauses') || has('hiddenDefectCauses') || has('defectCauseOrder')) return;
+        ['customDefectCauses', 'hiddenDefectCauses'].forEach((f) => {
+            const src = st[f] && st[f][legacy];
+            if (!Array.isArray(src) || !src.length) return;
+            if (!st[f]) st[f] = {};
+            st[f][key] = src.slice();
+        });
+    }
+
     function getCauseOptionsForKey(key, types) {
         if (!window.state.customDefectCauses) window.state.customDefectCauses = {};
         if (!window.state.hiddenDefectCauses) window.state.hiddenDefectCauses = {};
+        seedCauseSettingsFromLegacyKey(key);
         const hidden = window.state.hiddenDefectCauses[key] || [];
         const ctx = getCurrentDefectCauseContext();
         const presetList = getDefaultCausePresetList(key, types, ctx.category, ctx.component)
@@ -3879,6 +3899,7 @@
             const key = window._optionManagerCauseKey || causeGroups[causeGroups.length - 1]?.key || getCauseKey(dType);
             if (!window.state.customDefectCauses) window.state.customDefectCauses = {};
             if (!window.state.hiddenDefectCauses) window.state.hiddenDefectCauses = {};
+            seedCauseSettingsFromLegacyKey(key);
             if (!window.state.hiddenDefectCauses[key]) window.state.hiddenDefectCauses[key] = [];
             if (!window.state.customDefectCauses[key]) window.state.customDefectCauses[key] = [];
             return {

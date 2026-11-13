@@ -3654,12 +3654,57 @@
     }
     // @@GRID_LINES_END
 
+    /**
+     * 2026-11-13 Esc: 수정창 위에 뜬 창(톱니바퀴 세팅 창 등)이 있으면 그것만 닫는다.
+     * 예전엔 Esc가 곧장 결함·비파괴 수정창을 닫아서, 톱니바퀴 창에서 Esc를 누르면 아래 수정창이 꺼졌다.
+     * @returns {boolean} 무언가 닫았으면 true
+     */
+    function closeOverlayAboveEditModalForEsc() {
+        const closeEl = (el) => {
+            if (!el) return false;
+            const open = el.classList.contains('open') || el.style.display === 'flex' || el.style.display === 'block';
+            if (!open) return false;
+            el.classList.remove('open');
+            el.style.display = 'none';
+            return true;
+        };
+        if (window.BSA && window.BSA.photoZoomViewer && window.BSA.photoZoomViewer.isOpen && window.BSA.photoZoomViewer.isOpen()) {
+            window.BSA.photoZoomViewer.close();
+            return true;
+        }
+        const sheet = document.getElementById('bsaSelectSheet');
+        if (sheet && sheet.classList.contains('open') && typeof closeBsaSelectSheet === 'function') {
+            closeBsaSelectSheet();
+            return true;
+        }
+        if (window.BsaMeasureKeypad && typeof window.BsaMeasureKeypad.isOpen === 'function' && window.BsaMeasureKeypad.isOpen()) {
+            window.BsaMeasureKeypad.close();
+            return true;
+        }
+        if (closeEl(document.getElementById('optionManagerModal'))) {
+            if (typeof closeOptionManagerModal === 'function') closeOptionManagerModal();
+            return true;
+        }
+        for (const id of ['surveySizeModal', 'styleColorModal', 'locationMapLegendModal', 'ndtDisplacementChartModal']) {
+            if (closeEl(document.getElementById(id))) return true;
+        }
+        return false;
+    }
+
     // 도면 탭 단축키: D=핀 마킹, A=영역 마킹, Esc=수정창 닫기+선택모드
     // 비파괴 탭: D=NDT 마킹, Esc=등록창 닫기+이동모드
     window.addEventListener('keydown', async (e) => {
         const tag = (e.target && e.target.tagName) ? e.target.tagName.toLowerCase() : '';
         const typing = (tag === 'input' || tag === 'textarea' || tag === 'select' || e.target?.isContentEditable);
         const k = e.key ? e.key.toLowerCase() : '';
+
+        if (k === 'escape' && (window.state.currentTab === 'tab-ndt' || window.state.currentTab === 'tab-map')
+            && !(window.BsaTypingPopup && typeof window.BsaTypingPopup.isOpen === 'function' && window.BsaTypingPopup.isOpen())
+            && !(window.BsaFinishMemberChooser && typeof window.BsaFinishMemberChooser.isOpen === 'function' && window.BsaFinishMemberChooser.isOpen())
+            && closeOverlayAboveEditModalForEsc()) {
+            e.preventDefault();
+            return;
+        }
 
         if (window.state.currentTab === 'tab-ndt') {
             if (k === 'escape') {

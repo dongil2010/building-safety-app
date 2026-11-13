@@ -5824,7 +5824,7 @@ document.addEventListener('DOMContentLoaded', () => {
         }
     }
 
-// @@app-part 02-buildings.js sha=2fe348480911 — 원본은 app/02-buildings.js (여기 말고 거기서 고칠 것)
+// @@app-part 02-buildings.js sha=50dff69437ba — 원본은 app/02-buildings.js (여기 말고 거기서 고칠 것)
     // --- 5. TAB MANAGER (진입 로직은 js/tabs/*.js) ---
     // ---- 마지막 작업 위치 기억·복원 (js/core/last-location.js, 2026-10-28) ----
     // 로그인 직후 복원 시도가 끝나기 전에는 기록·삭제를 하지 않는다(부팅 중 switchTab('tab-home')이 기록을 지우지 않게).
@@ -7411,6 +7411,27 @@ ${roundMobile ? '' : `<button type="button" class="icon-btn icon-btn-trash" titl
             window.renameFloorDisplayName(b, code);
         });
     })();
+
+    /**
+     * 층 순서(floorsList·drawingFloorCodes·직접 정한 순서 표시·시각)를 같은 id의 다른 건물 객체에도 맞춘다.
+     * 수정 창(currentEditingBuilding)이 연 뒤 동기화가 state.buildings를 새 객체로 바꾸면 둘이 갈라진다.
+     */
+    function copyFloorOrderToLiveBuildings(src) {
+        if (!src || !src.id) return;
+        const targets = [
+            (window.state.buildings || []).find((x) => x && x.id === src.id),
+            window.state.currentBuilding,
+            window.currentEditingBuilding
+        ];
+        targets.forEach((o) => {
+            if (!o || o === src || o.id !== src.id) return;
+            o.floorsList = (src.floorsList || []).map((f) => Object.assign({}, f));
+            o.drawingFloorCodes = (src.drawingFloorCodes || []).slice();
+            if (src.floorsOrderManual) o.floorsOrderManual = true;
+            if (src.floorsOrderUpdatedAt) o.floorsOrderUpdatedAt = src.floorsOrderUpdatedAt;
+            if (typeof markBuildingMetaDirty === 'function') markBuildingMetaDirty(o);
+        });
+    }
 
     window.getBuildingAvailableFloors = function(bldg) {
         if (!bldg) return [];
@@ -9811,6 +9832,13 @@ ${roundMobile ? '' : `<button type="button" class="icon-btn icon-btn-trash" titl
                 markFloorOrderManual(b, true);
                 b.drawingFloorCodes = next.map((f) => f.floorCode).filter(Boolean);
                 if (typeof markBuildingMetaDirty === 'function') markBuildingMetaDirty(b);
+                // 2026-11-13 「도면 순서를 바꿔도 몇 번 해야 바뀐다」: 수정 창이 연 건물이 동기화로 새 사본으로 바뀌어 있으면
+                // 순서가 옛 사본에만 적혀 저장·점검층 목록에 안 들어갔다 — 지금 쓰는 건물에도 같이 넣고 바로 저장한다
+                copyFloorOrderToLiveBuildings(b);
+                saveStateToLocalStorage();
+                if (window.state.currentBuildingId === b.id) {
+                    populateFloorSelectDropdown(window.state.currentBuilding || b);
+                }
                 renderEditDrawingPreview();
             });
         }
@@ -10395,6 +10423,8 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
                 // 다른 기기의 새 순서를 이기지 않게 한다
                 markFloorOrderManual(bldg, !!window.editDrawingPreviewManualOrder);
             }
+            // 수정 창 사본과 목록의 건물이 갈라져 있으면 층 순서도 목록 쪽에 넣는다(저장은 목록 쪽을 쓴다)
+            copyFloorOrderToLiveBuildings(bldg);
 
             // Update building metadata
             const prevSiteName = getBuildingSiteName(bldg);
@@ -31414,7 +31444,7 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
         refreshDefectQuickPickBar();
     }
 
-// @@app-part 08-defect-presets.js sha=30d752c1eeff — 원본은 app/08-defect-presets.js (여기 말고 거기서 고칠 것)
+// @@app-part 08-defect-presets.js sha=d1a81b6d14b9 — 원본은 app/08-defect-presets.js (여기 말고 거기서 고칠 것)
     // --- Dynamic Defect Type Presets & Custom Adding ---
     const STEEL_MEMBER_DEFECTS = [
         '상태양호',
@@ -34784,9 +34814,29 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
      * 화면에 보일 원인 목록 = 앱 기본(부재·균열 방향별) − 숨김 + 계정이 추가한 원인, 계정 순서 적용.
      * (2026-09-28: 벽체 접합부 원인을 모든 종류 앞에 끼워 넣던 것 제거 — 접합부는 문맥별 목록으로)
      */
+    /**
+     * 2026-11-13 「공극」「재료분리」는 전엔 원인 키가 따로 없어 「기타」「신축이음/재료분리 손상」 세팅을 썼다.
+     * 전용 키로 바꾼 뒤 ⚙에서 직접 추가·숨긴 원인이 사라져 보였다 — 새 키에 아무 세팅이 없으면 옛 키의
+     * 직접 추가·숨김을 한 번 복사한다(순서는 복사하지 않음: 맨 위 기본 원인 「다짐 시공미흡」 유지).
+     */
+    function seedCauseSettingsFromLegacyKey(key) {
+        const legacy = { '공극': '기타', '재료분리': '신축이음/재료분리 손상' }[key];
+        if (!legacy) return;
+        const st = window.state;
+        const has = (f) => !!(st[f] && Array.isArray(st[f][key]) && st[f][key].length);
+        if (has('customDefectCauses') || has('hiddenDefectCauses') || has('defectCauseOrder')) return;
+        ['customDefectCauses', 'hiddenDefectCauses'].forEach((f) => {
+            const src = st[f] && st[f][legacy];
+            if (!Array.isArray(src) || !src.length) return;
+            if (!st[f]) st[f] = {};
+            st[f][key] = src.slice();
+        });
+    }
+
     function getCauseOptionsForKey(key, types) {
         if (!window.state.customDefectCauses) window.state.customDefectCauses = {};
         if (!window.state.hiddenDefectCauses) window.state.hiddenDefectCauses = {};
+        seedCauseSettingsFromLegacyKey(key);
         const hidden = window.state.hiddenDefectCauses[key] || [];
         const ctx = getCurrentDefectCauseContext();
         const presetList = getDefaultCausePresetList(key, types, ctx.category, ctx.component)
@@ -35295,6 +35345,7 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
             const key = window._optionManagerCauseKey || causeGroups[causeGroups.length - 1]?.key || getCauseKey(dType);
             if (!window.state.customDefectCauses) window.state.customDefectCauses = {};
             if (!window.state.hiddenDefectCauses) window.state.hiddenDefectCauses = {};
+            seedCauseSettingsFromLegacyKey(key);
             if (!window.state.hiddenDefectCauses[key]) window.state.hiddenDefectCauses[key] = [];
             if (!window.state.customDefectCauses[key]) window.state.customDefectCauses[key] = [];
             return {
@@ -42325,7 +42376,7 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
         });
     }
 
-// @@app-part 10-marking.js sha=e89236dc4745 — 원본은 app/10-marking.js (여기 말고 거기서 고칠 것)
+// @@app-part 10-marking.js sha=d4b9e3b395c6 — 원본은 app/10-marking.js (여기 말고 거기서 고칠 것)
     // --- 9. BUTTON CONTROLS & LISTENERS ---
 
     // Main Navigation Tabs Click Listener
@@ -45981,12 +46032,57 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
     }
     // @@GRID_LINES_END
 
+    /**
+     * 2026-11-13 Esc: 수정창 위에 뜬 창(톱니바퀴 세팅 창 등)이 있으면 그것만 닫는다.
+     * 예전엔 Esc가 곧장 결함·비파괴 수정창을 닫아서, 톱니바퀴 창에서 Esc를 누르면 아래 수정창이 꺼졌다.
+     * @returns {boolean} 무언가 닫았으면 true
+     */
+    function closeOverlayAboveEditModalForEsc() {
+        const closeEl = (el) => {
+            if (!el) return false;
+            const open = el.classList.contains('open') || el.style.display === 'flex' || el.style.display === 'block';
+            if (!open) return false;
+            el.classList.remove('open');
+            el.style.display = 'none';
+            return true;
+        };
+        if (window.BSA && window.BSA.photoZoomViewer && window.BSA.photoZoomViewer.isOpen && window.BSA.photoZoomViewer.isOpen()) {
+            window.BSA.photoZoomViewer.close();
+            return true;
+        }
+        const sheet = document.getElementById('bsaSelectSheet');
+        if (sheet && sheet.classList.contains('open') && typeof closeBsaSelectSheet === 'function') {
+            closeBsaSelectSheet();
+            return true;
+        }
+        if (window.BsaMeasureKeypad && typeof window.BsaMeasureKeypad.isOpen === 'function' && window.BsaMeasureKeypad.isOpen()) {
+            window.BsaMeasureKeypad.close();
+            return true;
+        }
+        if (closeEl(document.getElementById('optionManagerModal'))) {
+            if (typeof closeOptionManagerModal === 'function') closeOptionManagerModal();
+            return true;
+        }
+        for (const id of ['surveySizeModal', 'styleColorModal', 'locationMapLegendModal', 'ndtDisplacementChartModal']) {
+            if (closeEl(document.getElementById(id))) return true;
+        }
+        return false;
+    }
+
     // 도면 탭 단축키: D=핀 마킹, A=영역 마킹, Esc=수정창 닫기+선택모드
     // 비파괴 탭: D=NDT 마킹, Esc=등록창 닫기+이동모드
     window.addEventListener('keydown', async (e) => {
         const tag = (e.target && e.target.tagName) ? e.target.tagName.toLowerCase() : '';
         const typing = (tag === 'input' || tag === 'textarea' || tag === 'select' || e.target?.isContentEditable);
         const k = e.key ? e.key.toLowerCase() : '';
+
+        if (k === 'escape' && (window.state.currentTab === 'tab-ndt' || window.state.currentTab === 'tab-map')
+            && !(window.BsaTypingPopup && typeof window.BsaTypingPopup.isOpen === 'function' && window.BsaTypingPopup.isOpen())
+            && !(window.BsaFinishMemberChooser && typeof window.BsaFinishMemberChooser.isOpen === 'function' && window.BsaFinishMemberChooser.isOpen())
+            && closeOverlayAboveEditModalForEsc()) {
+            e.preventDefault();
+            return;
+        }
 
         if (window.state.currentTab === 'tab-ndt') {
             if (k === 'escape') {
