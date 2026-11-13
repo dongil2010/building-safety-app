@@ -81,7 +81,7 @@ function buildEnv() {
     code += src.slice(a, b) + '\n';
     code += src.slice(kn, src.indexOf('function isKnownCauseLabel', kn)) + '\n' + extractFunction('isKnownCauseLabel') + '\n';
     ['normalizeComponentKey', 'isRcStructuralCrackKind', 'parseDefectTypeList', 'getDefectTypePresetFor', 'getDefectTypePresetForRaw', 'getCauseKey',
-        'getCauseDisplayGroups', 'parseCauseList', 'getCurrentDefectCauseContext', 'getCauseOptionsForKey',
+        'getCauseDisplayGroups', 'parseCauseList', 'getCurrentDefectCauseContext', 'seedCauseSettingsFromLegacyKey', 'getCauseOptionsForKey',
         'getDefaultFirstCauseFor', 'resetOptionManagerCurrent', 'refreshDefectTypeAfterComponentChange',
         'applyCauseAutoPickForType', 'applySavedOptionOrder'].forEach((f) => { code += extractFunction(f) + '\n'; });
     code += 'return { DEFECT_COMPONENT_PRESET, DEFECT_JOINT_COMPONENT_PRESET, defectCausePreset, getDefectTypePresetFor, getCauseDisplayGroups, ' +
