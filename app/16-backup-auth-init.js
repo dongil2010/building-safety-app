@@ -7126,7 +7126,6 @@
         window.fitToScreen = fitToScreen;
         window.shouldAutoFitMapView = shouldAutoFitMapView;
         window.drawCanvas = drawCanvas;
-        window.captureFloorSnapshotNow = captureFloorSnapshotNow;
         window.setupNdtCanvas = setupNdtCanvas;
         window.resizeNdtCanvas = resizeNdtCanvas;
         window.renderNdtSummaryTable = renderNdtSummaryTable;

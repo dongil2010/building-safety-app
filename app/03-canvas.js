@@ -1348,34 +1348,8 @@
     };
 
     let _mapDrawRafId = 0;
-    let _floorSnapshotTimer = 0;
-
-    function captureFloorSnapshotNow() {
-        if (!state.canvas || !state.currentFloor) return;
-        try {
-            if (!state.floorSnapshots) state.floorSnapshots = {};
-            const snapW = state.canvasCssW || state.canvas.width;
-            const snapH = state.canvasCssH || state.canvas.height;
-            if ((state.canvasDpr || 1) > 1.05) {
-                const off = document.createElement('canvas');
-                off.width = snapW;
-                off.height = snapH;
-                off.getContext('2d').drawImage(state.canvas, 0, 0, snapW, snapH);
-                state.floorSnapshots[state.currentFloor] = off.toDataURL('image/jpeg', 0.82);
-            } else {
-                state.floorSnapshots[state.currentFloor] = state.canvas.toDataURL('image/jpeg', 0.82);
-            }
-        } catch (_e) { /* ignore */ }
-    }
-
-    function scheduleFloorSnapshotCapture() {
-        if (_floorSnapshotTimer) clearTimeout(_floorSnapshotTimer);
-        const delay = window.BSA?.performance?.getFloorSnapshotDelayMs?.() ?? 500;
-        _floorSnapshotTimer = setTimeout(() => {
-            _floorSnapshotTimer = 0;
-            captureFloorSnapshotNow();
-        }, delay);
-    }
+    // 2026-11-13 층 스냅샷(state.floorSnapshots) 제거: 아무 데서도 읽지 않는데 그리기를 멈출 때마다·저장할 때마다
+    // 화면 전체를 JPEG로 만들어(toDataURL) PC에서 도면 이동·타이핑 뒤 툭툭 멈추는 원인이었다.
 
     function drawCanvas(opts) {
         opts = opts || {};
@@ -1617,7 +1591,6 @@
 
         ctx.restore(); // Restore view offset & scale
 
-        scheduleFloorSnapshotCapture();
         syncMemberGbOverlay(window._bsaMemberGbEntries || []);
         window._bsaMemberGbEntries = null;
         syncDrawingMemoOverlay();

@@ -6238,7 +6238,8 @@
             }
             drawCanvas();
             if (typeof renderDefectListPanel === 'function') renderDefectListPanel();
-            if (typeof renderSurveyTable === 'function') renderSurveyTable();
+            // 2026-11-13 조사표는 보고 있을 때만 다시 그린다(탭에 들어가면 다시 그림) — 타이핑마다 표 전체를 새로 만들어 느렸다
+            if (typeof renderSurveyTable === 'function' && state.currentTab === 'tab-survey') renderSurveyTable();
             flashDefectAutosaveBadge('done');
         }, 180);
     }

@@ -1,5 +1,5 @@
 // @@app-parts 자동 생성 파일 — 여기를 고치지 말고 app/ 조각을 고친 뒤 `node scripts/app-parts.js join` (CLAUDE.md 「app.js 조각」)
-// @@app-part 01-base.js sha=9e47335f166e — 원본은 app/01-base.js (여기 말고 거기서 고칠 것)
+// @@app-part 01-base.js sha=d81295430c7d — 원본은 app/01-base.js (여기 말고 거기서 고칠 것)
 /* ==========================================================================
    스마트 건축물 안전점검 현장점검 시스템 — UI 부트스트랩
    전역 상태·IndexedDB·이미지 헬퍼: js/core/state.js
@@ -3019,9 +3019,6 @@ document.addEventListener('DOMContentLoaded', () => {
 
     function saveStateToLocalStorage() {
         try {
-            if ((state.currentTab === 'tab-map') && typeof captureFloorSnapshotNow === 'function') {
-                captureFloorSnapshotNow();
-            }
             const rawBuildings = window.state.buildings || [];
             const rawDefects = window.state.defects || {};
 
@@ -10621,7 +10618,7 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
         });
     }
 
-// @@app-part 03-canvas.js sha=be7fdd302d07 — 원본은 app/03-canvas.js (여기 말고 거기서 고칠 것)
+// @@app-part 03-canvas.js sha=10b9372a2732 — 원본은 app/03-canvas.js (여기 말고 거기서 고칠 것)
     // --- 8. DRAWING CANVAS ENGINE (PAN/ZOOM/ROTATE & PINS) ---
 
     function setupCanvas() {
@@ -11971,34 +11968,8 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
     };
 
     let _mapDrawRafId = 0;
-    let _floorSnapshotTimer = 0;
-
-    function captureFloorSnapshotNow() {
-        if (!state.canvas || !state.currentFloor) return;
-        try {
-            if (!state.floorSnapshots) state.floorSnapshots = {};
-            const snapW = state.canvasCssW || state.canvas.width;
-            const snapH = state.canvasCssH || state.canvas.height;
-            if ((state.canvasDpr || 1) > 1.05) {
-                const off = document.createElement('canvas');
-                off.width = snapW;
-                off.height = snapH;
-                off.getContext('2d').drawImage(state.canvas, 0, 0, snapW, snapH);
-                state.floorSnapshots[state.currentFloor] = off.toDataURL('image/jpeg', 0.82);
-            } else {
-                state.floorSnapshots[state.currentFloor] = state.canvas.toDataURL('image/jpeg', 0.82);
-            }
-        } catch (_e) { /* ignore */ }
-    }
-
-    function scheduleFloorSnapshotCapture() {
-        if (_floorSnapshotTimer) clearTimeout(_floorSnapshotTimer);
-        const delay = window.BSA?.performance?.getFloorSnapshotDelayMs?.() ?? 500;
-        _floorSnapshotTimer = setTimeout(() => {
-            _floorSnapshotTimer = 0;
-            captureFloorSnapshotNow();
-        }, delay);
-    }
+    // 2026-11-13 층 스냅샷(state.floorSnapshots) 제거: 아무 데서도 읽지 않는데 그리기를 멈출 때마다·저장할 때마다
+    // 화면 전체를 JPEG로 만들어(toDataURL) PC에서 도면 이동·타이핑 뒤 툭툭 멈추는 원인이었다.
 
     function drawCanvas(opts) {
         opts = opts || {};
@@ -12240,7 +12211,6 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
 
         ctx.restore(); // Restore view offset & scale
 
-        scheduleFloorSnapshotCapture();
         syncMemberGbOverlay(window._bsaMemberGbEntries || []);
         window._bsaMemberGbEntries = null;
         syncDrawingMemoOverlay();
@@ -23596,7 +23566,7 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
         return bestKey;
     }
 
-// @@app-part 06-defect-edit.js sha=41912c5906b7 — 원본은 app/06-defect-edit.js (여기 말고 거기서 고칠 것)
+// @@app-part 06-defect-edit.js sha=4d6947b0d260 — 원본은 app/06-defect-edit.js (여기 말고 거기서 고칠 것)
     // --- 결함 회차 일괄 재지정 모달 ---
     // 건물 전체(또는 현재 층)가 잘못된 회차로 통째로 등록됐을 때, 결함들의 surveyRound를
     // 한번에 올바른 값으로 옮기는 관리자용 복구 기능. 결함 내용은 건드리지 않고 회차 값만 바꾼다.
@@ -27914,12 +27884,49 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
         return scored[0];
     }
 
+    // 2026-11-13 PC 렉: 그리는 동안(한 번의 renderDefectsGrouped) 그룹 멤버·균열폭 배지 설정을 한 번만 계산한다.
+    // 예전엔 마킹 하나마다 층 전체 결함을 2~3번 훑고(그룹 선택·「중요」 표시) localStorage를 읽어서, 마킹이 많으면 매 프레임이 느렸다.
+    let _pinDrawFrame = null;
+    function pinDrawGroupMembers(groupId) {
+        if (!_pinDrawFrame) return getDefectMarkingGroupMembers(groupId);
+        if (!_pinDrawFrame.groups) {
+            const groups = new Map();
+            const key = state.currentBuildingId ? `${state.currentBuildingId}_${state.currentFloor}` : '';
+            (state.defects[key] || []).forEach((d) => {
+                if (!d || !d.groupId || d.surveyExtra) return;
+                let arr = groups.get(d.groupId);
+                if (!arr) { arr = []; groups.set(d.groupId, arr); }
+                arr.push(d);
+            });
+            _pinDrawFrame.groups = groups;
+        }
+        if (!groupId || !state.currentBuildingId) return [];
+        return _pinDrawFrame.groups.get(groupId) || [];
+    }
+
     function renderDefectsGrouped(ctx, defects, drawFn) {
+        const outerFrame = _pinDrawFrame;
+        if (!outerFrame) _pinDrawFrame = { groups: null, cwPref: undefined };
+        try {
+            renderDefectsGroupedBody(ctx, defects, drawFn);
+        } finally {
+            if (!outerFrame) _pinDrawFrame = null;
+        }
+    }
+
+    function renderDefectsGroupedBody(ctx, defects, drawFn) {
         const renderedGroups = new Set();
+        const byGroup = new Map();
+        defects.forEach((d) => {
+            if (!d || !d.groupId) return;
+            let arr = byGroup.get(d.groupId);
+            if (!arr) { arr = []; byGroup.set(d.groupId, arr); }
+            arr.push(d);
+        });
         defects.forEach(defect => {
             if (defect.groupId) {
                 if (renderedGroups.has(defect.groupId)) return;
-                const groupMembers = defects.filter(d => d.groupId === defect.groupId);
+                const groupMembers = byGroup.get(defect.groupId) || [];
                 if (groupMembers.length > 1) {
                     renderedGroups.add(defect.groupId);
                     const representative = pickDefectGroupRepresentative(groupMembers) || defect;
@@ -27959,7 +27966,8 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
         if (!defect) return false;
         if (defect.isBookmark) return true;
         if (!defect.groupId || typeof getDefectMarkingGroupMembers !== 'function') return false;
-        return getDefectMarkingGroupMembers(defect.groupId).some((m) => m && m.isBookmark);
+        const members = typeof pinDrawGroupMembers === 'function' ? pinDrawGroupMembers : getDefectMarkingGroupMembers;
+        return members(defect.groupId).some((m) => m && m.isBookmark);
     }
 
     /**
@@ -28021,7 +28029,13 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
     }
     function crackWidthBadgeTextFor(defect) {
         const api = crackWidthBadgeApi();
-        if (!api || !readCrackWidthBadgePref()) return '';
+        if (!api) return '';
+        let on;
+        if (_pinDrawFrame) {
+            if (_pinDrawFrame.cwPref === undefined) _pinDrawFrame.cwPref = readCrackWidthBadgePref();
+            on = _pinDrawFrame.cwPref;
+        } else on = readCrackWidthBadgePref();
+        if (!on) return '';
         return api.formatBadgeText(defect) || '';
     }
     function syncCrackWidthBadgeUi() {
@@ -28192,7 +28206,7 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
 
         const groupMemberSelected = !!(defect.groupId
             && typeof selectedDefectIds !== 'undefined'
-            && getDefectMarkingGroupMembers(defect.groupId).some((m) => selectedDefectIds.has(m.id)));
+            && pinDrawGroupMembers(defect.groupId).some((m) => selectedDefectIds.has(m.id)));
         const pinChromeSelected = !!(typeof selectedDefectIds !== 'undefined' && shouldDrawMapSelectionChrome()
             && ((defect.id && selectedDefectIds.has(defect.id)) || groupMemberSelected));
 
@@ -35665,7 +35679,7 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
         }
     }
 
-// @@app-part 09-settings-input-camera.js sha=014498443e85 — 원본은 app/09-settings-input-camera.js (여기 말고 거기서 고칠 것)
+// @@app-part 09-settings-input-camera.js sha=ff42aa6413ce — 원본은 app/09-settings-input-camera.js (여기 말고 거기서 고칠 것)
     // --- 카테고리별 핀/박스 색상 설정 모달 ---
     // 결함 색상은 getDefectColor()가 쓰는 등급·상태 키와 맞춰야 도면에 바로 반영됨
     const STYLE_COLOR_FIELDS = [
@@ -41905,7 +41919,8 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
             }
             drawCanvas();
             if (typeof renderDefectListPanel === 'function') renderDefectListPanel();
-            if (typeof renderSurveyTable === 'function') renderSurveyTable();
+            // 2026-11-13 조사표는 보고 있을 때만 다시 그린다(탭에 들어가면 다시 그림) — 타이핑마다 표 전체를 새로 만들어 느렸다
+            if (typeof renderSurveyTable === 'function' && state.currentTab === 'tab-survey') renderSurveyTable();
             flashDefectAutosaveBadge('done');
         }, 180);
     }
@@ -69156,7 +69171,7 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
         }
     };
 
-// @@app-part 16-backup-auth-init.js sha=bd286a0bb4da — 원본은 app/16-backup-auth-init.js (여기 말고 거기서 고칠 것)
+// @@app-part 16-backup-auth-init.js sha=6025511e0371 — 원본은 app/16-backup-auth-init.js (여기 말고 거기서 고칠 것)
     // ==========================================================================
     // 건물 백업(체크포인트) — 2026-09-27
     // safety_app/{회사}/buildingCheckpoints/{id}          요약 + 이 백업이 쓰는 사진 id(photoIds)
@@ -76284,7 +76299,6 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
         window.fitToScreen = fitToScreen;
         window.shouldAutoFitMapView = shouldAutoFitMapView;
         window.drawCanvas = drawCanvas;
-        window.captureFloorSnapshotNow = captureFloorSnapshotNow;
         window.setupNdtCanvas = setupNdtCanvas;
         window.resizeNdtCanvas = resizeNdtCanvas;
         window.renderNdtSummaryTable = renderNdtSummaryTable;

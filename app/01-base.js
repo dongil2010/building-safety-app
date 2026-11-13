@@ -3018,9 +3018,6 @@ document.addEventListener('DOMContentLoaded', () => {
 
     function saveStateToLocalStorage() {
         try {
-            if ((state.currentTab === 'tab-map') && typeof captureFloorSnapshotNow === 'function') {
-                captureFloorSnapshotNow();
-            }
             const rawBuildings = window.state.buildings || [];
             const rawDefects = window.state.defects || {};
 
