@@ -2663,9 +2663,12 @@
             document.getElementById('defectComponentInput')
         );
         const preset = (typeof getDefectTypePresetFor === 'function' ? getDefectTypePresetFor(cat, component) : []) || [];
-        if (preset.includes(trimmed) || window.state.customDefectTypes[cat].includes(trimmed)) return false;
-        window.state.customDefectTypes[cat].push(trimmed);
-        const order = ensureOptionOrderEntry('defectTypeOrder', cat);
+        // 2026-11-13 결함 종류 세팅은 부재별 — 지금 부재 칸(아직 없으면 분류 칸)에 넣는다
+        const typeBucket = typeof defectTypeSettingsBucket === 'function' ? defectTypeSettingsBucket(cat, component) : cat;
+        if (!window.state.customDefectTypes[typeBucket]) window.state.customDefectTypes[typeBucket] = [];
+        if (preset.includes(trimmed) || window.state.customDefectTypes[typeBucket].includes(trimmed)) return false;
+        window.state.customDefectTypes[typeBucket].push(trimmed);
+        const order = ensureOptionOrderEntry('defectTypeOrder', typeBucket);
         if (!order.includes(trimmed)) order.push(trimmed);
         if (typeof saveStateToLocalStorage === 'function') saveStateToLocalStorage();
         return true;

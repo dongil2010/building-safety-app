@@ -564,11 +564,42 @@
         return good.concat(cracks, rest);
     }
 
+    /**
+     * 2026-11-13 결함 종류 세팅(직접 추가·숨김·순서)을 부재별로.
+     * 저장 칸: 「분류|부재」(예: 구조체|보(G)). 그 부재를 ⚙에서 아직 안 고쳤으면 예전처럼 분류 칸(구조체)을 쓴다 —
+     * 기존 세팅은 그대로 보이고, ⚙를 처음 열 때 분류 세팅을 그 부재 칸으로 복사한 뒤 그 부재만 고친다.
+     */
+    function defectTypeComponentBucketKey(category, component) {
+        const cat = String(category || '').trim();
+        const comp = String(component || '').trim();
+        return (cat && comp) ? `${cat}|${comp}` : '';
+    }
+    function defectTypeSettingsBucket(category, component) {
+        const cat = String(category || '').trim();
+        const b = defectTypeComponentBucketKey(cat, component);
+        if (b && window.state.customDefectTypes && Array.isArray(window.state.customDefectTypes[b])) return b;
+        return cat;
+    }
+    /** ⚙로 고치기 전: 이 부재 칸이 없으면 분류 세팅을 복사해 만든다 → 그 칸 이름 */
+    function ownDefectTypeSettingsBucket(category, component) {
+        const cat = String(category || '').trim();
+        const b = defectTypeComponentBucketKey(cat, component);
+        if (!b) return cat;
+        const st = window.state;
+        if (st.customDefectTypes && Array.isArray(st.customDefectTypes[b])) return b;
+        ['customDefectTypes', 'hiddenDefectTypes', 'defectTypeOrder'].forEach((f) => {
+            if (!st[f] || typeof st[f] !== 'object') st[f] = {};
+            st[f][b] = Array.isArray(st[f][cat]) ? st[f][cat].slice() : [];
+        });
+        return b;
+    }
+
     function getPinnedDefectTypeChips(category, component) {
-        const hidden = (window.state.hiddenDefectTypes && window.state.hiddenDefectTypes[category]) || [];
+        const bucket = defectTypeSettingsBucket(category, component);
+        const hidden = (window.state.hiddenDefectTypes && window.state.hiddenDefectTypes[bucket]) || [];
         const crackKinds = getCrackKindsForComponent(component) || [];
         const preset = (getDefectTypePresetFor(category, component) || []).filter(t => !hidden.includes(t));
-        const custom = ((window.state.customDefectTypes && window.state.customDefectTypes[category]) || [])
+        const custom = ((window.state.customDefectTypes && window.state.customDefectTypes[bucket]) || [])
             .filter(t => t && !isTransientDefectTypeValue(t) && !crackKinds.includes(t) && !hidden.includes(t));
         const out = [];
         const seen = new Set();
@@ -582,7 +613,7 @@
         crackKinds.forEach(push);
         preset.forEach((t) => { if (!crackKinds.includes(t)) push(t); });
         custom.forEach(push);
-        return prioritizeCrackDefectTypes(applySavedOptionOrder(out, ensureOptionOrderEntry('defectTypeOrder', category)));
+        return prioritizeCrackDefectTypes(applySavedOptionOrder(out, ensureOptionOrderEntry('defectTypeOrder', bucket)));
     }
 
     function updateDefectTypeDropdown(category, currentVal = null) {
@@ -599,11 +630,12 @@
             document.getElementById('defectComponentInput')
         );
         const crackKinds = getCrackKindsForComponent(component);
-        const hidden = window.state.hiddenDefectTypes[category] || [];
+        const typeBucket = defectTypeSettingsBucket(category, component);
+        const hidden = window.state.hiddenDefectTypes[typeBucket] || [];
         const presetList = getDefectTypePresetFor(category, component).filter(t => !hidden.includes(t));
-        const customList = ((window.state.customDefectTypes[category] || []))
+        const customList = ((window.state.customDefectTypes[typeBucket] || []))
             .filter(item => !isTransientDefectTypeValue(item));
-        window.state.customDefectTypes[category] = customList;
+        if (typeBucket) window.state.customDefectTypes[typeBucket] = customList;
 
         let html = `<option value="" ${!currentVal ? 'selected' : ''}>—</option>`;
         const allOptions = presetList.slice();
@@ -613,7 +645,7 @@
         });
         const orderedOptions = prioritizeCrackDefectTypes(applySavedOptionOrder(
             allOptions,
-            ensureOptionOrderEntry('defectTypeOrder', category)
+            ensureOptionOrderEntry('defectTypeOrder', typeBucket)
         ));
         orderedOptions.forEach(item => {
             const sel = (currentVal && currentVal === item) ? 'selected' : '';
@@ -3656,10 +3688,15 @@
                     const trimmed = newType.trim();
                     if (!isTransientDefectTypeValue(trimmed)) {
                         if (!window.state.customDefectTypes) window.state.customDefectTypes = { '구조체': [], '비구조체': [], '마감재': [] };
-                        if (!window.state.customDefectTypes[cat]) window.state.customDefectTypes[cat] = [];
-                        if (!window.state.customDefectTypes[cat].includes(trimmed)) {
-                            window.state.customDefectTypes[cat].push(trimmed);
-                            const order = ensureOptionOrderEntry('defectTypeOrder', cat);
+                        // 부재를 골랐으면 그 부재에만 추가(다른 부재에 안 뜨게) — 2026-11-13
+                        const typeBucket = ownDefectTypeSettingsBucket(cat, getDefectComboValue(
+                            document.getElementById('defectComponent'),
+                            document.getElementById('defectComponentInput')
+                        ));
+                        if (!window.state.customDefectTypes[typeBucket]) window.state.customDefectTypes[typeBucket] = [];
+                        if (!window.state.customDefectTypes[typeBucket].includes(trimmed)) {
+                            window.state.customDefectTypes[typeBucket].push(trimmed);
+                            const order = ensureOptionOrderEntry('defectTypeOrder', typeBucket);
                             if (!order.includes(trimmed)) order.push(trimmed);
                             saveStateToLocalStorage();
                         }
@@ -3872,14 +3909,17 @@
             if (!window.state.hiddenDefectTypes) window.state.hiddenDefectTypes = {};
             if (!window.state.hiddenDefectTypes[cat]) window.state.hiddenDefectTypes[cat] = [];
             if (!window.state.customDefectTypes[cat]) window.state.customDefectTypes[cat] = [];
+            // 부재를 골랐으면 그 부재 칸만 고친다(다른 부재는 그대로) — 2026-11-13
+            const typeBucket = ownDefectTypeSettingsBucket(cat, component);
+            const compLabel = String(component || '').trim();
             return {
-                title: `결함 종류 세팅 (${cat})`,
+                title: compLabel ? `결함 종류 세팅 (${cat} · ${compLabel})` : `결함 종류 세팅 (${cat})`,
                 favField: 'type',
                 favBucket: cat,
                 presetList: getDefectTypePresetFor(cat, component),
-                hiddenList: window.state.hiddenDefectTypes[cat],
-                customList: window.state.customDefectTypes[cat],
-                orderList: ensureOptionOrderEntry('defectTypeOrder', cat),
+                hiddenList: window.state.hiddenDefectTypes[typeBucket],
+                customList: window.state.customDefectTypes[typeBucket],
+                orderList: ensureOptionOrderEntry('defectTypeOrder', typeBucket),
                 labelFor: (item) => item,
                 refresh: () => updateDefectTypeDropdown(cat, getDefectComboValue(
                     document.getElementById('defectType'),
