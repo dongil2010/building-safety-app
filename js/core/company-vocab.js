@@ -77,8 +77,11 @@
         return x;
     }
 
+    // 바탕 부재 낱말을 품었지만 부재가 아닌 말. 「보」가 「보수부위」에 걸려 원래 부재명
+    // (샛기둥)이 사라지던 사고(2026-11-13 글로벌모터스 차체공장) — 이 말들은 지우고 본다.
+    const NOT_HOST_RE = /보(?:수|강|호|온|양|완|충|관|안|일러|도|행)|경보|정보|예보|확보/g;
     function hasHostWord(s) {
-        const c = compact(s);
+        const c = compact(s).replace(NOT_HOST_RE, '');
         return HOST_WORDS.some((w) => c.includes(w));
     }
 
