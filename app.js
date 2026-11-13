@@ -31458,7 +31458,7 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
         refreshDefectQuickPickBar();
     }
 
-// @@app-part 08-defect-presets.js sha=f40c91f3197e — 원본은 app/08-defect-presets.js (여기 말고 거기서 고칠 것)
+// @@app-part 08-defect-presets.js sha=9a9fcdbd9cae — 원본은 app/08-defect-presets.js (여기 말고 거기서 고칠 것)
     // --- Dynamic Defect Type Presets & Custom Adding ---
     const STEEL_MEMBER_DEFECTS = [
         '상태양호',
@@ -32030,8 +32030,12 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
      * 기존 세팅은 그대로 보이고, ⚙를 처음 열 때 분류 세팅을 그 부재 칸으로 복사한 뒤 그 부재만 고친다.
      */
     /** 세팅 칸의 부재 이름 — 2026-11-13 보(G)·보(B)는 「보」, 철골보(G)·(B)는 「철골보」 한 칸 */
+    // 2026-11-13 PC보·RC보·큰보·작은보도 「보」, RC기둥·PC기둥도 「기둥」(철골·SRC·원형은 따로)
     function settingsComponentName(component) {
-        return String(component || '').trim().replace(/\s*\(\s*[GgBb]\s*\)\s*$/, '').trim();
+        let n = String(component || '').trim().replace(/\s*\(\s*[GgBb]\s*\)\s*$/, '').trim();
+        if (/^(RC|PC)\s*보$/i.test(n) || n === '큰보' || n === '작은보') n = '보';
+        else if (/^(RC|PC)\s*기둥$/i.test(n)) n = '기둥';
+        return n;
     }
     /** 이미 만든 칸 찾기: 묶은 이름 칸, 없으면 예전 이름 칸(보(G) 등) — parts: 칸 이름 앞·뒤에 붙는 분류·종류 */
     function findOwnedSettingsBucket(map, prefix, component, suffix) {
@@ -32078,7 +32082,8 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
     function getPinnedDefectTypeChips(category, component) {
         const bucket = defectTypeSettingsBucket(category, component);
         const hidden = (window.state.hiddenDefectTypes && window.state.hiddenDefectTypes[bucket]) || [];
-        const crackKinds = getCrackKindsForComponent(component) || [];
+        // 2026-11-13 ⚙에서 지운(숨긴) 균열 종류도 실제로 안 보이게 — 전엔 균열 종류는 지워도 계속 떴다
+        const crackKinds = (getCrackKindsForComponent(component) || []).filter(t => !hidden.includes(t));
         const preset = (getDefectTypePresetFor(category, component) || []).filter(t => !hidden.includes(t));
         const custom = ((window.state.customDefectTypes && window.state.customDefectTypes[bucket]) || [])
             .filter(t => t && !isTransientDefectTypeValue(t) && !crackKinds.includes(t) && !hidden.includes(t));
@@ -32120,7 +32125,7 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
 
         let html = `<option value="" ${!currentVal ? 'selected' : ''}>—</option>`;
         const allOptions = presetList.slice();
-        if (crackKinds) crackKinds.forEach(k => { if (!allOptions.includes(k)) allOptions.push(k); });
+        if (crackKinds) crackKinds.forEach(k => { if (!allOptions.includes(k) && !hidden.includes(k)) allOptions.push(k); });
         customList.forEach(item => {
             if (!allOptions.includes(item)) allOptions.push(item);
         });
@@ -35510,8 +35515,18 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
             .filter(Boolean);
         ctx.orderList.length = 0;
         texts.forEach((t) => ctx.orderList.push(t));
-        saveStateToLocalStorage();
-        if (typeof ctx.refresh === 'function') ctx.refresh();
+        deferOptionManagerSave(ctx);
+    }
+
+    /** 2026-11-13 ⚙ 창: 화면을 먼저 바꾸고 저장(전체 자료 저장이라 느림)·수정창 갱신은 바로 뒤에 한 번만 */
+    let _optionManagerSaveTimer = 0;
+    function deferOptionManagerSave(ctx) {
+        if (_optionManagerSaveTimer) clearTimeout(_optionManagerSaveTimer);
+        _optionManagerSaveTimer = setTimeout(() => {
+            _optionManagerSaveTimer = 0;
+            saveStateToLocalStorage();
+            if (ctx && typeof ctx.refresh === 'function') ctx.refresh();
+        }, 60);
     }
 
     function bindOptionManagerDrag(listEl) {
@@ -35545,32 +35560,48 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
 
                 handle.setPointerCapture(e.pointerId);
 
+                // 2026-11-13 버벅임: 예전엔 마우스가 움직일 때마다 모든 줄의 위치를 다시 재고 자리 표시를 다시 꽂았다.
+                // 지금은 화면 한 번 그릴 때 한 번만(rAF), 줄 위치는 자리 표시가 실제로 옮겨졌을 때만 다시 잰다.
+                const rows = Array.from(listEl.querySelectorAll('.option-manager-item'));
+                let mids = null;
+                let lastScroll = listEl.scrollTop;
+                const measure = () => {
+                    mids = rows.map((other) => { const r = other.getBoundingClientRect(); return r.top + r.height / 2; });
+                    lastScroll = listEl.scrollTop;
+                };
+                let beforeRow; // 자리 표시 바로 뒤 줄(undefined = 아직 모름, null = 맨 끝)
                 const moveRowToY = (clientY) => {
                     const top = clientY - offsetY;
                     const minTop = listRect.top - rowRect.height * 0.35;
                     const maxTop = listRect.bottom - rowRect.height * 0.65;
                     row.style.top = `${Math.max(minTop, Math.min(maxTop, top))}px`;
 
-                    const probeY = clientY;
-                    const rows = Array.from(listEl.querySelectorAll('.option-manager-item:not(.is-dragging)'));
-                    let inserted = false;
-                    for (const other of rows) {
-                        const r = other.getBoundingClientRect();
-                        const mid = r.top + r.height / 2;
-                        if (probeY < mid) {
-                            listEl.insertBefore(placeholder, other);
-                            inserted = true;
-                            break;
-                        }
+                    if (!mids || listEl.scrollTop !== lastScroll) measure();
+                    let target = null;
+                    for (let i = 0; i < rows.length; i++) {
+                        if (clientY < mids[i]) { target = rows[i]; break; }
                     }
-                    if (!inserted) listEl.appendChild(placeholder);
+                    if (target === beforeRow) return;
+                    beforeRow = target;
+                    if (target) listEl.insertBefore(placeholder, target);
+                    else listEl.appendChild(placeholder);
+                    mids = null; // 자리 표시가 옮겨져 줄 위치가 바뀜 — 다음에 다시 잰다
                 };
                 moveRowToY(e.clientY);
 
+                let pendingY = null;
+                let rafId = 0;
                 const onMove = (ev) => {
-                    moveRowToY(ev.clientY);
+                    pendingY = ev.clientY;
+                    if (rafId) return;
+                    rafId = requestAnimationFrame(() => {
+                        rafId = 0;
+                        if (pendingY != null) moveRowToY(pendingY);
+                    });
                 };
                 const onUp = () => {
+                    if (rafId) { cancelAnimationFrame(rafId); rafId = 0; }
+                    if (pendingY != null) moveRowToY(pendingY);
                     try { handle.releasePointerCapture(e.pointerId); } catch (_) {}
                     handle.removeEventListener('pointermove', onMove);
                     handle.removeEventListener('pointerup', onUp);
@@ -35717,20 +35748,20 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
         const label = ctx.labelFor ? ctx.labelFor(item) : item;
         if (!await window.confirmDelete(`「${label}」 항목을 삭제할까요?`)) return;
 
-        if (isPreset) {
-            if (!ctx.hiddenList.includes(item)) ctx.hiddenList.push(item);
-        } else {
-            const idx = ctx.customList.indexOf(item);
-            if (idx !== -1) ctx.customList.splice(idx, 1);
+        // 2026-11-13 「삭제가 잘 안 된다」: 같은 이름이 기본 목록과 직접 추가 목록 둘 다에 있으면 한쪽만 지워져
+        // 그대로 남았다(두 번 눌러야 사라짐). 직접 추가에서 다 빼고, 기본 목록에 있으면 숨김에도 넣는다.
+        for (let i = ctx.customList.length - 1; i >= 0; i--) {
+            if (ctx.customList[i] === item) ctx.customList.splice(i, 1);
         }
+        if ((isPreset || (ctx.presetList || []).includes(item)) && !ctx.hiddenList.includes(item)) ctx.hiddenList.push(item);
         if (Array.isArray(ctx.orderList)) {
-            const oIdx = ctx.orderList.indexOf(item);
-            if (oIdx !== -1) ctx.orderList.splice(oIdx, 1);
+            for (let i = ctx.orderList.length - 1; i >= 0; i--) {
+                if (ctx.orderList[i] === item) ctx.orderList.splice(i, 1);
+            }
         }
 
-        saveStateToLocalStorage();
         renderOptionManagerList();
-        ctx.refresh();
+        deferOptionManagerSave(ctx);
     }
 
     async function resetOptionManagerCurrent() {

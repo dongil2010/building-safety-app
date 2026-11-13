@@ -40,6 +40,15 @@ assert.strictEqual(ctx.norm('보(G)'), '보');
 assert.strictEqual(ctx.norm('보 (b)'), '보');
 assert.strictEqual(ctx.norm('철골보(B)'), '철골보');
 assert.strictEqual(ctx.norm('기둥'), '기둥');
+assert.strictEqual(ctx.norm('PC보(G)'), '보');
+assert.strictEqual(ctx.norm('RC보'), '보');
+assert.strictEqual(ctx.norm('큰보'), '보');
+assert.strictEqual(ctx.norm('작은보'), '보');
+assert.strictEqual(ctx.norm('RC기둥'), '기둥');
+assert.strictEqual(ctx.norm('PC기둥'), '기둥');
+assert.strictEqual(ctx.norm('철골기둥'), '철골기둥');
+assert.strictEqual(ctx.norm('SRC기둥'), 'SRC기둥');
+assert.strictEqual(ctx.norm('원형기둥'), '원형기둥');
 
 // 안 고친 부재 = 분류 칸
 assert.strictEqual(ctx.bucket('구조체', '보(G)'), '구조체');
