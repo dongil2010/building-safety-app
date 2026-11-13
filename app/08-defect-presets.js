@@ -4414,6 +4414,104 @@
         window.showToast('앱 기본 세팅으로 복원했습니다.', 'success', 2800);
     }
 
+    // 2026-11-13 세팅 프리셋 3종: ① 앱 기본(코드 목록) ② 서버 프리셋 ③ 회사 기본 프리셋.
+    //  ②③은 회사 서버(safety_app/{회사}/bulkData/settingsPresets)에 부재·결함종류·원인 세팅 전체를 통째로 저장해 두고
+    //  「초기화 후 그대로 불러오기」로 되돌린다. 기존 규칙(bulkData 하위 문서는 회사 소속원 읽기·쓰기)을 그대로 씀.
+    const DEFECT_SETTINGS_PRESET_KEYS = ['customDefectTypes', 'customDefectCauses', 'customDefectComponents',
+        'hiddenDefectComponents', 'hiddenDefectTypes', 'hiddenDefectCauses', 'defectComponentOrder', 'defectTypeOrder',
+        'defectCauseOrder', 'favoriteDefectComponents', 'favoriteDefectTypes', 'favoriteDefectCauses', 'defectCauseAutoCheck'];
+    const DEFECT_SETTINGS_PRESET_LABEL = { server: '서버 프리셋', company: '회사 기본 프리셋' };
+
+    function defectSettingsPresetRef() {
+        const cid = window.state && window.state.companyId;
+        if (!cid || typeof db === 'undefined' || !db) return null;
+        return db.collection('safety_app').doc(cid).collection('bulkData').doc('settingsPresets');
+    }
+
+    function snapshotDefectSettings() {
+        const data = {};
+        DEFECT_SETTINGS_PRESET_KEYS.forEach((k) => {
+            if (window.state[k] !== undefined) data[k] = JSON.parse(JSON.stringify(window.state[k]));
+        });
+        // Firestore는 중첩 배열을 못 받으므로 문자열로 저장
+        return JSON.stringify(data);
+    }
+
+    async function saveDefectSettingsPreset(which) {
+        const label = DEFECT_SETTINGS_PRESET_LABEL[which];
+        const ref = defectSettingsPresetRef();
+        if (!label || !ref || navigator.onLine === false) {
+            window.showToast('서버에 연결된 상태(회사 로그인)에서만 저장할 수 있습니다.', 'warning', 3500);
+            return;
+        }
+        const ok = await window.appConfirm(`지금 세팅(부재·결함종류·발생원인 전체)을 「${label}」으로 저장할까요?\n이미 저장된 ${label}이 있으면 덮어씁니다.\n※ 회사 공통이라 우리 회사 모든 계정이 같이 씁니다.`);
+        if (!ok) return;
+        try {
+            await ref.set({
+                [which]: {
+                    json: snapshotDefectSettings(),
+                    savedAt: firebase.firestore.FieldValue.serverTimestamp(),
+                    savedBy: window.state.uid || ''
+                }
+            }, { merge: true });
+            window.showToast(`${label}으로 저장했습니다.`, 'success', 2800);
+        } catch (e) {
+            console.warn('세팅 프리셋 저장 실패:', e);
+            window.showToast('저장에 실패했습니다. 네트워크·권한을 확인해 주세요.', 'error', 4000);
+        }
+    }
+
+    async function loadDefectSettingsPreset(which) {
+        const label = DEFECT_SETTINGS_PRESET_LABEL[which];
+        const ref = defectSettingsPresetRef();
+        if (!label || !ref || navigator.onLine === false) {
+            window.showToast('서버에 연결된 상태(회사 로그인)에서만 불러올 수 있습니다.', 'warning', 3500);
+            return;
+        }
+        let saved = null;
+        try {
+            const snap = await ref.get();
+            saved = snap.exists ? (snap.data() || {})[which] : null;
+        } catch (e) {
+            console.warn('세팅 프리셋 조회 실패:', e);
+            window.showToast('불러오기에 실패했습니다. 네트워크·권한을 확인해 주세요.', 'error', 4000);
+            return;
+        }
+        let data = null;
+        try { data = saved && saved.json ? JSON.parse(saved.json) : null; } catch (_) { data = null; }
+        if (!data || typeof data !== 'object') {
+            window.showToast(`저장된 ${label}이 없습니다. 먼저 「현재 → ${label} 저장」을 눌러 주세요.`, 'warning', 4500);
+            return;
+        }
+        const ok = await window.appConfirm(`세팅을 초기화하고 「${label}」으로 바꿀까요?\n(지금 세팅은 사라집니다)\n※ 회사 공통이라 우리 회사 모든 계정에 적용됩니다.`);
+        if (!ok) return;
+
+        applyBuiltInDefectPinDefaults(); // 먼저 초기화
+        DEFECT_SETTINGS_PRESET_KEYS.forEach((k) => { if (data[k] !== undefined) window.state[k] = data[k]; });
+        migrateDefectComponentStateShape();
+        saveStateToLocalStorage();
+        _lastSyncedUserDefectPinJson = '';
+        scheduleSyncUserDefectPinPresets();
+
+        const cat = document.getElementById('defectCategory')?.value || '구조체';
+        populateDefectComponentDropdown(cat, '');
+        const component = getDefectComboValue(
+            document.getElementById('defectComponent'),
+            document.getElementById('defectComponentInput')
+        ) || '';
+        const presetList = getDefectTypePresetFor(cat, component) || categoryDefectPreset[cat] || [];
+        const defType = presetList.find(t => !(typeof isGoodDefectType === 'function' ? isGoodDefectType(t) : t === '상태양호')) || presetList[0] || '';
+        updateDefectTypeDropdown(cat, defType);
+        if (defType) updateDefectCauseDropdown(defType, getDefaultFirstCauseFor(defType));
+        renderOptionManagerList();
+        const ctx = getOptionManagerContext();
+        if (ctx && typeof ctx.refresh === 'function') ctx.refresh();
+        if (typeof refreshDefectQuickPickBar === 'function') refreshDefectQuickPickBar();
+        window.showToast(`${label}으로 바꿨습니다.`, 'success', 2800);
+    }
+    window.saveDefectSettingsPreset = saveDefectSettingsPreset;
+    window.loadDefectSettingsPreset = loadDefectSettingsPreset;
+
     window.openOptionManagerModal = function(fieldType) {
         window._optionManagerField = fieldType;
         window._optionManagerCauseKey = null;
