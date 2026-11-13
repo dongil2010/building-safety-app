@@ -31400,7 +31400,7 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
         refreshDefectQuickPickBar();
     }
 
-// @@app-part 08-defect-presets.js sha=6528e163f113 — 원본은 app/08-defect-presets.js (여기 말고 거기서 고칠 것)
+// @@app-part 08-defect-presets.js sha=30d752c1eeff — 원본은 app/08-defect-presets.js (여기 말고 거기서 고칠 것)
     // --- Dynamic Defect Type Presets & Custom Adding ---
     const STEEL_MEMBER_DEFECTS = [
         '상태양호',
@@ -34249,6 +34249,9 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
         '박리/박락': ['철근 부식 팽창', C_WORK, '노후화', '염해', C_POST, '동결융해 반복', '기타'],
         '콘크리트 박리': ['철근 부식 팽창', C_WORK, C_WET, '피복두께 부족', '동결융해 반복', '기타'],
         '콘크리트 박락': ['철근 부식 팽창', C_WORK, '노후화', '염해', C_POST, '기타'],
+        // 2026-11-13 공극·재료분리 = 타설 시 다짐 부족(사용자 지정). 예전엔 목록이 없어 「기타」로 들어갔다
+        '공극': ['다짐 시공미흡', C_WORK, '피복두께 부족', '기타'],
+        '재료분리': ['다짐 시공미흡', C_WORK, '피복두께 부족', '기타'],
         '신축이음/재료분리 손상': ['시공 다짐 불량', C_POUR, '피복두께 부족', '신축이음 노후화', '온도변화 수축팽창', '기타'],
         // ── 비구조체 ──
         '이격': [C_MISM, C_DS, C_WORK, C_MISM_WORK, '부등침하', C_MISM_JOINT, '기타'],
@@ -34570,7 +34573,7 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
         '철근 부식 팽창', '이질재료 거동차이', '사용자 부주의', '코너부위 응력집중', '관리미흡', '이어치기 시공미흡', '이질재료 접합부 시공미흡',
         '방청 불량', '과하중', 'SRC기둥 이질재료 간 인장변형률 상이', '외부 충격', '배수 불량', '내력부족', '조적 쌓기 불량', '상부 누수', '결로',
         '추가하중 적치', '지하수 유입', '부식', '누수', '동결융해 반복', '실 변경으로 인한 하중증가', '추가하중 설치', '부착력 저하', '시공 누락',
-        '온도변화', '기타'];
+        '온도변화', '다짐 시공미흡', '기타'];
     let _defectCauseAllowSet = null;
     function getDefaultCausePresetList(key, types, category, component) {
         const raw = getDefaultCausePresetListRaw(key, types, category, component);
