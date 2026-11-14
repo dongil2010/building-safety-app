@@ -1708,10 +1708,10 @@ html:not(.layout-desktop) .map-sel-popup-photo-add {
 .option-manager-reset-row .btn {
     flex: 1 1 auto;
 }
-/* 2026-11-15 세팅 창 버튼 4개: 2×2, 제목 + 하는 일 한 줄 설명 */
+/* 2026-11-15 세팅 창 버튼 3개: 한 줄, 제목 + 하는 일 설명 */
 .option-manager-reset-row {
     display: grid;
-    grid-template-columns: 1fr 1fr;
+    grid-template-columns: repeat(3, 1fr);
 }
 .option-manager-reset-row .option-manager-action {
     display: flex;
