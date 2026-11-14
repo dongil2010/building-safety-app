@@ -2956,9 +2956,10 @@
             return false;
         }
         if (persist) {
-            const causeKey = getCauseDisplayGroups(dType)[0]?.key || getCauseKey(dType);
-            // 2026-11-13 원인 세팅은 「분류|부재|종류」 칸(아직 없으면 종류 칸)
-            const key = typeof causeSettingsBucket === 'function' ? causeSettingsBucket(causeKey) : causeKey;
+            const g0 = getCauseDisplayGroups(dType)[0];
+            const causeKey = g0?.key || getCauseKey(dType);
+            // 2026-11-13 원인 세팅은 「분류|부재|종류」 칸(아직 없으면 종류 칸). 2026-11-15 결함 종류 칸이 있으면 그 칸
+            const key = typeof causeSettingsBucket === 'function' ? causeSettingsBucket(causeKey, undefined, g0 && g0.types) : causeKey;
             if (!window.state.customDefectCauses) window.state.customDefectCauses = {};
             if (!window.state.customDefectCauses[key]) window.state.customDefectCauses[key] = [];
             if (!window.state.customDefectCauses[key].includes(trimmed)) {

@@ -95,6 +95,7 @@ vm.runInContext(HELPERS.concat([
     extractFunction(app, 'function causeTreeContext('),
     extractFunction(app, 'function causeTreeBucketKey('),
     extractFunction(app, 'function findOwnedCauseBucket('),
+    extractFunction(app, 'function causeSettingsTypeName('),
     extractFunction(app, 'function causeSettingsBucket('),
     extractFunction(app, 'function ownCauseSettingsBucket('),
     'this.bucket = causeSettingsBucket; this.own = ownCauseSettingsBucket;'
@@ -111,5 +112,16 @@ fields.defectComponent = '기둥';
 assert.strictEqual(cctx.bucket('균열'), '균열', '기둥은 아직 종류 칸');
 fields.defectComponent = '보(B)';
 assert.strictEqual(cctx.bucket('균열'), cb, '보(B)도 보 칸');
+// 2026-11-15 결함 종류별 원인 칸: 종류 칸이 없으면 원인 묶음 칸, 만들면 그 종류만 따로
+assert.strictEqual(cctx.bucket('균열', undefined, ['하부면 균열']), cb, '하부면 균열 칸이 없으면 보|균열 칸');
+const hb = cctx.own('균열', undefined, ['하부면 균열']);
+assert.strictEqual(hb, '구조체|보|하부면 균열');
+assert.strictEqual(j(cs.customDefectCauses[hb]), j(['바닥 침하', '보 처짐']), '처음 만들 때 보|균열 칸을 복사');
+cs.customDefectCauses[hb].push('하부면만');
+assert.ok(!cs.customDefectCauses[cb].includes('하부면만'), '수직균열(보|균열 칸)은 그대로');
+assert.strictEqual(cctx.bucket('균열', undefined, ['하부면 균열']), hb);
+assert.strictEqual(cctx.bucket('균열', undefined, ['수직균열']), cb, '다른 균열 종류는 여전히 보|균열');
+assert.strictEqual(cctx.bucket('균열', undefined, ['수직균열', '하부면 균열']), cb, '여러 종류를 같이 고르면 묶음 칸');
+assert.strictEqual(cctx.bucket('기타', undefined, ['중성화']), '기타', '종류 칸이 없으면 기타 칸');
 
 console.log('test-defect-type-per-component: ok');

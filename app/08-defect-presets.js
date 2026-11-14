@@ -860,7 +860,7 @@
         const groups = getCauseDisplayGroups(t);
         const res = q.pickCausesAfterTypeChange({
             groupOptions: groups.map((g) => getCauseOptionsForKey(g.key, g.types)),
-            groupFavorites: groups.map((g) => getDefectFavoriteList('cause', causeSettingsBucket(g.key))),
+            groupFavorites: groups.map((g) => getDefectFavoriteList('cause', causeSettingsBucket(g.key, undefined, g.types))),
             selected: Array.isArray(selectedOverride) ? selectedOverride : getSelectedCausesFromUi(),
             autoPicked: window._defectAutoCauses || [],
             autoCheck: window.state.defectCauseAutoCheck !== false
@@ -3474,18 +3474,32 @@
         if (!cat || !k) return '';
         return findOwnedSettingsBucket(window.state.customDefectCauses, `${cat}|`, t.component, `|${k}`);
     }
-    function causeSettingsBucket(key, tree) {
-        const t = tree || causeTreeContext();
-        return findOwnedCauseBucket(t, key) || key;
+    /**
+     * 2026-11-15 원인 세팅을 결함 종류마다: 원인 묶음 하나(균열·기타 …)를 여러 결함 종류가 같이 쓰면
+     * (수직균열·하부면 균열 → 균열, 중성화·진동 → 기타) 종류별로 원인을 다르게 둘 수 없었다.
+     * 종류 하나만 고른 원인 묶음이면 그 종류 이름 칸(「분류|부재|하부면 균열」)을 먼저 보고, 없으면 예전 칸.
+     */
+    function causeSettingsTypeName(key, types) {
+        const k = String(key || '').trim();
+        const list = (Array.isArray(types) ? types : []).map((x) => String(x || '').trim()).filter(Boolean);
+        if (list.length !== 1) return k;
+        const t = list[0];
+        return (t && t !== k && t !== '기타') ? t : k;
     }
-    function ownCauseSettingsBucket(key, tree) {
+    function causeSettingsBucket(key, tree, types) {
         const t = tree || causeTreeContext();
-        const b = causeTreeBucketKey(t.category, t.component, key);
+        const sub = causeSettingsTypeName(key, types);
+        return (sub !== key && findOwnedCauseBucket(t, sub)) || findOwnedCauseBucket(t, key) || key;
+    }
+    function ownCauseSettingsBucket(key, tree, types) {
+        const t = tree || causeTreeContext();
+        const sub = causeSettingsTypeName(key, types);
+        const b = causeTreeBucketKey(t.category, t.component, sub);
         if (!b) return key;
         const st = window.state;
         if (st.customDefectCauses && Array.isArray(st.customDefectCauses[b])) return b;
         seedCauseSettingsFromLegacyKey(key);
-        const src = findOwnedCauseBucket(t, key) || key;
+        const src = causeSettingsBucket(key, t, types);
         const favNow = typeof getDefectFavoriteList === 'function' ? getDefectFavoriteList('cause', src) : null;
         ['customDefectCauses', 'hiddenDefectCauses', 'defectCauseOrder'].forEach((f) => {
             if (!st[f] || typeof st[f] !== 'object') st[f] = {};
@@ -3502,7 +3516,7 @@
         if (!window.state.customDefectCauses) window.state.customDefectCauses = {};
         if (!window.state.hiddenDefectCauses) window.state.hiddenDefectCauses = {};
         seedCauseSettingsFromLegacyKey(key);
-        const bucket = causeSettingsBucket(key);
+        const bucket = causeSettingsBucket(key, undefined, types);
         const hidden = window.state.hiddenDefectCauses[bucket] || [];
         const ctx = getCurrentDefectCauseContext();
         const presetList = getDefaultCausePresetList(key, types, ctx.category, ctx.component)
@@ -4016,7 +4030,12 @@
             // 세팅 창의 「결함 종류」 선택으로 다른 종류의 원인 목록도 바로 편집
             // 결함 종류를 여러 개 고른 마킹은 마지막에 고른 종류를 먼저 보여 준다(「콘크리트 박리, 도장 박리」→ 도장 박리)
             const causeGroups = getCauseDisplayGroups(dType);
-            const key = window._optionManagerCauseKey || causeGroups[causeGroups.length - 1]?.key || getCauseKey(dType);
+            const lastGroup = causeGroups[causeGroups.length - 1];
+            // 2026-11-15 고른 값이 원인 묶음(균열·기타 …)이 아니라 결함 종류 이름이면 그 종류 칸을 연다
+            const pick = window._optionManagerCauseKey
+                || (lastGroup ? causeSettingsTypeName(lastGroup.key, lastGroup.types) : '') || getCauseKey(dType);
+            const key = defectCausePreset[pick] ? pick : getCauseKey(pick);
+            const pickTypes = pick !== key ? [pick] : (lastGroup && lastGroup.key === key ? lastGroup.types : undefined);
             if (!window.state.customDefectCauses) window.state.customDefectCauses = {};
             if (!window.state.hiddenDefectCauses) window.state.hiddenDefectCauses = {};
             seedCauseSettingsFromLegacyKey(key);
@@ -4024,17 +4043,17 @@
             if (!window.state.customDefectCauses[key]) window.state.customDefectCauses[key] = [];
             // 분류·부재를 골랐으면 「분류|부재|종류」 칸만 고친다 — 같은 종류라도 다른 부재는 그대로 (2026-11-13)
             const tree = causeTreeContext();
-            const causeBucket = ownCauseSettingsBucket(key, tree);
-            const treeLabel = causeBucket !== key ? `${tree.category} · ${settingsComponentName(tree.component)} · ${key}` : key;
+            const causeBucket = ownCauseSettingsBucket(key, tree, pickTypes);
+            const treeLabel = causeBucket !== key ? `${tree.category} · ${settingsComponentName(tree.component)} · ${pick}` : key;
             return {
                 title: `발생 원인 세팅 (${treeLabel})`,
                 favField: 'cause',
                 favBucket: causeBucket,
-                causeKey: key,
+                causeKey: pick,
                 presetList: (() => {
                     const cctx = getCurrentDefectCauseContext();
                     const g = getCauseDisplayGroups(dType).find(x => x.key === key);
-                    return getDefaultCausePresetList(key, g ? g.types : undefined, cctx.category, cctx.component);
+                    return getDefaultCausePresetList(key, pickTypes || (g ? g.types : undefined), cctx.category, cctx.component);
                 })(),
                 hiddenList: window.state.hiddenDefectCauses[causeBucket],
                 customList: window.state.customDefectCauses[causeBucket],
@@ -4250,6 +4269,13 @@
         const pushKey = (k) => { if (k && !seen.has(k)) { seen.add(k); keys.push(k); } };
         const curKey = ctx.causeKey || ctx.favBucket;
         pushKey(curKey);
+        // 2026-11-15 지금 부재에 결함 종류별 원인 칸(「분류|부재|하부면 균열」)이 있으면 그 종류도 고를 수 있게
+        const tr = causeTreeContext();
+        const trComp = settingsComponentName(tr.component);
+        if (tr.category && trComp) {
+            const pre = `${tr.category}|${trComp}|`;
+            Object.keys(window.state.customDefectCauses || {}).filter((k) => k.startsWith(pre)).forEach((k) => pushKey(k.slice(pre.length)));
+        }
         Object.keys(defectCausePreset).forEach(pushKey);
         // 「분류|부재|종류」 칸은 종류 목록에 넣지 않는다(지금 부재 기준으로 열린다)
         Object.keys(window.state.customDefectCauses || {}).filter((k) => !String(k).includes('|')).forEach(pushKey);
