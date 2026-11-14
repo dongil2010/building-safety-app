@@ -1708,6 +1708,34 @@ html:not(.layout-desktop) .map-sel-popup-photo-add {
 .option-manager-reset-row .btn {
     flex: 1 1 auto;
 }
+/* 2026-11-15 세팅 창 버튼 4개: 2×2, 제목 + 하는 일 한 줄 설명 */
+.option-manager-reset-row {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+}
+.option-manager-reset-row .option-manager-action {
+    display: flex;
+    flex-direction: column;
+    align-items: flex-start;
+    gap: 0.2rem;
+    text-align: left;
+    white-space: normal;
+    height: auto;
+    padding: 0.45rem 0.6rem;
+    line-height: 1.3;
+}
+.option-manager-action .oma-title {
+    font-weight: 600;
+}
+.option-manager-action .oma-desc {
+    font-size: 0.72rem;
+    font-weight: 400;
+    color: var(--text-muted);
+    word-break: keep-all;
+}
+@media (max-width: 420px) {
+    .option-manager-reset-row { grid-template-columns: 1fr; }
+}
 
 .option-manager-item {
     display: flex;

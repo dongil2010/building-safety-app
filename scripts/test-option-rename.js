@@ -21,7 +21,8 @@ vm.createContext(ctx);
 vm.runInContext([
     extractFunction(app, 'function replaceInList('),
     extractFunction(app, 'function moveSettingsBucket('),
-    'this.replaceInList = replaceInList; this.moveSettingsBucket = moveSettingsBucket;'
+    extractFunction(app, 'function nextCopyName('),
+    'this.replaceInList = replaceInList; this.moveSettingsBucket = moveSettingsBucket; this.nextCopyName = nextCopyName;'
 ].join('\n'), ctx);
 
 const l = ['a', 'b', 'c'];
@@ -45,5 +46,12 @@ st.customDefectCauses['구조체|A|균열'] = ['old'];
 st.customDefectCauses['구조체|B|균열'] = ['keep'];
 ctx.moveSettingsBucket(['customDefectCauses'], '구조체|A|균열', '구조체|B|균열');
 assert.deepStrictEqual(st.customDefectCauses['구조체|B|균열'], ['keep']);
+
+// 2026-11-15 복사: 「이름-1」, 이미 있으면 -2
+assert.strictEqual(ctx.nextCopyName('하부면 균열', new Set(['하부면 균열'])), '하부면 균열-1');
+assert.strictEqual(ctx.nextCopyName('보(G)', new Set(['보(G)', '보(G)-1'])), '보(G)-2');
+assert.ok(app.includes('copyOptionItem(text)'), '복사 버튼');
+assert.ok(app.includes("carryCauseSettingsToRenamedType(cat, component, item, next, { keepOld: true })"), '결함 종류 복사는 원인까지(원본 칸 유지)');
+assert.ok(app.includes('copyComponentSettings(ctx.favBucket, item, next)'), '부재 복사는 결함 종류·원인까지');
 
 console.log('test-option-rename: ok');
