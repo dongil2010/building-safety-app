@@ -1777,6 +1777,19 @@ html:not(.layout-desktop) .map-sel-popup-photo-add {
     font-size: 0.85rem;
 }
 
+.option-manager-item-rename {
+    flex-shrink: 0;
+    background: none;
+    border: none;
+    color: var(--text-muted);
+    cursor: pointer;
+    padding: 0.15rem 0.35rem;
+    font-size: 0.8rem;
+}
+.option-manager-item-rename:hover {
+    color: #2563eb;
+}
+
 .option-manager-item-delete:hover:not(:disabled) {
     color: #ef4444;
 }

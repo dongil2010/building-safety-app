@@ -85,8 +85,9 @@
     const EXT_STONE_DEFECTS = [
         '상태양호', '파손/팟칭', '들뜸/탈락', '줄눈 손상', '철물 노출·녹', '변색/오염', '기타'
     ];
+    // 2026-11-15 도장은 도막 결함만 — 「균열」은 바탕(벽체·기둥 …) 결함이라 도장 목록에서 뺌
     const EXT_PAINT_DEFECTS = [
-        '상태양호', '균열', '변색/오염', '박리/탈락', '부풀음', '기타'
+        '상태양호', '변색/오염', '박리/탈락', '부풀음', '기타'
     ];
     const METAL_PANEL_FINISH_DEFECTS = [
         '상태양호', '부식', '변형/들뜸', '이음부 손상', '도장 박리', '체결부 이완', '기타'
@@ -98,7 +99,7 @@
         '상태양호', '들뜸/탈락', '파손', '변색/오염', '이격', '기타'
     ];
     const INT_PAINT_DEFECTS = [
-        '상태양호', '균열', '변색/오염', '박리/탈락', '곰팡이·결로 흔적', '기타'
+        '상태양호', '변색/오염', '박리/탈락', '곰팡이·결로 흔적', '기타'
     ];
     const CEILING_FINISH_DEFECTS = [
         '상태양호', '들뜸/탈락', '처짐', '오염/변색', '누수 흔적', '파손', '기타'
@@ -4242,6 +4243,15 @@
             label.textContent = ctx.labelFor(text);
             row.appendChild(label);
 
+            const renameBtn = document.createElement('button');
+            renameBtn.type = 'button';
+            renameBtn.className = 'option-manager-item-rename';
+            renameBtn.innerHTML = '<i class="fa-solid fa-pen"></i>';
+            renameBtn.title = '이름 바꾸기 (원인·순서·★ 그대로)';
+            renameBtn.setAttribute('aria-label', '이름 바꾸기');
+            renameBtn.addEventListener('click', () => renameOptionItem(text));
+            row.appendChild(renameBtn);
+
             const delBtn = document.createElement('button');
             delBtn.type = 'button';
             delBtn.className = 'option-manager-item-delete';
@@ -4270,16 +4280,18 @@
         const pushKey = (k) => { if (k && !seen.has(k)) { seen.add(k); keys.push(k); } };
         const curKey = ctx.causePick || ctx.causeKey || ctx.favBucket;
         pushKey(curKey);
-        // 2026-11-15 지금 부재에 결함 종류별 원인 칸(「분류|부재|하부면 균열」)이 있으면 그 종류도 고를 수 있게
+        // 2026-11-15 부재를 골랐으면 그 부재의 결함 종류만(창호에만 있는 「유리 파손」이 벽체 마감재 원인 세팅에도 보이던 것).
+        //  부재가 없을 때만 예전처럼 앱이 아는 원인 묶음 전부
         const tr = causeTreeContext();
         const trComp = settingsComponentName(tr.component);
         if (tr.category && trComp) {
-            const pre = `${tr.category}|${trComp}|`;
-            Object.keys(window.state.customDefectCauses || {}).filter((k) => k.startsWith(pre)).forEach((k) => pushKey(k.slice(pre.length)));
+            const isGood = (t) => (typeof isGoodDefectType === 'function' ? isGoodDefectType(t) : t === '상태양호');
+            (getPinnedDefectTypeChips(tr.category, tr.component) || []).filter((t) => t && !isGood(t)).forEach(pushKey);
+        } else {
+            Object.keys(defectCausePreset).forEach(pushKey);
+            // 「분류|부재|종류」 칸은 종류 목록에 넣지 않는다(지금 부재 기준으로 열린다)
+            Object.keys(window.state.customDefectCauses || {}).filter((k) => !String(k).includes('|')).forEach(pushKey);
         }
-        Object.keys(defectCausePreset).forEach(pushKey);
-        // 「분류|부재|종류」 칸은 종류 목록에 넣지 않는다(지금 부재 기준으로 열린다)
-        Object.keys(window.state.customDefectCauses || {}).filter((k) => !String(k).includes('|')).forEach(pushKey);
         const autoOn = window.state.defectCauseAutoCheck !== false;
         host.innerHTML = `
             <label class="option-manager-extra-row">결함 종류
@@ -4303,6 +4315,121 @@
                 if (typeof saveStateToLocalStorage === 'function') saveStateToLocalStorage();
             });
         }
+    }
+
+    /**
+     * 2026-11-15 ⚙ 세팅 창 이름 바꾸기 — 지우고 다시 추가하면 딸린 원인·순서·★가 다 날아가 불편했다.
+     * 목록 안 자리·★는 그대로 두고, 결함 종류면 그 종류의 원인 칸을, 부재면 그 부재의 결함 종류·원인 칸을 새 이름으로 옮긴다.
+     * 이미 저장된 결함 기록의 글자는 바꾸지 않는다.
+     */
+    const OPTION_FAV_STATE_KEY = { component: 'favoriteDefectComponents', type: 'favoriteDefectTypes', cause: 'favoriteDefectCauses' };
+    function replaceInList(list, from, to) {
+        if (!Array.isArray(list)) return;
+        const at = list.indexOf(from);
+        if (at < 0) return;
+        if (list.includes(to)) list.splice(at, 1);
+        else list[at] = to;
+    }
+    function moveSettingsBucket(fields, from, to) {
+        const st = window.state;
+        fields.forEach((f) => {
+            const map = st[f];
+            if (!map || typeof map !== 'object' || !Array.isArray(map[from])) return;
+            if (!Array.isArray(map[to])) map[to] = map[from];
+            delete map[from];
+        });
+    }
+    const CAUSE_BUCKET_FIELDS = ['customDefectCauses', 'hiddenDefectCauses', 'defectCauseOrder', 'favoriteDefectCauses'];
+    const TYPE_BUCKET_FIELDS = ['customDefectTypes', 'hiddenDefectTypes', 'defectTypeOrder', 'favoriteDefectTypes'];
+    /** 결함 종류 이름이 바뀌어도 원인 목록이 그대로 보이게: 옛 종류에서 보이던 원인을 새 종류 칸에 그대로 적는다 */
+    function carryCauseSettingsToRenamedType(category, component, oldType, newType) {
+        const st = window.state;
+        const comp = settingsComponentName(component);
+        if (!category || !comp) return;
+        const oldKey = getCauseKey(oldType);
+        const list = getCauseOptionsForKey(oldKey, [oldType]).slice();
+        const oldBucket = causeSettingsBucket(oldKey, { category, component }, [oldType]);
+        const favs = (typeof getDefectFavoriteList === 'function' ? getDefectFavoriteList('cause', oldBucket) : [])
+            .filter((c) => list.includes(c));
+        const newKey = getCauseKey(newType);
+        const allDef = new Set(getAllDefaultCausesForKey(newKey));
+        const universe = [...new Set([...getDefaultCausePresetList(newKey, [newType], category, component), ...allDef])];
+        const orderOk = list.some((c) => allDef.has(c));
+        const b = `${category}|${comp}|${causeSettingsTypeName(newKey, [newType])}`;
+        const oldOwn = `${category}|${comp}|${oldType}`;
+        if (oldOwn !== b) CAUSE_BUCKET_FIELDS.forEach((f) => { if (st[f] && typeof st[f] === 'object') delete st[f][oldOwn]; });
+        CAUSE_BUCKET_FIELDS.forEach((f) => { if (!st[f] || typeof st[f] !== 'object') st[f] = {}; });
+        st.customDefectCauses[b] = list;
+        st.hiddenDefectCauses[b] = universe.filter((c) => (orderOk ? !list.includes(c) : !favs.includes(c)));
+        st.defectCauseOrder[b] = list.slice();
+        st.favoriteDefectCauses[b] = favs;
+    }
+    async function renameOptionItem(item) {
+        const ctx = getOptionManagerContext();
+        if (!ctx) return;
+        const label = ctx.labelFor ? ctx.labelFor(item) : item;
+        const raw = await window.appPrompt(`「${label}」의 새 이름`, item);
+        const next = String(raw == null ? '' : raw).trim();
+        if (!next || next === item) return;
+        if (/[,，]/.test(next) && ctx.favField !== 'component') {
+            window.showToast('이름에 쉼표(,)는 쓸 수 없습니다.', 'warning');
+            return;
+        }
+        const visible = getOrderedVisibleOptionItems(ctx).map((x) => x.text);
+        if (visible.includes(next)) {
+            window.showToast(`「${next}」은(는) 이미 목록에 있습니다.`, 'warning');
+            return;
+        }
+        const st = window.state;
+        // 결함 종류: 옛 이름일 때 보이던 원인을 먼저 새 이름 칸으로(목록을 바꾸기 전에 읽어야 함)
+        if (ctx.favField === 'type') {
+            const cat = String(document.getElementById('defectCategory')?.value || '').trim();
+            const component = getDefectComboValue(
+                document.getElementById('defectComponent'),
+                document.getElementById('defectComponentInput')
+            ) || '';
+            carryCauseSettingsToRenamedType(cat, component, item, next);
+        }
+        // 목록: 같은 자리에 새 이름, 기본 항목이면 옛 이름은 숨김
+        if (Array.isArray(ctx.orderList) && !ctx.orderList.length) visible.forEach((t) => ctx.orderList.push(t));
+        if (ctx.customList.includes(item)) replaceInList(ctx.customList, item, next);
+        else if (!ctx.customList.includes(next)) ctx.customList.push(next);
+        if ((ctx.presetList || []).includes(item) && !ctx.hiddenList.includes(item)) ctx.hiddenList.push(item);
+        for (let i = ctx.hiddenList.length - 1; i >= 0; i--) if (ctx.hiddenList[i] === next) ctx.hiddenList.splice(i, 1);
+        replaceInList(ctx.orderList, item, next);
+        const favKey = OPTION_FAV_STATE_KEY[ctx.favField];
+        if (favKey && ctx.favBucket) {
+            const favNow = typeof getDefectFavoriteList === 'function' ? getDefectFavoriteList(ctx.favField, ctx.favBucket) : [];
+            if (favNow.includes(item)) {
+                if (!st[favKey] || typeof st[favKey] !== 'object') st[favKey] = {};
+                const nextFav = favNow.slice();
+                replaceInList(nextFav, item, next);
+                st[favKey][ctx.favBucket] = nextFav;
+            }
+        }
+        // 부재: 그 부재의 결함 종류 칸·원인 칸을 새 이름으로
+        if (ctx.favField === 'component') {
+            const cat = ctx.favBucket;
+            const from = settingsComponentName(item);
+            const to = settingsComponentName(next);
+            if (from && to && from !== to) {
+                moveSettingsBucket(TYPE_BUCKET_FIELDS, `${cat}|${from}`, `${cat}|${to}`);
+                Object.keys(st.customDefectCauses || {}).filter((k) => k.startsWith(`${cat}|${from}|`)).forEach((k) => {
+                    moveSettingsBucket(CAUSE_BUCKET_FIELDS, k, `${cat}|${to}|${k.slice(cat.length + from.length + 2)}`);
+                });
+            }
+            const sel = document.getElementById('defectComponent');
+            const inp = document.getElementById('defectComponentInput');
+            if (getDefectComboValue(sel, inp) === item && typeof syncDefectComboFields === 'function') syncDefectComboFields(sel, inp, next);
+        }
+        if (ctx.favField === 'type') {
+            const sel = document.getElementById('defectType');
+            const inp = document.getElementById('defectTypeInput');
+            if (getDefectComboValue(sel, inp) === item && typeof syncDefectComboFields === 'function') syncDefectComboFields(sel, inp, next);
+        }
+        renderOptionManagerList();
+        deferOptionManagerSave(ctx);
+        window.showToast(`「${label}」 → 「${next}」 이름을 바꿨습니다.`, 'success', 2500);
     }
 
     async function deleteOptionItem(item, isPreset) {
