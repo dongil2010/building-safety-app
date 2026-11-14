@@ -31460,7 +31460,7 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
         refreshDefectQuickPickBar();
     }
 
-// @@app-part 08-defect-presets.js sha=2af7dbf2a0c7 — 원본은 app/08-defect-presets.js (여기 말고 거기서 고칠 것)
+// @@app-part 08-defect-presets.js sha=a603dc5c7a21 — 원본은 app/08-defect-presets.js (여기 말고 거기서 고칠 것)
     // --- Dynamic Defect Type Presets & Custom Adding ---
     const STEEL_MEMBER_DEFECTS = [
         '상태양호',
@@ -35511,7 +35511,8 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
                 title: `발생 원인 세팅 (${treeLabel})`,
                 favField: 'cause',
                 favBucket: causeBucket,
-                causeKey: pick,
+                causeKey: key,
+                causePick: pick,
                 presetList: (() => {
                     const cctx = getCurrentDefectCauseContext();
                     const g = getCauseDisplayGroups(dType).find(x => x.key === key);
@@ -35729,7 +35730,7 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
         const keys = [];
         const seen = new Set();
         const pushKey = (k) => { if (k && !seen.has(k)) { seen.add(k); keys.push(k); } };
-        const curKey = ctx.causeKey || ctx.favBucket;
+        const curKey = ctx.causePick || ctx.causeKey || ctx.favBucket;
         pushKey(curKey);
         // 2026-11-15 지금 부재에 결함 종류별 원인 칸(「분류|부재|하부면 균열」)이 있으면 그 종류도 고를 수 있게
         const tr = causeTreeContext();

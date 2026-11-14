@@ -4049,7 +4049,8 @@
                 title: `발생 원인 세팅 (${treeLabel})`,
                 favField: 'cause',
                 favBucket: causeBucket,
-                causeKey: pick,
+                causeKey: key,
+                causePick: pick,
                 presetList: (() => {
                     const cctx = getCurrentDefectCauseContext();
                     const g = getCauseDisplayGroups(dType).find(x => x.key === key);
@@ -4267,7 +4268,7 @@
         const keys = [];
         const seen = new Set();
         const pushKey = (k) => { if (k && !seen.has(k)) { seen.add(k); keys.push(k); } };
-        const curKey = ctx.causeKey || ctx.favBucket;
+        const curKey = ctx.causePick || ctx.causeKey || ctx.favBucket;
         pushKey(curKey);
         // 2026-11-15 지금 부재에 결함 종류별 원인 칸(「분류|부재|하부면 균열」)이 있으면 그 종류도 고를 수 있게
         const tr = causeTreeContext();
