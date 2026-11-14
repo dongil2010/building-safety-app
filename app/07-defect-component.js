@@ -43,10 +43,11 @@
     /** 분류별 기본 부재 칩. 비구조체·마감재에는 맨몸 구조 부재가 끼지 않게 한 번 더 걸러, 미선택은 구조체로 폴백하지 않음. */
     function getDefectComponentPresetForCategory(category) {
         const cat = String(category || '').trim();
+        // 2026-11-14 기본 목록에 「기타」는 넣지 않음(필요하면 직접 추가)
         if (cat === '비구조체' || cat === '마감재') {
-            return (DEFECT_COMPONENT_PRESET[cat] || []).filter((n) => !isBareStructuralMemberChipName(n));
+            return (DEFECT_COMPONENT_PRESET[cat] || []).filter((n) => n !== '기타' && !isBareStructuralMemberChipName(n));
         }
-        if (cat === '구조체') return (DEFECT_COMPONENT_PRESET['구조체'] || []).slice();
+        if (cat === '구조체') return (DEFECT_COMPONENT_PRESET['구조체'] || []).filter((n) => n !== '기타');
         return [];
     }
     function finishMemberChooserApi() {

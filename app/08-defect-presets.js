@@ -420,7 +420,8 @@
         if (!Array.isArray(raw)) return raw;
         if (!_defectTypeAllowSet) _defectTypeAllowSet = new Set(DEFECT_TYPE_ALLOW);
         const out = raw.filter((t) => _defectTypeAllowSet.has(t));
-        return out.some((t) => t !== '기타' && t !== '상태양호') ? out : raw;
+        // 2026-11-14 기본 목록에 「기타」는 넣지 않음(필요하면 직접 추가)
+        return (out.some((t) => t !== '기타' && t !== '상태양호') ? out : raw).filter((t) => t !== '기타');
     }
     function getDefectTypePresetForRaw(category, component) {
         const key = normalizeComponentKey(component);
@@ -3238,13 +3239,14 @@
             _defectCauseAllowSet = new Set(DEFECT_CAUSE_ALLOW.concat(CRACK_TOP_CAUSES, LEAK_TOP_CAUSES, FINISH_TOP_CAUSES));
             Object.values(CRACK_LEAD_BY_GROUP).forEach((l) => l.forEach((c) => _defectCauseAllowSet.add(c)));
         }
-        const out = raw.filter((c) => _defectCauseAllowSet.has(c));
-        if (out.some((c) => c !== '기타')) return out;
+        // 2026-11-14 기본 목록에 「기타」는 넣지 않음(필요하면 직접 추가)
+        const out = raw.filter((c) => c !== '기타' && _defectCauseAllowSet.has(c));
+        if (out.length) return out;
         // 그 종류에 쓸 원인이 엑셀에 하나도 없으면(기타·도장 박리·줄눈 손상 …) 엑셀에서 많이 쓰인 일반 원인으로
         const rk = companyCauseRankKey(key) || (/이격/.test(String(key)) ? '이격' : '');
         const base = (COMPANY_CAUSE_RANK[rk] || ['시공미흡', '경과년수 증대에 따른 노후화', '관리미흡', '사용자 부주의'])
             .filter((c) => _defectCauseAllowSet.has(c) && c !== '기타').slice(0, 6);
-        return uniqCauseList(base.concat(raw.includes('기타') ? ['기타'] : []));
+        return uniqCauseList(base);
     }
     function getDefaultCausePresetListRaw(key, types, category, component) {
         const k = String(key || '').trim() || '기타';

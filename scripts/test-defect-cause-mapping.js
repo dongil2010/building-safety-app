@@ -353,7 +353,8 @@ function testComponentChangeKeepsManualCauses() {
 // 그래도 직접 입력한 중량물류 부재명(물탱크·실외기 …)은 중량물 목록(엑셀에 나온 「중량물 적치」)이 나오고 원인 연결도 유지.
 function testHeavyLoadItems() {
     env.window.state = {};
-    const HEAVY = ['상태양호', '중량물 적치', '기타'];
+    // 2026-11-14 기본 목록에서 「기타」는 뺌(원본 상수에는 남아 있음)
+    const HEAVY = ['상태양호', '중량물 적치'];
     const comps = api.DEFECT_COMPONENT_PRESET['비구조체'];
     assert.ok(!comps.includes('중량물'), '비구조체 기본 부재에서 중량물은 빠짐');
     assert.strictEqual(comps[comps.length - 1], '기타');
@@ -365,7 +366,7 @@ function testHeavyLoadItems() {
     // 부재를 안 고른 비구조체에도 「중량물 적치」는 보임(엑셀에 나온 종류)
     const cat = api.getDefectTypePresetFor('비구조체', '');
     assert.ok(cat.includes('중량물 적치') && !cat.includes('중량물 설치'));
-    assert.strictEqual(cat[cat.length - 1], '기타');
+    assert.ok(!cat.includes('기타'), '기본 결함 종류 목록에 기타 없음');
     // 원인 자동 체크 = 회사 결함원인추정 표현
     assert.strictEqual(firstFor('비구조체', '중량물', '중량물 적치'), '추가하중 적치'); // 엑셀에 쓰인 원인 중 맨 위(원래 맨 위 「중량물 적치」 원인은 엑셀에 없어 기본에서 빠짐)
     assert.strictEqual(firstFor('비구조체', '', '중량물 적치'), '추가하중 적치');

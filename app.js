@@ -28373,7 +28373,7 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
         ctx.restore();
     }
 
-// @@app-part 07-defect-component.js sha=a9b1dd01b93b — 원본은 app/07-defect-component.js (여기 말고 거기서 고칠 것)
+// @@app-part 07-defect-component.js sha=39903b2bebc8 — 원본은 app/07-defect-component.js (여기 말고 거기서 고칠 것)
     // --- Dynamic Defect Component(부재 명칭) — 분류별 플랫 프리셋 ---
     // 2026-09-28 접합부는 거더/빔 구분이 필요 없음 — 큰보·작은보 → 보, 철골거더·철골빔 → 철골보
     // 2026-11-04 보(G)·보(B) 다시 넣음(사용자) — 통계 평가 표가 접합부 결함을 맞닿은 부재 줄(큰보·작은보·슬래브…)에 같이 세서
@@ -28418,10 +28418,11 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
     /** 분류별 기본 부재 칩. 비구조체·마감재에는 맨몸 구조 부재가 끼지 않게 한 번 더 걸러, 미선택은 구조체로 폴백하지 않음. */
     function getDefectComponentPresetForCategory(category) {
         const cat = String(category || '').trim();
+        // 2026-11-14 기본 목록에 「기타」는 넣지 않음(필요하면 직접 추가)
         if (cat === '비구조체' || cat === '마감재') {
-            return (DEFECT_COMPONENT_PRESET[cat] || []).filter((n) => !isBareStructuralMemberChipName(n));
+            return (DEFECT_COMPONENT_PRESET[cat] || []).filter((n) => n !== '기타' && !isBareStructuralMemberChipName(n));
         }
-        if (cat === '구조체') return (DEFECT_COMPONENT_PRESET['구조체'] || []).slice();
+        if (cat === '구조체') return (DEFECT_COMPONENT_PRESET['구조체'] || []).filter((n) => n !== '기타');
         return [];
     }
     function finishMemberChooserApi() {
@@ -31458,7 +31459,7 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
         refreshDefectQuickPickBar();
     }
 
-// @@app-part 08-defect-presets.js sha=a009b6da1fe0 — 원본은 app/08-defect-presets.js (여기 말고 거기서 고칠 것)
+// @@app-part 08-defect-presets.js sha=fdd8c5175708 — 원본은 app/08-defect-presets.js (여기 말고 거기서 고칠 것)
     // --- Dynamic Defect Type Presets & Custom Adding ---
     const STEEL_MEMBER_DEFECTS = [
         '상태양호',
@@ -31880,7 +31881,8 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
         if (!Array.isArray(raw)) return raw;
         if (!_defectTypeAllowSet) _defectTypeAllowSet = new Set(DEFECT_TYPE_ALLOW);
         const out = raw.filter((t) => _defectTypeAllowSet.has(t));
-        return out.some((t) => t !== '기타' && t !== '상태양호') ? out : raw;
+        // 2026-11-14 기본 목록에 「기타」는 넣지 않음(필요하면 직접 추가)
+        return (out.some((t) => t !== '기타' && t !== '상태양호') ? out : raw).filter((t) => t !== '기타');
     }
     function getDefectTypePresetForRaw(category, component) {
         const key = normalizeComponentKey(component);
@@ -34698,13 +34700,14 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
             _defectCauseAllowSet = new Set(DEFECT_CAUSE_ALLOW.concat(CRACK_TOP_CAUSES, LEAK_TOP_CAUSES, FINISH_TOP_CAUSES));
             Object.values(CRACK_LEAD_BY_GROUP).forEach((l) => l.forEach((c) => _defectCauseAllowSet.add(c)));
         }
-        const out = raw.filter((c) => _defectCauseAllowSet.has(c));
-        if (out.some((c) => c !== '기타')) return out;
+        // 2026-11-14 기본 목록에 「기타」는 넣지 않음(필요하면 직접 추가)
+        const out = raw.filter((c) => c !== '기타' && _defectCauseAllowSet.has(c));
+        if (out.length) return out;
         // 그 종류에 쓸 원인이 엑셀에 하나도 없으면(기타·도장 박리·줄눈 손상 …) 엑셀에서 많이 쓰인 일반 원인으로
         const rk = companyCauseRankKey(key) || (/이격/.test(String(key)) ? '이격' : '');
         const base = (COMPANY_CAUSE_RANK[rk] || ['시공미흡', '경과년수 증대에 따른 노후화', '관리미흡', '사용자 부주의'])
             .filter((c) => _defectCauseAllowSet.has(c) && c !== '기타').slice(0, 6);
-        return uniqCauseList(base.concat(raw.includes('기타') ? ['기타'] : []));
+        return uniqCauseList(base);
     }
     function getDefaultCausePresetListRaw(key, types, category, component) {
         const k = String(key || '').trim() || '기타';
