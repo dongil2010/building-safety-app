@@ -1619,6 +1619,19 @@
         window.showToast?.('바깥 테두리 모서리 기준으로 맞췄습니다. 어긋나면 미세 조정 후 확정하세요.', 'info', 5000);
     }
 
+    /** 지금 층 행·열 선(이 층 도면 좌표로 확정된 것만 — 다른 층에서 복사해 와 아직 못 맞춘 선은 제외) */
+    function drawingAlignGrid() {
+        const grid = (typeof getCurrentFloorGrid === 'function') ? getCurrentFloorGrid(false) : null;
+        if (!grid || grid.pendingScale) return null;
+        const n = (grid.groups || []).reduce((a, g) => a + ((g.lines || []).length), 0);
+        return (n > 0 || (grid.zones || []).length) ? grid : null;
+    }
+    function drawingAlignGridLineCount() {
+        const grid = drawingAlignGrid();
+        if (!grid) return 0;
+        return (grid.groups || []).reduce((a, g) => a + ((g.lines || []).length), 0) || (grid.zones || []).length;
+    }
+
     async function startDrawingAlign() {
         const MA = window.BSA && window.BSA.markingAlign;
         if (!MA) { alert('마킹 맞추기 모듈이 로드되지 않았습니다. Ctrl+F5로 새로고침 후 다시 시도하세요.'); return; }
@@ -1649,6 +1662,8 @@
             ghostAlpha: 0.55,
             snapLines: true,
             moveNdt: cnt.ndt > 0 && !floorNdtUsesOwnDrawing(floorKey),
+            moveGrid: drawingAlignGridLineCount() > 0,
+            gridCount: drawingAlignGridLineCount(),
             ndtCount: cnt.ndt,
             defectCount: cnt.defects,
             step: 0,
@@ -1889,6 +1904,9 @@
         const ndtCtl = st.ndtCount > 0
             ? `<label class="dab-chk" title="${ndtOwn ? '비파괴 탭에 따로 넣은 도면을 쓰는 층 — 보통은 옮기지 않습니다' : '비파괴(강도·탄산화·기울기·변위 등) 마킹도 같이 옮깁니다'}"><input type="checkbox" id="dabNdt"${st.moveNdt ? ' checked' : ''}> 비파괴 ${st.ndtCount}개도</label>`
             : '';
+        const gridCtl = st.gridCount > 0
+            ? `<label class="dab-chk" title="행·열 선(구역 포함)도 마킹과 같은 비율로 옮깁니다 — 행·열 위치가 그대로 유지됩니다"><input type="checkbox" id="dabGrid"${st.moveGrid ? ' checked' : ''}> 행·열 선도</label>`
+            : '';
         let body;
         if (!preview) {
             body = `<span class="dab-step">${ALIGN_PICK_TEXT[st.step](!!(st.ghost && st.showGhost))}</span>`
@@ -1901,7 +1919,7 @@
                 + '<span class="dab-sep"></span><span class="dab-note">미세 조정</span>'
                 + B('dabL', '⬅', 'dab-sm', '왼쪽으로') + B('dabU', '⬆', 'dab-sm', '위로') + B('dabD', '⬇', 'dab-sm', '아래로') + B('dabR', '➡', 'dab-sm', '오른쪽으로')
                 + B('dabSUp', '➕', 'dab-sm', '조금 크게(0.2%)') + B('dabSDown', '➖', 'dab-sm', '조금 작게(0.2%)')
-                + `<span class="dab-sep"></span>${ghostCtl}${ndtCtl}`
+                + `<span class="dab-sep"></span>${ghostCtl}${ndtCtl}${gridCtl}`
                 + '<span class="dab-sep"></span>'
                 + B('dabConfirm', okLabel, 'dab-ok') + B('dabRestart', '다시 찍기') + B('dabCancel', '취소', 'dab-cancel');
         }
@@ -1916,6 +1934,7 @@
         on('dabGhostAlpha', 'input', (e) => { st.ghostAlpha = Number(e.target.value) || 0.55; drawCanvas(); });
         on('dabSnap', 'change', (e) => { st.snapLines = !!e.target.checked; });
         on('dabNdt', 'change', (e) => { st.moveNdt = !!e.target.checked; renderDrawingAlignBar(); });
+        on('dabGrid', 'change', (e) => { st.moveGrid = !!e.target.checked; });
         const nudge = (dxPx, dyPx) => {
             const sc = Math.max(state.view.scale || 1, 0.01);
             st.adj.dx += dxPx / sc; st.adj.dy += dyPx / sc;
@@ -1972,6 +1991,19 @@
                 nNdt++;
             });
         }
+        // 행·열 선도 같은 변환으로 — 마킹만 옮기면 선과 어긋나 행·열 위치가 틀어진다
+        let gridMoved = false;
+        if (st.moveGrid) {
+            const GL = (typeof gridLib === 'function') ? gridLib() : null;
+            const grid = drawingAlignGrid();
+            if (GL && grid && typeof GL.transformGridInPlace === 'function') {
+                gridMoved = GL.transformGridInPlace(grid, T);
+                if (gridMoved) {
+                    const gd = (typeof getFloorPlanDisplayDims === 'function') ? getFloorPlanDisplayDims() : null;
+                    if (gd && gd.w > 1 && gd.h > 1) { grid.refW = gd.w; grid.refH = gd.h; }
+                }
+            }
+        }
         if (typeof markFloorKeyDirty === 'function') markFloorKeyDirty(floorKey);
         if (typeof discardStalePendingRemoteAfterLocalPinEdit === 'function') discardStalePendingRemoteAfterLocalPinEdit();
         saveStateToLocalStorage();
@@ -1983,7 +2015,7 @@
         endDrawingAlign();
         if (typeof renderDefectListPanel === 'function') renderDefectListPanel();
         if (typeof drawNdtCanvas === 'function' && state.currentTab === 'tab-ndt') drawNdtCanvas();
-        let msg = `마킹 위치를 새 도면에 맞췄습니다 — 결함 ${nDef}개${nNdt ? ` · 비파괴 ${nNdt}개` : ''} (${info}). 결함 위치는 되돌리기(Ctrl+Z)로 되돌릴 수 있습니다.`;
+        let msg = `마킹 위치를 새 도면에 맞췄습니다 — 결함 ${nDef}개${nNdt ? ` · 비파괴 ${nNdt}개` : ''} ${gridMoved ? ' · 행·열 선' : ''} (${info}). 결함 위치는 되돌리기(Ctrl+Z)로 되돌릴 수 있습니다.`;
         if (T.scale < 0.6 || T.scale > 1.6) msg += ' 핀이 도면에 비해 크거나 작아 보이면 「크기」에서 조절하세요.';
         window.showToast?.(msg, 'success', 8000);
     }

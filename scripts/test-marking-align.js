@@ -146,4 +146,24 @@ t('바깥 테두리: 옛(여백 없음) → 새(여백 추가)로 모서리 두 
     assert.strictEqual(M.findFrameBox(new Uint8Array(400 * 300).fill(255), 400, 300), null);
 });
 
+t('행·열 선도 마킹과 같은 변환으로 옮겨져 행·열 위치가 그대로다', () => {
+    const G = require('../js/shared/grid-lines.js');
+    const grid = G.normalizeGrid({
+        zones: [{ id: 'z1', name: 'A', rect: { x1: 100, y1: 100, x2: 900, y2: 700 } }],
+        groups: [
+            { axis: 'col', lines: [{ pts: [{ x: 200, y: 0 }, { x: 200, y: 800 }] }, { pts: [{ x: 600, y: 0 }, { x: 600, y: 800 }] }] },
+            { axis: 'row', lines: [{ pts: [{ x: 0, y: 300 }, { x: 1000, y: 300 }] }, { pts: [{ x: 0, y: 500 }, { x: 1000, y: 500 }] }] }
+        ]
+    });
+    const ctx = { rot: 0, w: 1000, h: 800 };
+    const pt = { x: 400, y: 400 };
+    const before = G.computeGridLocation(grid, [pt], ctx);
+    const T = M.solveSimilarity([{ x: 0, y: 0 }, { x: 1000, y: 800 }], [{ x: 50, y: 40 }, { x: 950, y: 760 }], { allowRotation: false });
+    assert.strictEqual(G.transformGridInPlace(grid, T), true);
+    assert.deepStrictEqual(grid.groups[0].lines[0].pts[0], { x: 230, y: 40 });
+    assert.deepStrictEqual(grid.zones[0].rect, { x1: 140, y1: 130, x2: 860, y2: 670 });
+    const after = G.computeGridLocation(grid, [M.applyPoint(T, pt.x, pt.y)], ctx);
+    assert.deepStrictEqual(JSON.stringify(after && (after.text || after.label || after)), JSON.stringify(before && (before.text || before.label || before)));
+});
+
 console.log(`marking-align: ${n}개 통과`);
