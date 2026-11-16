@@ -1,5 +1,5 @@
 // @@app-parts 자동 생성 파일 — 여기를 고치지 말고 app/ 조각을 고친 뒤 `node scripts/app-parts.js join` (CLAUDE.md 「app.js 조각」)
-// @@app-part 01-base.js sha=bbedd9a3fe50 — 원본은 app/01-base.js (여기 말고 거기서 고칠 것)
+// @@app-part 01-base.js sha=092898cd69e0 — 원본은 app/01-base.js (여기 말고 거기서 고칠 것)
 /* ==========================================================================
    스마트 건축물 안전점검 현장점검 시스템 — UI 부트스트랩
    전역 상태·IndexedDB·이미지 헬퍼: js/core/state.js
@@ -1668,6 +1668,7 @@ document.addEventListener('DOMContentLoaded', () => {
             if (!(window.BSA && window.BSA.dxfView && typeof window.BSA.dxfView.ensureModel === 'function')) return Promise.resolve();
             return window.BSA.dxfView.ensureModel(`${bldg.id}_${floorCode}`, pdfUrl).then((model) => {
                 const changed = noteFloorDxfView(bldg.id, floorCode, !!model);
+                if (model) markFloorDxf(bldg, floorCode); // 현장에 기억(서버로 올라가 다른 기기도 바로 안다)
                 if (model && stillHere() && typeof drawCanvas === 'function') drawCanvas();
                 // DXF인 줄 알고 확대용 그림을 건너뛰었는데 아니었다(일반 PDF로 바뀜) → 다시 고른다
                 if (!model && changed && stillHere() && typeof scheduleFloorDrawingTierSync === 'function') scheduleFloorDrawingTierSync();
@@ -1768,6 +1769,8 @@ document.addEventListener('DOMContentLoaded', () => {
     // 쓰지도 않을 확대용 큰 그림(8000/16000px)을 받아 푸느라 화면이 한동안 버벅였다. 지난번 결과를 기기에 적어 두고 바로 건너뛴다.
     const DXF_FLOOR_KEYS_LS = 'bsa_dxf_floor_keys_v1';
     let _dxfFloorKeys = null;
+    /** 이번 실행에서 벡터 자료가 없다고 확인된 층(표시는 있어도 확대용 그림을 쓴다) */
+    const _dxfNotVectorThisRun = new Set();
     function dxfFloorKeySet() {
         if (_dxfFloorKeys) return _dxfFloorKeys;
         _dxfFloorKeys = new Set();
@@ -1782,7 +1785,9 @@ document.addEventListener('DOMContentLoaded', () => {
         if (!bldgId || !floorCode) return false;
         const set = dxfFloorKeySet();
         const key = `${bldgId}_${floorCode}`;
-        if (set.has(key) === !!isDxf) return false;
+        const wasOff = _dxfNotVectorThisRun.has(key);
+        if (isDxf) _dxfNotVectorThisRun.delete(key); else _dxfNotVectorThisRun.add(key);
+        if (set.has(key) === !!isDxf) return wasOff === !!isDxf;
         if (isDxf) set.add(key); else set.delete(key);
         try {
             let arr = Array.from(set);
@@ -1791,12 +1796,42 @@ document.addEventListener('DOMContentLoaded', () => {
         } catch (_e) { /* 저장 못 해도 이번 실행 동안은 기억 */ }
         return true;
     }
+    /**
+     * 현장(건물 정보)에 적어 두는 「DXF로 올린 층」 표시 — 서버로 같이 올라가 다른 기기도 처음 열 때부터 안다.
+     * 값은 그때의 도면 시각(floorPdfUpdatedAt, 없으면 1). 나중에 다른 도면으로 바꾸면 도면 시각이 더 커져 표시가 저절로 풀린다.
+     */
+    function isFloorDxfMarked(bldg, floorCode) {
+        const at = Number(bldg && bldg.floorDxfAt && bldg.floorDxfAt[floorCode]) || 0;
+        if (!at) return false;
+        const drawingAt = Number(bldg.floorPdfUpdatedAt && bldg.floorPdfUpdatedAt[floorCode]) || 0;
+        return at >= drawingAt;
+    }
+    function markFloorDxf(bldg, floorCode) {
+        if (!bldg || !bldg.id || !floorCode || isFloorDxfMarked(bldg, floorCode)) return false;
+        const stamp = Number(bldg.floorPdfUpdatedAt && bldg.floorPdfUpdatedAt[floorCode]) || 1;
+        const targets = new Set([bldg]);
+        const live = (window.state.buildings || []).find((b) => b && b.id === bldg.id);
+        if (live) targets.add(live);
+        if (state.currentBuilding && state.currentBuilding.id === bldg.id) targets.add(state.currentBuilding);
+        targets.forEach((b) => {
+            b.floorDxfAt = Object.assign({}, b.floorDxfAt, { [floorCode]: stamp });
+            b._pendingCloudSync = true;
+            markBuildingMetaDirty(b);
+        });
+        try {
+            if (typeof saveStateToLocalStorage === 'function') saveStateToLocalStorage();
+            if (typeof syncStateToFirebase === 'function') syncStateToFirebase();
+        } catch (_e) { /* 다음 저장 때 올라간다 */ }
+        return true;
+    }
+
     function isFloorDxfView(bldg, floorCode) {
         if (!bldg || !floorCode) return false;
         if (window.BSA_PDF_VECTOR && window.BSA_PDF_VECTOR.dxfLiveView === false) return false;
         if (typeof window.isFloorPdfRemoved === 'function' && window.isFloorPdfRemoved(bldg, floorCode)) return false;
         if (state.currentBuilding === bldg && state.currentFloor === floorCode && getDxfViewModelForCurrentFloor()) return true;
-        return dxfFloorKeySet().has(`${bldg.id}_${floorCode}`);
+        if (_dxfNotVectorThisRun.has(`${bldg.id}_${floorCode}`)) return false;
+        return isFloorDxfMarked(bldg, floorCode) || dxfFloorKeySet().has(`${bldg.id}_${floorCode}`);
     }
     function isCurrentFloorDxfView() {
         return isFloorDxfView(state.currentBuilding, state.currentFloor);
@@ -3691,7 +3726,7 @@ document.addEventListener('DOMContentLoaded', () => {
         'floorsOrderManual',
         'siteName', 'dong', 'multiDong', 'dongOrder', 'name', 'address', 'inspector', 'contactPhone',
         'floors', 'date', 'structureType', 'facilityGrade', 'completionDate', 'notes',
-        'enabledStrengthFormulas', 'strengthAnvilAvg', 'strengthAgeOverride', 'floorPdfRemovedAt', 'floorPdfUpdatedAt', 'roundDone'
+        'enabledStrengthFormulas', 'strengthAnvilAvg', 'strengthAgeOverride', 'floorPdfRemovedAt', 'floorPdfUpdatedAt', 'floorDxfAt', 'roundDone'
     ];
 
     function buildingMetaUpdatedAt(bldg) {
@@ -4008,6 +4043,10 @@ document.addEventListener('DOMContentLoaded', () => {
                 merged.floorPdfUpdatedAt = _buildingMetaMerge.mergeFloorStampMaps(
                     localMatch && localMatch.floorPdfUpdatedAt,
                     b.floorPdfUpdatedAt
+                );
+                merged.floorDxfAt = _buildingMetaMerge.mergeFloorStampMaps(
+                    localMatch && localMatch.floorDxfAt,
+                    b.floorDxfAt
                 );
             }
             if (_legendLayout && typeof _legendLayout.overlayOnMerged === 'function') {

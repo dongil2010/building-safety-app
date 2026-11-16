@@ -30,6 +30,8 @@
         'floorPdfRemovedAt',
         // 층별 "도면을 다시 넣은 시각" — 다른 기기가 받아 둔 옛 PDF를 버리고 새 파일을 받게
         'floorPdfUpdatedAt',
+        // 층별 "DXF로 올린 도면" 표시(그때의 도면 시각) — 다른 기기도 처음 열 때부터 벡터 층으로 안다(2026-11-16)
+        'floorDxfAt',
         // 회차별 보고서/결함위치도 작성완료 표시(round-done.js) — 2026-10-21
         'roundDone'
     ];
