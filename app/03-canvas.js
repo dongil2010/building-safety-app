@@ -898,6 +898,11 @@
                 img.crossOrigin = 'anonymous';
             }
             img.onload = async () => {
+                // 2026-11-16 큰 도면 그림(4000px)의 압축 풀기를 화면 스레드 밖에서 미리 끝낸다 — 첫 그리기 때 화면이 멈칫하던 것 방지
+                if (typeof img.decode === 'function') {
+                    try { await img.decode(); } catch (_e) { /* 못 하면 예전처럼 그릴 때 푼다 */ }
+                    if (loadToken !== floorDrawingTierLoadToken || state.currentFloor !== floorCode) return;
+                }
                 applyFloorDrawingTarget(img, null, { immediate: !state.bgImage });
                 updateFloorDrawingEmptyOverlay(null);
                 floorDrawingActiveTierDim = baseTier;
@@ -905,7 +910,8 @@
                     // 이 기기에 PDF가 없어도 서버에서 받아 스냅 선을 만든다.
                     // 크롬·엣지는 예전에 받은 PDF가 기기에 남아 스냅이 되고, 프로그램은 그림만 있어 안 붙었다.
                     if (state.snapToCad !== false || floorMayHavePdfSource(bldg, floorCode)) {
-                        await ensureFloorPlanRefForPdf(bldg, floorCode);
+                        await ensureFloorPlanRefForPdf(bldg, floorCode, { deferGeometry: true });
+                        if (loadToken !== floorDrawingTierLoadToken || state.currentFloor !== floorCode) return;
                     }
                     const refNow = state.floorPlanRef;
                     const refOk = refNow && refNow.bldgId === bldg.id && refNow.floorCode === floorCode && refNow.w > 0;

@@ -1,5 +1,5 @@
 // @@app-parts 자동 생성 파일 — 여기를 고치지 말고 app/ 조각을 고친 뒤 `node scripts/app-parts.js join` (CLAUDE.md 「app.js 조각」)
-// @@app-part 01-base.js sha=d81295430c7d — 원본은 app/01-base.js (여기 말고 거기서 고칠 것)
+// @@app-part 01-base.js sha=2f90e40a1523 — 원본은 app/01-base.js (여기 말고 거기서 고칠 것)
 /* ==========================================================================
    스마트 건축물 안전점검 현장점검 시스템 — UI 부트스트랩
    전역 상태·IndexedDB·이미지 헬퍼: js/core/state.js
@@ -1633,8 +1633,14 @@ document.addEventListener('DOMContentLoaded', () => {
         return { w, h };
     }
 
-    async function ensureFloorPlanRefForPdf(bldg, floorCode) {
+    /**
+     * opts.deferGeometry(2026-11-16): 층을 열 때는 좌표 기준 크기만 기다리고, 무거운 일(DXF 화면 벡터 읽기 · 스냅 선 추출)은
+     * 도면이 화면에 뜬 뒤에 차례로 한다 — 예전엔 스냅 선 추출(큰 도면은 몇 초)이 끝나야 층 화면이 맞춰졌다.
+     * 스냅 자료가 바로 필요한 곳(행·열 자동 찾기 등)은 옵션 없이 불러 끝까지 기다린다.
+     */
+    async function ensureFloorPlanRefForPdf(bldg, floorCode, opts) {
         if (!bldg || !floorCode) return;
+        const deferGeometry = !!(opts && opts.deferGeometry);
         // PDF를 뺀 층 — 옛 PDF 크기로 좌표 기준을 잡지 않는다(그림 크기 기준 updateFloorPlanRefFromImage)
         if (dropRemovedFloorPdf(bldg, floorCode)) return;
         let pdfUrl = (typeof window.getFloorPdfDataUrl === 'function')
@@ -1651,17 +1657,32 @@ document.addEventListener('DOMContentLoaded', () => {
         } catch (e) {
             console.warn('PDF ref 좌표계 설정 실패:', e);
         }
+        const stillHere = () => state.currentBuildingId === bldg.id && state.currentFloor === floorCode;
         // 2026-11-12 DXF로 올린 층이면 화면 벡터 모델을 읽어 둔다(뒤에서). 다 읽으면 화면을 벡터로 다시 그린다.
-        if (window.BSA && window.BSA.dxfView && typeof window.BSA.dxfView.ensureModel === 'function') {
-            window.BSA.dxfView.ensureModel(`${bldg.id}_${floorCode}`, pdfUrl).then((model) => {
-                if (model && state.currentBuildingId === bldg.id && state.currentFloor === floorCode
-                    && typeof drawCanvas === 'function') drawCanvas();
-            });
-        }
+        const loadDxfModel = () => {
+            if (!(window.BSA && window.BSA.dxfView && typeof window.BSA.dxfView.ensureModel === 'function')) return Promise.resolve();
+            return window.BSA.dxfView.ensureModel(`${bldg.id}_${floorCode}`, pdfUrl).then((model) => {
+                if (model && stillHere() && typeof drawCanvas === 'function') drawCanvas();
+            }).catch(() => {});
+        };
         // 캐드 벡터 스냅용 선분. 그림만 있고 PDF 원본이 없으면 여기까지 오지 않는다.
-        if (window.BSA_PDF_SNAP && typeof window.BSA_PDF_SNAP.ensureGeometry === 'function') {
-            await window.BSA_PDF_SNAP.ensureGeometry(pdfUrl, bldg.id, floorCode, window.FLOOR_DRAWING_PDF_PREVIEW_DIM || 4000);
+        const loadSnapGeometry = () => {
+            if (!(window.BSA_PDF_SNAP && typeof window.BSA_PDF_SNAP.ensureGeometry === 'function')) return Promise.resolve(false);
+            return window.BSA_PDF_SNAP.ensureGeometry(pdfUrl, bldg.id, floorCode, window.FLOOR_DRAWING_PDF_PREVIEW_DIM || 4000);
+        };
+        if (!deferGeometry) {
+            loadDxfModel();
+            await loadSnapGeometry();
+            return;
         }
+        // 도면이 먼저 화면에 뜨게 한 박자 쉬고, 벡터 읽기 → 스냅 선 추출을 겹치지 않게 차례로(그 사이 다른 층으로 갔으면 그만둔다)
+        setTimeout(() => {
+            if (!stillHere()) return;
+            loadDxfModel().then(() => new Promise((r) => setTimeout(r, 60))).then(() => {
+                if (stillHere()) return loadSnapGeometry();
+                return false;
+            }).catch(() => {});
+        }, 80);
     }
 
     function shouldUpdateViewportPatchRegion(region, meta) {
@@ -2552,7 +2573,8 @@ document.addEventListener('DOMContentLoaded', () => {
         if (token !== viewportHiPatchToken) return;
         if (state.currentFloor !== fc || state.currentBuildingId !== bldg.id) return;
 
-        await ensureFloorPlanRefForPdf(bldg, fc);
+        // 확대 선명 패치는 좌표 기준 크기만 있으면 된다 — 스냅 선 추출을 기다리지 않는다
+        await ensureFloorPlanRefForPdf(bldg, fc, { deferGeometry: true });
         if (token !== viewportHiPatchToken) return;
         ref = (typeof window.getFloorPlanRefDimensions === 'function')
             ? window.getFloorPlanRefDimensions(bldg, fc)
@@ -10648,7 +10670,7 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
         });
     }
 
-// @@app-part 03-canvas.js sha=10b9372a2732 — 원본은 app/03-canvas.js (여기 말고 거기서 고칠 것)
+// @@app-part 03-canvas.js sha=dbd756a10a35 — 원본은 app/03-canvas.js (여기 말고 거기서 고칠 것)
     // --- 8. DRAWING CANVAS ENGINE (PAN/ZOOM/ROTATE & PINS) ---
 
     function setupCanvas() {
@@ -11548,6 +11570,11 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
                 img.crossOrigin = 'anonymous';
             }
             img.onload = async () => {
+                // 2026-11-16 큰 도면 그림(4000px)의 압축 풀기를 화면 스레드 밖에서 미리 끝낸다 — 첫 그리기 때 화면이 멈칫하던 것 방지
+                if (typeof img.decode === 'function') {
+                    try { await img.decode(); } catch (_e) { /* 못 하면 예전처럼 그릴 때 푼다 */ }
+                    if (loadToken !== floorDrawingTierLoadToken || state.currentFloor !== floorCode) return;
+                }
                 applyFloorDrawingTarget(img, null, { immediate: !state.bgImage });
                 updateFloorDrawingEmptyOverlay(null);
                 floorDrawingActiveTierDim = baseTier;
@@ -11555,7 +11582,8 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
                     // 이 기기에 PDF가 없어도 서버에서 받아 스냅 선을 만든다.
                     // 크롬·엣지는 예전에 받은 PDF가 기기에 남아 스냅이 되고, 프로그램은 그림만 있어 안 붙었다.
                     if (state.snapToCad !== false || floorMayHavePdfSource(bldg, floorCode)) {
-                        await ensureFloorPlanRefForPdf(bldg, floorCode);
+                        await ensureFloorPlanRefForPdf(bldg, floorCode, { deferGeometry: true });
+                        if (loadToken !== floorDrawingTierLoadToken || state.currentFloor !== floorCode) return;
                     }
                     const refNow = state.floorPlanRef;
                     const refOk = refNow && refNow.bldgId === bldg.id && refNow.floorCode === floorCode && refNow.w > 0;
