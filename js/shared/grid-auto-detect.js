@@ -384,9 +384,11 @@
         let dx = p1[0] - p0[0];
         let dy = p1[1] - p0[1];
         const dl = Math.hypot(dx, dy) || 1;
+        // 글자 크기(이미지 좌표): 읽는 방향 길이 tw, 높이 th
+        const sc = dl;
         dx /= dl;
         dy /= dl;
-        return { str, x: pc[0], y: pc[1], dx, dy };
+        return { str, x: pc[0], y: pc[1], dx, dy, tw: w * sc, th: h * sc };
     }
 
     /** 풍선 안 글자(여러 조각이면 읽는 방향 순으로 이어 붙임) → 도면 글자 모양이면 그 글자, 아니면 '' */
@@ -423,7 +425,7 @@
         (data.texts || []).forEach((t) => {
             if (!t || !isLabelText(t.str)) return;
             if (bubbles.some((b) => Math.hypot(t.x - b.x, t.y - b.y) <= b.r * 1.3)) return; // 이미 풍선 안
-            markers.push({ x: t.x, y: t.y, r: 0, bubble: false, label: String(t.str).trim() });
+            markers.push({ x: t.x, y: t.y, r: 0, bubble: false, label: String(t.str).trim(), dx: t.dx, dy: t.dy, tw: t.tw, th: t.th });
         });
         return markers;
     }
@@ -580,7 +582,36 @@
     }
 
     /** 표시 묶음 → 선들. counterpart: 반대편(위↔아래) 묶음이 있으면 그 사이가 길이 */
-    function linesFromGroup(axis, g, counter, dims, content, chains, o) {
+    /**
+     * 2026-11-16 「행열 선 못찾고 이름에다 박는거」 — 번호가 풍선 없이 글자만 있고 통심선이 글자 옆의 짧은 기둥선(깃발 모양)일 때,
+     * 글자 가운데에 박지 않고 글자 바로 옆의 짧은 수직(행이면 수평) 선에 맞춘다.
+     * pieces: 이 축의 선분 조각 [{ pos, a0, a1 }]. 못 찾으면 null.
+     */
+    function poleBesideText(axis, m, pieces) {
+        if (!m || m.bubble || !(m.th > 0) || !pieces || !pieces.length) return null;
+        const col = axis === 'col';
+        const ax = Math.abs(num(m.dx, 1)), ay = Math.abs(num(m.dy, 0));
+        const bw = ax * m.tw + ay * m.th;   // x 방향 크기
+        const bh = ay * m.tw + ax * m.th;   // y 방향 크기
+        const hp = (col ? bw : bh) / 2;     // 선 위치 방향 반폭
+        const ha = (col ? bh : bw) / 2;     // 선이 달리는 방향 반폭
+        const c = col ? m.x : m.y;
+        const k = col ? m.y : m.x;
+        const reach = hp + m.th * 1.2;
+        let best = null;
+        pieces.forEach((p) => {
+            const len = p.a1 - p.a0;
+            if (len < m.th * 0.7 || len > m.th * 6) return;   // 글자 높이 안팎의 짧은 기둥선만
+            const d = Math.abs(p.pos - c);
+            if (d > reach) return;
+            const ov = Math.min(p.a1, k + ha) - Math.max(p.a0, k - ha);
+            if (ov < Math.min(len, ha * 2) * 0.5) return;     // 글자 높이와 겹쳐야
+            if (!best || d < best.d) best = { d, p };
+        });
+        return best ? best.p : null;
+    }
+
+    function linesFromGroup(axis, g, counter, dims, content, chains, o, pieces) {
         const L = Math.max(dims.w, dims.h);
         const snapTol = L * o.snapTolFrac;
         const full = axis === 'col' ? [content.y0, content.y1] : [content.x0, content.x1];
@@ -639,6 +670,9 @@
                 pos = best.ch.pos;
                 a0 = Math.min(a0, best.ch.a0);
                 a1 = Math.max(a1, best.ch.a1);
+            } else {
+                const pole = poleBesideText(axis, m, pieces);
+                if (pole) pos = pole.pos;
             }
             lines.push({ pos, a0, a1, label: m.label || '', tier: 'M' });
         });
@@ -690,7 +724,7 @@
             // 반대편에 같은 번호 줄이 또 있으면(위·아래 / 왼·오른쪽) 그 사이가 선 길이
             const counter = groups.find((g) => g !== best && Math.abs(g.cross - best.cross) >= span * 0.15
                 && g.items.filter((m) => best.items.some((q) => Math.abs((axis === 'col' ? m.x - q.x : m.y - q.y)) <= L * o.snapTolFrac * 0.6)).length >= Math.ceil(best.items.length * 0.6));
-            return finishLines(linesFromGroup(axis, best, counter || null, dims, content, chains, o));
+            return finishLines(linesFromGroup(axis, best, counter || null, dims, content, chains, o, axis === 'col' ? split.cols : split.rows));
         };
         const c = pick('col', colChains);
         const r = pick('row', rowChains);
@@ -735,7 +769,7 @@
         };
     }
 
-    const api = { footprintRange, isOuterGroup, DEFAULTS, LABEL_RE, isLabelText, labelClass, seriesIndexes, textFromItem, textInside, splitAxisSegments, chainPieces, labelAtEnd, bubbleAtEnd, findBubbles, findMarkers, alignGroups, labelOrder, detect };
+    const api = { footprintRange, isOuterGroup, DEFAULTS, LABEL_RE, isLabelText, labelClass, seriesIndexes, textFromItem, poleBesideText, textInside, splitAxisSegments, chainPieces, labelAtEnd, bubbleAtEnd, findBubbles, findMarkers, alignGroups, labelOrder, detect };
     root.BSA = root.BSA || {};
     root.BSA.gridAutoDetect = api;
     if (typeof module !== 'undefined' && module.exports) module.exports = api;

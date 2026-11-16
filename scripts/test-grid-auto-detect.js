@@ -547,3 +547,18 @@ farTwo.segments.push([747, 300, 747, 2500], [760, 300, 760, 2500]);
 r = D.detect(farTwo, dims);
 assert.ok(Math.abs(r.cols[0].x - 800) < 1, '후보가 여럿이면 풍선 가운데 유지');
 console.log('test-grid-auto-detect: 12 cases ok');
+
+// 13) ★ 2026-11-16 풍선 없이 글자(X11…)만 있고 통심선이 글자 왼쪽의 짧은 기둥선: 글자 가운데가 아니라 기둥선에 맞춤
+{
+    const segs = [];
+    const texts = [];
+    for (let i = 0; i < 8; i++) {
+        const px = 100 + i * 180;
+        segs.push([px, 100, px, 160]);
+        texts.push({ str: 'X' + (i + 1), x: px + 38, y: 130, dx: 1, dy: 0, tw: 60, th: 40 });
+    }
+    for (let i = 0; i < 40; i++) { segs.push([100 + i * 30, 400, 100 + i * 30, 900]); segs.push([100, 400 + i * 10, 1500, 400 + i * 10]); }
+    const rp = D.detect({ segments: segs, small: [], texts }, { w: 1600, h: 1000 }, { outerOnly: false });
+    assert.ok(Math.abs(rp.cols[0].x - 100) < 1 && Math.abs(rp.cols[7].x - 1360) < 1, '글자 옆 기둥선 위치 사용: ' + rp.cols.map((c) => c.x));
+}
+console.log('test-grid-auto-detect: 13 cases ok');
