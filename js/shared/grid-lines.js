@@ -1390,16 +1390,20 @@
     }
 
     /**
-     * 2026-11-16 도면 교체 후 「마킹 맞추기」 변환 T(x' = a·x − b·y + e, y' = b·x + a·y + f)를 행·열 선·구역에도 적용(제자리).
+     * 2026-11-16 도면 교체 후 「마킹 맞추기」 변환 T(x' = a·x + c·y + e, y' = b·x + d·y + f)를 행·열 선·구역에도 적용(제자리).
+     * c·d가 없으면 2점(닮음) 변환으로 보고 c = −b, d = a. 3점(아핀) 변환이면 가로·세로 배율이 다를 수 있다.
      * 마킹과 같은 변환이라 행·열 위치(gridLoc)가 그대로 유지된다. 폭(띠)은 배율만큼. 바뀌면 true
      */
     function transformGridInPlace(grid, T) {
         if (!grid || !T || !Number.isFinite(T.a) || !Number.isFinite(T.b) || !Number.isFinite(T.e) || !Number.isFinite(T.f)) return false;
-        const s = Math.hypot(T.a, T.b);
+        const tc = Number.isFinite(T.c) ? T.c : -T.b;
+        const td = Number.isFinite(T.d) ? T.d : T.a;
+        const sx = Math.hypot(T.a, T.b), sy = Math.hypot(tc, td);
+        const s = Math.sqrt(Math.abs(T.a * td - T.b * tc));
         if (!(s > 0)) return false;
         const deg = Math.atan2(T.b, T.a) * 180 / Math.PI;
         const rotated = Math.abs(deg) > 1e-9;
-        const map = (p) => ({ x: T.a * p.x - T.b * p.y + T.e, y: T.b * p.x + T.a * p.y + T.f });
+        const map = (p) => ({ x: T.a * p.x + tc * p.y + T.e, y: T.b * p.x + td * p.y + T.f });
         const r2 = (p) => ({ x: roundTo(p.x, 2), y: roundTo(p.y, 2) });
         (grid.zones || []).forEach((z) => {
             if (!z || !z.rect) return;
@@ -1412,8 +1416,8 @@
                 z.rect = polyBBox(z.poly);
             } else {
                 const c = map(rectCenter(z.rect));
-                const hw = (z.rect.x2 - z.rect.x1) / 2 * s;
-                const hh = (z.rect.y2 - z.rect.y1) / 2 * s;
+                const hw = (z.rect.x2 - z.rect.x1) / 2 * sx;
+                const hh = (z.rect.y2 - z.rect.y1) / 2 * sy;
                 z.rect = { x1: roundTo(c.x - hw, 2), y1: roundTo(c.y - hh, 2), x2: roundTo(c.x + hw, 2), y2: roundTo(c.y + hh, 2) };
                 if (nextAng) z.angle = nextAng; else delete z.angle;
             }

@@ -19102,6 +19102,10 @@ body.defect-modal-open .map-sel-photo-bar { display: none !important; }
 .drawing-align-bar .dab-btn.dab-sm { padding: 5px 8px; }
 .drawing-align-bar .dab-btn.dab-ok { background: #10b981; }
 .drawing-align-bar .dab-btn.dab-cancel { background: #ef4444; }
+/* 2026-11-16 2점 / 3점 고르기 */
+.drawing-align-bar .dab-seg { display: inline-flex; border-radius: 7px; overflow: hidden; border: 1px solid #64748b; }
+.drawing-align-bar .dab-seg .dab-btn { border-radius: 0; background: transparent; color: #cbd5e1; padding: 5px 10px; }
+.drawing-align-bar .dab-seg .dab-btn.dab-seg-on { background: #fda4af; color: #0f172a; }
 #btnAlignMarkingsToDrawing.drawing-align-pending { animation: drawingAlignPulse 1.6s ease-in-out infinite; }
 @keyframes drawingAlignPulse {
     0%, 100% { box-shadow: 0 0 0 0 rgba(244, 63, 94, 0.0); }
