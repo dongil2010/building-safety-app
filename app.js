@@ -10670,7 +10670,7 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
         });
     }
 
-// @@app-part 03-canvas.js sha=dbd756a10a35 — 원본은 app/03-canvas.js (여기 말고 거기서 고칠 것)
+// @@app-part 03-canvas.js sha=ca7d0c6277ad — 원본은 app/03-canvas.js (여기 말고 거기서 고칠 것)
     // --- 8. DRAWING CANVAS ENGINE (PAN/ZOOM/ROTATE & PINS) ---
 
     function setupCanvas() {
@@ -11581,10 +11581,10 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
                 if (bldg && bldg.id) {
                     // 이 기기에 PDF가 없어도 서버에서 받아 스냅 선을 만든다.
                     // 크롬·엣지는 예전에 받은 PDF가 기기에 남아 스냅이 되고, 프로그램은 그림만 있어 안 붙었다.
-                    if (state.snapToCad !== false || floorMayHavePdfSource(bldg, floorCode)) {
-                        await ensureFloorPlanRefForPdf(bldg, floorCode, { deferGeometry: true });
-                        if (loadToken !== floorDrawingTierLoadToken || state.currentFloor !== floorCode) return;
-                    }
+                    // 2026-11-16 스냅을 꺼 둔 기기도 받는다 — 예전엔 스냅이 꺼져 있고 이 기기에 PDF가 없으면 안 받아서,
+                    // 다른 사람이 올린 DXF 층이 벡터가 아니라 그림으로만 보였다(같은 파일을 직접 올리면 벡터로 보임).
+                    await ensureFloorPlanRefForPdf(bldg, floorCode, { deferGeometry: true });
+                    if (loadToken !== floorDrawingTierLoadToken || state.currentFloor !== floorCode) return;
                     const refNow = state.floorPlanRef;
                     const refOk = refNow && refNow.bldgId === bldg.id && refNow.floorCode === floorCode && refNow.w > 0;
                     if (!refOk) updateFloorPlanRefFromImage(img, bldg.id, floorCode);
