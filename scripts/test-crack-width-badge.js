@@ -63,6 +63,8 @@ function testFormatUnits() {
     assert.strictEqual(api.formatBadgeText(crack({
         crackMeasures: [{ width: '0.3' }, { width: '0.5' }]
     })), '0.3 / 0.5');
+    assert.strictEqual(api.formatBadgeText(crack({ crackWidth: '0.3~0.5' })), '0.3~0.5', '범위는 물결로');
+    assert.strictEqual(api.formatBadgeText(crack({ crackMeasures: [{ width: '0.3~0.5' }, { width: '1' }] })), '0.3~0.5 / 1.0');
     assert.strictEqual(api.formatBadgeText(crack({ size: 'Cw:0.3' })), '0.3');
     assert.strictEqual(api.formatBadgeText(crack({ size: '0.5mm' })), '0.5');
     assert.strictEqual(api.formatBadgeText(crack({ size: '0.3/1.5' })), '0.3');

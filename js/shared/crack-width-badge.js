@@ -76,14 +76,19 @@
     }
 
     /** 2026-11-11 「0.1 ~ 0.5」 같은 범위·여러 값 표기를 낱개로 나눈다 (~ 뒤 값도 본다) */
-    function splitWidthText(raw) {
+    // 2026-11-16 「0.3~0.5」는 범위라 배지에도 ~ 로 — 묶음(/ , 로 나뉜 덩어리) 안의 ~ 앞뒤 값은 한 묶음
+    function splitWidthGroups(raw) {
         return String(raw == null ? '' : raw).trim()
-            .split(/\s*(?:[\/,~∼〜～–]|-(?=\s|\d|\.))\s*/)
-            .map(function (s) { return s.trim(); })
-            .filter(Boolean);
+            .split(/\s*[\/,]\s*/)
+            .map(function (g) {
+                return g.split(/\s*(?:[~∼〜～–]|-(?=\s|\d|\.))\s*/)
+                    .map(function (s) { return s.trim(); })
+                    .filter(Boolean);
+            })
+            .filter(function (g) { return g.length; });
     }
 
-    function collectWidthParts(d) {
+    function collectWidthGroups(d) {
         if (!d) return [];
         // 2026-11-10 면적용(가로x세로)으로 넣은 값(0.3x0.5)은 배지에 안 나오게 — 측정 행 구분이 x이거나 규모 글자가 면적이면 뺀다
         if (Array.isArray(d.crackMeasures) && d.crackMeasures.length) {
@@ -92,13 +97,26 @@
                 if (!m) return;
                 if (/^[x×*]$/i.test(String(m.join || '').trim())) return;
                 if (isAreaWidthInSize(d.size, m.width)) return;
-                splitWidthText(m.width).forEach(function (w) { out.push(w); });
+                splitWidthGroups(m.width).forEach(function (g) { out.push(g); });
             });
             return out;
         }
         var raw = String(d.crackWidth != null ? d.crackWidth : '').trim();
         if (raw) {
-            return splitWidthText(raw).filter(function (w) { return !isAreaWidthInSize(d.size, w); });
+            return splitWidthGroups(raw).map(function (g) {
+                return g.filter(function (w) { return !isAreaWidthInSize(d.size, w); });
+            }).filter(function (g) { return g.length; });
+        }
+        var p = collectWidthParts(d, true);
+        return p.map(function (w) { return [w]; });
+    }
+
+    function collectWidthParts(d, sizeOnly) {
+        if (!d) return [];
+        if (!sizeOnly) {
+            var flat = [];
+            collectWidthGroups(d).forEach(function (g) { g.forEach(function (w) { flat.push(w); }); });
+            return flat;
         }
         var size = String(d.size || '').trim();
         if (!size || size === '-') return [];
@@ -116,16 +134,20 @@
 
     function formatBadgeText(d) {
         if (!isCrackDefect(d)) return '';
-        var parts = collectWidthParts(d);
+        var groups = collectWidthGroups(d);
         var out = [];
         var seen = Object.create(null);
-        for (var i = 0; i < parts.length; i++) {
-            var n = parseCrackWidthMm(parts[i]);
-            if (!meetsMinWidth(n)) continue;
-            var label = formatWidthMm(n);
-            if (!label || seen[label]) continue;
-            seen[label] = true;
-            out.push(label);
+        for (var gi = 0; gi < groups.length; gi++) {
+            var labels = [];
+            for (var i = 0; i < groups[gi].length; i++) {
+                var n = parseCrackWidthMm(groups[gi][i]);
+                if (!meetsMinWidth(n)) continue;
+                var label = formatWidthMm(n);
+                if (!label || seen[label]) continue;
+                seen[label] = true;
+                labels.push(label);
+            }
+            if (labels.length) out.push(labels.join('~'));
         }
         return out.join(' / ');
     }
