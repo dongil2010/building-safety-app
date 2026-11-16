@@ -1531,14 +1531,30 @@
 
     // ---- 맞추기 진행 ----
     window.drawingAlignState = null;
-    const ALIGN_PICK_TEXT = [
-        (g) => g ? '<b>1/4</b> 빨간 <b>옛 도면</b>에서 기준점 1(예: 왼쪽 위 기둥 모서리)을 누르세요'
-            : '<b>1/4</b> 옮길 <b>마킹의 점</b> 하나(지시선 끝 등)를 누르세요 — 지금 있는 자리',
-        () => '<b>2/4</b> 검은 <b>새 도면</b>에서 같은 점을 누르세요',
-        (g) => g ? '<b>3/4</b> 빨간 <b>옛 도면</b>에서 기준점 2(1에서 멀리 떨어진 곳, 예: 오른쪽 아래 기둥)를 누르세요'
-            : '<b>3/4</b> 멀리 떨어진 다른 <b>마킹의 점</b>을 누르세요 — 지금 있는 자리',
-        () => '<b>4/4</b> 검은 <b>새 도면</b>에서 같은 점을 누르세요'
-    ];
+    // 2026-11-16 2점(이동·배율·큰 회전) / 3점(회전·가로세로 배율·뒤집힘까지) 중 고른다. 고른 값은 이 기기에 기억
+    const DRAWING_ALIGN_POINTS_KEY = 'bsa-drawing-align-points';
+    function loadDrawingAlignPointCount() {
+        try { return localStorage.getItem(DRAWING_ALIGN_POINTS_KEY) === '3' ? 3 : 2; } catch (_e) { return 2; }
+    }
+    function saveDrawingAlignPointCount(n) {
+        try { localStorage.setItem(DRAWING_ALIGN_POINTS_KEY, String(n)); } catch (_e) { /* 기억 못 해도 그만 */ }
+    }
+
+    /** 찍기 단계 안내. 옛 → 새를 한 쌍씩: 단계 0·2·4 = 옛, 1·3·5 = 새 */
+    function drawingAlignPickText(st, ghostOn) {
+        const total = st.pointCount * 2;
+        const i = st.step;
+        const no = Math.floor(i / 2) + 1;
+        const tag = `<b>${i + 1}/${total}</b> `;
+        if (i % 2 === 1) return tag + '검은 <b>새 도면</b>에서 같은 점을 누르세요';
+        const where = no === 1 ? '예: 왼쪽 위 기둥 모서리'
+            : (st.pointCount === 3
+                ? (no === 2 ? '1에서 멀리, 예: 오른쪽 위 기둥' : '1·2와 한 줄이 아닌 곳, 예: 왼쪽 아래 기둥')
+                : '1에서 멀리 떨어진 곳, 예: 오른쪽 아래 기둥');
+        if (ghostOn) return tag + `빨간 <b>옛 도면</b>에서 기준점 ${no}(${where})을 누르세요`;
+        return tag + (no === 1 ? '옮길 <b>마킹의 점</b> 하나(지시선 끝 등)를 누르세요 — 지금 있는 자리'
+            : `${no === 3 ? '앞의 두 점과 한 줄이 아닌' : '멀리 떨어진'} 다른 <b>마킹의 점</b>을 누르세요 — 지금 있는 자리`);
+    }
 
     function drawingAlignFloorKey() {
         return (state.currentBuildingId && state.currentFloor) ? `${state.currentBuildingId}_${state.currentFloor}` : '';
@@ -1559,7 +1575,79 @@
         } catch (e) {
             console.warn('[마킹 맞추기] 옛 도면 색칠 실패 — 그대로 겹침', e);
         }
-        return { canvas: cv, refW: rec.refW || w, refH: rec.refH || h, at: rec.at || 0 };
+        return { canvas: cv, raw: img, refW: rec.refW || w, refH: rec.refH || h, at: rec.at || 0 };
+    }
+
+    /** 그림 → 바깥 테두리 상자(좌표 기준 크기 refW×refH 안의 좌표). 못 찾으면 null */
+    function frameBoxOfImage(img, refW, refH) {
+        const MA = window.BSA && window.BSA.markingAlign;
+        const nw = img && (img.naturalWidth || img.width), nh = img && (img.naturalHeight || img.height);
+        if (!MA || !(nw > 0 && nh > 0)) return null;
+        const k = Math.min(1, 1600 / Math.max(nw, nh));
+        const w = Math.max(16, Math.round(nw * k)), h = Math.max(16, Math.round(nh * k));
+        const cv = document.createElement('canvas');
+        cv.width = w; cv.height = h;
+        const cx = cv.getContext('2d', { willReadFrequently: true });
+        cx.fillStyle = '#ffffff';
+        cx.fillRect(0, 0, w, h);
+        cx.drawImage(img, 0, 0, w, h);
+        const px = cx.getImageData(0, 0, w, h).data;
+        const lum = new Uint8Array(w * h);
+        for (let i = 0, j = 0; i < px.length; i += 4, j++) lum[j] = 0.299 * px[i] + 0.587 * px[i + 1] + 0.114 * px[i + 2];
+        const b = MA.findFrameBox(lum, w, h);
+        if (!b) return null;
+        const sx = refW / w, sy = refH / h;
+        return { x0: b.x0 * sx, y0: b.y0 * sy, x1: (b.x1 + 1) * sx, y1: (b.y1 + 1) * sy };
+    }
+
+    /** 바깥 테두리 모서리(왼쪽 위·오른쪽 아래)를 기준점으로 자동 지정 → 마킹을 테두리 비율대로 옮기는 미리보기 */
+    function autoAlignByFrame() {
+        const st = window.drawingAlignState;
+        const MA = window.BSA && window.BSA.markingAlign;
+        if (!st || !MA || !st.ghost || !st.ghost.raw) {
+            window.showToast?.('옛 도면 그림이 없어 테두리로 맞출 수 없습니다. 기준점을 직접 찍어 주세요.', 'warning', 5000);
+            return;
+        }
+        const dims = (typeof getFloorPlanDisplayDims === 'function') ? getFloorPlanDisplayDims() : null;
+        const nw = state.bgImage && (state.bgImage.naturalWidth || state.bgImage.width) || 0;
+        const nh = state.bgImage && (state.bgImage.naturalHeight || state.bgImage.height) || 0;
+        const newW = (dims && dims.w) || nw, newH = (dims && dims.h) || nh;
+        let oldBox = null, newBox = null;
+        try {
+            oldBox = frameBoxOfImage(st.ghost.raw, st.ghost.refW, st.ghost.refH);
+            newBox = frameBoxOfImage(state.bgImage, newW, newH);
+        } catch (e) {
+            console.warn('[마킹 맞추기] 테두리 찾기 실패', e);
+        }
+        const pr = MA.frameCornerPairs(oldBox, newBox);
+        const T = pr && MA.solveSimilarity(pr.oldPts, pr.newPts, { allowRotation: false });
+        if (!T) {
+            window.showToast?.('바깥 테두리를 찾지 못했습니다. 기준점을 직접 찍어 주세요.', 'warning', 5000);
+            return;
+        }
+        st.oldPts = pr.oldPts; st.newPts = pr.newPts;
+        // 테두리 모서리는 두 쌍(닮음 변환) — 3점 모드였어도 이번 맞추기는 2점으로(기기에 기억한 선택은 그대로)
+        st.pointCount = 2;
+        st.step = 4;
+        st.baseT = T;
+        st.adj = { ds: 1, dr: 0, dx: 0, dy: 0 };
+        recomputeDrawingAlignT();
+        renderDrawingAlignBar();
+        drawCanvas();
+        window.showToast?.('바깥 테두리 모서리 기준으로 맞췄습니다. 어긋나면 미세 조정 후 확정하세요.', 'info', 5000);
+    }
+
+    /** 지금 층 행·열 선(이 층 도면 좌표로 확정된 것만 — 다른 층에서 복사해 와 아직 못 맞춘 선은 제외) */
+    function drawingAlignGrid() {
+        const grid = (typeof getCurrentFloorGrid === 'function') ? getCurrentFloorGrid(false) : null;
+        if (!grid || grid.pendingScale) return null;
+        const n = (grid.groups || []).reduce((a, g) => a + ((g.lines || []).length), 0);
+        return (n > 0 || (grid.zones || []).length) ? grid : null;
+    }
+    function drawingAlignGridLineCount() {
+        const grid = drawingAlignGrid();
+        if (!grid) return 0;
+        return (grid.groups || []).reduce((a, g) => a + ((g.lines || []).length), 0) || (grid.zones || []).length;
     }
 
     async function startDrawingAlign() {
@@ -1592,14 +1680,17 @@
             ghostAlpha: 0.55,
             snapLines: true,
             moveNdt: cnt.ndt > 0 && !floorNdtUsesOwnDrawing(floorKey),
+            moveGrid: drawingAlignGridLineCount() > 0,
+            gridCount: drawingAlignGridLineCount(),
             ndtCount: cnt.ndt,
             defectCount: cnt.defects,
+            pointCount: loadDrawingAlignPointCount(),
             step: 0,
             oldPts: [],
             newPts: [],
             baseT: null,
             T: null,
-            adj: { ds: 1, dx: 0, dy: 0 },
+            adj: { ds: 1, dr: 0, dx: 0, dy: 0 },
             busy: false
         };
         renderDrawingAlignBar();
@@ -1618,20 +1709,30 @@
         const st = window.drawingAlignState;
         if (!st) return;
         st.step = 0; st.oldPts = []; st.newPts = []; st.baseT = null; st.T = null;
-        st.adj = { ds: 1, dx: 0, dy: 0 };
+        st.adj = { ds: 1, dr: 0, dx: 0, dy: 0 };
         renderDrawingAlignBar();
         drawCanvas();
+    }
+
+    function setDrawingAlignPointCount(n) {
+        const st = window.drawingAlignState;
+        if (!st || (n !== 2 && n !== 3)) return;
+        saveDrawingAlignPointCount(n);
+        if (st.pointCount === n) return;
+        st.pointCount = n;
+        resetDrawingAlignPoints();
     }
 
     function recomputeDrawingAlignT() {
         const st = window.drawingAlignState;
         const MA = window.BSA && window.BSA.markingAlign;
-        if (!st || !MA || !st.baseT) return;
+        if (!st || !MA || !st.baseT || !st.newPts.length) return;
+        // 미세 조정(배율·회전) 중심 = 새 도면에 찍은 점들의 가운데
         const c = {
-            x: (st.newPts[0].x + st.newPts[1].x) / 2,
-            y: (st.newPts[0].y + st.newPts[1].y) / 2
+            x: st.newPts.reduce((s, p) => s + p.x, 0) / st.newPts.length,
+            y: st.newPts.reduce((s, p) => s + p.y, 0) / st.newPts.length
         };
-        st.T = MA.adjustTransform(st.baseT, { ds: st.adj.ds, cx: c.x, cy: c.y, dx: st.adj.dx, dy: st.adj.dy });
+        st.T = MA.adjustTransform(st.baseT, { ds: st.adj.ds, dr: st.adj.dr, cx: c.x, cy: c.y, dx: st.adj.dx, dy: st.adj.dy });
     }
 
     /** 옛 위치 찍기(옛 도면이 없을 때): 가까운 마킹 점(지시 끝·박스·영역 꼭짓점)에 붙인다 */
@@ -1668,10 +1769,11 @@
 
     function handleDrawingAlignPick(clientX, clientY) {
         const st = window.drawingAlignState;
-        if (!st || st.step > 3 || !elements.planCanvas) return;
+        const total = st ? st.pointCount * 2 : 0;
+        if (!st || st.step >= total || !elements.planCanvas) return;
         const rect = elements.planCanvas.getBoundingClientRect();
         let pt = canvasCssToImgCoords(clientX - rect.left, clientY - rect.top);
-        const isOld = st.step === 0 || st.step === 2;
+        const isOld = st.step % 2 === 0;
         if (isOld) {
             if (!(st.ghost && st.showGhost)) pt = snapToMarkingAnchor(pt);
             st.oldPts.push({ x: pt.x, y: pt.y });
@@ -1680,15 +1782,19 @@
             st.newPts.push({ x: pt.x, y: pt.y });
         }
         st.step += 1;
-        if (st.step === 4) {
+        if (st.step === total) {
             const MA = window.BSA.markingAlign;
-            st.baseT = MA.solveSimilarity(st.oldPts, st.newPts);
+            st.baseT = st.pointCount === 3
+                ? MA.solveAffine3(st.oldPts, st.newPts)
+                : MA.solveSimilarity(st.oldPts, st.newPts);
             if (!st.baseT) {
-                window.showToast?.('두 기준점이 너무 가깝습니다. 서로 멀리 떨어진 두 점으로 다시 찍어 주세요.', 'warning', 5000);
+                window.showToast?.(st.pointCount === 3
+                    ? '세 기준점이 거의 한 줄에 있거나 너무 가깝습니다. 삼각형이 되도록 서로 떨어진 세 점으로 다시 찍어 주세요.'
+                    : '두 기준점이 너무 가깝습니다. 서로 멀리 떨어진 두 점으로 다시 찍어 주세요.', 'warning', 5000);
                 resetDrawingAlignPoints();
                 return;
             }
-            st.adj = { ds: 1, dx: 0, dy: 0 };
+            st.adj = { ds: 1, dr: 0, dx: 0, dy: 0 };
             recomputeDrawingAlignT();
         }
         renderDrawingAlignBar();
@@ -1754,7 +1860,7 @@
         const st = window.drawingAlignState;
         if (!st || !st.ghost || !st.showGhost || st.floorKey !== drawingAlignFloorKey()) return;
         ctx.save();
-        if (st.T) ctx.transform(st.T.a, st.T.b, -st.T.b, st.T.a, st.T.e, st.T.f);
+        if (st.T) ctx.transform(st.T.a, st.T.b, st.T.c, st.T.d, st.T.e, st.T.f);
         ctx.globalAlpha = st.ghostAlpha;
         ctx.imageSmoothingEnabled = true;
         ctx.drawImage(st.ghost.canvas, 0, 0, st.ghost.refW, st.ghost.refH);
@@ -1804,8 +1910,17 @@
     function drawingAlignInfoText(st) {
         const T = st.T;
         if (!T) return '';
-        const ang = Math.abs(T.angleDeg) < 0.05 ? '회전 없음' : `회전 ${T.angleDeg.toFixed(1)}°`;
-        return `배율 ×${T.scale.toFixed(3)} · ${ang}`;
+        const ang = Math.abs(T.angleDeg) < 0.05 ? '회전 없음' : `회전 ${T.angleDeg.toFixed(2)}°`;
+        const parts = [];
+        if (T.mode === 3 && T.scaleX > 0 && T.scaleY > 0 && Math.abs(T.scaleX / T.scaleY - 1) > 0.002) {
+            parts.push(`배율 가로 ×${T.scaleX.toFixed(3)} · 세로 ×${T.scaleY.toFixed(3)}`);
+        } else {
+            parts.push(`배율 ×${T.scale.toFixed(3)}`);
+        }
+        parts.push(ang);
+        if (T.mirrored) parts.push('<b>뒤집힘</b>');
+        if (T.mode === 3 && Math.abs(T.skewDeg || 0) >= 0.3) parts.push(`비틀림 ${T.skewDeg.toFixed(1)}°`);
+        return parts.join(' · ');
     }
 
     function renderDrawingAlignBar() {
@@ -1832,18 +1947,27 @@
         const ndtCtl = st.ndtCount > 0
             ? `<label class="dab-chk" title="${ndtOwn ? '비파괴 탭에 따로 넣은 도면을 쓰는 층 — 보통은 옮기지 않습니다' : '비파괴(강도·탄산화·기울기·변위 등) 마킹도 같이 옮깁니다'}"><input type="checkbox" id="dabNdt"${st.moveNdt ? ' checked' : ''}> 비파괴 ${st.ndtCount}개도</label>`
             : '';
+        const gridCtl = st.gridCount > 0
+            ? `<label class="dab-chk" title="행·열 선(구역 포함)도 마킹과 같은 비율로 옮깁니다 — 행·열 위치가 그대로 유지됩니다"><input type="checkbox" id="dabGrid"${st.moveGrid ? ' checked' : ''}> 행·열 선도</label>`
+            : '';
+        const modeCtl = '<span class="dab-seg" role="group" aria-label="기준점 수">'
+            + B('dabMode2', '2점', st.pointCount === 2 ? 'dab-seg-on' : '', '이동·배율·회전 — 1.5° 미만 기울기는 버림')
+            + B('dabMode3', '3점', st.pointCount === 3 ? 'dab-seg-on' : '', '돌아간 도면용 — 작은 회전·가로세로 배율 차이·뒤집힘까지 맞춤(세 점이 삼각형이 되게)')
+            + '</span>';
         let body;
         if (!preview) {
-            body = `<span class="dab-step">${ALIGN_PICK_TEXT[st.step](!!(st.ghost && st.showGhost))}</span>`
+            body = modeCtl + `<span class="dab-step">${drawingAlignPickText(st, !!(st.ghost && st.showGhost))}</span>`
+                + (st.ghost && st.ghost.raw ? B('dabFrame', '▣ 테두리로 자동 맞추기', 'dab-ok', '옛 도면·새 도면의 바깥 테두리 모서리를 기준점으로 자동 지정해 마킹을 비율대로 옮깁니다') : '')
                 + `<span class="dab-sep"></span>${ghostCtl}${snapCtl}`
                 + `<span class="dab-sep"></span>${st.step > 0 ? B('dabRestart', '다시 찍기') : ''}${B('dabCancel', '취소', 'dab-cancel')}`;
         } else {
             const okLabel = `✅ 확정 (결함 ${st.defectCount}개${st.moveNdt && st.ndtCount ? ` + 비파괴 ${st.ndtCount}개` : ''})`;
-            body = `<span class="dab-step"><b>미리보기</b> ${drawingAlignInfoText(st)} — 마킹이 새 도면 자리에 맞으면 확정</span>`
+            body = `<span class="dab-step"><b>미리보기(${st.pointCount}점)</b> ${drawingAlignInfoText(st)} — 마킹이 새 도면 자리에 맞으면 확정</span>`
                 + '<span class="dab-sep"></span><span class="dab-note">미세 조정</span>'
                 + B('dabL', '⬅', 'dab-sm', '왼쪽으로') + B('dabU', '⬆', 'dab-sm', '위로') + B('dabD', '⬇', 'dab-sm', '아래로') + B('dabR', '➡', 'dab-sm', '오른쪽으로')
                 + B('dabSUp', '➕', 'dab-sm', '조금 크게(0.2%)') + B('dabSDown', '➖', 'dab-sm', '조금 작게(0.2%)')
-                + `<span class="dab-sep"></span>${ghostCtl}${ndtCtl}`
+                + B('dabRotL', '⟲', 'dab-sm', '반시계로 조금 돌리기(0.1°)') + B('dabRotR', '⟳', 'dab-sm', '시계로 조금 돌리기(0.1°)')
+                + `<span class="dab-sep"></span>${ghostCtl}${ndtCtl}${gridCtl}`
                 + '<span class="dab-sep"></span>'
                 + B('dabConfirm', okLabel, 'dab-ok') + B('dabRestart', '다시 찍기') + B('dabCancel', '취소', 'dab-cancel');
         }
@@ -1852,11 +1976,13 @@
 
         const on = (id, ev, fn) => { const el = document.getElementById(id); if (el) el.addEventListener(ev, fn); };
         on('dabCancel', 'click', () => endDrawingAlign());
+        on('dabFrame', 'click', () => autoAlignByFrame());
         on('dabRestart', 'click', () => resetDrawingAlignPoints());
         on('dabGhost', 'change', (e) => { st.showGhost = !!e.target.checked; renderDrawingAlignBar(); drawCanvas(); });
         on('dabGhostAlpha', 'input', (e) => { st.ghostAlpha = Number(e.target.value) || 0.55; drawCanvas(); });
         on('dabSnap', 'change', (e) => { st.snapLines = !!e.target.checked; });
         on('dabNdt', 'change', (e) => { st.moveNdt = !!e.target.checked; renderDrawingAlignBar(); });
+        on('dabGrid', 'change', (e) => { st.moveGrid = !!e.target.checked; });
         const nudge = (dxPx, dyPx) => {
             const sc = Math.max(state.view.scale || 1, 0.01);
             st.adj.dx += dxPx / sc; st.adj.dy += dyPx / sc;
@@ -1868,6 +1994,11 @@
         on('dabD', 'click', () => nudge(0, 2));
         on('dabSUp', 'click', () => { st.adj.ds *= 1.002; recomputeDrawingAlignT(); renderDrawingAlignBar(); drawCanvas(); });
         on('dabSDown', 'click', () => { st.adj.ds /= 1.002; recomputeDrawingAlignT(); renderDrawingAlignBar(); drawCanvas(); });
+        // 화면 y가 아래로 커서 각도 +가 시계 방향
+        on('dabRotL', 'click', () => { st.adj.dr -= 0.1; recomputeDrawingAlignT(); renderDrawingAlignBar(); drawCanvas(); });
+        on('dabRotR', 'click', () => { st.adj.dr += 0.1; recomputeDrawingAlignT(); renderDrawingAlignBar(); drawCanvas(); });
+        on('dabMode2', 'click', () => setDrawingAlignPointCount(2));
+        on('dabMode3', 'click', () => setDrawingAlignPointCount(3));
         on('dabConfirm', 'click', () => {
             confirmDrawingAlign().catch((e) => {
                 console.error('[마킹 맞추기] 확정 실패', e);
@@ -1913,6 +2044,19 @@
                 nNdt++;
             });
         }
+        // 행·열 선도 같은 변환으로 — 마킹만 옮기면 선과 어긋나 행·열 위치가 틀어진다
+        let gridMoved = false;
+        if (st.moveGrid) {
+            const GL = (typeof gridLib === 'function') ? gridLib() : null;
+            const grid = drawingAlignGrid();
+            if (GL && grid && typeof GL.transformGridInPlace === 'function') {
+                gridMoved = GL.transformGridInPlace(grid, T);
+                if (gridMoved) {
+                    const gd = (typeof getFloorPlanDisplayDims === 'function') ? getFloorPlanDisplayDims() : null;
+                    if (gd && gd.w > 1 && gd.h > 1) { grid.refW = gd.w; grid.refH = gd.h; }
+                }
+            }
+        }
         if (typeof markFloorKeyDirty === 'function') markFloorKeyDirty(floorKey);
         if (typeof discardStalePendingRemoteAfterLocalPinEdit === 'function') discardStalePendingRemoteAfterLocalPinEdit();
         saveStateToLocalStorage();
@@ -1924,7 +2068,7 @@
         endDrawingAlign();
         if (typeof renderDefectListPanel === 'function') renderDefectListPanel();
         if (typeof drawNdtCanvas === 'function' && state.currentTab === 'tab-ndt') drawNdtCanvas();
-        let msg = `마킹 위치를 새 도면에 맞췄습니다 — 결함 ${nDef}개${nNdt ? ` · 비파괴 ${nNdt}개` : ''} (${info}). 결함 위치는 되돌리기(Ctrl+Z)로 되돌릴 수 있습니다.`;
+        let msg = `마킹 위치를 새 도면에 맞췄습니다 — 결함 ${nDef}개${nNdt ? ` · 비파괴 ${nNdt}개` : ''} ${gridMoved ? ' · 행·열 선' : ''} (${info}). 결함 위치는 되돌리기(Ctrl+Z)로 되돌릴 수 있습니다.`;
         if (T.scale < 0.6 || T.scale > 1.6) msg += ' 핀이 도면에 비해 크거나 작아 보이면 「크기」에서 조절하세요.';
         window.showToast?.(msg, 'success', 8000);
     }

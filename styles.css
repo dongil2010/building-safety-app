@@ -1708,6 +1708,34 @@ html:not(.layout-desktop) .map-sel-popup-photo-add {
 .option-manager-reset-row .btn {
     flex: 1 1 auto;
 }
+/* 2026-11-15 세팅 창 버튼 3개: 한 줄, 제목 + 하는 일 설명 */
+.option-manager-reset-row {
+    display: grid;
+    grid-template-columns: repeat(3, 1fr);
+}
+.option-manager-reset-row .option-manager-action {
+    display: flex;
+    flex-direction: column;
+    align-items: flex-start;
+    gap: 0.2rem;
+    text-align: left;
+    white-space: normal;
+    height: auto;
+    padding: 0.45rem 0.6rem;
+    line-height: 1.3;
+}
+.option-manager-action .oma-title {
+    font-weight: 600;
+}
+.option-manager-action .oma-desc {
+    font-size: 0.72rem;
+    font-weight: 400;
+    color: var(--text-muted);
+    word-break: keep-all;
+}
+@media (max-width: 420px) {
+    .option-manager-reset-row { grid-template-columns: 1fr; }
+}
 
 .option-manager-item {
     display: flex;
@@ -1775,6 +1803,19 @@ html:not(.layout-desktop) .map-sel-popup-photo-add {
     cursor: pointer;
     padding: 0.15rem 0.35rem;
     font-size: 0.85rem;
+}
+
+.option-manager-item-rename {
+    flex-shrink: 0;
+    background: none;
+    border: none;
+    color: var(--text-muted);
+    cursor: pointer;
+    padding: 0.15rem 0.35rem;
+    font-size: 0.8rem;
+}
+.option-manager-item-rename:hover {
+    color: #2563eb;
 }
 
 .option-manager-item-delete:hover:not(:disabled) {
@@ -19061,6 +19102,10 @@ body.defect-modal-open .map-sel-photo-bar { display: none !important; }
 .drawing-align-bar .dab-btn.dab-sm { padding: 5px 8px; }
 .drawing-align-bar .dab-btn.dab-ok { background: #10b981; }
 .drawing-align-bar .dab-btn.dab-cancel { background: #ef4444; }
+/* 2026-11-16 2점 / 3점 고르기 */
+.drawing-align-bar .dab-seg { display: inline-flex; border-radius: 7px; overflow: hidden; border: 1px solid #64748b; }
+.drawing-align-bar .dab-seg .dab-btn { border-radius: 0; background: transparent; color: #cbd5e1; padding: 5px 10px; }
+.drawing-align-bar .dab-seg .dab-btn.dab-seg-on { background: #fda4af; color: #0f172a; }
 #btnAlignMarkingsToDrawing.drawing-align-pending { animation: drawingAlignPulse 1.6s ease-in-out infinite; }
 @keyframes drawingAlignPulse {
     0%, 100% { box-shadow: 0 0 0 0 rgba(244, 63, 94, 0.0); }

@@ -85,8 +85,9 @@
     const EXT_STONE_DEFECTS = [
         '상태양호', '파손/팟칭', '들뜸/탈락', '줄눈 손상', '철물 노출·녹', '변색/오염', '기타'
     ];
+    // 2026-11-15 도장은 도막 결함만 — 「균열」은 바탕(벽체·기둥 …) 결함이라 도장 목록에서 뺌
     const EXT_PAINT_DEFECTS = [
-        '상태양호', '균열', '변색/오염', '박리/탈락', '부풀음', '기타'
+        '상태양호', '변색/오염', '박리/탈락', '부풀음', '기타'
     ];
     const METAL_PANEL_FINISH_DEFECTS = [
         '상태양호', '부식', '변형/들뜸', '이음부 손상', '도장 박리', '체결부 이완', '기타'
@@ -98,7 +99,7 @@
         '상태양호', '들뜸/탈락', '파손', '변색/오염', '이격', '기타'
     ];
     const INT_PAINT_DEFECTS = [
-        '상태양호', '균열', '변색/오염', '박리/탈락', '곰팡이·결로 흔적', '기타'
+        '상태양호', '변색/오염', '박리/탈락', '곰팡이·결로 흔적', '기타'
     ];
     const CEILING_FINISH_DEFECTS = [
         '상태양호', '들뜸/탈락', '처짐', '오염/변색', '누수 흔적', '파손', '기타'
@@ -420,7 +421,8 @@
         if (!Array.isArray(raw)) return raw;
         if (!_defectTypeAllowSet) _defectTypeAllowSet = new Set(DEFECT_TYPE_ALLOW);
         const out = raw.filter((t) => _defectTypeAllowSet.has(t));
-        return out.some((t) => t !== '기타' && t !== '상태양호') ? out : raw;
+        // 2026-11-14 기본 목록에 「기타」는 넣지 않음(필요하면 직접 추가)
+        return (out.some((t) => t !== '기타' && t !== '상태양호') ? out : raw).filter((t) => t !== '기타');
     }
     function getDefectTypePresetForRaw(category, component) {
         const key = normalizeComponentKey(component);
@@ -569,35 +571,61 @@
      * 저장 칸: 「분류|부재」(예: 구조체|보(G)). 그 부재를 ⚙에서 아직 안 고쳤으면 예전처럼 분류 칸(구조체)을 쓴다 —
      * 기존 세팅은 그대로 보이고, ⚙를 처음 열 때 분류 세팅을 그 부재 칸으로 복사한 뒤 그 부재만 고친다.
      */
+    /** 세팅 칸의 부재 이름 — 2026-11-13 보(G)·보(B)는 「보」, 철골보(G)·(B)는 「철골보」 한 칸 */
+    // 2026-11-13 PC보·RC보·큰보·작은보도 「보」, RC기둥·PC기둥도 「기둥」(철골·SRC·원형은 따로)
+    function settingsComponentName(component) {
+        let n = String(component || '').trim().replace(/\s*\(\s*[GgBb]\s*\)\s*$/, '').trim();
+        if (/^(RC|PC)\s*보$/i.test(n) || n === '큰보' || n === '작은보') n = '보';
+        else if (/^(RC|PC)\s*기둥$/i.test(n)) n = '기둥';
+        return n;
+    }
+    /** 이미 만든 칸 찾기: 묶은 이름 칸, 없으면 예전 이름 칸(보(G) 등) — parts: 칸 이름 앞·뒤에 붙는 분류·종류 */
+    function findOwnedSettingsBucket(map, prefix, component, suffix) {
+        if (!map || typeof map !== 'object') return '';
+        const norm = settingsComponentName(component);
+        if (!norm) return '';
+        const exact = prefix + norm + suffix;
+        if (Array.isArray(map[exact])) return exact;
+        return Object.keys(map).find((k) => Array.isArray(map[k]) && k.startsWith(prefix) && k.endsWith(suffix)
+            && k.length > prefix.length + suffix.length
+            && settingsComponentName(k.slice(prefix.length, k.length - suffix.length)) === norm) || '';
+    }
     function defectTypeComponentBucketKey(category, component) {
         const cat = String(category || '').trim();
-        const comp = String(component || '').trim();
+        const comp = settingsComponentName(component);
         return (cat && comp) ? `${cat}|${comp}` : '';
     }
     function defectTypeSettingsBucket(category, component) {
         const cat = String(category || '').trim();
-        const b = defectTypeComponentBucketKey(cat, component);
-        if (b && window.state.customDefectTypes && Array.isArray(window.state.customDefectTypes[b])) return b;
-        return cat;
+        if (!cat) return cat;
+        return findOwnedSettingsBucket(window.state.customDefectTypes, `${cat}|`, component, '') || cat;
     }
-    /** ⚙로 고치기 전: 이 부재 칸이 없으면 분류 세팅을 복사해 만든다 → 그 칸 이름 */
+    /** ⚙로 고치기 전: 이 부재 칸이 없으면 (예전 보(G) 칸 또는) 분류 세팅을 복사해 만든다 → 그 칸 이름 */
     function ownDefectTypeSettingsBucket(category, component) {
         const cat = String(category || '').trim();
         const b = defectTypeComponentBucketKey(cat, component);
         if (!b) return cat;
         const st = window.state;
         if (st.customDefectTypes && Array.isArray(st.customDefectTypes[b])) return b;
+        const src = findOwnedSettingsBucket(st.customDefectTypes, `${cat}|`, component, '') || cat;
+        const favNow = typeof getDefectFavoriteList === 'function' ? getDefectFavoriteList('type', src) : null;
         ['customDefectTypes', 'hiddenDefectTypes', 'defectTypeOrder'].forEach((f) => {
             if (!st[f] || typeof st[f] !== 'object') st[f] = {};
-            st[f][b] = Array.isArray(st[f][cat]) ? st[f][cat].slice() : [];
+            st[f][b] = Array.isArray(st[f][src]) ? st[f][src].slice() : [];
         });
+        // ★도 부재별 — 지금 보이는 분류 ★를 그 부재 칸으로 복사
+        if (Array.isArray(favNow)) {
+            if (!st.favoriteDefectTypes || typeof st.favoriteDefectTypes !== 'object') st.favoriteDefectTypes = {};
+            st.favoriteDefectTypes[b] = favNow.slice();
+        }
         return b;
     }
 
     function getPinnedDefectTypeChips(category, component) {
         const bucket = defectTypeSettingsBucket(category, component);
         const hidden = (window.state.hiddenDefectTypes && window.state.hiddenDefectTypes[bucket]) || [];
-        const crackKinds = getCrackKindsForComponent(component) || [];
+        // 2026-11-13 ⚙에서 지운(숨긴) 균열 종류도 실제로 안 보이게 — 전엔 균열 종류는 지워도 계속 떴다
+        const crackKinds = (getCrackKindsForComponent(component) || []).filter(t => !hidden.includes(t));
         const preset = (getDefectTypePresetFor(category, component) || []).filter(t => !hidden.includes(t));
         const custom = ((window.state.customDefectTypes && window.state.customDefectTypes[bucket]) || [])
             .filter(t => t && !isTransientDefectTypeValue(t) && !crackKinds.includes(t) && !hidden.includes(t));
@@ -639,7 +667,7 @@
 
         let html = `<option value="" ${!currentVal ? 'selected' : ''}>—</option>`;
         const allOptions = presetList.slice();
-        if (crackKinds) crackKinds.forEach(k => { if (!allOptions.includes(k)) allOptions.push(k); });
+        if (crackKinds) crackKinds.forEach(k => { if (!allOptions.includes(k) && !hidden.includes(k)) allOptions.push(k); });
         customList.forEach(item => {
             if (!allOptions.includes(item)) allOptions.push(item);
         });
@@ -833,7 +861,7 @@
         const groups = getCauseDisplayGroups(t);
         const res = q.pickCausesAfterTypeChange({
             groupOptions: groups.map((g) => getCauseOptionsForKey(g.key, g.types)),
-            groupFavorites: groups.map((g) => getDefectFavoriteList('cause', g.key)),
+            groupFavorites: groups.map((g) => getDefectFavoriteList('cause', causeSettingsBucket(g.key, undefined, g.types))),
             selected: Array.isArray(selectedOverride) ? selectedOverride : getSelectedCausesFromUi(),
             autoPicked: window._defectAutoCauses || [],
             autoCheck: window.state.defectCauseAutoCheck !== false
@@ -2768,8 +2796,9 @@
     const CORE_CRACK_CAUSE_PRESET = [C_DS, C_OPEN, C_RESTR, '과하중', '부등침하', '철근 부식 팽창'];
     const CRACK_MESH_CAUSES = [C_DS, C_PLASTER, '동결융해 반복', C_WORK];
     const CRACK_MASONRY_CAUSES = [C_DS, C_OPEN, C_RESTR, C_MISM, C_MASONRY, C_MISM_JOINT];
-    // 2026-11-03 회사 결함표(엑셀 160건 보고서·결함 38,085행): 슬래브 균열의 12%가 「결함부위 수분유입」, 5%가 「상부 방수층 파손」을 함께 적음
-    const CRACK_SLAB_CAUSES = [C_DS, C_RESTR, C_WET, '상부 방수층 파손', '과하중', C_SHORE, '철근 부식 팽창'];
+    // 2026-11-13 수분 원인(결함부위 수분유입·상부 방수층 파손·방수층 파손)은 균열 원인에서 뺌(사용자 지정).
+    // 균열+누수·백태를 같이 고르면 누수/백태 원인 칸이 따로 나오므로 수분 원인은 그쪽에서 고른다.
+    const CRACK_SLAB_CAUSES = [C_DS, C_RESTR, '과하중', C_SHORE, '철근 부식 팽창'];
     const CRACK_NONSTRUCT_CAUSES = [C_MISM, C_DS, C_WORK, '외부 충격', C_MISM_JOINT];
     const CRACK_FINISH_CAUSES = ['바탕 균열 전달', C_WORK, C_DS, C_AGING];
 
@@ -3088,7 +3117,7 @@
 
     // 2026-10-30 회사 결함표(엑셀 173개, 판본 묶은 보고서 수 기준) 원인 빈도 순위 — 앱 기본 목록의 순서만 바꾼다(지우지 않음)
     const COMPANY_CAUSE_RANK = {
-        '균열': ['건조수축 및 재료적 특성', '개구부 주위 응력집중', '시공미흡', '결함부위 수분유입', '주변부재의 구속', '이질재료 접합부 거동차이', '이질재료 거동차이', '코너부위 응력집중', '상부 방수층 파손', '경과년수 증대에 따른 노후화', '건조수축', '방수층 파손', '이어치기 시공미흡', '피복두께 부족'],
+        '균열': ['건조수축 및 재료적 특성', '개구부 주위 응력집중', '시공미흡', '주변부재의 구속', '이질재료 접합부 거동차이', '이질재료 거동차이', '코너부위 응력집중', '경과년수 증대에 따른 노후화', '건조수축', '이어치기 시공미흡', '피복두께 부족'],
         '*': ['건조수축 및 재료적 특성', '시공미흡', '개구부 주위 응력집중', '경과년수 증대에 따른 노후화', '이질재료 접합부 거동차이', '결함부위 수분유입', '상부 방수층 파손', '주변부재의 구속', '이질재료 거동차이', '피복두께 부족', '코너부위 응력집중', '관리미흡', '방수층 파손', '사용자 부주의'],
         '이격': ['이질재료 접합부 거동차이', '건조수축 및 재료적 특성', '시공미흡', '이질재료 거동차이', '경과년수 증대에 따른 노후화', '코너부위 응력집중', '개구부 주위 응력집중'],
         '누수': ['상부 방수층 파손', '결함부위 수분유입', '방수층 파손', '경과년수 증대에 따른 노후화', '시공미흡', '건조수축 및 재료적 특성', '상부 배관 누수', '이질재료 접합부 거동차이'],
@@ -3211,13 +3240,14 @@
             _defectCauseAllowSet = new Set(DEFECT_CAUSE_ALLOW.concat(CRACK_TOP_CAUSES, LEAK_TOP_CAUSES, FINISH_TOP_CAUSES));
             Object.values(CRACK_LEAD_BY_GROUP).forEach((l) => l.forEach((c) => _defectCauseAllowSet.add(c)));
         }
-        const out = raw.filter((c) => _defectCauseAllowSet.has(c));
-        if (out.some((c) => c !== '기타')) return out;
+        // 2026-11-14 기본 목록에 「기타」는 넣지 않음(필요하면 직접 추가)
+        const out = raw.filter((c) => c !== '기타' && _defectCauseAllowSet.has(c));
+        if (out.length) return out;
         // 그 종류에 쓸 원인이 엑셀에 하나도 없으면(기타·도장 박리·줄눈 손상 …) 엑셀에서 많이 쓰인 일반 원인으로
         const rk = companyCauseRankKey(key) || (/이격/.test(String(key)) ? '이격' : '');
         const base = (COMPANY_CAUSE_RANK[rk] || ['시공미흡', '경과년수 증대에 따른 노후화', '관리미흡', '사용자 부주의'])
             .filter((c) => _defectCauseAllowSet.has(c) && c !== '기타').slice(0, 6);
-        return uniqCauseList(base.concat(raw.includes('기타') ? ['기타'] : []));
+        return uniqCauseList(base);
     }
     function getDefaultCausePresetListRaw(key, types, category, component) {
         const k = String(key || '').trim() || '기타';
@@ -3419,15 +3449,80 @@
         });
     }
 
+    /**
+     * 2026-11-13 세팅은 트리: 분류 → 부재 → 결함 종류 → 원인. 같은 「균열」이라도 부재가 다르면 원인 세팅이 따로다.
+     * 저장 칸 「분류|부재|원인키」(예: 구조체|보(G)|균열). ⚙로 아직 안 고친 칸은 예전처럼 원인키 칸(균열)을 쓴다 —
+     * 기존 세팅이 그대로 보이고, ⚙를 열 때 그 칸으로 복사한 뒤 그 부재·종류만 고친다.
+     */
+    function causeTreeContext() {
+        return {
+            category: String(document.getElementById('defectCategory')?.value || '').trim(),
+            component: String(getDefectComboValue(
+                document.getElementById('defectComponent'),
+                document.getElementById('defectComponentInput')
+            ) || '').trim()
+        };
+    }
+    function causeTreeBucketKey(category, component, key) {
+        const cat = String(category || '').trim();
+        const comp = settingsComponentName(component);
+        const k = String(key || '').trim();
+        return (cat && comp && k) ? `${cat}|${comp}|${k}` : '';
+    }
+    function findOwnedCauseBucket(t, key) {
+        const cat = String(t.category || '').trim();
+        const k = String(key || '').trim();
+        if (!cat || !k) return '';
+        return findOwnedSettingsBucket(window.state.customDefectCauses, `${cat}|`, t.component, `|${k}`);
+    }
+    /**
+     * 2026-11-15 원인 세팅을 결함 종류마다: 원인 묶음 하나(균열·기타 …)를 여러 결함 종류가 같이 쓰면
+     * (수직균열·하부면 균열 → 균열, 중성화·진동 → 기타) 종류별로 원인을 다르게 둘 수 없었다.
+     * 종류 하나만 고른 원인 묶음이면 그 종류 이름 칸(「분류|부재|하부면 균열」)을 먼저 보고, 없으면 예전 칸.
+     */
+    function causeSettingsTypeName(key, types) {
+        const k = String(key || '').trim();
+        const list = (Array.isArray(types) ? types : []).map((x) => String(x || '').trim()).filter(Boolean);
+        if (list.length !== 1) return k;
+        const t = list[0];
+        return (t && t !== k && t !== '기타') ? t : k;
+    }
+    function causeSettingsBucket(key, tree, types) {
+        const t = tree || causeTreeContext();
+        const sub = causeSettingsTypeName(key, types);
+        return (sub !== key && findOwnedCauseBucket(t, sub)) || findOwnedCauseBucket(t, key) || key;
+    }
+    function ownCauseSettingsBucket(key, tree, types) {
+        const t = tree || causeTreeContext();
+        const sub = causeSettingsTypeName(key, types);
+        const b = causeTreeBucketKey(t.category, t.component, sub);
+        if (!b) return key;
+        const st = window.state;
+        if (st.customDefectCauses && Array.isArray(st.customDefectCauses[b])) return b;
+        seedCauseSettingsFromLegacyKey(key);
+        const src = causeSettingsBucket(key, t, types);
+        const favNow = typeof getDefectFavoriteList === 'function' ? getDefectFavoriteList('cause', src) : null;
+        ['customDefectCauses', 'hiddenDefectCauses', 'defectCauseOrder'].forEach((f) => {
+            if (!st[f] || typeof st[f] !== 'object') st[f] = {};
+            st[f][b] = Array.isArray(st[f][src]) ? st[f][src].slice() : [];
+        });
+        if (Array.isArray(favNow)) {
+            if (!st.favoriteDefectCauses || typeof st.favoriteDefectCauses !== 'object') st.favoriteDefectCauses = {};
+            st.favoriteDefectCauses[b] = favNow.slice();
+        }
+        return b;
+    }
+
     function getCauseOptionsForKey(key, types) {
         if (!window.state.customDefectCauses) window.state.customDefectCauses = {};
         if (!window.state.hiddenDefectCauses) window.state.hiddenDefectCauses = {};
         seedCauseSettingsFromLegacyKey(key);
-        const hidden = window.state.hiddenDefectCauses[key] || [];
+        const bucket = causeSettingsBucket(key, undefined, types);
+        const hidden = window.state.hiddenDefectCauses[bucket] || [];
         const ctx = getCurrentDefectCauseContext();
         const presetList = getDefaultCausePresetList(key, types, ctx.category, ctx.component)
             .filter(c => !hidden.includes(c));
-        const customList = window.state.customDefectCauses[key] || [];
+        const customList = window.state.customDefectCauses[bucket] || [];
         const merged = [];
         const seen = new Set();
         [...presetList, ...customList].forEach((item) => {
@@ -3437,7 +3532,7 @@
         });
         return applySavedOptionOrder(
             merged,
-            getEffectiveCauseOrder(key, ensureOptionOrderEntry('defectCauseOrder', key))
+            getEffectiveCauseOrder(key, ensureOptionOrderEntry('defectCauseOrder', bucket))
         );
     }
 
@@ -3864,7 +3959,7 @@
     }
 
     function getOrderedVisibleOptionItems(ctx) {
-        const order = ctx.favField === 'cause' ? getEffectiveCauseOrder(ctx.favBucket, ctx.orderList) : ctx.orderList;
+        const order = ctx.favField === 'cause' ? getEffectiveCauseOrder(ctx.causeKey || ctx.favBucket, ctx.orderList) : ctx.orderList;
         const texts = applySavedOptionOrder(getDefaultVisibleOptionTexts(ctx), order);
         return texts.map((text) => ({
             text,
@@ -3911,11 +4006,11 @@
             if (!window.state.customDefectTypes[cat]) window.state.customDefectTypes[cat] = [];
             // 부재를 골랐으면 그 부재 칸만 고친다(다른 부재는 그대로) — 2026-11-13
             const typeBucket = ownDefectTypeSettingsBucket(cat, component);
-            const compLabel = String(component || '').trim();
+            const compLabel = settingsComponentName(component);
             return {
                 title: compLabel ? `결함 종류 세팅 (${cat} · ${compLabel})` : `결함 종류 세팅 (${cat})`,
                 favField: 'type',
-                favBucket: cat,
+                favBucket: typeBucket,
                 presetList: getDefectTypePresetFor(cat, component),
                 hiddenList: window.state.hiddenDefectTypes[typeBucket],
                 customList: window.state.customDefectTypes[typeBucket],
@@ -3936,24 +4031,35 @@
             // 세팅 창의 「결함 종류」 선택으로 다른 종류의 원인 목록도 바로 편집
             // 결함 종류를 여러 개 고른 마킹은 마지막에 고른 종류를 먼저 보여 준다(「콘크리트 박리, 도장 박리」→ 도장 박리)
             const causeGroups = getCauseDisplayGroups(dType);
-            const key = window._optionManagerCauseKey || causeGroups[causeGroups.length - 1]?.key || getCauseKey(dType);
+            const lastGroup = causeGroups[causeGroups.length - 1];
+            // 2026-11-15 고른 값이 원인 묶음(균열·기타 …)이 아니라 결함 종류 이름이면 그 종류 칸을 연다
+            const pick = window._optionManagerCauseKey
+                || (lastGroup ? causeSettingsTypeName(lastGroup.key, lastGroup.types) : '') || getCauseKey(dType);
+            const key = defectCausePreset[pick] ? pick : getCauseKey(pick);
+            const pickTypes = pick !== key ? [pick] : (lastGroup && lastGroup.key === key ? lastGroup.types : undefined);
             if (!window.state.customDefectCauses) window.state.customDefectCauses = {};
             if (!window.state.hiddenDefectCauses) window.state.hiddenDefectCauses = {};
             seedCauseSettingsFromLegacyKey(key);
             if (!window.state.hiddenDefectCauses[key]) window.state.hiddenDefectCauses[key] = [];
             if (!window.state.customDefectCauses[key]) window.state.customDefectCauses[key] = [];
+            // 분류·부재를 골랐으면 「분류|부재|종류」 칸만 고친다 — 같은 종류라도 다른 부재는 그대로 (2026-11-13)
+            const tree = causeTreeContext();
+            const causeBucket = ownCauseSettingsBucket(key, tree, pickTypes);
+            const treeLabel = causeBucket !== key ? `${tree.category} · ${settingsComponentName(tree.component)} · ${pick}` : key;
             return {
-                title: `발생 원인 세팅 (${key})`,
+                title: `발생 원인 세팅 (${treeLabel})`,
                 favField: 'cause',
-                favBucket: key,
+                favBucket: causeBucket,
+                causeKey: key,
+                causePick: pick,
                 presetList: (() => {
                     const cctx = getCurrentDefectCauseContext();
                     const g = getCauseDisplayGroups(dType).find(x => x.key === key);
-                    return getDefaultCausePresetList(key, g ? g.types : undefined, cctx.category, cctx.component);
+                    return getDefaultCausePresetList(key, pickTypes || (g ? g.types : undefined), cctx.category, cctx.component);
                 })(),
-                hiddenList: window.state.hiddenDefectCauses[key],
-                customList: window.state.customDefectCauses[key],
-                orderList: ensureOptionOrderEntry('defectCauseOrder', key),
+                hiddenList: window.state.hiddenDefectCauses[causeBucket],
+                customList: window.state.customDefectCauses[causeBucket],
+                orderList: ensureOptionOrderEntry('defectCauseOrder', causeBucket),
                 labelFor: (item) => item,
                 refresh: () => updateDefectCauseDropdown(dType, getDefectComboValue(
                     document.getElementById('defectCause'),
@@ -3973,8 +4079,18 @@
             .filter(Boolean);
         ctx.orderList.length = 0;
         texts.forEach((t) => ctx.orderList.push(t));
-        saveStateToLocalStorage();
-        if (typeof ctx.refresh === 'function') ctx.refresh();
+        deferOptionManagerSave(ctx);
+    }
+
+    /** 2026-11-13 ⚙ 창: 화면을 먼저 바꾸고 저장(전체 자료 저장이라 느림)·수정창 갱신은 바로 뒤에 한 번만 */
+    let _optionManagerSaveTimer = 0;
+    function deferOptionManagerSave(ctx) {
+        if (_optionManagerSaveTimer) clearTimeout(_optionManagerSaveTimer);
+        _optionManagerSaveTimer = setTimeout(() => {
+            _optionManagerSaveTimer = 0;
+            saveStateToLocalStorage();
+            if (ctx && typeof ctx.refresh === 'function') ctx.refresh();
+        }, 60);
     }
 
     function bindOptionManagerDrag(listEl) {
@@ -4008,32 +4124,48 @@
 
                 handle.setPointerCapture(e.pointerId);
 
+                // 2026-11-13 버벅임: 예전엔 마우스가 움직일 때마다 모든 줄의 위치를 다시 재고 자리 표시를 다시 꽂았다.
+                // 지금은 화면 한 번 그릴 때 한 번만(rAF), 줄 위치는 자리 표시가 실제로 옮겨졌을 때만 다시 잰다.
+                const rows = Array.from(listEl.querySelectorAll('.option-manager-item'));
+                let mids = null;
+                let lastScroll = listEl.scrollTop;
+                const measure = () => {
+                    mids = rows.map((other) => { const r = other.getBoundingClientRect(); return r.top + r.height / 2; });
+                    lastScroll = listEl.scrollTop;
+                };
+                let beforeRow; // 자리 표시 바로 뒤 줄(undefined = 아직 모름, null = 맨 끝)
                 const moveRowToY = (clientY) => {
                     const top = clientY - offsetY;
                     const minTop = listRect.top - rowRect.height * 0.35;
                     const maxTop = listRect.bottom - rowRect.height * 0.65;
                     row.style.top = `${Math.max(minTop, Math.min(maxTop, top))}px`;
 
-                    const probeY = clientY;
-                    const rows = Array.from(listEl.querySelectorAll('.option-manager-item:not(.is-dragging)'));
-                    let inserted = false;
-                    for (const other of rows) {
-                        const r = other.getBoundingClientRect();
-                        const mid = r.top + r.height / 2;
-                        if (probeY < mid) {
-                            listEl.insertBefore(placeholder, other);
-                            inserted = true;
-                            break;
-                        }
+                    if (!mids || listEl.scrollTop !== lastScroll) measure();
+                    let target = null;
+                    for (let i = 0; i < rows.length; i++) {
+                        if (clientY < mids[i]) { target = rows[i]; break; }
                     }
-                    if (!inserted) listEl.appendChild(placeholder);
+                    if (target === beforeRow) return;
+                    beforeRow = target;
+                    if (target) listEl.insertBefore(placeholder, target);
+                    else listEl.appendChild(placeholder);
+                    mids = null; // 자리 표시가 옮겨져 줄 위치가 바뀜 — 다음에 다시 잰다
                 };
                 moveRowToY(e.clientY);
 
+                let pendingY = null;
+                let rafId = 0;
                 const onMove = (ev) => {
-                    moveRowToY(ev.clientY);
+                    pendingY = ev.clientY;
+                    if (rafId) return;
+                    rafId = requestAnimationFrame(() => {
+                        rafId = 0;
+                        if (pendingY != null) moveRowToY(pendingY);
+                    });
                 };
                 const onUp = () => {
+                    if (rafId) { cancelAnimationFrame(rafId); rafId = 0; }
+                    if (pendingY != null) moveRowToY(pendingY);
                     try { handle.releasePointerCapture(e.pointerId); } catch (_) {}
                     handle.removeEventListener('pointermove', onMove);
                     handle.removeEventListener('pointerup', onUp);
@@ -4111,6 +4243,24 @@
             label.textContent = ctx.labelFor(text);
             row.appendChild(label);
 
+            const copyBtn = document.createElement('button');
+            copyBtn.type = 'button';
+            copyBtn.className = 'option-manager-item-rename option-manager-item-copy';
+            copyBtn.innerHTML = '<i class="fa-regular fa-copy"></i>';
+            copyBtn.title = ctx.favField === 'cause' ? '복사 (이름-1)' : '복사 (이름-1, 딸린 원인까지)';
+            copyBtn.setAttribute('aria-label', '복사');
+            copyBtn.addEventListener('click', () => copyOptionItem(text));
+            row.appendChild(copyBtn);
+
+            const renameBtn = document.createElement('button');
+            renameBtn.type = 'button';
+            renameBtn.className = 'option-manager-item-rename';
+            renameBtn.innerHTML = '<i class="fa-solid fa-pen"></i>';
+            renameBtn.title = '이름 바꾸기 (원인·순서·★ 그대로)';
+            renameBtn.setAttribute('aria-label', '이름 바꾸기');
+            renameBtn.addEventListener('click', () => renameOptionItem(text));
+            row.appendChild(renameBtn);
+
             const delBtn = document.createElement('button');
             delBtn.type = 'button';
             delBtn.className = 'option-manager-item-delete';
@@ -4137,13 +4287,24 @@
         const keys = [];
         const seen = new Set();
         const pushKey = (k) => { if (k && !seen.has(k)) { seen.add(k); keys.push(k); } };
-        pushKey(ctx.favBucket);
-        Object.keys(defectCausePreset).forEach(pushKey);
-        Object.keys(window.state.customDefectCauses || {}).forEach(pushKey);
+        const curKey = ctx.causePick || ctx.causeKey || ctx.favBucket;
+        pushKey(curKey);
+        // 2026-11-15 부재를 골랐으면 그 부재의 결함 종류만(창호에만 있는 「유리 파손」이 벽체 마감재 원인 세팅에도 보이던 것).
+        //  부재가 없을 때만 예전처럼 앱이 아는 원인 묶음 전부
+        const tr = causeTreeContext();
+        const trComp = settingsComponentName(tr.component);
+        if (tr.category && trComp) {
+            const isGood = (t) => (typeof isGoodDefectType === 'function' ? isGoodDefectType(t) : t === '상태양호');
+            (getPinnedDefectTypeChips(tr.category, tr.component) || []).filter((t) => t && !isGood(t)).forEach(pushKey);
+        } else {
+            Object.keys(defectCausePreset).forEach(pushKey);
+            // 「분류|부재|종류」 칸은 종류 목록에 넣지 않는다(지금 부재 기준으로 열린다)
+            Object.keys(window.state.customDefectCauses || {}).filter((k) => !String(k).includes('|')).forEach(pushKey);
+        }
         const autoOn = window.state.defectCauseAutoCheck !== false;
         host.innerHTML = `
             <label class="option-manager-extra-row">결함 종류
-                <select id="optionManagerCauseKey" class="form-select">${keys.map((k) => `<option value="${escapeHtml(k)}"${k === ctx.favBucket ? ' selected' : ''}>${escapeHtml(k)}</option>`).join('')}</select>
+                <select id="optionManagerCauseKey" class="form-select">${keys.map((k) => `<option value="${escapeHtml(k)}"${k === curKey ? ' selected' : ''}>${escapeHtml(k)}</option>`).join('')}</select>
             </label>
             <label class="option-manager-extra-row option-manager-extra-check">
                 <input type="checkbox" id="optionManagerCauseAuto"${autoOn ? ' checked' : ''}> 결함 종류를 고르면 원인 자동 체크
@@ -4165,6 +4326,218 @@
         }
     }
 
+    /**
+     * 2026-11-15 ⚙ 세팅 창 이름 바꾸기 — 지우고 다시 추가하면 딸린 원인·순서·★가 다 날아가 불편했다.
+     * 목록 안 자리·★는 그대로 두고, 결함 종류면 그 종류의 원인 칸을, 부재면 그 부재의 결함 종류·원인 칸을 새 이름으로 옮긴다.
+     * 이미 저장된 결함 기록의 글자는 바꾸지 않는다.
+     */
+    const OPTION_FAV_STATE_KEY = { component: 'favoriteDefectComponents', type: 'favoriteDefectTypes', cause: 'favoriteDefectCauses' };
+    function replaceInList(list, from, to) {
+        if (!Array.isArray(list)) return;
+        const at = list.indexOf(from);
+        if (at < 0) return;
+        if (list.includes(to)) list.splice(at, 1);
+        else list[at] = to;
+    }
+    function moveSettingsBucket(fields, from, to) {
+        const st = window.state;
+        fields.forEach((f) => {
+            const map = st[f];
+            if (!map || typeof map !== 'object' || !Array.isArray(map[from])) return;
+            if (!Array.isArray(map[to])) map[to] = map[from];
+            delete map[from];
+        });
+    }
+    const CAUSE_BUCKET_FIELDS = ['customDefectCauses', 'hiddenDefectCauses', 'defectCauseOrder', 'favoriteDefectCauses'];
+    const TYPE_BUCKET_FIELDS = ['customDefectTypes', 'hiddenDefectTypes', 'defectTypeOrder', 'favoriteDefectTypes'];
+    /** 결함 종류 이름이 바뀌어도 원인 목록이 그대로 보이게: 옛 종류에서 보이던 원인을 새 종류 칸에 그대로 적는다 */
+    function carryCauseSettingsToRenamedType(category, component, oldType, newType, opts) {
+        const o = opts || {};
+        const st = window.state;
+        const comp = settingsComponentName(component);
+        const newComp = o.newComponent ? settingsComponentName(o.newComponent) : comp;
+        if (!category || !comp || !newComp) return;
+        const oldKey = getCauseKey(oldType);
+        const list = getCauseOptionsForKey(oldKey, [oldType]).slice();
+        const oldBucket = causeSettingsBucket(oldKey, { category, component }, [oldType]);
+        const favs = (typeof getDefectFavoriteList === 'function' ? getDefectFavoriteList('cause', oldBucket) : [])
+            .filter((c) => list.includes(c));
+        const newKey = getCauseKey(newType);
+        const allDef = new Set(getAllDefaultCausesForKey(newKey));
+        const universe = [...new Set([...getDefaultCausePresetList(newKey, [newType], category, component), ...allDef])];
+        const orderOk = list.some((c) => allDef.has(c));
+        const b = `${category}|${newComp}|${causeSettingsTypeName(newKey, [newType])}`;
+        const oldOwn = `${category}|${comp}|${oldType}`;
+        if (!o.keepOld && oldOwn !== b) CAUSE_BUCKET_FIELDS.forEach((f) => { if (st[f] && typeof st[f] === 'object') delete st[f][oldOwn]; });
+        CAUSE_BUCKET_FIELDS.forEach((f) => { if (!st[f] || typeof st[f] !== 'object') st[f] = {}; });
+        st.customDefectCauses[b] = list;
+        st.hiddenDefectCauses[b] = universe.filter((c) => (orderOk ? !list.includes(c) : !favs.includes(c)));
+        st.defectCauseOrder[b] = list.slice();
+        st.favoriteDefectCauses[b] = favs;
+    }
+    /** 2026-11-15 복사 이름: 「이름-1」, 이미 있으면 -2, -3 … */
+    function nextCopyName(item, taken) {
+        for (let i = 1; i < 1000; i++) {
+            const n = `${item}-${i}`;
+            if (!taken.has(n)) return n;
+        }
+        return `${item}-${Date.now()}`;
+    }
+    /** 결함 수정창의 부재 칸을 잠깐 바꿔 그 부재 기준 원인 목록을 읽는다(원인 목록 계산이 화면의 부재를 본다) */
+    function withDefectComponentInForm(component, fn) {
+        const sel = document.getElementById('defectComponent');
+        const inp = document.getElementById('defectComponentInput');
+        const keep = { s: sel ? sel.value : '', i: inp ? inp.value : '' };
+        try {
+            if (sel) {
+                if (component && ![...sel.options].some((op) => op.value === component)) {
+                    const op = document.createElement('option');
+                    op.value = component; op.textContent = component; op.dataset.tmpCopy = '1';
+                    sel.appendChild(op);
+                }
+                sel.value = component;
+            }
+            if (inp) inp.value = component;
+            return fn();
+        } finally {
+            if (sel) {
+                sel.querySelectorAll('option[data-tmp-copy]').forEach((op) => op.remove());
+                sel.value = keep.s;
+            }
+            if (inp) inp.value = keep.i;
+        }
+    }
+    /** 부재 복사: 그 부재의 결함 종류 목록·★과 종류마다의 원인 목록·순서·★를 새 부재 칸에 그대로 */
+    function copyComponentSettings(category, fromComp, toComp) {
+        const st = window.state;
+        const to = settingsComponentName(toComp);
+        if (!category || !to) return;
+        const isGood = (t) => (typeof isGoodDefectType === 'function' ? isGoodDefectType(t) : t === '상태양호');
+        const types = (getPinnedDefectTypeChips(category, fromComp) || []).slice();
+        const fromBucket = defectTypeSettingsBucket(category, fromComp);
+        const typeFavs = (typeof getDefectFavoriteList === 'function' ? getDefectFavoriteList('type', fromBucket) : [])
+            .filter((t) => types.includes(t));
+        const universe = [...new Set([
+            ...(getDefectTypePresetFor(category, toComp) || []), ...(getCrackKindsForComponent(toComp) || []),
+            ...(getDefectTypePresetFor(category, fromComp) || []), ...(getCrackKindsForComponent(fromComp) || [])
+        ])];
+        const tb = `${category}|${to}`;
+        TYPE_BUCKET_FIELDS.forEach((f) => { if (!st[f] || typeof st[f] !== 'object') st[f] = {}; });
+        st.customDefectTypes[tb] = types.slice();
+        st.hiddenDefectTypes[tb] = universe.filter((t) => !types.includes(t));
+        st.defectTypeOrder[tb] = types.slice();
+        st.favoriteDefectTypes[tb] = typeFavs;
+        withDefectComponentInForm(fromComp, () => {
+            types.filter((t) => t && !isGood(t)).forEach((t) => {
+                carryCauseSettingsToRenamedType(category, fromComp, t, t, { newComponent: toComp, keepOld: true });
+            });
+        });
+    }
+    async function copyOptionItem(item) {
+        const ctx = getOptionManagerContext();
+        if (!ctx) return;
+        const visible = getOrderedVisibleOptionItems(ctx).map((x) => x.text);
+        const taken = new Set([...visible, ...(ctx.customList || []), ...(ctx.presetList || [])]);
+        if (ctx.favField === 'component') {
+            Object.keys(window.state.customDefectTypes || {}).forEach((k) => {
+                if (k.startsWith(`${ctx.favBucket}|`)) taken.add(k.slice(ctx.favBucket.length + 1));
+            });
+        }
+        const next = nextCopyName(item, taken);
+        if (ctx.favField === 'type') {
+            const cat = String(document.getElementById('defectCategory')?.value || '').trim();
+            const component = getDefectComboValue(
+                document.getElementById('defectComponent'),
+                document.getElementById('defectComponentInput')
+            ) || '';
+            carryCauseSettingsToRenamedType(cat, component, item, next, { keepOld: true });
+        } else if (ctx.favField === 'component') {
+            copyComponentSettings(ctx.favBucket, item, next);
+        }
+        // 목록: 원본 바로 아래에
+        if (Array.isArray(ctx.orderList) && !ctx.orderList.length) visible.forEach((t) => ctx.orderList.push(t));
+        if (!ctx.customList.includes(next)) ctx.customList.push(next);
+        for (let i = ctx.hiddenList.length - 1; i >= 0; i--) if (ctx.hiddenList[i] === next) ctx.hiddenList.splice(i, 1);
+        if (Array.isArray(ctx.orderList)) {
+            const at = ctx.orderList.indexOf(item);
+            if (at >= 0) ctx.orderList.splice(at + 1, 0, next);
+            else ctx.orderList.push(next);
+        }
+        renderOptionManagerList();
+        deferOptionManagerSave(ctx);
+        const label = ctx.labelFor ? ctx.labelFor(item) : item;
+        const what = ctx.favField === 'type' ? ' (원인까지)' : (ctx.favField === 'component' ? ' (결함 종류·원인까지)' : '');
+        window.showToast(`「${label}」 → 「${next}」 복사했습니다${what}.`, 'success', 2500);
+    }
+
+    async function renameOptionItem(item) {
+        const ctx = getOptionManagerContext();
+        if (!ctx) return;
+        const label = ctx.labelFor ? ctx.labelFor(item) : item;
+        const raw = await window.appPrompt(`「${label}」의 새 이름`, item);
+        const next = String(raw == null ? '' : raw).trim();
+        if (!next || next === item) return;
+        if (/[,，]/.test(next) && ctx.favField !== 'component') {
+            window.showToast('이름에 쉼표(,)는 쓸 수 없습니다.', 'warning');
+            return;
+        }
+        const visible = getOrderedVisibleOptionItems(ctx).map((x) => x.text);
+        if (visible.includes(next)) {
+            window.showToast(`「${next}」은(는) 이미 목록에 있습니다.`, 'warning');
+            return;
+        }
+        const st = window.state;
+        // 결함 종류: 옛 이름일 때 보이던 원인을 먼저 새 이름 칸으로(목록을 바꾸기 전에 읽어야 함)
+        if (ctx.favField === 'type') {
+            const cat = String(document.getElementById('defectCategory')?.value || '').trim();
+            const component = getDefectComboValue(
+                document.getElementById('defectComponent'),
+                document.getElementById('defectComponentInput')
+            ) || '';
+            carryCauseSettingsToRenamedType(cat, component, item, next);
+        }
+        // 목록: 같은 자리에 새 이름, 기본 항목이면 옛 이름은 숨김
+        if (Array.isArray(ctx.orderList) && !ctx.orderList.length) visible.forEach((t) => ctx.orderList.push(t));
+        if (ctx.customList.includes(item)) replaceInList(ctx.customList, item, next);
+        else if (!ctx.customList.includes(next)) ctx.customList.push(next);
+        if ((ctx.presetList || []).includes(item) && !ctx.hiddenList.includes(item)) ctx.hiddenList.push(item);
+        for (let i = ctx.hiddenList.length - 1; i >= 0; i--) if (ctx.hiddenList[i] === next) ctx.hiddenList.splice(i, 1);
+        replaceInList(ctx.orderList, item, next);
+        const favKey = OPTION_FAV_STATE_KEY[ctx.favField];
+        if (favKey && ctx.favBucket) {
+            const favNow = typeof getDefectFavoriteList === 'function' ? getDefectFavoriteList(ctx.favField, ctx.favBucket) : [];
+            if (favNow.includes(item)) {
+                if (!st[favKey] || typeof st[favKey] !== 'object') st[favKey] = {};
+                const nextFav = favNow.slice();
+                replaceInList(nextFav, item, next);
+                st[favKey][ctx.favBucket] = nextFav;
+            }
+        }
+        // 부재: 그 부재의 결함 종류 칸·원인 칸을 새 이름으로
+        if (ctx.favField === 'component') {
+            const cat = ctx.favBucket;
+            const from = settingsComponentName(item);
+            const to = settingsComponentName(next);
+            if (from && to && from !== to) {
+                moveSettingsBucket(TYPE_BUCKET_FIELDS, `${cat}|${from}`, `${cat}|${to}`);
+                Object.keys(st.customDefectCauses || {}).filter((k) => k.startsWith(`${cat}|${from}|`)).forEach((k) => {
+                    moveSettingsBucket(CAUSE_BUCKET_FIELDS, k, `${cat}|${to}|${k.slice(cat.length + from.length + 2)}`);
+                });
+            }
+            const sel = document.getElementById('defectComponent');
+            const inp = document.getElementById('defectComponentInput');
+            if (getDefectComboValue(sel, inp) === item && typeof syncDefectComboFields === 'function') syncDefectComboFields(sel, inp, next);
+        }
+        if (ctx.favField === 'type') {
+            const sel = document.getElementById('defectType');
+            const inp = document.getElementById('defectTypeInput');
+            if (getDefectComboValue(sel, inp) === item && typeof syncDefectComboFields === 'function') syncDefectComboFields(sel, inp, next);
+        }
+        renderOptionManagerList();
+        deferOptionManagerSave(ctx);
+        window.showToast(`「${label}」 → 「${next}」 이름을 바꿨습니다.`, 'success', 2500);
+    }
+
     async function deleteOptionItem(item, isPreset) {
         const ctx = getOptionManagerContext();
         if (!ctx) return;
@@ -4178,20 +4551,20 @@
         const label = ctx.labelFor ? ctx.labelFor(item) : item;
         if (!await window.confirmDelete(`「${label}」 항목을 삭제할까요?`)) return;
 
-        if (isPreset) {
-            if (!ctx.hiddenList.includes(item)) ctx.hiddenList.push(item);
-        } else {
-            const idx = ctx.customList.indexOf(item);
-            if (idx !== -1) ctx.customList.splice(idx, 1);
+        // 2026-11-13 「삭제가 잘 안 된다」: 같은 이름이 기본 목록과 직접 추가 목록 둘 다에 있으면 한쪽만 지워져
+        // 그대로 남았다(두 번 눌러야 사라짐). 직접 추가에서 다 빼고, 기본 목록에 있으면 숨김에도 넣는다.
+        for (let i = ctx.customList.length - 1; i >= 0; i--) {
+            if (ctx.customList[i] === item) ctx.customList.splice(i, 1);
         }
+        if ((isPreset || (ctx.presetList || []).includes(item)) && !ctx.hiddenList.includes(item)) ctx.hiddenList.push(item);
         if (Array.isArray(ctx.orderList)) {
-            const oIdx = ctx.orderList.indexOf(item);
-            if (oIdx !== -1) ctx.orderList.splice(oIdx, 1);
+            for (let i = ctx.orderList.length - 1; i >= 0; i--) {
+                if (ctx.orderList[i] === item) ctx.orderList.splice(i, 1);
+            }
         }
 
-        saveStateToLocalStorage();
         renderOptionManagerList();
-        ctx.refresh();
+        deferOptionManagerSave(ctx);
     }
 
     async function resetOptionManagerCurrent() {
@@ -4302,6 +4675,104 @@
         if (typeof refreshDefectQuickPickBar === 'function') refreshDefectQuickPickBar();
         window.showToast('앱 기본 세팅으로 복원했습니다.', 'success', 2800);
     }
+
+    // 2026-11-13 세팅 프리셋 3종: ① 앱 기본(코드 목록) ② 서버 프리셋 ③ 회사 기본 프리셋.
+    //  ②③은 회사 서버(safety_app/{회사}/bulkData/settingsPresets)에 부재·결함종류·원인 세팅 전체를 통째로 저장해 두고
+    //  「초기화 후 그대로 불러오기」로 되돌린다. 기존 규칙(bulkData 하위 문서는 회사 소속원 읽기·쓰기)을 그대로 씀.
+    const DEFECT_SETTINGS_PRESET_KEYS = ['customDefectTypes', 'customDefectCauses', 'customDefectComponents',
+        'hiddenDefectComponents', 'hiddenDefectTypes', 'hiddenDefectCauses', 'defectComponentOrder', 'defectTypeOrder',
+        'defectCauseOrder', 'favoriteDefectComponents', 'favoriteDefectTypes', 'favoriteDefectCauses', 'defectCauseAutoCheck'];
+    const DEFECT_SETTINGS_PRESET_LABEL = { server: '서버 프리셋', company: '회사 프리셋' };
+
+    function defectSettingsPresetRef() {
+        const cid = window.state && window.state.companyId;
+        if (!cid || typeof db === 'undefined' || !db) return null;
+        return db.collection('safety_app').doc(cid).collection('bulkData').doc('settingsPresets');
+    }
+
+    function snapshotDefectSettings() {
+        const data = {};
+        DEFECT_SETTINGS_PRESET_KEYS.forEach((k) => {
+            if (window.state[k] !== undefined) data[k] = JSON.parse(JSON.stringify(window.state[k]));
+        });
+        // Firestore는 중첩 배열을 못 받으므로 문자열로 저장
+        return JSON.stringify(data);
+    }
+
+    async function saveDefectSettingsPreset(which) {
+        const label = DEFECT_SETTINGS_PRESET_LABEL[which];
+        const ref = defectSettingsPresetRef();
+        if (!label || !ref || navigator.onLine === false) {
+            window.showToast('서버에 연결된 상태(회사 로그인)에서만 저장할 수 있습니다.', 'warning', 3500);
+            return;
+        }
+        const ok = await window.appConfirm(`지금 세팅(부재·결함종류·발생원인 전체)을 「${label}」으로 저장할까요?\n이미 저장된 ${label}이 있으면 덮어씁니다.\n※ 회사 공통이라 우리 회사 모든 계정이 같이 씁니다.`);
+        if (!ok) return;
+        try {
+            await ref.set({
+                [which]: {
+                    json: snapshotDefectSettings(),
+                    savedAt: firebase.firestore.FieldValue.serverTimestamp(),
+                    savedBy: window.state.uid || ''
+                }
+            }, { merge: true });
+            window.showToast(`${label}으로 저장했습니다.`, 'success', 2800);
+        } catch (e) {
+            console.warn('세팅 프리셋 저장 실패:', e);
+            window.showToast('저장에 실패했습니다. 네트워크·권한을 확인해 주세요.', 'error', 4000);
+        }
+    }
+
+    async function loadDefectSettingsPreset(which) {
+        const label = DEFECT_SETTINGS_PRESET_LABEL[which];
+        const ref = defectSettingsPresetRef();
+        if (!label || !ref || navigator.onLine === false) {
+            window.showToast('서버에 연결된 상태(회사 로그인)에서만 불러올 수 있습니다.', 'warning', 3500);
+            return;
+        }
+        let saved = null;
+        try {
+            const snap = await ref.get();
+            saved = snap.exists ? (snap.data() || {})[which] : null;
+        } catch (e) {
+            console.warn('세팅 프리셋 조회 실패:', e);
+            window.showToast('불러오기에 실패했습니다. 네트워크·권한을 확인해 주세요.', 'error', 4000);
+            return;
+        }
+        let data = null;
+        try { data = saved && saved.json ? JSON.parse(saved.json) : null; } catch (_) { data = null; }
+        if (!data || typeof data !== 'object') {
+            window.showToast(`저장된 ${label}이 없습니다. 먼저 「지금 세팅을 ${label}으로 저장」을 눌러 주세요.`, 'warning', 4500);
+            return;
+        }
+        const ok = await window.appConfirm(`세팅을 초기화하고 「${label}」으로 바꿀까요?\n(지금 세팅은 사라집니다)\n※ 회사 공통이라 우리 회사 모든 계정에 적용됩니다.`);
+        if (!ok) return;
+
+        applyBuiltInDefectPinDefaults(); // 먼저 초기화
+        DEFECT_SETTINGS_PRESET_KEYS.forEach((k) => { if (data[k] !== undefined) window.state[k] = data[k]; });
+        migrateDefectComponentStateShape();
+        saveStateToLocalStorage();
+        _lastSyncedUserDefectPinJson = '';
+        scheduleSyncUserDefectPinPresets();
+
+        const cat = document.getElementById('defectCategory')?.value || '구조체';
+        populateDefectComponentDropdown(cat, '');
+        const component = getDefectComboValue(
+            document.getElementById('defectComponent'),
+            document.getElementById('defectComponentInput')
+        ) || '';
+        const presetList = getDefectTypePresetFor(cat, component) || categoryDefectPreset[cat] || [];
+        const defType = presetList.find(t => !(typeof isGoodDefectType === 'function' ? isGoodDefectType(t) : t === '상태양호')) || presetList[0] || '';
+        updateDefectTypeDropdown(cat, defType);
+        if (defType) updateDefectCauseDropdown(defType, getDefaultFirstCauseFor(defType));
+        renderOptionManagerList();
+        const ctx = getOptionManagerContext();
+        if (ctx && typeof ctx.refresh === 'function') ctx.refresh();
+        if (typeof refreshDefectQuickPickBar === 'function') refreshDefectQuickPickBar();
+        window.showToast(`${label}으로 바꿨습니다.`, 'success', 2800);
+    }
+    window.saveDefectSettingsPreset = saveDefectSettingsPreset;
+    window.loadDefectSettingsPreset = loadDefectSettingsPreset;
 
     window.openOptionManagerModal = function(fieldType) {
         window._optionManagerField = fieldType;

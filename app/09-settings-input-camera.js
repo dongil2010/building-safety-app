@@ -796,6 +796,12 @@
         btnResetAllOptionManager.addEventListener('click', () => resetOptionManagerAll());
     }
 
+    [['btnOptionManagerLoadServer', 'load', 'server'], ['btnOptionManagerLoadCompany', 'load', 'company'],
+        ['btnOptionManagerSaveServer', 'save', 'server'], ['btnOptionManagerSaveCompany', 'save', 'company']].forEach(([id, act, which]) => {
+        const b = document.getElementById(id);
+        if (b) b.addEventListener('click', () => (act === 'load' ? loadDefectSettingsPreset(which) : saveDefectSettingsPreset(which)));
+    });
+
     // Canvas Mouse & Touch Event Handlers with Threshold-Based Pin & Arrow Dragging & Multi-Touch Pinch Zoom
     let isDragging = false;
     let isMarkingDrag = false;

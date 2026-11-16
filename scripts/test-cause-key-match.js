@@ -24,6 +24,6 @@ assert.strictEqual(f('콘크리트 박리'), '콘크리트 박리');
 assert.strictEqual(f('콘크리트 박리 및 철근노출'), '콘크리트 박리', '긴 이름 안의 가장 구체적인 종류');
 assert.strictEqual(f(''), '기타');
 assert.strictEqual(f('처음 보는 결함'), '기타');
-assert.ok(app.includes('causeGroups[causeGroups.length - 1]?.key'), '여러 종류면 마지막에 고른 종류');
+assert.ok(app.includes('const lastGroup = causeGroups[causeGroups.length - 1];'), '여러 종류면 마지막에 고른 종류');
 assert.ok(/\.dqg-finish-bases \{[^}]*repeat\(2,/.test(css), '기둥·벽체·보·슬래브 2×2');
 console.log('test-cause-key-match: ok');

@@ -81,7 +81,7 @@ function buildEnv() {
     code += src.slice(a, b) + '\n';
     code += src.slice(kn, src.indexOf('function isKnownCauseLabel', kn)) + '\n' + extractFunction('isKnownCauseLabel') + '\n';
     ['normalizeComponentKey', 'isRcStructuralCrackKind', 'parseDefectTypeList', 'getDefectTypePresetFor', 'getDefectTypePresetForRaw', 'getCauseKey',
-        'getCauseDisplayGroups', 'parseCauseList', 'getCurrentDefectCauseContext', 'seedCauseSettingsFromLegacyKey', 'getCauseOptionsForKey',
+        'getCauseDisplayGroups', 'parseCauseList', 'getCurrentDefectCauseContext', 'seedCauseSettingsFromLegacyKey', 'settingsComponentName', 'findOwnedSettingsBucket', 'causeTreeContext', 'causeTreeBucketKey', 'findOwnedCauseBucket', 'causeSettingsTypeName', 'causeSettingsBucket', 'getCauseOptionsForKey',
         'getDefaultFirstCauseFor', 'resetOptionManagerCurrent', 'refreshDefectTypeAfterComponentChange',
         'applyCauseAutoPickForType', 'applySavedOptionOrder'].forEach((f) => { code += extractFunction(f) + '\n'; });
     code += 'return { DEFECT_COMPONENT_PRESET, DEFECT_JOINT_COMPONENT_PRESET, defectCausePreset, getDefectTypePresetFor, getCauseDisplayGroups, ' +
@@ -353,7 +353,8 @@ function testComponentChangeKeepsManualCauses() {
 // 그래도 직접 입력한 중량물류 부재명(물탱크·실외기 …)은 중량물 목록(엑셀에 나온 「중량물 적치」)이 나오고 원인 연결도 유지.
 function testHeavyLoadItems() {
     env.window.state = {};
-    const HEAVY = ['상태양호', '중량물 적치', '기타'];
+    // 2026-11-14 기본 목록에서 「기타」는 뺌(원본 상수에는 남아 있음)
+    const HEAVY = ['상태양호', '중량물 적치'];
     const comps = api.DEFECT_COMPONENT_PRESET['비구조체'];
     assert.ok(!comps.includes('중량물'), '비구조체 기본 부재에서 중량물은 빠짐');
     assert.strictEqual(comps[comps.length - 1], '기타');
@@ -365,7 +366,7 @@ function testHeavyLoadItems() {
     // 부재를 안 고른 비구조체에도 「중량물 적치」는 보임(엑셀에 나온 종류)
     const cat = api.getDefectTypePresetFor('비구조체', '');
     assert.ok(cat.includes('중량물 적치') && !cat.includes('중량물 설치'));
-    assert.strictEqual(cat[cat.length - 1], '기타');
+    assert.ok(!cat.includes('기타'), '기본 결함 종류 목록에 기타 없음');
     // 원인 자동 체크 = 회사 결함원인추정 표현
     assert.strictEqual(firstFor('비구조체', '중량물', '중량물 적치'), '추가하중 적치'); // 엑셀에 쓰인 원인 중 맨 위(원래 맨 위 「중량물 적치」 원인은 엑셀에 없어 기본에서 빠짐)
     assert.strictEqual(firstFor('비구조체', '', '중량물 적치'), '추가하중 적치');
@@ -441,8 +442,14 @@ function testExcelStatsPresets() {
             assert.ok(l.includes('주변부재의 구속'), b + '/' + t + ' 구속');
         });
     });
-    // 슬래브 균열: 결함부위 수분유입·상부 방수층 파손이 목록에 있음
-    ['결함부위 수분유입', '상부 방수층 파손'].forEach((c) => assert.ok(list('구조체', '슬래브', '균열').includes(c), c));
+    // 2026-11-13 균열 원인에는 수분 원인이 없음(누수·백태 원인 칸에서 고름) — 모든 분류·부재
+    const WET = ['결함부위 수분유입', '상부 방수층 파손', '방수층 파손'];
+    [['구조체', '슬래브'], ['구조체', '데크 슬래브'], ['구조체', '벽체'], ['구조체', '보'], ['구조체', '기둥'], ['비구조체', '조적 벽체']].forEach(([cat, comp]) => {
+        ['균열', '수직균열', '망상균열'].forEach((t) => {
+            const l = list(cat, comp, t);
+            WET.forEach((c) => assert.ok(!l.includes(c), cat + '/' + comp + '/' + t + ' ' + c));
+        });
+    });
     // 부식/녹: 철골은 시공미흡 → 노후화 → 방청 불량, 그 밖의 부재는 노후화 → 시공미흡
     assert.deepStrictEqual(list('구조체', '철골보(G)', '부식/녹').slice(0, 3), ['시공미흡', '경과년수 증대에 따른 노후화', '방청 불량']);
     assert.deepStrictEqual(list('구조체', '철골보(B)', '부식/녹').slice(0, 3), ['시공미흡', '경과년수 증대에 따른 노후화', '방청 불량']);

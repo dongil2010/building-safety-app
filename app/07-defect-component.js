@@ -43,10 +43,11 @@
     /** 분류별 기본 부재 칩. 비구조체·마감재에는 맨몸 구조 부재가 끼지 않게 한 번 더 걸러, 미선택은 구조체로 폴백하지 않음. */
     function getDefectComponentPresetForCategory(category) {
         const cat = String(category || '').trim();
+        // 2026-11-14 기본 목록에 「기타」는 넣지 않음(필요하면 직접 추가)
         if (cat === '비구조체' || cat === '마감재') {
-            return (DEFECT_COMPONENT_PRESET[cat] || []).filter((n) => !isBareStructuralMemberChipName(n));
+            return (DEFECT_COMPONENT_PRESET[cat] || []).filter((n) => n !== '기타' && !isBareStructuralMemberChipName(n));
         }
-        if (cat === '구조체') return (DEFECT_COMPONENT_PRESET['구조체'] || []).slice();
+        if (cat === '구조체') return (DEFECT_COMPONENT_PRESET['구조체'] || []).filter((n) => n !== '기타');
         return [];
     }
     function finishMemberChooserApi() {
@@ -2160,6 +2161,14 @@
     function getDefectFavoriteList(field, bucket) {
         const q = getDefectQuickPresetsApi();
         if (!q) return [];
+        // 2026-11-13 「분류|부재(|종류)」 칸에 ★를 아직 안 정했으면 윗 칸(결함 종류: 분류, 원인: 종류)의 ★를 쓴다
+        if ((field === 'type' || field === 'cause') && String(bucket || '').includes('|')) {
+            const favMap = field === 'type' ? window.state.favoriteDefectTypes : window.state.favoriteDefectCauses;
+            if (!(favMap && Array.isArray(favMap[bucket]))) {
+                const parts = String(bucket).split('|');
+                return getDefectFavoriteList(field, field === 'type' ? parts[0] : parts.slice(2).join('|'));
+            }
+        }
         if (field === 'component') {
             migrateDefectComponentStateShape();
             return q.getEffectiveFavorites(window.state.favoriteDefectComponents, 'component', bucket,
@@ -2198,12 +2207,12 @@
         if (window.state.uid && typeof scheduleSyncUserDefectPinPresets === 'function') scheduleSyncUserDefectPinPresets();
     }
 
-    function computeDefectVisibleChips(field, bucket, ordered, selected, pinned) {
+    function computeDefectVisibleChips(field, bucket, ordered, selected, pinned, favBucket) {
         const q = getDefectQuickPresetsApi();
         if (!q) return { visible: (ordered || []).slice(), hidden: [] };
         return q.computeVisibleChips(ordered, {
             limit: (ordered || []).length, // 접지 않고 전부 표시
-            favorites: getDefectFavoriteList(field, bucket),
+            favorites: getDefectFavoriteList(field, favBucket || bucket),
             usage: q.getUsageCounts(window.state.defectPickUsage, field, bucket),
             selected: selected || [],
             pinned: pinned || []
@@ -2605,7 +2614,8 @@
             const selectedTypeParts = parseDefectTypeList(currentType);
             const selectedTypeSet = new Set(selectedTypeParts);
             const typeChipOptions = getPinnedDefectTypeChips(currentCategory, currentComponent);
-            const typeSplit = computeDefectVisibleChips('type', currentCategory, typeChipOptions, selectedTypeParts, ['상태양호']);
+            const typeFavBucket = typeof defectTypeSettingsBucket === 'function' ? defectTypeSettingsBucket(currentCategory, currentComponent) : currentCategory;
+            const typeSplit = computeDefectVisibleChips('type', currentCategory, typeChipOptions, selectedTypeParts, ['상태양호'], typeFavBucket);
             renderDefectChips('quickDefectTypeChips', typeSplit, (v) => selectedTypeSet.has(v), (value) => {
                 if (value && value !== '상태양호' && !selectedTypeSet.has(value)) {
                     recordDefectPickUsage('type', currentCategory, value);
@@ -2946,7 +2956,10 @@
             return false;
         }
         if (persist) {
-            const key = getCauseDisplayGroups(dType)[0]?.key || getCauseKey(dType);
+            const g0 = getCauseDisplayGroups(dType)[0];
+            const causeKey = g0?.key || getCauseKey(dType);
+            // 2026-11-13 원인 세팅은 「분류|부재|종류」 칸(아직 없으면 종류 칸). 2026-11-15 결함 종류 칸이 있으면 그 칸
+            const key = typeof causeSettingsBucket === 'function' ? causeSettingsBucket(causeKey, undefined, g0 && g0.types) : causeKey;
             if (!window.state.customDefectCauses) window.state.customDefectCauses = {};
             if (!window.state.customDefectCauses[key]) window.state.customDefectCauses[key] = [];
             if (!window.state.customDefectCauses[key].includes(trimmed)) {

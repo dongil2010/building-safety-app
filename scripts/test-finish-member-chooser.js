@@ -52,7 +52,7 @@ function crackApi() {
         "const COLUMN_CRACK_KINDS=['수직균열','U자형균열'];",
         "const BEAM_CRACK_KINDS=['수직균열','수평균열'];",
         "const COMPANY_TILE_DEFECTS=['상태양호','균열','들뜸','파손','탈락','박락','이격','줄눈 손상','백태','오염','기타'];",
-        "const EXT_PAINT_DEFECTS=['상태양호','균열','변색/오염','박리/탈락','부풀음','기타'];",
+        "const EXT_PAINT_DEFECTS=['상태양호','변색/오염','박리/탈락','부풀음','기타'];",
         "const COMPANY_FINISH_DEFECTS=['상태양호','균열','들뜸','파손','박락','탈락','이격','철근노출','백태','오염','처짐','누수흔적','도장열화','기타'];",
         "const SPRAY_FINISH_DEFECTS=['상태양호','박락'];",
         "const CEILING_FINISH_DEFECTS=['상태양호','들뜸/탈락'];",
@@ -69,6 +69,8 @@ function crackApi() {
 const d = crackApi();
 assert.strictEqual(d.getCrackKindsForComponent('기둥 타일'), null, '기둥 타일은 RC 방향균열 아님');
 assert.strictEqual(d.getCrackKindsForComponent('벽체 도장'), null);
+assert.ok(!d.getDefectTypePresetForRaw('마감재', '벽체 도장').includes('균열'), '도장 결함에 균열 없음');
+assert.ok(!/const EXT_PAINT_DEFECTS = \[[^\]]*'균열'/.test(app) && !/const INT_PAINT_DEFECTS = \[[^\]]*'균열'/.test(app), '앱 도장 기본 목록에 균열 없음');
 assert.strictEqual(d.getCrackKindsForComponent('보 마감재'), null);
 assert.strictEqual(d.getCrackKindsForComponent('슬래브 타일'), null);
 assert.strictEqual(d.getCrackKindsForComponent('기둥 미장'), null);
