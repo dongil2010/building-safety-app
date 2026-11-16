@@ -31460,7 +31460,7 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
         refreshDefectQuickPickBar();
     }
 
-// @@app-part 08-defect-presets.js sha=4752b1cd279c — 원본은 app/08-defect-presets.js (여기 말고 거기서 고칠 것)
+// @@app-part 08-defect-presets.js sha=dbc9989631b9 — 원본은 app/08-defect-presets.js (여기 말고 거기서 고칠 것)
     // --- Dynamic Defect Type Presets & Custom Adding ---
     const STEEL_MEMBER_DEFECTS = [
         '상태양호',
@@ -31857,13 +31857,26 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
         let pos = d && d.openingPos ? String(d.openingPos).trim() : '';
         if (pos) { const chosen = parseOpeningPosValue(pos); if (chosen.length) pos = formatOpeningPosLabel(chosen); }
         else pos = formatOpeningPosLabel(findOpeningPosListInText(raw));
+        // 2026-11-16 시립도서관: 부재 칸에 이미 개구부 말(「조적벽체 기존 개구부 부위」·「조적벽체 문 상부」)이 있으면
+        // 조사내용에 「개구부 주위」·「문 상부 벽체」를 또 붙이지 않는다(부재 + 결함 내용이 원문 순서 그대로)
+        const comp = (d && d.component) ? String(d.component).replace(/[\s\u3000]+/g, ' ').trim() : '';
+        if ((pos || (d && d.isOpeningCrack)) && comp && (/개구부/.test(comp) || findOpeningPosListInText(comp).length)) {
+            return raw || '균열';
+        }
         if (pos) {
-            const head = `${pos} 벽체`;
+            // 2026-11-16 부재가 「벽체 도장」·「벽체 치장벽돌」처럼 벽체 + 대상이면 대상까지 위치 뒤에
+            // (「벽체 도장 창 하부 벽체 들뜸」 → 「창 하부 벽체 도장 들뜸」). 부재 칸은 surveyContentComponentText가 뺀다.
+            const compOut = /^벽체 \S/.test(comp) ? String((typeof memberNameOut === 'function' ? memberNameOut(comp) : comp) || comp).replace(/[\s\u3000]+/g, ' ').trim() : '';
+            const member = /^벽체 \S/.test(compOut) ? compOut : '벽체';
+            const extra = member === '벽체' ? '' : member.slice(3).replace(/[\s\u3000]+/g, '');
+            const extraRe = extra ? new RegExp('^' + extra.split('').map((ch) => ch.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')).join('[\\s\\u3000]*') + '[\\s\\u3000]*') : null;
+            const head = `${pos} ${member}`;
             const ps = parseDefectTypeList(raw);
             if (!ps.length) return `${head} 균열`;
             return joinDefectTypeList(ps.map((t) => {
                 if (!t || (typeof isGoodDefectType === 'function' ? isGoodDefectType(t) : t === '상태양호')) return t;
-                const bare = stripOpeningPosPrefix(t);
+                let bare = stripOpeningPosPrefix(t);
+                if (extraRe && extraRe.test(bare)) bare = bare.replace(extraRe, '').trim(); // 결함 글에 대상이 또 있으면(「도장 들뜸」) 한 번만
                 return bare ? `${head} ${bare}` : `${head} 균열`;
             }));
         }
@@ -31872,7 +31885,7 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
         if (!parts.length) return '개구부 주위 균열';
         return joinDefectTypeList(parts.map((t) => {
             if (!t || (typeof isGoodDefectType === 'function' ? isGoodDefectType(t) : t === '상태양호')) return t;
-            if (/^개구부\s*주위/.test(t)) return t;
+            if (/개구부/.test(t)) return t; // 「기존 개구부 부위 수직균열」처럼 글 안에 이미 있으면 그대로
             return `개구부 주위 ${t}`;
         }));
     }
@@ -49327,7 +49340,7 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
             endDrawingAlign();
         }
     }, true);
-// @@app-part 12-survey-table.js sha=93071024e474 — 원본은 app/12-survey-table.js (여기 말고 거기서 고칠 것)
+// @@app-part 12-survey-table.js sha=7dac2c943dd3 — 원본은 app/12-survey-table.js (여기 말고 거기서 고칠 것)
     // --- 10. SURVEY TABLE & ALBUM RENDERING ---
 
     // 상태조사표 컬럼 기본 정의 (화면/PDF/엑셀 공통). size와 crackWidth/crackLength는 상호 배타적으로
@@ -49949,7 +49962,12 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
     function surveyContentComponentText(d, ctx) {
         const comp = getSurveyCellText('component', d, ctx);
         const t = String(getSurveyCellText('defectType', d, ctx) || '').trim();
-        if (String(comp || '').trim() === '벽체' && /^(?:개구부|창|문) (?:상부|하부|측면)(?:·(?:(?:개구부|창|문) )?(?:상부|하부|측면))* 벽체(?:\s|,|$)/.test(t)) return '';
+        // 2026-11-16 「벽체 도장」처럼 벽체 + 대상인 부재도 결함 내용이 「창 하부 벽체 도장 …」으로 시작하면 빼기
+        const c = String(comp || '').replace(/[\s\u3000]+/g, ' ').trim();
+        if (/^벽체(?: \S.*)?$/.test(c)) {
+            const esc = c.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+            if (new RegExp('^(?:개구부|창|문) (?:상부|하부|측면)(?:·(?:(?:개구부|창|문) )?(?:상부|하부|측면))* ' + esc + '(?:\\s|,|$)').test(t)) return '';
+        }
         return comp;
     }
 
@@ -62593,7 +62611,7 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
         }
     });
 
-// @@app-part 14-extras.js sha=dd3678b85cf5 — 원본은 app/14-extras.js (여기 말고 거기서 고칠 것)
+// @@app-part 14-extras.js sha=47e236380cc4 — 원본은 app/14-extras.js (여기 말고 거기서 고칠 것)
     // ==========================================================================
     // 🛠️ 6대 추천 개선 및 신규 기능 모듈 (100% 한글 주석 & 독립 보조엔진)
     // ==========================================================================
@@ -63867,13 +63885,22 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
             if (!out.pos) out.pos = name;
             return (a !== '개구부' && off > 0 && /[가-힣]/.test(all.charAt(off - 1))) ? m : ' ';
         });
-        work = work.replace(/개구부[\s\u3000]*주위|개구부/g, () => { out.found = true; return ' '; });
+        // 2026-11-16 시립도서관: 「기존 개구부 부위」는 부재 이름의 일부 — 「개구부」를 지우면 「기존 부위」만 남는다.
+        // 개구부 결함으로는 보되 글은 그대로 둔다(조사내용에 「개구부 주위」도 안 붙음 — formatOpeningAwareDefectType)
+        if (/개구부[\s\u3000]*부위/.test(work)) out.found = true;
+        work = work.replace(/개구부[\s\u3000]*주위|개구부(?![\s\u3000]*부위)/g, () => { out.found = true; return ' '; });
         if (!out.found) return out;
-        work = work.replace(/[(（]\s*[)）]|\[\s*\]/g, ' ')
-            .replace(/^[\s\u3000,;:·ㆍ\/\-_()（）\[\]]+|[\s\u3000,;:·ㆍ\/\-_()（）\[\]]+$/g, '')
+        const JUNK = '[\\s\\u3000,;:·ㆍ\\/\\-_]';
+        work = work.replace(new RegExp('[(（]' + JUNK + '*[)）]|\\[' + JUNK + '*\\]', 'g'), ' ')
+            .replace(new RegExp('^' + JUNK + '+|' + JUNK + '+$', 'g'), '')
             .replace(/[\s\u3000]{2,}/g, ' ')
             .trim();
-        out.component = work;
+        // 앞뒤 괄호는 짝이 안 맞을 때만 뗀다(「벽체(기존 개구부 부위)」의 닫는 괄호를 지키려고)
+        const opens = () => (work.match(/[(（\[]/g) || []).length;
+        const closes = () => (work.match(/[)）\]]/g) || []).length;
+        while (/[)）\]]$/.test(work) && closes() > opens()) work = work.slice(0, -1).replace(new RegExp(JUNK + '+$'), '');
+        while (/^[(（\[]/.test(work) && opens() > closes()) work = work.slice(1).replace(new RegExp('^' + JUNK + '+'), '');
+        out.component = work.trim();
         return out;
     }
 

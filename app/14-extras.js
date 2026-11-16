@@ -1272,13 +1272,22 @@
             if (!out.pos) out.pos = name;
             return (a !== '개구부' && off > 0 && /[가-힣]/.test(all.charAt(off - 1))) ? m : ' ';
         });
-        work = work.replace(/개구부[\s\u3000]*주위|개구부/g, () => { out.found = true; return ' '; });
+        // 2026-11-16 시립도서관: 「기존 개구부 부위」는 부재 이름의 일부 — 「개구부」를 지우면 「기존 부위」만 남는다.
+        // 개구부 결함으로는 보되 글은 그대로 둔다(조사내용에 「개구부 주위」도 안 붙음 — formatOpeningAwareDefectType)
+        if (/개구부[\s\u3000]*부위/.test(work)) out.found = true;
+        work = work.replace(/개구부[\s\u3000]*주위|개구부(?![\s\u3000]*부위)/g, () => { out.found = true; return ' '; });
         if (!out.found) return out;
-        work = work.replace(/[(（]\s*[)）]|\[\s*\]/g, ' ')
-            .replace(/^[\s\u3000,;:·ㆍ\/\-_()（）\[\]]+|[\s\u3000,;:·ㆍ\/\-_()（）\[\]]+$/g, '')
+        const JUNK = '[\\s\\u3000,;:·ㆍ\\/\\-_]';
+        work = work.replace(new RegExp('[(（]' + JUNK + '*[)）]|\\[' + JUNK + '*\\]', 'g'), ' ')
+            .replace(new RegExp('^' + JUNK + '+|' + JUNK + '+$', 'g'), '')
             .replace(/[\s\u3000]{2,}/g, ' ')
             .trim();
-        out.component = work;
+        // 앞뒤 괄호는 짝이 안 맞을 때만 뗀다(「벽체(기존 개구부 부위)」의 닫는 괄호를 지키려고)
+        const opens = () => (work.match(/[(（\[]/g) || []).length;
+        const closes = () => (work.match(/[)）\]]/g) || []).length;
+        while (/[)）\]]$/.test(work) && closes() > opens()) work = work.slice(0, -1).replace(new RegExp(JUNK + '+$'), '');
+        while (/^[(（\[]/.test(work) && opens() > closes()) work = work.slice(1).replace(new RegExp('^' + JUNK + '+'), '');
+        out.component = work.trim();
         return out;
     }
 

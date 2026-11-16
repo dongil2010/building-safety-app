@@ -115,6 +115,33 @@ const r = sb.ext('창상부 벽체');
 assert.strictEqual(sb.content({ component: r.component, defectType: '수직균열', openingPos: r.pos, isOpeningCrack: true }),
     sb.content({ component: '벽체', defectType: '창상부 수직균열', isOpeningCrack: true }), '부재명칭에서 얻은 것 = 결함 내용에서 얻은 것');
 
+// ---- 2026-11-16 시립도서관 무등·산수: 원문 순서 그대로 ----
+// 부재명칭의 「기존 개구부 부위」는 지우지 않는다(「기존 부위」만 남던 문제) — 개구부 결함으로는 본다
+assert.strictEqual(E('기존 개구부 부위 벽체'), 'true||기존 개구부 부위 벽체');
+assert.strictEqual(E('벽체(기존 개구부 부위)'), 'true||벽체(기존 개구부 부위)', '짝 맞는 닫는 괄호는 지킨다');
+assert.strictEqual(E('조적벽체 기존 개구부 부위'), 'true||조적벽체 기존 개구부 부위');
+assert.strictEqual(E('벽체(개구부 주위, 창 하부)'), 'true|창 하부|벽체', '지우고 남은 괄호·쉼표 정리');
+// 「벽체 + 대상」 부재(도장·미장·치장벽돌 …)는 대상까지 개구부 위치 뒤에 — 「벽체 도장 창 하부 벽체 들뜸」 방지
+assert.strictEqual(sb.content({ component: '벽체 도장', defectType: '들뜸', openingPos: '창 하부', isOpeningCrack: true }), '창 하부 벽체 도장 들뜸');
+assert.strictEqual(sb.content({ component: '벽체 도장', defectType: '도장 들뜸', openingPos: '창 하부' }), '창 하부 벽체 도장 들뜸', '결함 글의 대상은 한 번만');
+assert.strictEqual(sb.content({ component: '벽체 도장', defectType: '도장들뜸', openingPos: '창 하부' }), '창 하부 벽체 도장 들뜸');
+assert.strictEqual(sb.content({ component: '벽체 도장 부분', defectType: '들뜸', openingPos: '창 하부' }), '창 하부 벽체 도장 부분 들뜸');
+assert.strictEqual(sb.content({ component: '벽체 미장', defectType: '들뜸', openingPos: '창 측면' }), '창 측면 벽체 미장 들뜸');
+assert.strictEqual(sb.content({ component: '벽체 치장벽돌', defectType: '탈락', openingPos: '창 상부' }), '창 상부 벽체 치장벽돌 탈락');
+assert.strictEqual(sb.content({ component: '벽체 도장', defectType: '들뜸, 박리', openingPos: '창 상부, 창 하부' }), '창 상부·하부 벽체 도장 들뜸, 창 상부·하부 벽체 도장 박리');
+assert.strictEqual(sb.content({ component: '벽체  도장', defectType: '들뜸', openingPos: '창 하부' }), '창 하부 벽체 도장 들뜸', '부재 띄어쓰기 여러 칸');
+assert.strictEqual(sb.content({ component: '벽체 도장', defectType: '상태양호', openingPos: '창 하부' }), '벽체 도장 상태양호');
+// 부재나 결함 글에 이미 개구부 말이 있으면 「개구부 주위」·위치를 또 붙이지 않는다
+assert.strictEqual(sb.content({ component: '벽체 개구부 주위', defectType: '수직균열', isOpeningCrack: true }), '벽체 개구부 주위 수직균열');
+assert.strictEqual(sb.content({ component: '벽체 기존 개구부 부위', defectType: '수직·수평균열', isOpeningCrack: true }), '벽체 기존 개구부 부위 수직·수평균열');
+assert.strictEqual(sb.content({ component: '조적벽체 기존 개구부 부위', defectType: '수평·수직균열', isOpeningCrack: true }), '조적벽체 기존 개구부 부위 수평·수직균열');
+assert.strictEqual(sb.content({ component: '벽체', defectType: '기존 개구부 부위 수직균열', isOpeningCrack: true }), '벽체 기존 개구부 부위 수직균열');
+assert.strictEqual(sb.content({ component: '벽체', defectType: '개구부 주위 수직균열', isOpeningCrack: true }), '벽체 개구부 주위 수직균열');
+assert.strictEqual(sb.content({ component: '조적벽체 문 상부', defectType: '균열', openingPos: '문 상부', isOpeningCrack: true }), '조적벽체 문 상부 균열', '부재에 위치가 있으면 「문 상부 벽체」 안 붙임');
+// 가져오기 전체(부재명칭 → 지우기 → 조사내용) — 「조적벽체 기존 개구부 부위」 + 「수평·수직균열」
+const r14 = sb.ext('조적벽체 기존 개구부 부위');
+assert.strictEqual(sb.content({ component: r14.component, defectType: '수평·수직균열', openingPos: r14.pos, isOpeningCrack: r14.found }), '조적벽체 기존 개구부 부위 수평·수직균열');
+
 // 조사내용을 만드는 곳은 모두 중복 방지 도우미를 쓴다
 ['const headParts = [surveyContentComponentText(d, ctx),', 'const content = [surveyContentComponentText(d),',
     '[surveyContentComponentText(slot1.d),', '[surveyContentComponentText(slot2.d),'].forEach((s) => assert.ok(app.includes(s), s));

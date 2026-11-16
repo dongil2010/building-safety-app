@@ -395,13 +395,26 @@
         let pos = d && d.openingPos ? String(d.openingPos).trim() : '';
         if (pos) { const chosen = parseOpeningPosValue(pos); if (chosen.length) pos = formatOpeningPosLabel(chosen); }
         else pos = formatOpeningPosLabel(findOpeningPosListInText(raw));
+        // 2026-11-16 시립도서관: 부재 칸에 이미 개구부 말(「조적벽체 기존 개구부 부위」·「조적벽체 문 상부」)이 있으면
+        // 조사내용에 「개구부 주위」·「문 상부 벽체」를 또 붙이지 않는다(부재 + 결함 내용이 원문 순서 그대로)
+        const comp = (d && d.component) ? String(d.component).replace(/[\s\u3000]+/g, ' ').trim() : '';
+        if ((pos || (d && d.isOpeningCrack)) && comp && (/개구부/.test(comp) || findOpeningPosListInText(comp).length)) {
+            return raw || '균열';
+        }
         if (pos) {
-            const head = `${pos} 벽체`;
+            // 2026-11-16 부재가 「벽체 도장」·「벽체 치장벽돌」처럼 벽체 + 대상이면 대상까지 위치 뒤에
+            // (「벽체 도장 창 하부 벽체 들뜸」 → 「창 하부 벽체 도장 들뜸」). 부재 칸은 surveyContentComponentText가 뺀다.
+            const compOut = /^벽체 \S/.test(comp) ? String((typeof memberNameOut === 'function' ? memberNameOut(comp) : comp) || comp).replace(/[\s\u3000]+/g, ' ').trim() : '';
+            const member = /^벽체 \S/.test(compOut) ? compOut : '벽체';
+            const extra = member === '벽체' ? '' : member.slice(3).replace(/[\s\u3000]+/g, '');
+            const extraRe = extra ? new RegExp('^' + extra.split('').map((ch) => ch.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')).join('[\\s\\u3000]*') + '[\\s\\u3000]*') : null;
+            const head = `${pos} ${member}`;
             const ps = parseDefectTypeList(raw);
             if (!ps.length) return `${head} 균열`;
             return joinDefectTypeList(ps.map((t) => {
                 if (!t || (typeof isGoodDefectType === 'function' ? isGoodDefectType(t) : t === '상태양호')) return t;
-                const bare = stripOpeningPosPrefix(t);
+                let bare = stripOpeningPosPrefix(t);
+                if (extraRe && extraRe.test(bare)) bare = bare.replace(extraRe, '').trim(); // 결함 글에 대상이 또 있으면(「도장 들뜸」) 한 번만
                 return bare ? `${head} ${bare}` : `${head} 균열`;
             }));
         }
@@ -410,7 +423,7 @@
         if (!parts.length) return '개구부 주위 균열';
         return joinDefectTypeList(parts.map((t) => {
             if (!t || (typeof isGoodDefectType === 'function' ? isGoodDefectType(t) : t === '상태양호')) return t;
-            if (/^개구부\s*주위/.test(t)) return t;
+            if (/개구부/.test(t)) return t; // 「기존 개구부 부위 수직균열」처럼 글 안에 이미 있으면 그대로
             return `개구부 주위 ${t}`;
         }));
     }
