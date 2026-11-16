@@ -126,4 +126,24 @@ t('옛 도면 보관은 읽기만 — 기기에 저장하는 함수를 부르지
     });
 });
 
+t('바깥 테두리: 옛(여백 없음) → 새(여백 추가)로 모서리 두 쌍이 비율대로 맞는다', () => {
+    const mk = (w, h, x0, y0, x1, y1) => {
+        const a = new Uint8Array(w * h).fill(255);
+        for (let x = x0; x <= x1; x++) { a[y0 * w + x] = 0; a[y1 * w + x] = 0; }
+        for (let y = y0; y <= y1; y++) { a[y * w + x0] = 0; a[y * w + x1] = 0; }
+        a[(y0 + 20) * w + (x0 + 20)] = 0; // 짧은 잡선은 무시
+        return a;
+    };
+    const ob = M.findFrameBox(mk(400, 300, 10, 10, 389, 289), 400, 300);
+    const nb = M.findFrameBox(mk(400, 300, 30, 25, 369, 274), 400, 300);
+    assert.deepStrictEqual(ob, { x0: 10, y0: 10, x1: 389, y1: 289 });
+    assert.deepStrictEqual(nb, { x0: 30, y0: 25, x1: 369, y1: 274 });
+    const pr = M.frameCornerPairs(ob, nb);
+    const T = M.solveSimilarity(pr.oldPts, pr.newPts, { allowRotation: false });
+    assert.ok(T.scale < 1 && T.scale > 0.85);
+    const p = M.applyPoint(T, 10, 10);
+    assert.ok(Math.abs(p.x - 30) < 8 && Math.abs(p.y - 25) < 8);
+    assert.strictEqual(M.findFrameBox(new Uint8Array(400 * 300).fill(255), 400, 300), null);
+});
+
 console.log(`marking-align: ${n}개 통과`);

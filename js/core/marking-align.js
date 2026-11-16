@@ -190,7 +190,46 @@
         return data;
     }
 
+    /**
+     * 그림의 바깥 테두리 상자(2026-11-16). lum: 밝기 0~255 배열(w×h). 어두운 점이 가로·세로로 길게 이어진
+     * 줄(테두리 선) 중 가장 바깥 줄을 찾는다. 도면 안 글자·먼지는 짧아서 무시된다. 못 찾으면 null.
+     * 반환 {x0,y0,x1,y1}(픽셀, x1·y1은 마지막 어두운 줄).
+     */
+    function findFrameBox(lum, w, h, opts) {
+        opts = opts || {};
+        var dark = isNum(opts.darkLum) ? opts.darkLum : 200;
+        var ratio = isNum(opts.lineRatio) ? opts.lineRatio : 0.6;
+        if (!lum || !(w > 8) || !(h > 8) || lum.length < w * h) return null;
+        var rows = new Array(h), cols = new Array(w), i, x, y;
+        for (i = 0; i < h; i++) rows[i] = 0;
+        for (i = 0; i < w; i++) cols[i] = 0;
+        for (y = 0; y < h; y++) {
+            for (x = 0; x < w; x++) {
+                if (lum[y * w + x] < dark) { rows[y]++; cols[x]++; }
+            }
+        }
+        var maxR = Math.max.apply(null, rows), maxC = Math.max.apply(null, cols);
+        if (!(maxR > 0) || !(maxC > 0)) return null;
+        var y0 = -1, y1 = -1, x0 = -1, x1 = -1;
+        for (y = 0; y < h; y++) if (rows[y] >= maxR * ratio) { if (y0 < 0) y0 = y; y1 = y; }
+        for (x = 0; x < w; x++) if (cols[x] >= maxC * ratio) { if (x0 < 0) x0 = x; x1 = x; }
+        if (x0 < 0 || y0 < 0) return null;
+        if ((x1 - x0) < w * 0.3 || (y1 - y0) < h * 0.3) return null;
+        return { x0: x0, y0: y0, x1: x1, y1: y1 };
+    }
+
+    /** 옛 테두리 상자 → 새 테두리 상자: 왼쪽 위·오른쪽 아래 모서리 두 쌍(solveSimilarity에 그대로 넣는다) */
+    function frameCornerPairs(oldBox, newBox) {
+        if (!oldBox || !newBox) return null;
+        return {
+            oldPts: [{ x: oldBox.x0, y: oldBox.y0 }, { x: oldBox.x1, y: oldBox.y1 }],
+            newPts: [{ x: newBox.x0, y: newBox.y0 }, { x: newBox.x1, y: newBox.y1 }]
+        };
+    }
+
     var api = {
+        findFrameBox: findFrameBox,
+        frameCornerPairs: frameCornerPairs,
         DEFAULT_SNAP_ANGLE_DEG: DEFAULT_SNAP_ANGLE_DEG,
         solveSimilarity: solveSimilarity,
         adjustTransform: adjustTransform,

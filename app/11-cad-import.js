@@ -1559,7 +1559,64 @@
         } catch (e) {
             console.warn('[마킹 맞추기] 옛 도면 색칠 실패 — 그대로 겹침', e);
         }
-        return { canvas: cv, refW: rec.refW || w, refH: rec.refH || h, at: rec.at || 0 };
+        return { canvas: cv, raw: img, refW: rec.refW || w, refH: rec.refH || h, at: rec.at || 0 };
+    }
+
+    /** 그림 → 바깥 테두리 상자(좌표 기준 크기 refW×refH 안의 좌표). 못 찾으면 null */
+    function frameBoxOfImage(img, refW, refH) {
+        const MA = window.BSA && window.BSA.markingAlign;
+        const nw = img && (img.naturalWidth || img.width), nh = img && (img.naturalHeight || img.height);
+        if (!MA || !(nw > 0 && nh > 0)) return null;
+        const k = Math.min(1, 1600 / Math.max(nw, nh));
+        const w = Math.max(16, Math.round(nw * k)), h = Math.max(16, Math.round(nh * k));
+        const cv = document.createElement('canvas');
+        cv.width = w; cv.height = h;
+        const cx = cv.getContext('2d', { willReadFrequently: true });
+        cx.fillStyle = '#ffffff';
+        cx.fillRect(0, 0, w, h);
+        cx.drawImage(img, 0, 0, w, h);
+        const px = cx.getImageData(0, 0, w, h).data;
+        const lum = new Uint8Array(w * h);
+        for (let i = 0, j = 0; i < px.length; i += 4, j++) lum[j] = 0.299 * px[i] + 0.587 * px[i + 1] + 0.114 * px[i + 2];
+        const b = MA.findFrameBox(lum, w, h);
+        if (!b) return null;
+        const sx = refW / w, sy = refH / h;
+        return { x0: b.x0 * sx, y0: b.y0 * sy, x1: (b.x1 + 1) * sx, y1: (b.y1 + 1) * sy };
+    }
+
+    /** 바깥 테두리 모서리(왼쪽 위·오른쪽 아래)를 기준점으로 자동 지정 → 마킹을 테두리 비율대로 옮기는 미리보기 */
+    function autoAlignByFrame() {
+        const st = window.drawingAlignState;
+        const MA = window.BSA && window.BSA.markingAlign;
+        if (!st || !MA || !st.ghost || !st.ghost.raw) {
+            window.showToast?.('옛 도면 그림이 없어 테두리로 맞출 수 없습니다. 기준점을 직접 찍어 주세요.', 'warning', 5000);
+            return;
+        }
+        const dims = (typeof getFloorPlanDisplayDims === 'function') ? getFloorPlanDisplayDims() : null;
+        const nw = state.bgImage && (state.bgImage.naturalWidth || state.bgImage.width) || 0;
+        const nh = state.bgImage && (state.bgImage.naturalHeight || state.bgImage.height) || 0;
+        const newW = (dims && dims.w) || nw, newH = (dims && dims.h) || nh;
+        let oldBox = null, newBox = null;
+        try {
+            oldBox = frameBoxOfImage(st.ghost.raw, st.ghost.refW, st.ghost.refH);
+            newBox = frameBoxOfImage(state.bgImage, newW, newH);
+        } catch (e) {
+            console.warn('[마킹 맞추기] 테두리 찾기 실패', e);
+        }
+        const pr = MA.frameCornerPairs(oldBox, newBox);
+        const T = pr && MA.solveSimilarity(pr.oldPts, pr.newPts, { allowRotation: false });
+        if (!T) {
+            window.showToast?.('바깥 테두리를 찾지 못했습니다. 기준점을 직접 찍어 주세요.', 'warning', 5000);
+            return;
+        }
+        st.oldPts = pr.oldPts; st.newPts = pr.newPts;
+        st.step = 4;
+        st.baseT = T;
+        st.adj = { ds: 1, dx: 0, dy: 0 };
+        recomputeDrawingAlignT();
+        renderDrawingAlignBar();
+        drawCanvas();
+        window.showToast?.('바깥 테두리 모서리 기준으로 맞췄습니다. 어긋나면 미세 조정 후 확정하세요.', 'info', 5000);
     }
 
     async function startDrawingAlign() {
@@ -1835,6 +1892,7 @@
         let body;
         if (!preview) {
             body = `<span class="dab-step">${ALIGN_PICK_TEXT[st.step](!!(st.ghost && st.showGhost))}</span>`
+                + (st.ghost && st.ghost.raw ? B('dabFrame', '▣ 테두리로 자동 맞추기', 'dab-ok', '옛 도면·새 도면의 바깥 테두리 모서리를 기준점으로 자동 지정해 마킹을 비율대로 옮깁니다') : '')
                 + `<span class="dab-sep"></span>${ghostCtl}${snapCtl}`
                 + `<span class="dab-sep"></span>${st.step > 0 ? B('dabRestart', '다시 찍기') : ''}${B('dabCancel', '취소', 'dab-cancel')}`;
         } else {
@@ -1852,6 +1910,7 @@
 
         const on = (id, ev, fn) => { const el = document.getElementById(id); if (el) el.addEventListener(ev, fn); };
         on('dabCancel', 'click', () => endDrawingAlign());
+        on('dabFrame', 'click', () => autoAlignByFrame());
         on('dabRestart', 'click', () => resetDrawingAlignPoints());
         on('dabGhost', 'change', (e) => { st.showGhost = !!e.target.checked; renderDrawingAlignBar(); drawCanvas(); });
         on('dabGhostAlpha', 'input', (e) => { st.ghostAlpha = Number(e.target.value) || 0.55; drawCanvas(); });
