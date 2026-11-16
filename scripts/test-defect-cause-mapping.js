@@ -212,7 +212,14 @@ function testAutoCheckedCause() {
             if (t === '상태양호' || t === '미장균열') return;
             api.getCauseDisplayGroups(t).forEach((g) => {
                 if (g.key === '미장균열' || /^누수( ?흔적)?$/.test(g.key) || /^(백태|백태\/유출|백화)$/.test(g.key)) return;
-                assert.deepStrictEqual(api.getDefaultCausePresetList(g.key, g.types, '마감재', comp).slice(0, 4), FIN4, 'finish top4 ' + comp + '/' + t);
+                const got = api.getDefaultCausePresetList(g.key, g.types, '마감재', comp);
+                if (/균열/.test(g.key)) {
+                    // 2026-11-16 균열은 누수 원인 없이 시공미흡·노후화만 맨 위
+                    assert.deepStrictEqual(got.slice(0, 2), FIN4.slice(0, 2), 'finish crack top2 ' + comp + '/' + t);
+                    assert.ok(!got.some((c) => /누수/.test(c)), 'finish crack no leak ' + comp + '/' + t);
+                    return;
+                }
+                assert.deepStrictEqual(got.slice(0, 4), FIN4, 'finish top4 ' + comp + '/' + t);
             });
         });
     });

@@ -31582,7 +31582,7 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
         refreshDefectQuickPickBar();
     }
 
-// @@app-part 08-defect-presets.js sha=dbc9989631b9 — 원본은 app/08-defect-presets.js (여기 말고 거기서 고칠 것)
+// @@app-part 08-defect-presets.js sha=67cd57891f50 — 원본은 app/08-defect-presets.js (여기 말고 거기서 고칠 것)
     // --- Dynamic Defect Type Presets & Custom Adding ---
     const STEEL_MEMBER_DEFECTS = [
         '상태양호',
@@ -34753,10 +34753,14 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
         const k = String(key || '').trim();
         if (k === '미장균열') return list;
         const raw = uniqCauseList(list);
-        const rk = companyCauseRankKey(k) === '균열' ? '' : companyCauseRankKey(k);
+        const isCrack = companyCauseRankKey(k) === '균열';
+        const rk = isCrack ? '' : companyCauseRankKey(k);
         const own = COMPANY_CAUSE_RANK[rk] || [];
         const glob = COMPANY_CAUSE_RANK['*'] || [];
-        const rest = raw.filter((c) => FINISH_TOP_CAUSES.indexOf(c) < 0 && !(companyCauseRankKey(k) === '균열' && CRACK_TOP_CAUSES.indexOf(c) >= 0 && c !== C_DS));
+        // 2026-11-16 균열은 누수 원인(상부 배관 누수·상부 누수)을 맨 위 목록에도, 나머지에도 넣지 않음(사용자 지정)
+        const LEAK_WORDS = ['상부 배관 누수', '상부 누수'];
+        const top = isCrack ? FINISH_TOP_CAUSES.filter((c) => LEAK_WORDS.indexOf(c) < 0) : FINISH_TOP_CAUSES;
+        const rest = raw.filter((c) => FINISH_TOP_CAUSES.indexOf(c) < 0 && !(isCrack && LEAK_WORDS.indexOf(c) >= 0) &&!(companyCauseRankKey(k) === '균열' && CRACK_TOP_CAUSES.indexOf(c) >= 0 && c !== C_DS));
         const score = (c, i) => {
             if (c === '기타') return 1e6;
             const o = own.indexOf(c); if (o >= 0) return o;
@@ -34764,7 +34768,7 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
             return 5000 + i;
         };
         const sorted = rest.map((c, i) => ({ c, s: score(c, i) })).sort((x, y) => x.s - y.s).map((x) => x.c);
-        return FINISH_TOP_CAUSES.concat(sorted);
+        return top.concat(sorted);
     }
     // 2026-10-30 누수류(모든 분류) 맨 위 3개(사용자 지정) — 마감재 맨 위 4개보다 우선
     const LEAK_TOP_CAUSES = ['상부 방수층 파손', '결함부위 수분유입', '창호 실링 열화', '상부 배관 누수'];
