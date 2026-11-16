@@ -66,6 +66,17 @@ const simple = (items) => J(items.map((i) => [i.label, i.color, i.colorName]));
     assert.strictEqual(makeCtx({ legend: own, defects: pri }).items().length, 2, '이미 있으면 중복 없음');
     assert.strictEqual(makeCtx({ grade3: true, legend: [{ label: '상태양호', color: '#000' }], defects: pri }).items().length, 1, '3종은 사용자가 지운 줄을 다시 붙이지 않음');
 }
+// 2026-11-16 1·2종 자동 줄(중점관리·보수완료)의 글을 범례 설정에서 바꾼 것(autoKind) — 바꾼 글로, 그 마킹이 있는 층에만, 중복 없이
+{
+    const legend = [{ label: '결함발생', color: '#dc2626', styleKey: 'defectBad' },
+        { label: '중점관리대상', color: '#16a34a', styleKey: 'priorityManage', autoKind: 'priorityManage' },
+        { label: '보수 끝', color: '#000000', autoKind: 'priorityRepaired' }];
+    const two = { B_1F: [{ id: 'a', isPriorityManage: true }], B_2F: [{ id: 'b' }] };
+    assert.deepStrictEqual(J(makeCtx({ legend, defects: two }).items('1F').map((i) => i.label)), ['결함발생', '중점관리대상'], '바꾼 글 한 줄만');
+    assert.deepStrictEqual(J(makeCtx({ legend, defects: two }).items('2F').map((i) => i.label)), ['결함발생'], '마킹 없는 층엔 안 그림');
+    assert.strictEqual(makeCtx({ legend, defects: two, colors: { ...COLORS, priorityManage: '#0d9488' } }).items('1F')[1].color, '#0d9488', '이름을 바꿔도 마킹 색 설정을 따른다');
+    assert.ok(/getAutoLocationMapLegendRows\(items\)/.test(extractFunction(app, 'function renderLocationMapLegendModalList(')), '설정 창에 자동 줄 표시');
+}
 
 // 연결: 화면·보고서·벡터 PDF·범위 맞춤이 같은 줄을 쓴다
 assert.strictEqual((app.match(/const items = getLocationMapLegendDrawItems\((?:legendOpts && legendOpts\.floorCode|floorCode)\);/g) || []).length, 3, "그리는 층을 넘김");

@@ -2882,15 +2882,23 @@
      * 1·2종도 중점관리 마킹은 녹색으로 그려지는데 기본 범례엔 그 줄이 없었다 → 중점관리 마킹이 있으면 줄을 붙인다.
      */
     function getLocationMapLegendDrawItems(floorCode) {
-        const items = getActiveLocationMapLegend().map(enrichLocationMapLegendItem);
+        let items = getActiveLocationMapLegend().map(enrichLocationMapLegendItem);
         if (!isGrade3Building()) {
-            const hasRow = items.some((it) => resolveLegendItemStyleKey(it) === 'priorityManage'
+            // 2026-11-16 autoKind: 범례 설정에서 글·색을 고친 「중점관리」「보수완료」 줄 — 저장은 되지만
+            // 자동 줄과 똑같이 그 마킹이 있는 층 도면에만 그린다(이름을 바꿔도 자동 줄이 또 붙지 않는다).
+            const hasPm = floorHasPriorityManageMarking(floorCode);
+            const hasRep = floorHasPriorityRepairedMarking(floorCode);
+            items = items.filter((it) => !(it.autoKind === 'priorityManage' && !hasPm)
+                && !(it.autoKind === 'priorityRepaired' && !hasRep));
+            const hasRow = items.some((it) => it.autoKind === 'priorityManage'
+                || resolveLegendItemStyleKey(it) === 'priorityManage'
                 || normalizeLegendLabelKey(it.label) === '중점관리');
-            if (!hasRow && floorHasPriorityManageMarking(floorCode)) {
+            if (!hasRow && hasPm) {
                 items.push(enrichLocationMapLegendItem({ label: '중점관리', color: getStyleColor('priorityManage'), styleKey: 'priorityManage', auto: true }));
             }
-            const hasRepairRow = items.some((it) => normalizeLegendLabelKey(it.label) === '보수완료');
-            if (!hasRepairRow && floorHasPriorityRepairedMarking(floorCode)) {
+            const hasRepairRow = items.some((it) => it.autoKind === 'priorityRepaired'
+                || normalizeLegendLabelKey(it.label) === '보수완료');
+            if (!hasRepairRow && hasRep) {
                 items.push(enrichLocationMapLegendItem({ colorName: '흑색', label: '보수완료', color: PRIORITY_REPAIRED_COLOR, auto: true }));
             }
         }
@@ -3097,9 +3105,61 @@
                 <button type="button" class="btn btn-sm btn-danger-outline" onclick="window.removeLocationMapLegendItem(${idx})"><i class="fa-solid fa-trash"></i></button>
             </div>
         `;
-        }).join('');
+        }).join('') + getAutoLocationMapLegendRows(items).map((row) => `
+            <div class="style-cat-card" title="${legendAttr(row.hint)}" style="display:flex; align-items:center; gap:0.45rem; margin-bottom:0.35rem;">
+                <span style="padding:0.2rem 0.15rem;color:#a3a3a3;flex-shrink:0;line-height:1;" aria-hidden="true"><i class="fa-solid fa-wand-magic-sparkles"></i></span>
+                <input type="color" value="${legendAttr(normalizeHexColor(row.item.color) || '#64748b')}" onchange="window.editAutoLocationMapLegendItem('${row.kind}', 'color', this.value)">
+                <input type="text" class="form-control" value="${legendAttr(row.item.label)}" style="flex:1;" onchange="window.editAutoLocationMapLegendItem('${row.kind}', 'label', this.value)">
+                <span style="font-size:0.7rem;color:#a3a3a3;flex-shrink:0;white-space:nowrap;">해당 층만</span>
+            </div>
+        `).join('');
         setupLocationMapLegendListDragDrop(listEl);
     }
+
+    /** 1·2종 자동 줄(중점관리·보수완료)의 기본 모양 — 범례 설정에서 고치면 autoKind를 달고 저장된다 */
+    function makeAutoLocationMapLegendItem(kind) {
+        if (kind === 'priorityManage') {
+            return { label: '중점관리', color: getStyleColor('priorityManage'), styleKey: 'priorityManage', autoKind: 'priorityManage' };
+        }
+        if (kind === 'priorityRepaired') {
+            return { colorName: '흑색', label: '보수완료', color: PRIORITY_REPAIRED_COLOR, autoKind: 'priorityRepaired' };
+        }
+        return null;
+    }
+
+    /**
+     * 2026-11-16 1·2종 범례 설정 창에 자동 줄도 보여 준다 — 예전엔 도면에만 붙고 설정 창엔 없어서 글을 못 바꿨다.
+     * 이미 저장된 줄(고친 적 있거나 직접 만든 「중점관리」「보수완료」)이 있으면 그 줄이 대신한다.
+     */
+    function getAutoLocationMapLegendRows(items) {
+        if (isGrade3Building()) return [];
+        const list = items || [];
+        const rows = [];
+        const hasPm = list.some((it) => it && (it.autoKind === 'priorityManage'
+            || resolveLegendItemStyleKey(it) === 'priorityManage'
+            || normalizeLegendLabelKey(it.label) === '중점관리'));
+        if (!hasPm) rows.push({ kind: 'priorityManage', item: makeAutoLocationMapLegendItem('priorityManage'), hint: '중점관리 마킹이 있는 층 도면에만 표시됩니다' });
+        const hasRep = list.some((it) => it && (it.autoKind === 'priorityRepaired'
+            || normalizeLegendLabelKey(it.label) === '보수완료'));
+        if (!hasRep) rows.push({ kind: 'priorityRepaired', item: makeAutoLocationMapLegendItem('priorityRepaired'), hint: '중점관리였다가 보수된 마킹이 있는 층 도면에만 표시됩니다' });
+        return rows;
+    }
+
+    /** 자동 줄의 글·색을 고치면 저장 항목으로 만든 뒤 보통 항목처럼 고친다 */
+    window.editAutoLocationMapLegendItem = function(kind, field, value) {
+        const items = ensureLocationMapLegendInitialized();
+        if (field === 'label' && !String(value || '').trim()) { renderLocationMapLegendModalList(); return; }
+        let idx = items.findIndex((it) => it && it.autoKind === kind);
+        if (idx < 0) {
+            const item = makeAutoLocationMapLegendItem(kind);
+            if (!item) return;
+            items.push(item);
+            idx = items.length - 1;
+        }
+        if (field === 'color') window.recolorLocationMapLegendItem(idx, value);
+        else window.renameLocationMapLegendItem(idx, value);
+        renderLocationMapLegendModalList();
+    };
 
     window.openLocationMapLegendModal = function() {
         ensureLocationMapLegendInitialized();
