@@ -426,6 +426,65 @@
         return ent.model;
     }
 
+    // ───────── 작업 스레드(2026-11-16): PDF 풀기·선 읽기를 다른 코어에서(화면이 멈칫하지 않게). 안 되면 예전 길 ─────────
+    var IS_PAGE = typeof document !== 'undefined';
+    var SELF_SRC = (IS_PAGE && document.currentScript && document.currentScript.src) || '';
+    var mWorker = null, mWorkerBroken = false, mSeq = 0;
+    var mJobs = new Map();
+
+    function failModelWorker(err) {
+        mWorkerBroken = true;
+        try { if (mWorker) mWorker.terminate(); } catch (e) { /* ignore */ }
+        mWorker = null;
+        mJobs.forEach(function (j) { clearTimeout(j.timer); j.reject(err || new Error('dxf worker 실패')); });
+        mJobs.clear();
+    }
+
+    /** 모델 | null(DXF로 만든 PDF가 아님). 작업 스레드를 못 쓰면 undefined(→ 화면 스레드에서 읽는다) */
+    function modelInWorker(pdfDataUrl) {
+        if (mWorkerBroken || !IS_PAGE || !SELF_SRC || typeof Worker === 'undefined' || (root && root.BSA_DXF_VIEW_NO_WORKER)) return Promise.resolve(undefined);
+        if (!mWorker) {
+            try {
+                var qi = SELF_SRC.indexOf('?');
+                var q = qi >= 0 ? SELF_SRC.slice(qi) : '';
+                mWorker = new Worker(new URL('dxf-view-worker.js' + q, SELF_SRC).href);
+                mWorker.onmessage = function (ev) {
+                    var m = ev.data || {};
+                    var j = mJobs.get(m.id);
+                    if (!j) return;
+                    mJobs.delete(m.id);
+                    clearTimeout(j.timer);
+                    if (m.ok) j.resolve(m.model || null); else j.reject(new Error(m.error || 'dxf worker 오류'));
+                };
+                mWorker.onerror = function (e) { failModelWorker(new Error((e && e.message) || 'dxf worker 로드 실패')); };
+                mWorker.postMessage({ type: 'init', urls: { toPdf: new URL('dxf-to-pdf.js' + q, SELF_SRC).href, view: SELF_SRC } });
+            } catch (e) {
+                mWorkerBroken = true; mWorker = null;
+                return Promise.resolve(undefined);
+            }
+        }
+        return new Promise(function (resolve, reject) {
+            var id = ++mSeq;
+            var timer = setTimeout(function () {
+                if (!mJobs.has(id)) return;
+                mJobs.delete(id);
+                reject(new Error('dxf worker 시간 초과'));
+            }, 60000);
+            mJobs.set(id, { resolve: resolve, reject: reject, timer: timer });
+            mWorker.postMessage({ type: 'model', id: id, pdfDataUrl: pdfDataUrl });
+        });
+    }
+
+    /** dataURL → 모델 | null — 작업 스레드(dxf-view-worker.js)가 부른다 */
+    async function modelFromDataUrl(pdfDataUrl) {
+        var P = root && root.BSA && root.BSA.dxfToPdf;
+        if (!P || typeof P.dataUrlToBytes !== 'function') throw new Error('dxfToPdf 없음');
+        var bytes = P.dataUrlToBytes(pdfDataUrl);
+        if (!bytes || !findTaggedStream(bytes, 'Paths')) return null;
+        var meta = P.parseMetaFromKeywords(P.scanKeywordsFromBytes(bytes));
+        return meta ? await buildModelFromPdfBytes(bytes, meta) : null;
+    }
+
     /** PDF dataURL에서 모델을 읽어 보관한다. DXF로 만든 PDF가 아니면 null. 절대 던지지 않는다 */
     function ensureModel(key, pdfDataUrl) {
         if (!key || typeof pdfDataUrl !== 'string') return Promise.resolve(null);
@@ -436,7 +495,14 @@
         if (inflight.has(jobKey)) return inflight.get(jobKey);
         var job = (async function () {
             var model = null;
+            var viaWorker = false;
             try {
+                var wm = await modelInWorker(pdfDataUrl);
+                if (wm !== undefined) { model = wm; viaWorker = true; }
+            } catch (we) {
+                if (typeof console !== 'undefined' && console.warn) console.warn('[DXF 화면] 작업 스레드 실패 — 화면 스레드에서 다시', we);
+            }
+            if (!viaWorker) try {
                 var P = root && root.BSA && root.BSA.dxfToPdf;
                 if (P && typeof P.dataUrlToBytes === 'function') {
                     var bytes = P.dataUrlToBytes(pdfDataUrl);
@@ -564,6 +630,7 @@
         parsePaths: parsePaths,
         parseTexts: parseTexts,
         buildModelFromPdfBytes: buildModelFromPdfBytes,
+        modelFromDataUrl: modelFromDataUrl,
         render: render,
         getModel: getModel,
         ensureModel: ensureModel,

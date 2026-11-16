@@ -225,9 +225,9 @@
     return out;
   }
 
-  function buildGrid(segments) {
-    const grid = new Map();
-    segments.forEach((s, i) => {
+  function addToGrid(grid, segments, from, to) {
+    for (let i = from; i < to; i++) {
+      const s = segments[i];
       const minX = Math.min(s[0], s[2]), maxX = Math.max(s[0], s[2]);
       const minY = Math.min(s[1], s[3]), maxY = Math.max(s[1], s[3]);
       const cx0 = Math.floor(minX / GRID_CELL), cx1 = Math.floor(maxX / GRID_CELL);
@@ -240,7 +240,23 @@
           arr.push(i);
         }
       }
-    });
+    }
+  }
+
+  function buildGrid(segments) {
+    const grid = new Map();
+    addToGrid(grid, segments, 0, segments.length);
+    return grid;
+  }
+
+  /** buildGrid와 같은 결과 — 2만 개마다 한 번씩 쉰다 */
+  async function buildGridChunked(segments) {
+    const grid = new Map();
+    const STEP = 20000;
+    for (let i = 0; i < segments.length; i += STEP) {
+      if (i > 0) await pause();
+      addToGrid(grid, segments, i, Math.min(segments.length, i + STEP));
+    }
     return grid;
   }
 
@@ -255,6 +271,122 @@
     return [x1 + t * (x2 - x1), y1 + t * (y2 - y1)];
   }
 
+  /** PDF → 스냅·행열 자동 잡기 자료(무거운 계산). 화면 스레드에서도, 작업 스레드(pdf-vector-snap-worker.js)에서도 같은 함수를 쓴다 */
+  async function computeGeometry(pdfDataUrl, key, refDim) {
+    const { page, baseViewport } = await acquirePdfPageFromDataUrl(pdfDataUrl, key);
+    const dim = refDim || 4000;
+    const scale = dim / Math.max(baseViewport.width, baseViewport.height, 1);
+    const viewport = page.getViewport({ scale });
+    const opList = await page.getOperatorList();
+    const curvePolys = [];
+    const raw = extractSegments(opList, viewport, pdfjsLib.OPS, curvePolys);
+    const segments = filterAndTransform(raw, viewport);
+    let detect = null;
+    try {
+      detect = buildDetectData(raw, viewport, curvePolys);
+      detect.texts = await readTexts(page, viewport);
+    } catch (_e) { detect = null; }
+    return { segments, detect, w: Math.round(viewport.width), h: Math.round(viewport.height) };
+  }
+
+  const pause = () => new Promise((r) => setTimeout(r, 0));
+
+  function packSegs(list) {
+    const out = new Float64Array(list.length * 4);
+    for (let i = 0, j = 0; i < list.length; i++, j += 4) {
+      const s = list[i];
+      out[j] = s[0]; out[j + 1] = s[1]; out[j + 2] = s[2]; out[j + 3] = s[3];
+    }
+    return out;
+  }
+  function unpackSegs(f64) {
+    const n = f64.length >> 2;
+    const out = new Array(n);
+    for (let i = 0, j = 0; i < n; i++, j += 4) out[i] = [f64[j], f64[j + 1], f64[j + 2], f64[j + 3]];
+    return out;
+  }
+  /** 작업 스레드 → 화면 스레드로 넘길 모양(선분은 숫자 배열 한 덩어리 — 복사 없이 넘어간다) */
+  function packGeometry(g) {
+    const out = { w: g.w, h: g.h, segments: packSegs(g.segments), detect: null };
+    if (g.detect) out.detect = { segments: packSegs(g.detect.segments), small: packSegs(g.detect.small), texts: g.detect.texts || [] };
+    return out;
+  }
+  /** 받은 자료 풀기 — 덩어리마다 한 번씩 쉬어 화면이 멈칫하지 않게 */
+  async function unpackGeometry(p) {
+    const segments = unpackSegs(p.segments);
+    let detect = null;
+    if (p.detect) {
+      await pause();
+      const ds = unpackSegs(p.detect.segments);
+      await pause();
+      detect = { segments: ds, small: unpackSegs(p.detect.small), texts: p.detect.texts || [] };
+    }
+    return { w: p.w, h: p.h, segments, detect };
+  }
+
+  // ───────── 작업 스레드(2026-11-16): 큰 도면의 선 추출이 화면을 멈추지 않게 다른 코어에서 한다. 안 되면 예전처럼 화면 스레드에서 ─────────
+  const IS_PAGE = typeof document !== 'undefined';
+  const SELF_SRC = (IS_PAGE && document.currentScript && document.currentScript.src) || '';
+  let worker = null, workerBroken = false, workerSeq = 0;
+  const workerJobs = new Map();
+  const WORKER_TIMEOUT_MS = 120000;
+
+  function workerUrls() {
+    if (!SELF_SRC || typeof Worker === 'undefined') return null;
+    const pdfTag = document.querySelector('script[src*="pdf.min.js"]');
+    if (!pdfTag || !pdfTag.src) return null;
+    const q = SELF_SRC.indexOf('?') >= 0 ? SELF_SRC.slice(SELF_SRC.indexOf('?')) : '';
+    return {
+      worker: new URL('pdf-vector-snap-worker.js' + q, SELF_SRC).href,
+      pdfjs: pdfTag.src,
+      pdfWorker: new URL('vendor/pdf.worker.min.js', SELF_SRC).href,
+      gridDetect: new URL('shared/grid-auto-detect.js' + q, SELF_SRC).href,
+      snap: SELF_SRC
+    };
+  }
+
+  function failWorker(err) {
+    workerBroken = true;
+    try { if (worker) worker.terminate(); } catch (_e) { /* ignore */ }
+    worker = null;
+    workerJobs.forEach((job) => { clearTimeout(job.timer); job.reject(err || new Error('snap worker 실패')); });
+    workerJobs.clear();
+  }
+
+  function computeInWorker(pdfDataUrl, key, refDim) {
+    if (workerBroken || !IS_PAGE || (typeof window !== 'undefined' && window.BSA_PDF_SNAP_NO_WORKER)) return Promise.resolve(null);
+    if (!worker) {
+      const urls = workerUrls();
+      if (!urls) { workerBroken = true; return Promise.resolve(null); }
+      try {
+        worker = new Worker(urls.worker);
+        worker.onmessage = (ev) => {
+          const m = ev.data || {};
+          const job = workerJobs.get(m.id);
+          if (!job) return;
+          workerJobs.delete(m.id);
+          clearTimeout(job.timer);
+          if (m.ok) job.resolve(m.data); else job.reject(new Error(m.error || 'snap worker 오류'));
+        };
+        worker.onerror = (e) => { failWorker(new Error((e && e.message) || 'snap worker 로드 실패')); };
+        worker.postMessage({ type: 'init', urls });
+      } catch (e) {
+        workerBroken = true; worker = null;
+        return Promise.resolve(null);
+      }
+    }
+    return new Promise((resolve, reject) => {
+      const id = ++workerSeq;
+      const timer = setTimeout(() => {
+        if (!workerJobs.has(id)) return;
+        workerJobs.delete(id);
+        reject(new Error('snap worker 시간 초과'));
+      }, WORKER_TIMEOUT_MS);
+      workerJobs.set(id, { resolve, reject, timer });
+      worker.postMessage({ type: 'compute', id, pdfDataUrl, key, refDim });
+    }).then((packed) => unpackGeometry(packed));
+  }
+
   async function ensureGeometry(pdfDataUrl, bldgId, floorCode, refDim) {
     if (!pdfDataUrl || !bldgId || !floorCode || typeof pdfjsLib === 'undefined') return false;
     const key = bldgId + '_' + floorCode;
@@ -265,22 +397,27 @@
     const entry = { status: 'pending' };
     const task = (async () => {
       try {
-        const { page, baseViewport } = await acquirePdfPageFromDataUrl(pdfDataUrl, key);
         const dim = refDim || window.FLOOR_DRAWING_PDF_PREVIEW_DIM || 4000;
-        const scale = dim / Math.max(baseViewport.width, baseViewport.height, 1);
-        const viewport = page.getViewport({ scale });
-        const opList = await page.getOperatorList();
-        const curvePolys = [];
-        const raw = extractSegments(opList, viewport, pdfjsLib.OPS, curvePolys);
-        const segments = filterAndTransform(raw, viewport);
-        entry.segments = segments;
+        let geo = null;
         try {
-          entry.detect = buildDetectData(raw, viewport, curvePolys);
-          entry.detect.texts = await readTexts(page, viewport);
-        } catch (_e) { entry.detect = null; }
-        entry.grid = buildGrid(segments);
-        entry.w = Math.round(viewport.width);
-        entry.h = Math.round(viewport.height);
+          geo = await computeInWorker(pdfDataUrl, key, dim);
+        } catch (we) {
+          console.warn('CAD 스냅: 작업 스레드 실패 — 화면 스레드에서 다시', we);
+          geo = null;
+        }
+        let grid;
+        if (geo) {
+          await pause();
+          grid = await buildGridChunked(geo.segments);
+        } else {
+          geo = await computeGeometry(pdfDataUrl, key, dim);
+          grid = buildGrid(geo.segments);
+        }
+        entry.segments = geo.segments;
+        entry.detect = geo.detect;
+        entry.grid = grid;
+        entry.w = geo.w;
+        entry.h = geo.h;
         entry.status = 'ready';
         return true;
       } catch (e) {
@@ -378,5 +515,5 @@
     return { segments: entry.detect.segments, small: entry.detect.small, texts: entry.detect.texts, w: entry.w, h: entry.h };
   }
 
-  window.BSA_PDF_SNAP = { ensureGeometry, isReady, snap, getDetectionData };
+  window.BSA_PDF_SNAP = { ensureGeometry, isReady, snap, getDetectionData, _computeGeometry: computeGeometry, _packGeometry: packGeometry };
 })();
