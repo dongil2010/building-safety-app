@@ -116,6 +116,7 @@ public class CustomCameraActivity extends AppCompatActivity {
     private static final String KEY_SHUTTER_Y = "shutterFy2";
     private static final String KEY_FLASH = "flashState";
     private static final String KEY_FAST = "fastCapture";
+    private static final String KEY_DETAIL = "detailNr"; // 노이즈 제거를 약하게(디테일 우선)
     private static final String KEY_REMOTE = "remoteKey";
     private static final String KEY_ZOOM_IN = "zoomInKey";
     private static final String KEY_ZOOM_OUT = "zoomOutKey";
@@ -205,6 +206,8 @@ public class CustomCameraActivity extends AppCompatActivity {
     private int flashMode = FLASH_OFF;
     private boolean settingsMode;
     private boolean fastCapture;
+    private boolean detailFirst = true;
+    private boolean centerAf;
     private int remoteKey = KeyEvent.KEYCODE_UNKNOWN; // 직접 지정한 리모컨 촬영 키(없으면 UNKNOWN)
     private int zoomInKey = KeyEvent.KEYCODE_UNKNOWN;
     private int zoomOutKey = KeyEvent.KEYCODE_UNKNOWN;
@@ -235,6 +238,7 @@ public class CustomCameraActivity extends AppCompatActivity {
         shutterFx = Math.max(0f, Math.min(1f, prefs().getFloat(KEY_SHUTTER_X, DEF_FX)));
         shutterFy = Math.max(0f, Math.min(1f, prefs().getFloat(KEY_SHUTTER_Y, DEF_FY)));
         fastCapture = prefs().getBoolean(KEY_FAST, false);
+        detailFirst = prefs().getBoolean(KEY_DETAIL, true);
         remoteKey = prefs().getInt(KEY_REMOTE, KeyEvent.KEYCODE_UNKNOWN);
         zoomInKey = prefs().getInt(KEY_ZOOM_IN, KeyEvent.KEYCODE_UNKNOWN);
         zoomOutKey = prefs().getInt(KEY_ZOOM_OUT, KeyEvent.KEYCODE_UNKNOWN);
@@ -475,6 +479,17 @@ public class CustomCameraActivity extends AppCompatActivity {
         LinearLayout.LayoutParams mlp = new LinearLayout.LayoutParams(dp(226), dp(44));
         mlp.topMargin = dp(16);
         settingsBox.addView(modeButton, mlp);
+        // 노이즈 제거: 약하게(기본 — 균열·글자가 뭉개지지 않게) ↔ 기기 기본(깨끗하지만 뭉개짐)
+        TextView detailButton = pillButton(detailText(), 0xFF3A3A3C, Color.WHITE);
+        detailButton.setOnClickListener(v -> {
+            detailFirst = !detailFirst;
+            prefs().edit().putBoolean(KEY_DETAIL, detailFirst).apply();
+            detailButton.setText(detailText());
+            applyRequestOptions();
+        });
+        LinearLayout.LayoutParams dlp = new LinearLayout.LayoutParams(dp(226), dp(44));
+        dlp.topMargin = dp(8);
+        settingsBox.addView(detailButton, dlp);
         // 버튼 지정: 칸을 누른 뒤 리모컨(음량) 버튼을 누르면 그 키로 촬영 / 줌아웃 / 줌인
         remoteButton = pillButton("", 0xFF3A3A3C, Color.WHITE);
         remoteButton.setOnClickListener(v -> toggleLearn(LEARN_SHUTTER));
@@ -873,6 +888,10 @@ public class CustomCameraActivity extends AppCompatActivity {
 
     private String captureModeText() {
         return fastCapture ? "촬영 방식: 속도 우선" : "촬영 방식: 화질 우선";
+    }
+
+    private String detailText() {
+        return detailFirst ? "노이즈 제거: 약하게(선명)" : "노이즈 제거: 기기 기본";
     }
 
     private void dropLens(Lens l) {
@@ -1275,27 +1294,60 @@ public class CustomCameraActivity extends AppCompatActivity {
     }
 
     /** 계속 맞추는 초점이 볼 영역을 센서 정중앙(가로·세로 1/5)으로 건다 / 푼다. */
-    @OptIn(markerClass = ExperimentalCamera2Interop.class)
     private void setCenterAfRegion(boolean on) {
+        centerAf = on;
+        applyRequestOptions();
+    }
+
+    /**
+     * 카메라 요청 옵션(미리보기·촬영 공통)을 한 번에 다시 건다: 중앙 초점 영역 + 노이즈 제거 세기.
+     * 2026-11-16: 「화질 우선」 촬영은 기기가 노이즈 제거를 가장 세게(HIGH_QUALITY) 걸어, 실내처럼 어두운 곳에서
+     * 콘크리트 결·가는 균열·글자가 물감처럼 뭉개졌다. 순정 카메라 앱은 여러 장을 합쳐 노이즈를 지우지만
+     * 이 화면은 한 장만 받으므로, 기본은 노이즈 제거를 최소(MINIMAL, 없으면 FAST)로 낮춘다. 설정에서 되돌릴 수 있다.
+     */
+    @OptIn(markerClass = ExperimentalCamera2Interop.class)
+    private void applyRequestOptions() {
         if (camera == null) return;
         try {
             Camera2CameraControl c2 = Camera2CameraControl.from(camera.getCameraControl());
-            if (!on) {
-                c2.clearCaptureRequestOptions();
-                return;
-            }
             Camera2CameraInfo info = Camera2CameraInfo.from(camera.getCameraInfo());
-            Rect active = info.getCameraCharacteristic(CameraCharacteristics.SENSOR_INFO_ACTIVE_ARRAY_SIZE);
-            Integer maxAf = info.getCameraCharacteristic(CameraCharacteristics.CONTROL_MAX_REGIONS_AF);
-            if (active == null || maxAf == null || maxAf < 1) return; // 영역을 못 거는 기기: 기기 기본(보통 중앙)
-            int w = active.width() / 5;
-            int h = active.height() / 5;
-            MeteringRectangle center = new MeteringRectangle(
-                (active.width() - w) / 2, (active.height() - h) / 2, w, h, MeteringRectangle.METERING_WEIGHT_MAX);
-            c2.setCaptureRequestOptions(new CaptureRequestOptions.Builder()
-                .setCaptureRequestOption(CaptureRequest.CONTROL_AF_REGIONS, new MeteringRectangle[] { center })
-                .build());
-        } catch (Throwable ignored) { /* 못 걸면 기기 기본 초점 */ }
+            CaptureRequestOptions.Builder b = new CaptureRequestOptions.Builder();
+            boolean any = false;
+            if (centerAf) {
+                Rect active = info.getCameraCharacteristic(CameraCharacteristics.SENSOR_INFO_ACTIVE_ARRAY_SIZE);
+                Integer maxAf = info.getCameraCharacteristic(CameraCharacteristics.CONTROL_MAX_REGIONS_AF);
+                if (active != null && maxAf != null && maxAf >= 1) { // 영역을 못 거는 기기: 기기 기본(보통 중앙)
+                    int w = active.width() / 5;
+                    int h = active.height() / 5;
+                    MeteringRectangle center = new MeteringRectangle(
+                        (active.width() - w) / 2, (active.height() - h) / 2, w, h, MeteringRectangle.METERING_WEIGHT_MAX);
+                    b.setCaptureRequestOption(CaptureRequest.CONTROL_AF_REGIONS, new MeteringRectangle[] { center });
+                    any = true;
+                }
+            }
+            if (detailFirst) {
+                int nr = lightNoiseReduction(info.getCameraCharacteristic(
+                    CameraCharacteristics.NOISE_REDUCTION_AVAILABLE_NOISE_REDUCTION_MODES));
+                if (nr >= 0) {
+                    b.setCaptureRequestOption(CaptureRequest.NOISE_REDUCTION_MODE, nr);
+                    any = true;
+                }
+            }
+            if (any) c2.setCaptureRequestOptions(b.build());
+            else c2.clearCaptureRequestOptions();
+        } catch (Throwable ignored) { /* 못 걸면 기기 기본 */ }
+    }
+
+    /** 기기가 지원하는 것 중 가장 약한(꺼짐은 빼고) 노이즈 제거. 없으면 -1(기기 기본 그대로). */
+    private static int lightNoiseReduction(int[] modes) {
+        if (modes == null) return -1;
+        boolean minimal = false, fast = false;
+        for (int m : modes) {
+            if (m == CaptureRequest.NOISE_REDUCTION_MODE_MINIMAL) minimal = true;
+            else if (m == CaptureRequest.NOISE_REDUCTION_MODE_FAST) fast = true;
+        }
+        return minimal ? CaptureRequest.NOISE_REDUCTION_MODE_MINIMAL
+            : fast ? CaptureRequest.NOISE_REDUCTION_MODE_FAST : -1;
     }
 
     private void updateFlashButton() {
