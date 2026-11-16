@@ -3250,9 +3250,43 @@
         '방청 불량', '과하중', 'SRC기둥 이질재료 간 인장변형률 상이', '외부 충격', '배수 불량', '내력부족', '조적 쌓기 불량', '상부 누수', '결로',
         '추가하중 적치', '지하수 유입', '부식', '누수', '동결융해 반복', '실 변경으로 인한 하중증가', '추가하중 설치', '부착력 저하', '시공 누락',
         '온도변화', '다짐 시공미흡', '기타'];
+    /**
+     * 2026-11-16 부재·결함 종류에 어울리지 않는 원인 제거(사용자 지정 — 부재별 결함 내용의 원인 전수 점검).
+     *  - 창호 실링 열화: 벽·창·문 계열 부재의 누수에만(기둥·보·슬래브·천장·바닥·지붕·계단·파라펫에는 안 맞음)
+     *  - 상부 배관 누수·상부 누수: 파손·이격·철근노출·균열에는 안 맞고, 처짐은 천장만, 지붕 마감재는 위에 배관이 없어 제외
+     *  - 내력부족·개구부 응력집중 등 구조 원인: 비구조체·마감재 균열에서 제외(구조 부재가 아님)
+     *  - 철근 부식 팽창·과하중: 마감재(타일·미장·도장 …)에는 철근이 없어 제외
+     */
+    function pruneMismatchedCauses(list, key, category, component) {
+        const k = String(key || '').trim();
+        const cat = String(category || '').trim();
+        const comp = String(component || '').trim();
+        const isCrack = companyCauseRankKey(k) === '균열' || /균열/.test(k);
+        const isLeakType = isLeakCauseKey(k);
+        const drop = new Set();
+        if (!/벽|창|문|ALC|조적|치장|커튼|외벽/.test(comp)) drop.add('창호 실링 열화');
+        if (!isLeakType && !isEffloCauseKey(k)) {
+            const noPipe = isCrack || /^(파손|파손\/결손|이격|이격\/파손|이격\/흔들림|철근노출|물고임|부식|변형)$/.test(k)
+                || (/^처짐$/.test(k) && !/천장/.test(comp));
+            if (noPipe) { drop.add('상부 배관 누수'); drop.add('상부 누수'); }
+            if (cat === '마감재' && /지붕/.test(comp)) { drop.add('상부 배관 누수'); drop.add('상부 누수'); }
+        }
+        if (cat !== '구조체') {
+            if (isCrack && k !== '미장균열') { // 미장균열은 사용자 지정 맨 위 3개(내력부족 포함) 유지
+                drop.add('내력부족');
+                if (!/벽|창|문|개구|조적|벽돌|ALC|칸막이/.test(comp)) drop.add('개구부 주위 응력집중');
+            }
+        }
+        if (cat === '마감재') {
+            ['철근 부식 팽창', '과하중', '부등침하', '이어치기 시공미흡', '동바리 존치기간 미준수'].forEach((c) => drop.add(c));
+            if (/^(박락|철근노출)$/.test(k)) drop.add('철근 부식 팽창');
+        }
+        if (!drop.size) return list;
+        return list.filter((c) => !drop.has(c));
+    }
     let _defectCauseAllowSet = null;
     function getDefaultCausePresetList(key, types, category, component) {
-        const raw = getDefaultCausePresetListRaw(key, types, category, component);
+        const raw = pruneMismatchedCauses(getDefaultCausePresetListRaw(key, types, category, component), key, category, component);
         if (!_defectCauseAllowSet) {
             _defectCauseAllowSet = new Set(DEFECT_CAUSE_ALLOW.concat(CRACK_TOP_CAUSES, LEAK_TOP_CAUSES, FINISH_TOP_CAUSES));
             Object.values(CRACK_LEAD_BY_GROUP).forEach((l) => l.forEach((c) => _defectCauseAllowSet.add(c)));
@@ -3339,7 +3373,8 @@
             const t = part.trim();
             if (!t) return;
             // 목록에 있는 이름(수화열·온도균열, 배관 파손/연결부 누수 등)은 그대로, 모르는 옛 표기만 · / 로 나눔
-            if (!/[/·•|]/.test(t) || isKnownCauseLabel(t)) {
+            // 2026-11-16 「/」로 합쳐 쓴 원인은 목록에 있어도 무조건 나눔(사용자 지정). ·는 목록에 있는 이름만 그대로
+            if (!/[/·•|]/.test(t) || (!t.includes('/') && isKnownCauseLabel(t))) {
                 out.push(t);
                 return;
             }

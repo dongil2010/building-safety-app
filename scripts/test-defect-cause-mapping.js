@@ -219,6 +219,12 @@ function testAutoCheckedCause() {
                     assert.ok(!got.some((c) => /누수/.test(c)), 'finish crack no leak ' + comp + '/' + t);
                     return;
                 }
+                // 2026-11-16 파손·이격·철근노출 등 누수와 안 맞는 종류(지붕은 전부)는 배관 누수 원인 없이 시공미흡·노후화만 맨 위
+                if (/^(파손|파손\/결손|이격|철근노출)$/.test(g.key) || (/^처짐$/.test(g.key) && !/천장/.test(comp))) {
+                    assert.deepStrictEqual(got.slice(0, 2), FIN4.slice(0, 2), 'finish nonleak top2 ' + comp + '/' + t);
+                    assert.ok(!got.some((c) => /^상부( 배관)? 누수$/.test(c)), 'finish nonleak no pipe ' + comp + '/' + t);
+                    return;
+                }
                 assert.deepStrictEqual(got.slice(0, 4), FIN4, 'finish top4 ' + comp + '/' + t);
             });
         });
@@ -233,7 +239,10 @@ function testAutoCheckedCause() {
         (api.getDefectTypePresetFor(cat, comp) || []).filter((t) => /^누수( ?흔적)?$/.test(t)).forEach((t) => {
             api.getCauseDisplayGroups(t).forEach((g) => {
                 const list = api.getDefaultCausePresetList(g.key, g.types, cat, comp);
-                assert.deepStrictEqual(list.slice(0, 4), LEAK3, 'leak top3 ' + cat + '/' + comp + '/' + t);
+                // 2026-11-16 창호 실링 열화는 벽·창·문 계열 부재에만(기둥·슬래브·천장 등에는 어울리지 않아 뺌)
+                const want = /벽|창|문|ALC|조적|치장|커튼|외벽/.test(comp) ? LEAK3 : LEAK3.filter((c) => c !== '창호 실링 열화');
+                assert.deepStrictEqual(list.slice(0, want.length), want, 'leak top3 ' + cat + '/' + comp + '/' + t);
+                if (want !== LEAK3) assert.ok(!list.includes('창호 실링 열화'), 'no window sealing ' + comp);
             });
         });
     });
@@ -313,7 +322,7 @@ function testParseCauseList() {
     assert.deepStrictEqual(api.parseCauseList('건조수축 및 재료적 특성, 개구부 주위 응력집중'),
         ['건조수축 및 재료적 특성', '개구부 주위 응력집중']);
     // 예전 목록 이름(기존 결함 기록)도 한 개로
-    assert.deepStrictEqual(api.parseCauseList('수화열·온도균열, 배관 파손/연결부 누수'), ['수화열·온도균열', '배관 파손/연결부 누수']);
+    assert.deepStrictEqual(api.parseCauseList('수화열·온도균열, 배관 파손/연결부 누수'), ['수화열·온도균열', '배관 파손', '연결부 누수'] /* 2026-11-16 「/」는 항상 나눔 */);
     assert.deepStrictEqual(api.parseCauseList('외력·충격'), ['외력·충격']);
     // 모르는 옛 표기는 예전처럼 나눔
     assert.deepStrictEqual(api.parseCauseList('건조수축/과하중'), ['건조수축', '과하중']);
