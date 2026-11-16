@@ -556,6 +556,8 @@
 
     function scheduleFloorDrawingTierPrefetch(bldg, floorCode) {
         if (!bldg || !floorCode) return;
+        // DXF 층은 선으로 직접 그리므로 확대용 큰 그림이 필요 없다
+        if (typeof isFloorDxfView === 'function' && isFloorDxfView(bldg, floorCode)) return;
         const dims = [8000];
         try {
             const mobile = isMobileDrawingContext();
@@ -616,6 +618,12 @@
                     setTimeout(() => {
                         try { URL.revokeObjectURL(toRevoke); } catch (_) { /* ignore */ }
                     }, 60000);
+                }
+                // 2026-11-16 확대용 큰 그림(8000/16000px)은 압축 풀기를 화면 스레드 밖에서 끝낸 뒤 넘긴다 —
+                // 예전엔 처음 그리는 순간에 풀어서, 확대·축소 도중 화면이 한동안 멈췄다
+                if (typeof img.decode === 'function') {
+                    img.decode().then(() => resolve(img), () => resolve(img));
+                    return;
                 }
                 resolve(img);
             };
@@ -706,7 +714,8 @@
     function scheduleFloorDrawingTierSync() {
         if (floorDrawingTierSyncTimer) clearTimeout(floorDrawingTierSyncTimer);
         // 2026-11-12 DXF 층은 화면을 선으로 직접 그리므로 확대용 큰 그림(8000/16000)을 받지 않는다
-        if (typeof getDxfViewModelForCurrentFloor === 'function' && getDxfViewModelForCurrentFloor()) {
+        // (2026-11-16 층을 막 열어 벡터 자료를 아직 읽는 중이어도 — 지난번에 DXF였던 층이면 — 받지 않는다)
+        if (typeof isCurrentFloorDxfView === 'function' && isCurrentFloorDxfView()) {
             floorDrawingTierSyncTimer = null;
             return;
         }

@@ -1648,7 +1648,12 @@ document.addEventListener('DOMContentLoaded', () => {
         if (!pdfUrl && typeof window.resolveFloorPdfDataUrlAsync === 'function') {
             pdfUrl = await window.resolveFloorPdfDataUrlAsync(bldg, floorCode);
         }
-        if (!pdfUrl || typeof window.getPdfRefPixelSize !== 'function') return;
+        if (!pdfUrl || typeof window.getPdfRefPixelSize !== 'function') {
+            // PDF 원본을 못 구했다 → 벡터로 못 그린다. DXF 층으로 기억해 두었으면 풀고 확대용 그림을 쓰게 한다
+            if (noteFloorDxfView(bldg.id, floorCode, false) && state.currentBuildingId === bldg.id && state.currentFloor === floorCode
+                && typeof scheduleFloorDrawingTierSync === 'function') scheduleFloorDrawingTierSync();
+            return;
+        }
         try {
             const refDim = window.FLOOR_DRAWING_PDF_PREVIEW_DIM || 4000;
             const ref = await window.getPdfRefPixelSize(pdfUrl, refDim, `${bldg.id}_${floorCode}`);
@@ -1661,7 +1666,10 @@ document.addEventListener('DOMContentLoaded', () => {
         const loadDxfModel = () => {
             if (!(window.BSA && window.BSA.dxfView && typeof window.BSA.dxfView.ensureModel === 'function')) return Promise.resolve();
             return window.BSA.dxfView.ensureModel(`${bldg.id}_${floorCode}`, pdfUrl).then((model) => {
+                const changed = noteFloorDxfView(bldg.id, floorCode, !!model);
                 if (model && stillHere() && typeof drawCanvas === 'function') drawCanvas();
+                // DXF인 줄 알고 확대용 그림을 건너뛰었는데 아니었다(일반 PDF로 바뀜) → 다시 고른다
+                if (!model && changed && stillHere() && typeof scheduleFloorDrawingTierSync === 'function') scheduleFloorDrawingTierSync();
             }).catch(() => {});
         };
         // 캐드 벡터 스냅용 선분. 그림만 있고 PDF 원본이 없으면 여기까지 오지 않는다.
@@ -1753,6 +1761,44 @@ document.addEventListener('DOMContentLoaded', () => {
         if (typeof window.isFloorPdfRemoved === 'function' && window.isFloorPdfRemoved(bldg, fc)) return null;
         const pdfUrl = (typeof window.getFloorPdfDataUrl === 'function') ? window.getFloorPdfDataUrl(bldg, fc) : null;
         return V.getModel(`${bldg.id}_${fc}`, pdfUrl || undefined);
+    }
+
+    // 2026-11-16 「이 층은 DXF(벡터로 그리는 층)」 기억 — 벡터 자료는 층을 열고 조금 뒤에 읽히는데, 그 사이 확대하면
+    // 쓰지도 않을 확대용 큰 그림(8000/16000px)을 받아 푸느라 화면이 한동안 버벅였다. 지난번 결과를 기기에 적어 두고 바로 건너뛴다.
+    const DXF_FLOOR_KEYS_LS = 'bsa_dxf_floor_keys_v1';
+    let _dxfFloorKeys = null;
+    function dxfFloorKeySet() {
+        if (_dxfFloorKeys) return _dxfFloorKeys;
+        _dxfFloorKeys = new Set();
+        try {
+            const arr = JSON.parse(localStorage.getItem(DXF_FLOOR_KEYS_LS) || '[]');
+            if (Array.isArray(arr)) arr.forEach((k) => { if (typeof k === 'string') _dxfFloorKeys.add(k); });
+        } catch (_e) { /* 없으면 빈 목록 */ }
+        return _dxfFloorKeys;
+    }
+    /** 벡터 자료를 읽어 본 결과를 적는다. 바뀌었으면 true */
+    function noteFloorDxfView(bldgId, floorCode, isDxf) {
+        if (!bldgId || !floorCode) return false;
+        const set = dxfFloorKeySet();
+        const key = `${bldgId}_${floorCode}`;
+        if (set.has(key) === !!isDxf) return false;
+        if (isDxf) set.add(key); else set.delete(key);
+        try {
+            let arr = Array.from(set);
+            if (arr.length > 600) { arr = arr.slice(arr.length - 600); _dxfFloorKeys = new Set(arr); }
+            localStorage.setItem(DXF_FLOOR_KEYS_LS, JSON.stringify(arr));
+        } catch (_e) { /* 저장 못 해도 이번 실행 동안은 기억 */ }
+        return true;
+    }
+    function isFloorDxfView(bldg, floorCode) {
+        if (!bldg || !floorCode) return false;
+        if (window.BSA_PDF_VECTOR && window.BSA_PDF_VECTOR.dxfLiveView === false) return false;
+        if (typeof window.isFloorPdfRemoved === 'function' && window.isFloorPdfRemoved(bldg, floorCode)) return false;
+        if (state.currentBuilding === bldg && state.currentFloor === floorCode && getDxfViewModelForCurrentFloor()) return true;
+        return dxfFloorKeySet().has(`${bldg.id}_${floorCode}`);
+    }
+    function isCurrentFloorDxfView() {
+        return isFloorDxfView(state.currentBuilding, state.currentFloor);
     }
 
     function getMapViewScaleLimits() {

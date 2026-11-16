@@ -1,5 +1,5 @@
 // @@app-parts 자동 생성 파일 — 여기를 고치지 말고 app/ 조각을 고친 뒤 `node scripts/app-parts.js join` (CLAUDE.md 「app.js 조각」)
-// @@app-part 01-base.js sha=2f90e40a1523 — 원본은 app/01-base.js (여기 말고 거기서 고칠 것)
+// @@app-part 01-base.js sha=bbedd9a3fe50 — 원본은 app/01-base.js (여기 말고 거기서 고칠 것)
 /* ==========================================================================
    스마트 건축물 안전점검 현장점검 시스템 — UI 부트스트랩
    전역 상태·IndexedDB·이미지 헬퍼: js/core/state.js
@@ -1649,7 +1649,12 @@ document.addEventListener('DOMContentLoaded', () => {
         if (!pdfUrl && typeof window.resolveFloorPdfDataUrlAsync === 'function') {
             pdfUrl = await window.resolveFloorPdfDataUrlAsync(bldg, floorCode);
         }
-        if (!pdfUrl || typeof window.getPdfRefPixelSize !== 'function') return;
+        if (!pdfUrl || typeof window.getPdfRefPixelSize !== 'function') {
+            // PDF 원본을 못 구했다 → 벡터로 못 그린다. DXF 층으로 기억해 두었으면 풀고 확대용 그림을 쓰게 한다
+            if (noteFloorDxfView(bldg.id, floorCode, false) && state.currentBuildingId === bldg.id && state.currentFloor === floorCode
+                && typeof scheduleFloorDrawingTierSync === 'function') scheduleFloorDrawingTierSync();
+            return;
+        }
         try {
             const refDim = window.FLOOR_DRAWING_PDF_PREVIEW_DIM || 4000;
             const ref = await window.getPdfRefPixelSize(pdfUrl, refDim, `${bldg.id}_${floorCode}`);
@@ -1662,7 +1667,10 @@ document.addEventListener('DOMContentLoaded', () => {
         const loadDxfModel = () => {
             if (!(window.BSA && window.BSA.dxfView && typeof window.BSA.dxfView.ensureModel === 'function')) return Promise.resolve();
             return window.BSA.dxfView.ensureModel(`${bldg.id}_${floorCode}`, pdfUrl).then((model) => {
+                const changed = noteFloorDxfView(bldg.id, floorCode, !!model);
                 if (model && stillHere() && typeof drawCanvas === 'function') drawCanvas();
+                // DXF인 줄 알고 확대용 그림을 건너뛰었는데 아니었다(일반 PDF로 바뀜) → 다시 고른다
+                if (!model && changed && stillHere() && typeof scheduleFloorDrawingTierSync === 'function') scheduleFloorDrawingTierSync();
             }).catch(() => {});
         };
         // 캐드 벡터 스냅용 선분. 그림만 있고 PDF 원본이 없으면 여기까지 오지 않는다.
@@ -1754,6 +1762,44 @@ document.addEventListener('DOMContentLoaded', () => {
         if (typeof window.isFloorPdfRemoved === 'function' && window.isFloorPdfRemoved(bldg, fc)) return null;
         const pdfUrl = (typeof window.getFloorPdfDataUrl === 'function') ? window.getFloorPdfDataUrl(bldg, fc) : null;
         return V.getModel(`${bldg.id}_${fc}`, pdfUrl || undefined);
+    }
+
+    // 2026-11-16 「이 층은 DXF(벡터로 그리는 층)」 기억 — 벡터 자료는 층을 열고 조금 뒤에 읽히는데, 그 사이 확대하면
+    // 쓰지도 않을 확대용 큰 그림(8000/16000px)을 받아 푸느라 화면이 한동안 버벅였다. 지난번 결과를 기기에 적어 두고 바로 건너뛴다.
+    const DXF_FLOOR_KEYS_LS = 'bsa_dxf_floor_keys_v1';
+    let _dxfFloorKeys = null;
+    function dxfFloorKeySet() {
+        if (_dxfFloorKeys) return _dxfFloorKeys;
+        _dxfFloorKeys = new Set();
+        try {
+            const arr = JSON.parse(localStorage.getItem(DXF_FLOOR_KEYS_LS) || '[]');
+            if (Array.isArray(arr)) arr.forEach((k) => { if (typeof k === 'string') _dxfFloorKeys.add(k); });
+        } catch (_e) { /* 없으면 빈 목록 */ }
+        return _dxfFloorKeys;
+    }
+    /** 벡터 자료를 읽어 본 결과를 적는다. 바뀌었으면 true */
+    function noteFloorDxfView(bldgId, floorCode, isDxf) {
+        if (!bldgId || !floorCode) return false;
+        const set = dxfFloorKeySet();
+        const key = `${bldgId}_${floorCode}`;
+        if (set.has(key) === !!isDxf) return false;
+        if (isDxf) set.add(key); else set.delete(key);
+        try {
+            let arr = Array.from(set);
+            if (arr.length > 600) { arr = arr.slice(arr.length - 600); _dxfFloorKeys = new Set(arr); }
+            localStorage.setItem(DXF_FLOOR_KEYS_LS, JSON.stringify(arr));
+        } catch (_e) { /* 저장 못 해도 이번 실행 동안은 기억 */ }
+        return true;
+    }
+    function isFloorDxfView(bldg, floorCode) {
+        if (!bldg || !floorCode) return false;
+        if (window.BSA_PDF_VECTOR && window.BSA_PDF_VECTOR.dxfLiveView === false) return false;
+        if (typeof window.isFloorPdfRemoved === 'function' && window.isFloorPdfRemoved(bldg, floorCode)) return false;
+        if (state.currentBuilding === bldg && state.currentFloor === floorCode && getDxfViewModelForCurrentFloor()) return true;
+        return dxfFloorKeySet().has(`${bldg.id}_${floorCode}`);
+    }
+    function isCurrentFloorDxfView() {
+        return isFloorDxfView(state.currentBuilding, state.currentFloor);
     }
 
     function getMapViewScaleLimits() {
@@ -10670,7 +10716,7 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
         });
     }
 
-// @@app-part 03-canvas.js sha=ca7d0c6277ad — 원본은 app/03-canvas.js (여기 말고 거기서 고칠 것)
+// @@app-part 03-canvas.js sha=98092cac72ef — 원본은 app/03-canvas.js (여기 말고 거기서 고칠 것)
     // --- 8. DRAWING CANVAS ENGINE (PAN/ZOOM/ROTATE & PINS) ---
 
     function setupCanvas() {
@@ -11228,6 +11274,8 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
 
     function scheduleFloorDrawingTierPrefetch(bldg, floorCode) {
         if (!bldg || !floorCode) return;
+        // DXF 층은 선으로 직접 그리므로 확대용 큰 그림이 필요 없다
+        if (typeof isFloorDxfView === 'function' && isFloorDxfView(bldg, floorCode)) return;
         const dims = [8000];
         try {
             const mobile = isMobileDrawingContext();
@@ -11288,6 +11336,12 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
                     setTimeout(() => {
                         try { URL.revokeObjectURL(toRevoke); } catch (_) { /* ignore */ }
                     }, 60000);
+                }
+                // 2026-11-16 확대용 큰 그림(8000/16000px)은 압축 풀기를 화면 스레드 밖에서 끝낸 뒤 넘긴다 —
+                // 예전엔 처음 그리는 순간에 풀어서, 확대·축소 도중 화면이 한동안 멈췄다
+                if (typeof img.decode === 'function') {
+                    img.decode().then(() => resolve(img), () => resolve(img));
+                    return;
                 }
                 resolve(img);
             };
@@ -11378,7 +11432,8 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
     function scheduleFloorDrawingTierSync() {
         if (floorDrawingTierSyncTimer) clearTimeout(floorDrawingTierSyncTimer);
         // 2026-11-12 DXF 층은 화면을 선으로 직접 그리므로 확대용 큰 그림(8000/16000)을 받지 않는다
-        if (typeof getDxfViewModelForCurrentFloor === 'function' && getDxfViewModelForCurrentFloor()) {
+        // (2026-11-16 층을 막 열어 벡터 자료를 아직 읽는 중이어도 — 지난번에 DXF였던 층이면 — 받지 않는다)
+        if (typeof isCurrentFloorDxfView === 'function' && isCurrentFloorDxfView()) {
             floorDrawingTierSyncTimer = null;
             return;
         }
