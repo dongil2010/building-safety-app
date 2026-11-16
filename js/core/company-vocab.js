@@ -30,6 +30,9 @@
 
     // 조사내용 앞부분이 이것이면 부재가 아니라 결함 설명의 일부 — 쪼개지 않는다
     const NOT_TARGET = ['보수부위', '보수 부위', '기존', '미세', '경미한', '부분'];
+    // 조사내용이 이것으로 시작하면 통째로 결함 설명 — 쪼개지 않는다(띄어쓰기 무관).
+    // 2026-11-16 글로벌모터스: 부재 「샛기둥 주각부」 + 「무수축 모르타르 이격」은 부재 그대로, 결함에 무수축 모르타르까지
+    const NOT_TARGET_PREFIX = ['무수축 모르타르'];
 
     // 그 자체로 부재 이름인 마감 대상(바탕 부재를 앞에 붙이지 않음)
     const STANDALONE_FINISH = ['천장 마감재', '천장마감재', '외벽 마감재', '외부 마감재', '지붕 마감재', '천장'];
@@ -62,7 +65,8 @@
         let target = tidy(raw.slice(0, m.index).replace(/상태$/, ''));
         const defect = normalizeDefect(raw.slice(m.index));
         if (!target || /\d/.test(target) || target.length > 16
-            || NOT_TARGET.some((w) => compact(target) === compact(w))) {
+            || NOT_TARGET.some((w) => compact(target) === compact(w))
+            || NOT_TARGET_PREFIX.some((w) => compact(target).startsWith(compact(w)))) {
             return out;
         }
         out.target = target;
