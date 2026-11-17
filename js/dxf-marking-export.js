@@ -219,6 +219,36 @@
     }
   };
 
+  /**
+   * 여러 층 마킹 DXF 를 zip 에 넣는다(층마다 파일 하나). 마킹 없는 층은 건너뜀.
+   * usedNames: zip 안 파일 이름 겹침 막기(소문자로 담음)
+   * @returns {Promise<{ok:number, skipped:string[], systems:Set<string>}>}
+   */
+  async function addFloorsMarkingDxfToZip(zip, bldg, floorCodes, buildingId, loadingLabel, usedNames) {
+    let ok = 0;
+    const skipped = [];
+    const systems = new Set();
+    for (let i = 0; i < floorCodes.length; i++) {
+      const floorCode = floorCodes[i];
+      if (typeof window.showLoading === 'function') window.showLoading(`${loadingLabel} (${i + 1}/${floorCodes.length}) ${floorCode}...`);
+      try {
+        const info = await window.buildFloorMarkingDxfInfo(bldg, floorCode, buildingId);
+        if (!info.count) { skipped.push(floorCode); continue; }
+        const base = floorFileName(bldg, floorCode);
+        let name = base;
+        for (let n = 2; usedNames.has(`${name}.dxf`.toLowerCase()); n++) name = `${base} (${n})`;
+        usedNames.add(`${name}.dxf`.toLowerCase());
+        zip.file(`${name}.dxf`, info.text);
+        systems.add(info.system);
+        ok += 1;
+      } catch (e) {
+        console.warn('[addFloorsMarkingDxfToZip] skip', floorCode, e);
+        skipped.push(floorCode);
+      }
+    }
+    return { ok, skipped, systems };
+  }
+
   /** 각 층 DXF 를 한 zip 으로 */
   async function exportAllFloorsMarkingDxf() {
     const state = window.state;
@@ -235,31 +265,13 @@
       return window.exportCurrentFloorMarkingDxf();
     }
     const zip = new JSZip();
-    let ok = 0;
-    const skipped = [];
-    const systems = new Set();
     const stamp = Date.now();
-    const usedNames = new Set();
     if (typeof window.showLoading === 'function') window.showLoading(`전층 마킹 DXF 준비 중 (0/${floorCodes.length})...`);
     try {
-      for (let i = 0; i < floorCodes.length; i++) {
-        const floorCode = floorCodes[i];
-        if (typeof window.showLoading === 'function') window.showLoading(`전층 마킹 DXF (${i + 1}/${floorCodes.length}) ${floorCode}...`);
-        try {
-          const info = await window.buildFloorMarkingDxfInfo(bldg, floorCode, state.currentBuildingId);
-          if (!info.count) { skipped.push(floorCode); continue; }
-          const base = floorFileName(bldg, floorCode);
-          let name = base;
-          for (let n = 2; usedNames.has(name.toLowerCase()); n++) name = `${base} (${n})`;
-          usedNames.add(name.toLowerCase());
-          zip.file(`${name}.dxf`, info.text);
-          systems.add(info.system);
-          ok += 1;
-        } catch (e) {
-          console.warn('[exportAllFloorsMarkingDxf] skip', floorCode, e);
-          skipped.push(floorCode);
-        }
-      }
+      const res = await addFloorsMarkingDxfToZip(zip, bldg, floorCodes, state.currentBuildingId, '전층 마킹 DXF', new Set());
+      const ok = res.ok;
+      const skipped = res.skipped;
+      const systems = res.systems;
       if (!ok) {
         toast('마킹이 있는 층이 없어 DXF를 만들지 못했습니다.', 'warning', 6000);
         return;
@@ -308,5 +320,178 @@
     const v = String(choice).trim();
     if (v === '2' || v === '전층' || v.toLowerCase() === 'all') return exportAllFloorsMarkingDxf();
     return window.exportCurrentFloorMarkingDxf();
+  };
+
+  // ---- 2026-11-17 「DXF·PDF 출력」 — 벡터 PDF 와 마킹 DXF 를 버튼 하나로 ----
+  // DXF 로 올린 층 = 마킹 DXF(원래 캐드 좌표·원본 도면 포함) / PDF 로 올린 층 = 벡터 PDF
+  // 도면 원본이 없는 층(그림만·못 받음)은 전층에서 빼고, 현재 층이면 벡터 PDF 쪽 안내(원본 못 받음)를 그대로 보여 준다.
+
+  /** 층 도면을 무엇으로 올렸나: 'dxf' | 'pdf' | 'none' (DXF 는 올릴 때 PDF 로 바뀌며 안에 캐드 변환값을 적어 둔다) */
+  window.detectFloorDrawingKind = async function (bldg, floorCode) {
+    let pdfDataUrl = null;
+    try {
+      pdfDataUrl = await window.resolveFloorPdfDataUrlAsync(bldg, floorCode);
+    } catch (e) {
+      console.warn('[BSA_EXPORT] 도면 원본 확인 실패', floorCode, e);
+    }
+    if (!pdfDataUrl) return 'none';
+    return (await readDxfMeta(pdfDataUrl)) ? 'dxf' : 'pdf';
+  };
+
+  /** (순수) [{floorCode, kind}] → { dxf: [...], pdf: [...], none: [...] } — 층 순서 유지 */
+  function splitFloorsByDrawingKind(list) {
+    const out = { dxf: [], pdf: [], none: [] };
+    (list || []).forEach((it) => {
+      if (!it || it.floorCode == null || it.floorCode === '') return;
+      const k = it.kind === 'dxf' || it.kind === 'pdf' ? it.kind : 'none';
+      out[k].push(String(it.floorCode));
+    });
+    return out;
+  }
+
+  /** (순수) 전층 출력 모양: 'pdf' = PDF 한 파일 / 'dxf-zip' = 층마다 DXF zip / 'mixed-zip' = DXF 들 + PDF 한 파일을 zip 하나로 / 'nothing' */
+  function planAllFloorsDrawingExport(split) {
+    const hasDxf = !!(split && split.dxf && split.dxf.length);
+    const hasPdf = !!(split && split.pdf && split.pdf.length);
+    if (hasDxf && hasPdf) return 'mixed-zip';
+    if (hasDxf) return 'dxf-zip';
+    if (hasPdf) return 'pdf';
+    return 'nothing';
+  }
+
+  /** (순수) 현재 층: DXF 층이면 'dxf', 아니면 'pdf' */
+  function pickCurrentFloorExport(kind) {
+    return kind === 'dxf' ? 'dxf' : 'pdf';
+  }
+
+  window.BSA = window.BSA || {};
+  window.BSA.drawingExport = { splitFloorsByDrawingKind, planAllFloorsDrawingExport, pickCurrentFloorExport };
+
+  window.exportCurrentFloorDrawing = async function () {
+    const state = window.state;
+    if (!state || !state.currentBuildingId) {
+      toast('건물을 먼저 선택하세요.', 'warning');
+      return;
+    }
+    if (typeof window.showLoading === 'function') window.showLoading('도면 종류 확인 중...');
+    let kind = 'none';
+    try {
+      kind = await window.detectFloorDrawingKind(state.currentBuilding, state.currentFloor);
+    } finally {
+      if (typeof window.hideLoading === 'function') window.hideLoading();
+    }
+    return pickCurrentFloorExport(kind) === 'dxf'
+      ? window.exportCurrentFloorMarkingDxf()
+      : window.exportCurrentFloorVectorPdf();
+  };
+
+  window.exportAllFloorsDrawing = async function () {
+    const state = window.state;
+    if (!state || !state.currentBuildingId) {
+      toast('건물을 먼저 선택하세요.', 'warning');
+      return;
+    }
+    const bldg = state.currentBuilding;
+    const id = state.currentBuildingId;
+    const floorCodes = typeof window.listFloorsForVectorPdfExport === 'function'
+      ? window.listFloorsForVectorPdfExport(bldg)
+      : [];
+    if (!floorCodes.length) {
+      toast('내보낼 층이 없습니다.', 'warning');
+      return;
+    }
+    const stamp = Date.now();
+    const bldgName = safeName((bldg && (bldg.name || bldg.buildingName)) || id || 'building');
+    const show = (msg) => { if (typeof window.showLoading === 'function') window.showLoading(msg); };
+    show(`도면 종류 확인 중 (0/${floorCodes.length})...`);
+    try {
+      const kinds = [];
+      for (let i = 0; i < floorCodes.length; i++) {
+        show(`도면 종류 확인 (${i + 1}/${floorCodes.length}) ${floorCodes[i]}...`);
+        kinds.push({ floorCode: floorCodes[i], kind: await window.detectFloorDrawingKind(bldg, floorCodes[i]) });
+      }
+      const split = splitFloorsByDrawingKind(kinds);
+      const plan = planAllFloorsDrawingExport(split);
+      if (plan === 'nothing') {
+        toast('PDF·DXF 도면 원본이 있는 층이 없어 내보내지 못했습니다. 동기화·로그인 상태를 확인하세요.', 'warning', 6000);
+        return;
+      }
+      if (split.pdf.length && typeof PDFLib === 'undefined') {
+        toast('pdf-lib가 로드되지 않았습니다. Ctrl+F5로 새로고침 후 다시 시도하세요.', 'error', 6000);
+        return;
+      }
+      if (plan === 'pdf') {
+        const res = await window.buildMergedFloorsVectorPdfBlob(bldg, split.pdf, id, '전층 벡터 PDF');
+        if (!res.blob) {
+          toast('PDF 원본이 있는 층이 없어 전층 벡터 PDF를 만들지 못했습니다.', 'warning', 6000);
+          return;
+        }
+        window.downloadBlobFile(res.blob, `결함위치도_벡터_전층_${bldgName}_${stamp}.pdf`);
+        const skip = res.skipped.length + split.none.length;
+        toast(`전층 벡터 PDF 완료 — ${res.ok}층 묶음${skip ? ` (제외 ${skip}층: PDF 없음 등)` : ''}`, 'success', 6000);
+        return;
+      }
+      if (typeof JSZip === 'undefined') {
+        toast('zip 도구가 없어 현재 층만 내보냅니다.', 'warning');
+        return window.exportCurrentFloorDrawing();
+      }
+      const zip = new JSZip();
+      const used = new Set();
+      const dxfRes = await addFloorsMarkingDxfToZip(zip, bldg, split.dxf, id, '마킹 DXF', used);
+      let pdfOk = 0;
+      let pdfSkipped = [];
+      if (split.pdf.length) {
+        const res = await window.buildMergedFloorsVectorPdfBlob(bldg, split.pdf, id, '벡터 PDF');
+        pdfOk = res.ok;
+        pdfSkipped = res.skipped;
+        if (res.blob) zip.file(`결함위치도_벡터_PDF층_${bldgName}.pdf`, res.blob);
+      }
+      if (!dxfRes.ok && !pdfOk) {
+        toast('마킹이 있는 층이 없어 내보내지 못했습니다.', 'warning', 6000);
+        return;
+      }
+      show('zip 묶는 중...');
+      const blob = await zip.generateAsync({ type: 'blob' });
+      window.downloadBlobFile(blob, `결함위치도_전층_${bldgName}_${stamp}.zip`);
+      const parts = [];
+      if (dxfRes.ok) parts.push(`DXF ${dxfRes.ok}층`);
+      if (pdfOk) parts.push(`벡터 PDF ${pdfOk}층(한 파일)`);
+      const skip = dxfRes.skipped.length + pdfSkipped.length + split.none.length;
+      toast(`전층 출력 완료 — ${parts.join(' + ')} zip 묶음${skip ? ` (제외 ${skip}층: 마킹·도면 없음 등)` : ''}`, 'success', 7000);
+    } catch (err) {
+      console.error(err);
+      toast(`전층 출력 실패: ${err.message || err}`, 'error', 6000);
+    } finally {
+      if (typeof window.hideLoading === 'function') window.hideLoading();
+    }
+  };
+
+  /** 「DXF·PDF 출력」 버튼: 현재 층 / 각 층 전부 */
+  window.exportFloorDrawingWithScopeChoice = async function () {
+    const state = window.state;
+    if (!state || !state.currentBuildingId) {
+      toast('건물을 먼저 선택하세요.', 'warning');
+      return;
+    }
+    const floors = typeof window.listFloorsForVectorPdfExport === 'function'
+      ? window.listFloorsForVectorPdfExport(state.currentBuilding)
+      : [];
+    if (floors.length <= 1) return window.exportCurrentFloorDrawing();
+    if (typeof window.appChoose === 'function') {
+      const k = await window.appChoose('DXF로 올린 층은 마킹 DXF, PDF로 올린 층은 벡터 PDF로 내보냅니다. 범위를 고르세요.', [
+        { label: '현재 층만', detail: state.currentFloor ? floorFileName(state.currentBuilding, state.currentFloor) : '-' },
+        { label: '각 층 전부', detail: floors.length + '층 (PDF 층은 한 PDF로, DXF 층은 층마다 DXF — 섞이면 zip 하나)' }
+      ], { title: 'DXF·PDF 출력', okText: '내보내기', defaultIndex: 1 });
+      if (k === null || k === undefined) return;
+      return k === 1 ? window.exportAllFloorsDrawing() : window.exportCurrentFloorDrawing();
+    }
+    const choice = window.prompt(
+      'DXF·PDF 출력 범위 선택\n\n1 = 현재 층만 (' + (state.currentFloor || '-') + ')\n2 = 각 층 전부 (' + floors.length + '층)\n\n숫자 입력 후 확인',
+      '2'
+    );
+    if (choice === null) return;
+    const v = String(choice).trim();
+    if (v === '2' || v === '전층' || v.toLowerCase() === 'all') return window.exportAllFloorsDrawing();
+    return window.exportCurrentFloorDrawing();
   };
 })();

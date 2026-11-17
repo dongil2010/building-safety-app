@@ -1089,6 +1089,39 @@
     }
   };
 
+  /**
+   * 여러 층 벡터 PDF를 한 PDF로 이어 붙인다(다운로드는 호출측). 층 순서 = floorCodes 순서.
+   * 2026-11-17 「DXF·PDF 출력」이 PDF 층만 골라 쓰려고 떼어 냄.
+   * @returns {Promise<{blob: Blob|null, ok: number, skipped: string[]}>}
+   */
+  window.buildMergedFloorsVectorPdfBlob = async function (bldg, floorCodes, buildingId, loadingLabel) {
+    const { PDFDocument } = PDFLib;
+    const merged = await PDFDocument.create();
+    const label = loadingLabel || '전층 벡터 PDF';
+    let ok = 0;
+    const skipped = [];
+    for (let i = 0; i < floorCodes.length; i++) {
+      const floorCode = floorCodes[i];
+      if (typeof window.showLoading === 'function') {
+        window.showLoading(`${label} (${i + 1}/${floorCodes.length}) ${floorCode}...`);
+      }
+      try {
+        const blob = await window.buildFloorDefectVectorPdfBlob(bldg, floorCode, buildingId);
+        const bytes = new Uint8Array(await blob.arrayBuffer());
+        const src = await PDFDocument.load(bytes);
+        const pages = await merged.copyPages(src, src.getPageIndices());
+        pages.forEach((p) => merged.addPage(p));
+        ok += 1;
+      } catch (e) {
+        console.warn('[buildMergedFloorsVectorPdfBlob] skip', floorCode, e);
+        skipped.push(floorCode);
+      }
+    }
+    if (!ok) return { blob: null, ok, skipped };
+    const pdfBytes = await merged.save();
+    return { blob: new Blob([pdfBytes], { type: 'application/pdf' }), ok, skipped };
+  };
+
   /** 각 층 벡터 PDF를 한 파일로 이어 붙임 (층 순서 = 점검층 목록) */
   window.exportAllFloorsVectorPdf = async function () {
     const state = window.state;
@@ -1107,40 +1140,20 @@
       return;
     }
 
-    const { PDFDocument } = PDFLib;
-    const merged = await PDFDocument.create();
-    let ok = 0;
-    const skipped = [];
-
     if (typeof window.showLoading === 'function') {
       window.showLoading(`전층 벡터 PDF 준비 중 (0/${floorCodes.length})...`);
     }
     try {
-      for (let i = 0; i < floorCodes.length; i++) {
-        const floorCode = floorCodes[i];
-        if (typeof window.showLoading === 'function') {
-          window.showLoading(`전층 벡터 PDF (${i + 1}/${floorCodes.length}) ${floorCode}...`);
-        }
-        try {
-          const blob = await window.buildFloorDefectVectorPdfBlob(bldg, floorCode, state.currentBuildingId);
-          const bytes = new Uint8Array(await blob.arrayBuffer());
-          const src = await PDFDocument.load(bytes);
-          const pages = await merged.copyPages(src, src.getPageIndices());
-          pages.forEach((p) => merged.addPage(p));
-          ok += 1;
-        } catch (e) {
-          console.warn('[exportAllFloorsVectorPdf] skip', floorCode, e);
-          skipped.push(floorCode);
-        }
-      }
+      const res = await window.buildMergedFloorsVectorPdfBlob(bldg, floorCodes, state.currentBuildingId);
+      const ok = res.ok;
+      const skipped = res.skipped;
       if (!ok) {
         if (typeof window.showToast === 'function') {
           window.showToast('PDF 원본이 있는 층이 없어 전층 벡터 PDF를 만들지 못했습니다.', 'warning', 6000);
         }
         return;
       }
-      const pdfBytes = await merged.save();
-      const outBlob = new Blob([pdfBytes], { type: 'application/pdf' });
+      const outBlob = res.blob;
       const bldgName = String((bldg && (bldg.name || bldg.buildingName)) || state.currentBuildingId || 'building')
         .replace(/[\\/:*?"<>|]/g, '_');
       window.downloadBlobFile(outBlob, `결함위치도_벡터_전층_${bldgName}_${Date.now()}.pdf`);

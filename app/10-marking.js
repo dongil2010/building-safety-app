@@ -3166,6 +3166,237 @@
         afterGridBulkChange(`전체 ${floorsDone}개 층 마킹 ${done}개의 상세 위치를 모두 지웠습니다.${plan.skippedUnplaced ? ` (도면에 안 놓인 ${plan.skippedUnplaced}개 제외)` : ''}`);
     }
 
+    // ---- 2026-11-17 「상세위치 입력」 팝업 ----
+    // 결함위치도 상단 툴바 버튼으로 연다. 글자를 쓰고 마킹을 고르면(순서 상관없음) 「적용」 → 고른 마킹들의 상세 위치에 그 글자.
+    // 3종은 층 이름을 앞에 붙인다(composeDefectLocation — 일괄 수정 창과 같은 규칙). 행·열 위치 칸(gridLoc)은 그대로.
+    // 팝업은 머리 줄을 끌어 옮길 수 있고, 자리는 이 기기에 기억한다(localStorage).
+    const DETAIL_LOC_POPUP_POS_KEY = 'bsa_detail_loc_popup_pos';
+
+    /** (순수) 고른 마킹 중 상세 위치가 실제로 바뀌는 것만 [{ d, next }] — compose(글자) = 저장할 위치 글자 */
+    function planDetailLocationApply(defects, selectedIds, text, compose) {
+        const detail = String(text || '').trim();
+        if (!detail || !selectedIds || !selectedIds.size) return [];
+        const next = String(compose(detail) || '');
+        const out = [];
+        (defects || []).forEach((d) => {
+            if (!d || !d.id || !selectedIds.has(d.id)) return;
+            if (String(d.location || '') === next) return;
+            out.push({ d, next });
+        });
+        return out;
+    }
+    window.planDetailLocationApply = planDetailLocationApply;
+
+    function getDetailLocationSelection() {
+        const sel = (typeof window.getSelectedDefectIds === 'function') ? window.getSelectedDefectIds() : null;
+        const list = (getCurrentFloorDefects() || []).filter((d) => d && d.id && sel && sel.has(d.id));
+        return { sel, list };
+    }
+
+    /** 적용: 바뀐 마킹 수(0 = 안 바뀜) */
+    function applyDetailLocationToSelection(text) {
+        const detail = String(text || '').trim();
+        if (!detail) {
+            window.showToast?.('상세위치에 넣을 글자를 먼저 쓰세요.', 'info', 2200);
+            return 0;
+        }
+        const { sel, list } = getDetailLocationSelection();
+        if (!list.length) {
+            window.showToast?.('상세위치를 넣을 마킹을 도면에서 고르세요. (클릭·드래그로 선택)', 'info', 2600);
+            return 0;
+        }
+        const fc = state.currentFloor;
+        const plan = planDetailLocationApply(list, sel, detail, (t) => composeDefectLocation(t, fc));
+        if (!plan.length) {
+            window.showToast?.(`고른 마킹 ${list.length}개는 이미 「${detail}」입니다.`, 'info', 2200);
+            return 0;
+        }
+        if (typeof pushDefectHistory === 'function') pushDefectHistory();
+        plan.forEach(({ d, next }) => {
+            // 예전 실험 데이터(gridLocAuto)는 먼저 gridLoc으로 옮겨 행·열 위치를 잃지 않게(지우기 버튼들과 같은 규칙)
+            if (d.gridLocAuto) migrateLegacyGridLocation(d, fc);
+            d.location = next;
+            touchDefectUpdatedAt(d);
+        });
+        afterGridBulkChange(`마킹 ${plan.length}개의 상세위치를 「${detail}」(으)로 넣었습니다.`);
+        return plan.length;
+    }
+    window.applyDetailLocationToSelection = applyDetailLocationToSelection;
+
+    function detailLocPopupEl() {
+        return document.getElementById('detailLocPopup');
+    }
+
+    function isDetailLocPopupOpen() {
+        const el = detailLocPopupEl();
+        return !!(el && !el.hidden);
+    }
+    window.isDetailLocPopupOpen = isDetailLocPopupOpen;
+
+    /** 팝업 안 「선택 N개」 글자 — 선택이 바뀔 때마다(updateMapSelectionBar) 부른다 */
+    function syncDetailLocPopupCount() {
+        const el = detailLocPopupEl();
+        if (!el || el.hidden) return;
+        const countEl = el.querySelector('[data-role="count"]');
+        const applyBtn = el.querySelector('[data-role="apply"]');
+        const { list } = getDetailLocationSelection();
+        if (countEl) {
+            countEl.textContent = list.length ? `선택된 마킹 ${list.length}개` : '마킹을 고르세요 (클릭·드래그)';
+            countEl.classList.toggle('is-empty', !list.length);
+        }
+        if (applyBtn) applyBtn.textContent = list.length ? `적용 (${list.length})` : '적용';
+    }
+    window.syncDetailLocPopupCount = syncDetailLocPopupCount;
+
+    /** 도면 칸 안으로 자리 맞춤(창 크기가 바뀌어도 밖으로 안 나가게) */
+    function clampDetailLocPopup(el, left, top) {
+        const host = el.offsetParent || el.parentElement;
+        const hw = host ? host.clientWidth : window.innerWidth;
+        const hh = host ? host.clientHeight : window.innerHeight;
+        const maxL = Math.max(4, hw - el.offsetWidth - 4);
+        const maxT = Math.max(4, hh - el.offsetHeight - 4);
+        return { left: Math.min(Math.max(4, left), maxL), top: Math.min(Math.max(4, top), maxT) };
+    }
+
+    function placeDetailLocPopup(el) {
+        let pos = null;
+        try {
+            const raw = localStorage.getItem(DETAIL_LOC_POPUP_POS_KEY);
+            if (raw) pos = JSON.parse(raw);
+        } catch (_e) { pos = null; }
+        let left;
+        let top;
+        if (pos && isFinite(Number(pos.left)) && isFinite(Number(pos.top))) {
+            left = Number(pos.left);
+            top = Number(pos.top);
+        } else {
+            // 처음: 도면 오른쪽 위, 상단 툴바 바로 아래
+            const host = el.offsetParent || el.parentElement;
+            const bar = host && host.querySelector('.canvas-top-toolbar');
+            top = bar && bar.offsetHeight ? bar.offsetTop + bar.offsetHeight + 8 : 56;
+            left = (host ? host.clientWidth : window.innerWidth) - el.offsetWidth - 12;
+        }
+        const c = clampDetailLocPopup(el, left, top);
+        el.style.left = `${c.left}px`;
+        el.style.top = `${c.top}px`;
+    }
+
+    function syncDetailLocToolbarBtn() {
+        const btn = document.getElementById('btnDetailLocPopup');
+        if (!btn) return;
+        const open = isDetailLocPopupOpen();
+        btn.classList.toggle('active', open);
+        btn.setAttribute('aria-pressed', open ? 'true' : 'false');
+    }
+
+    function ensureDetailLocPopup() {
+        let el = detailLocPopupEl();
+        if (el) return el;
+        const host = document.getElementById('canvasContainer');
+        if (!host) return null;
+        el = document.createElement('div');
+        el.id = 'detailLocPopup';
+        el.className = 'detail-loc-popup';
+        el.hidden = true;
+        el.setAttribute('role', 'dialog');
+        el.setAttribute('aria-label', '상세위치 입력');
+        el.innerHTML = `
+            <div class="detail-loc-popup-head" data-role="drag" title="끌어서 옮기기">
+                <span class="detail-loc-popup-title">상세위치 입력</span>
+                <button type="button" class="detail-loc-popup-close" data-role="close" title="닫기 (Esc)" aria-label="닫기">X</button>
+            </div>
+            <div class="detail-loc-popup-body">
+                <div class="detail-loc-popup-row">
+                    <input type="text" class="detail-loc-popup-input" data-role="input" autocomplete="off" spellcheck="false"
+                        placeholder="예: 101호 거실" aria-label="상세위치 글자">
+                    <button type="button" class="detail-loc-popup-apply" data-role="apply" title="고른 마킹들의 상세위치에 넣기 (Enter)">적용</button>
+                </div>
+                <div class="detail-loc-popup-count" data-role="count"></div>
+            </div>`;
+        host.appendChild(el);
+
+        const input = el.querySelector('[data-role="input"]');
+        const doApply = () => {
+            const n = applyDetailLocationToSelection(input.value);
+            syncDetailLocPopupCount();
+            if (!n && !String(input.value || '').trim()) input.focus();
+        };
+        el.querySelector('[data-role="apply"]').addEventListener('click', doApply);
+        el.querySelector('[data-role="close"]').addEventListener('click', () => closeDetailLocPopup());
+        // 글자 칸에서 누른 키가 도면 단축키(D·A·Delete·Ctrl+Z 등)로 새지 않게
+        input.addEventListener('keydown', (e) => {
+            e.stopPropagation();
+            if (e.key === 'Enter' && !e.isComposing) { e.preventDefault(); doApply(); }
+            else if (e.key === 'Escape') { e.preventDefault(); closeDetailLocPopup(); }
+        });
+        // 팝업 위 누름·휠이 도면 선택·이동·확대로 새지 않게
+        ['pointerdown', 'mousedown', 'touchstart', 'wheel', 'dblclick', 'contextmenu'].forEach((type) => {
+            el.addEventListener(type, (e) => e.stopPropagation(), { passive: true });
+        });
+
+        // 머리 줄 끌어 옮기기(마우스·터치·펜 공용)
+        const head = el.querySelector('[data-role="drag"]');
+        let drag = null;
+        head.addEventListener('pointerdown', (e) => {
+            if (e.button !== 0 || (e.target && e.target.closest('[data-role="close"]'))) return;
+            drag = { id: e.pointerId, dx: e.clientX - el.offsetLeft, dy: e.clientY - el.offsetTop };
+            try { head.setPointerCapture(e.pointerId); } catch (_e) { /* ignore */ }
+            el.classList.add('is-dragging');
+            e.preventDefault();
+        });
+        head.addEventListener('pointermove', (e) => {
+            if (!drag || e.pointerId !== drag.id) return;
+            const c = clampDetailLocPopup(el, e.clientX - drag.dx, e.clientY - drag.dy);
+            el.style.left = `${c.left}px`;
+            el.style.top = `${c.top}px`;
+        });
+        const endDrag = (e) => {
+            if (!drag || (e && e.pointerId !== drag.id)) return;
+            drag = null;
+            el.classList.remove('is-dragging');
+            try {
+                localStorage.setItem(DETAIL_LOC_POPUP_POS_KEY, JSON.stringify({ left: el.offsetLeft, top: el.offsetTop }));
+            } catch (_e) { /* 기억 못 해도 동작은 그대로 */ }
+        };
+        head.addEventListener('pointerup', endDrag);
+        head.addEventListener('pointercancel', endDrag);
+        window.addEventListener('resize', () => {
+            if (el.hidden) return;
+            const c = clampDetailLocPopup(el, el.offsetLeft, el.offsetTop);
+            el.style.left = `${c.left}px`;
+            el.style.top = `${c.top}px`;
+        });
+        return el;
+    }
+
+    function openDetailLocPopup() {
+        const el = ensureDetailLocPopup();
+        if (!el) return;
+        el.hidden = false;
+        placeDetailLocPopup(el);
+        syncDetailLocPopupCount();
+        syncDetailLocToolbarBtn();
+        const input = el.querySelector('[data-role="input"]');
+        if (input) { input.focus(); input.select(); }
+    }
+
+    function closeDetailLocPopup() {
+        const el = detailLocPopupEl();
+        if (el) el.hidden = true;
+        syncDetailLocToolbarBtn();
+    }
+    window.openDetailLocPopup = openDetailLocPopup;
+    window.closeDetailLocPopup = closeDetailLocPopup;
+
+    const btnDetailLocPopup = document.getElementById('btnDetailLocPopup');
+    if (btnDetailLocPopup && !btnDetailLocPopup.dataset.detailLocBound) {
+        btnDetailLocPopup.dataset.detailLocBound = '1';
+        btnDetailLocPopup.addEventListener('click', () => {
+            if (isDetailLocPopupOpen()) closeDetailLocPopup();
+            else openDetailLocPopup();
+        });
+    }
+
     // ---- 구역(한 도면에 여러 층, 2026-09-28) ----
     // 사각형 구역마다 그룹(zoneId)을 따로 두어 번호가 구역마다 새로 시작한다. 계산은 grid-lines.js(restrictGridToZone).
     function gridHasContent(grid) {

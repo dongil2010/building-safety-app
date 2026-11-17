@@ -1068,6 +1068,8 @@
         // 조사항목 창 OFF: 좌상단 팝업으로 선택 결함 내용·폭 표시
         if (typeof updateMapSelectedDefectPopup === 'function') updateMapSelectedDefectPopup();
         if (typeof syncMobileAddMarkingFab === 'function') syncMobileAddMarkingFab();
+        // 2026-11-17 「상세위치 입력」 팝업의 「선택된 마킹 N개」
+        if (typeof window.syncDetailLocPopupCount === 'function') window.syncDetailLocPopupCount();
     }
 
     /** 선택 상태 → 「통합」(마킹 2개 이상) · 「통합 해제」(통합된 번호칸 하나) */

@@ -130,8 +130,9 @@ const near = (a, b, eps, msg) => assert(Math.abs(a - b) <= (eps || 1e-6), (msg |
         const tag = (f) => html.indexOf('<script src="' + f + '?v=');
         assert(tag('js/core/dxf-read.js') > 0 && tag('js/core/dxf-to-pdf.js') > tag('js/core/dxf-read.js'));
         assert(tag('js/core/dxf-write.js') > tag('js/pdf-vector-snap.js') && tag('js/dxf-marking-export.js') > tag('js/core/dxf-write.js'));
-        assert(/id="btnExportMarkingDxf"[^>]*class="btn-rotate-hero pc-only-chrome"/.test(html));
-        assert(/getElementById\('btnExportMarkingDxf'\)[\s\S]{0,400}exportMarkingDxfWithScopeChoice[\s\S]{0,300}exportCurrentFloorMarkingDxf/.test(html));
+        // 2026-11-17 마킹 DXF·벡터 PDF → 「DXF·PDF 출력」 버튼 하나(test-drawing-export-merge.js)
+        assert(/id="btnExportFloorDrawing"[^>]*class="btn-rotate-hero pc-only-chrome"/.test(html));
+        assert(/getElementById\('btnExportFloorDrawing'\)[\s\S]{0,400}exportFloorDrawingWithScopeChoice/.test(html));
         const app = fs.readFileSync(path.join(root, 'app', '02-buildings.js'), 'utf8');
         assert(/picker\.accept = 'image\/\*,application\/pdf,\.pdf,\.dxf'/.test(app), '층 1:1 교체도 .dxf');
         assert((app.match(/err && err\.bsaUserMessage/g) || []).length >= 2, '변환 실패 안내를 사용자에게');
