@@ -4874,9 +4874,25 @@ html:not(.layout-desktop) .survey-inline-select {
     color: #b45309;
 }
 
-.defect-form-compact.is-bulk-edit .defect-photo-block,
 .defect-form-compact.is-bulk-edit .defect-arrow-block {
     display: none !important;
+}
+
+/* 2026-11-17 일괄 수정: 상세 위치 입력칸이 사진 칸(전차 사진 밑) 안에 있어서 사진 칸을 통째로 숨기면
+   상세 위치도 같이 사라졌다(저장 코드는 있는데 고칠 칸이 안 보임). 사진 칸은 두고 사진만 숨긴다. */
+.defect-form-compact.is-bulk-edit .defect-photo-block > :not(.defect-photo-pair),
+.defect-form-compact.is-bulk-edit .defect-photo-slot-curr,
+.defect-form-compact.is-bulk-edit .defect-photo-slot-prev .defect-photo-slot-label,
+.defect-form-compact.is-bulk-edit .defect-photo-slot-prev .defect-photo-frame,
+.defect-form-compact.is-bulk-edit .defect-photo-slot-prev .defect-photo-extra-row {
+    display: none !important;
+}
+.defect-form-compact.is-bulk-edit .defect-photo-pair {
+    display: block !important;
+}
+.defect-form-compact.is-bulk-edit .defect-photo-slot-prev {
+    width: 100%;
+    max-width: 100%;
 }
 
 .map-toolbar-bulk-edit:not([hidden]) {

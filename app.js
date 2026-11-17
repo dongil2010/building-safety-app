@@ -36435,7 +36435,7 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
         }
     }
 
-// @@app-part 09-settings-input-camera.js sha=68cb067769a8 — 원본은 app/09-settings-input-camera.js (여기 말고 거기서 고칠 것)
+// @@app-part 09-settings-input-camera.js sha=939f1f3edaa7 — 원본은 app/09-settings-input-camera.js (여기 말고 거기서 고칠 것)
     // --- 카테고리별 핀/박스 색상 설정 모달 ---
     // 결함 색상은 getDefectColor()가 쓰는 등급·상태 키와 맞춰야 도면에 바로 반영됨
     const STYLE_COLOR_FIELDS = [
@@ -41774,14 +41774,16 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
         zone.dataset.photoDropBound = '1';
         let depth = 0;
         const setHot = (on) => zone.classList.toggle('defect-photo-drop-hot', !!on);
+        // 일괄 수정 창에서는 사진 칸에 상세 위치만 보인다 — 사진 끌어다 놓기는 받지 않는다
+        const bulkBlocked = () => typeof isDefectBulkEditMode === 'function' && isDefectBulkEditMode();
         zone.addEventListener('dragenter', (e) => {
-            if (!api.looksLikeImageDrag(e.dataTransfer)) return;
+            if (bulkBlocked() || !api.looksLikeImageDrag(e.dataTransfer)) return;
             e.preventDefault();
             depth++;
             setHot(true);
         });
         zone.addEventListener('dragover', (e) => {
-            if (!api.looksLikeImageDrag(e.dataTransfer)) return;
+            if (bulkBlocked() || !api.looksLikeImageDrag(e.dataTransfer)) return;
             e.preventDefault();
             try { e.dataTransfer.dropEffect = 'copy'; } catch (_e) { /* ignore */ }
             setHot(true);
@@ -41791,7 +41793,7 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
             if (!depth) setHot(false);
         });
         zone.addEventListener('drop', async (e) => {
-            if (!api.looksLikeImageDrag(e.dataTransfer)) return;
+            if (bulkBlocked() || !api.looksLikeImageDrag(e.dataTransfer)) return;
             e.preventDefault();
             e.stopPropagation();
             depth = 0;

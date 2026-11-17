@@ -5337,14 +5337,16 @@
         zone.dataset.photoDropBound = '1';
         let depth = 0;
         const setHot = (on) => zone.classList.toggle('defect-photo-drop-hot', !!on);
+        // 일괄 수정 창에서는 사진 칸에 상세 위치만 보인다 — 사진 끌어다 놓기는 받지 않는다
+        const bulkBlocked = () => typeof isDefectBulkEditMode === 'function' && isDefectBulkEditMode();
         zone.addEventListener('dragenter', (e) => {
-            if (!api.looksLikeImageDrag(e.dataTransfer)) return;
+            if (bulkBlocked() || !api.looksLikeImageDrag(e.dataTransfer)) return;
             e.preventDefault();
             depth++;
             setHot(true);
         });
         zone.addEventListener('dragover', (e) => {
-            if (!api.looksLikeImageDrag(e.dataTransfer)) return;
+            if (bulkBlocked() || !api.looksLikeImageDrag(e.dataTransfer)) return;
             e.preventDefault();
             try { e.dataTransfer.dropEffect = 'copy'; } catch (_e) { /* ignore */ }
             setHot(true);
@@ -5354,7 +5356,7 @@
             if (!depth) setHot(false);
         });
         zone.addEventListener('drop', async (e) => {
-            if (!api.looksLikeImageDrag(e.dataTransfer)) return;
+            if (bulkBlocked() || !api.looksLikeImageDrag(e.dataTransfer)) return;
             e.preventDefault();
             e.stopPropagation();
             depth = 0;
