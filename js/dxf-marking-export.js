@@ -192,7 +192,7 @@
         toast('이 층에는 내보낼 마킹이 없습니다.', 'warning', 5000);
         return;
       }
-      window.downloadBlobFile(makeDxfBlob(info.text), `결함위치도_마킹_${safeName(floorCode || 'floor')}_${Date.now()}.dxf`);
+      window.downloadBlobFile(makeDxfBlob(info.text), `${safeName(floorCode || 'floor')}.dxf`);
       toast(`마킹 DXF 내보내기 완료 (좌표: ${systemLabel(info.system)}${info.withDrawing ? ', 원본 도면 포함' : ', 마킹만 — 캐드에서 원본 도면에 겹쳐 쓰세요'})`, 'success', 6000);
     } catch (err) {
       console.error(err);
@@ -230,7 +230,7 @@
         try {
           const info = await window.buildFloorMarkingDxfInfo(bldg, floorCode, state.currentBuildingId);
           if (!info.count) { skipped.push(floorCode); continue; }
-          zip.file(`결함위치도_마킹_${safeName(floorCode)}.dxf`, info.text);
+          zip.file(`${safeName(floorCode)}.dxf`, info.text);
           systems.add(info.system);
           ok += 1;
         } catch (e) {
