@@ -833,7 +833,7 @@
     // 1.0 = 손가락 아래를 그대로 위로 옮겨 보여줌 (실제 도면/화면은 확대하지 않음)
     const TOUCH_LOUPE_ZOOM = 1.0;
     let mobileMarqueeSelectEnabled = false; // 우측 레일 '선택' — 빈 곳 드래그로 마퀴 선택
-    let mobileAddSelectEnabled = false; // 우측 레일 '추가' — 터치마다 선택 토글
+    let mobileSelectAddMode = ''; // 우측 레일 「추가」(2026-11-17): '' 끔 / 'add' 더하기 / 'remove' 빼기
     let isDraggingPin = false;
     let isDraggingPinGroup = false;
     /** 마킹 핀 드래그 중(터치·마우스) — 목록 center 스크롤/선택 팬이 뷰를 흔들지 않게 */
@@ -1012,9 +1012,9 @@
     let activeVertexIndex = -1;
 
     // 선택 모드: 좌클릭 드래그로 마퀴 선택 (휠클릭은 도면 이동)
-    // Ctrl/Meta + 마퀴 = 기존 선택에 추가(여러 번 가능)
+    // 2026-11-17 CAD식: 그냥 = 새로 고름 / Ctrl(⌘) = 더함 / Shift = 뺌 (resolveCadSelectMode)
     let isMarqueeSelecting = false;
-    let marqueeAdditive = false;
+    let marqueeMode = 'replace';
     let marqueeStartImgX = 0;
     let marqueeStartImgY = 0;
     let marqueeCurImgX = 0;
@@ -1861,7 +1861,8 @@
 
     function handleDragStart(clientX, clientY, isTouch = false, forcePan = false, mods = {}) {
         if (!elements.planCanvas) return;
-        const additive = !!(mods.ctrlKey || mods.metaKey);
+        // 2026-11-17 CAD식 선택: 'replace' 그냥 / 'add' Ctrl(⌘)·「추가」 더하기 / 'remove' Shift·「추가」 빼기
+        const selMode = resolveCadSelectMode(mods, mobileSelectAddMode);
         activePointerIsTouch = !!isTouch;
         emptyTapPending = null;
         clearPendingDragLongPress();
@@ -1916,6 +1917,15 @@
         initialOffsetX = state.view.offsetX;
         initialOffsetY = state.view.offsetY;
 
+        // 2026-11-17 CAD식: 마우스로 Ctrl·Shift를 누른 채 누르면 마킹 위든 빈 곳이든 고르기 네모(더함·뺌).
+        // 끌지 않고 떼면 누른 자리의 마킹 하나만 더하거나 뺀다(handleDragEnd). 마킹 끌어 옮기기는 수정키 없이.
+        if (!isTouch && selMode !== 'replace' && state.mode === 'PAN' && !state.areaInkTool
+            && !isAreaPolygonRedrawActive() && !(pendingAreaPoly && pendingAreaPoly.length)) {
+            if (isDefectModalOpen() && !isDefectMarkingGroupPending()) closeDefectModal();
+            beginMapMarquee(imgX, imgY, selMode);
+            return;
+        }
+
         // Check if existing pin box, arrowhead tip, or area handle was clicked.
         // 터치: 즉시 선택만 하고, 약 0.3초 길게 누른 뒤에야 드래그 시작.
         const hitInfoRaw = findHitPinPart(imgX, imgY);
@@ -1929,7 +1939,7 @@
         let groupSelectedMember = null;
         let groupCycledInOpenModal = false;
         const groupCyclePrev = window._groupBoxCycle ? { ...window._groupBoxCycle } : window._groupBoxCycle;
-        if (hitInfo && hitInfo.defect && hitInfo.defect.groupId && !additive && !(isTouch && mobileAddSelectEnabled)) {
+        if (hitInfo && hitInfo.defect && hitInfo.defect.groupId && selMode === 'replace') {
             const gid0 = hitInfo.defect.groupId;
             groupSelectedMember = getCurrentFloorMapPlacedDefects().find((m) => m && m.groupId === gid0 && selectedDefectIds.has(m.id)) || null;
         }
@@ -1975,8 +1985,7 @@
             return;
         }
         if (hitInfo && !isAreaPolygonRedrawActive()) {
-            const useAdditive = additive || (isTouch && mobileAddSelectEnabled);
-            pendingDragHit = { hitInfo, imgX, imgY, additive: useAdditive };
+            pendingDragHit = { hitInfo, imgX, imgY, additive: selMode !== 'replace', selMode };
             pendingDragIsTouch = isTouch;
             pendingDragHitStartTime = Date.now();
             // 2026-10-16 PC·터치 공통: 선택 안 된 마킹은 누르면 선택만, 끌면 도면 이동.
@@ -2019,20 +2028,13 @@
         // 누를 때가 아니라 움직이지 않고 뗄 때(탭)만 닫기·해제. 끌어서 도면 이동하면 선택·수정창 그대로.
         if (isTouch && state.mode !== 'MARK' && state.mode !== 'AREA') {
             const closeOnTap = isDefectModalOpen() && !isDefectMarkingGroupPending();
-            const clearOnTap = state.mode === 'PAN' && !additive && !mobileAddSelectEnabled && selectedDefectIds.size > 0;
+            const clearOnTap = state.mode === 'PAN' && selMode === 'replace' && selectedDefectIds.size > 0;
             if (closeOnTap || clearOnTap) emptyTapPending = { closeModal: closeOnTap, clearSel: clearOnTap, moved: false };
         } else if (isDefectModalOpen() && !isDefectMarkingGroupPending()) {
             closeDefectModal();
         }
-        if (!isTouch && state.mode === 'PAN' && !additive && !mobileAddSelectEnabled && selectedDefectIds.size > 0) {
-            selectedDefectIds.clear();
-            updateMapSelectionBar();
-            drawCanvas();
-            if (!isTouch) {
-                // 마우스: 빈곳 클릭은 선택 해제만 (마퀴는 드래그로)
-                return;
-            }
-        }
+        // 2026-11-17 마우스 빈 곳: 예전엔 선택이 있으면 누르자마자 해제만 하고 네모를 안 그렸다.
+        // 이제 늘 고르기 네모 — 끌지 않고 떼면 해제(handleDragEnd), 끌면 네모 안 마킹으로 새로 고름.
 
         if (state.mode === 'MARK' && !getMarkPolyShape()) {
             isMarkingDrag = true;
@@ -2073,30 +2075,28 @@
             drawCanvas();
         } else if (isTouch) {
             if (mobileMarqueeSelectEnabled && state.mode === 'PAN') {
-                isMarqueeSelecting = true;
-                marqueeAdditive = additive || mobileAddSelectEnabled;
-                marqueeStartImgX = imgX;
-                marqueeStartImgY = imgY;
-                marqueeCurImgX = imgX;
-                marqueeCurImgY = imgY;
-                if (elements.planCanvas) elements.planCanvas.style.cursor = 'crosshair';
-                drawCanvas();
+                beginMapMarquee(imgX, imgY, selMode);
             } else {
                 // 터치(태블릿): 한 손가락으로 도면 이동
                 isDragging = true;
                 if (elements.planCanvas) elements.planCanvas.style.cursor = 'grabbing';
             }
         } else {
-            // 마우스 좌클릭: 빈 곳 드래그 = 마퀴 선택 (Ctrl = 추가 선택, 이동은 휠클릭)
-            isMarqueeSelecting = true;
-            marqueeAdditive = additive;
-            marqueeStartImgX = imgX;
-            marqueeStartImgY = imgY;
-            marqueeCurImgX = imgX;
-            marqueeCurImgY = imgY;
-            elements.planCanvas.style.cursor = 'crosshair';
-            drawCanvas();
+            // 마우스 좌클릭: 빈 곳 드래그 = 마퀴 선택 (Ctrl = 더함, Shift = 뺌, 이동은 휠클릭)
+            beginMapMarquee(imgX, imgY, selMode);
         }
+    }
+
+    /** 결함위치도 고르기 네모 시작(2026-11-17) — mode: 'replace' | 'add' | 'remove' */
+    function beginMapMarquee(imgX, imgY, mode) {
+        isMarqueeSelecting = true;
+        marqueeMode = mode || 'replace';
+        marqueeStartImgX = imgX;
+        marqueeStartImgY = imgY;
+        marqueeCurImgX = imgX;
+        marqueeCurImgY = imgY;
+        if (elements.planCanvas) elements.planCanvas.style.cursor = 'crosshair';
+        drawCanvas();
     }
 
     function handleDragMove(clientX, clientY) {
@@ -2498,13 +2498,13 @@
                 drawCanvas();
                 return;
             }
-            // 선택 확정
+            // 선택 확정 — 2026-11-17 더하기(Ctrl·「추가」)는 더하기만, 빼기(Shift·「추가」 빼기)는 빼기만
             if (wasAdditive) {
-                if (wasInSelection) selectedDefectIds.delete(d.id); else selectedDefectIds.add(d.id);
+                applyCadSelection(selectedDefectIds, [d.id], tapHit.selMode === 'remove' ? 'remove' : 'add');
             } else if (!wasInSelection || selectedDefectIds.size <= 1) {
                 selectedDefectIds = new Set([d.id]);
             }
-            // Ctrl 토글 클릭이면 내용 수정 모달 열지 않음
+            // 더하기·빼기 클릭이면 내용 수정 모달 열지 않음
             if (wasAdditive) {
                 pendingDragOpenedModal = false;
                 updateMapSelectionBar({ scrollToSelection: true });
@@ -2719,23 +2719,27 @@
             const y1 = Math.min(marqueeStartImgY, marqueeCurImgY);
             const x2 = Math.max(marqueeStartImgX, marqueeCurImgX);
             const y2 = Math.max(marqueeStartImgY, marqueeCurImgY);
-            const tiny = Math.hypot(x2 - x1, y2 - y1) < 6;
-            if (!marqueeAdditive) selectedDefectIds.clear();
-            if (!tiny) {
-                collectMarqueeHits(x1, y1, x2, y2).forEach(id => {
-                    if (marqueeAdditive) {
-                        if (selectedDefectIds.has(id)) selectedDefectIds.delete(id);
-                        else selectedDefectIds.add(id);
-                    } else {
-                        selectedDefectIds.add(id);
-                    }
-                });
+            const mqMode = marqueeMode || 'replace';
+            marqueeMode = 'replace';
+            const mqScreenMoved = (clientX == null || clientY == null)
+                ? 0 : Math.hypot(clientX - startMouseX, clientY - startMouseY);
+            // 더하기·빼기를 끌지 않고 뗐다 = 누른 자리의 마킹 하나만(Ctrl·Shift+클릭)
+            const mqPointPick = mqMode !== 'replace'
+                && mqScreenMoved <= (endedFromTouch ? TOUCH_DRAG_THRESHOLD : MOUSE_DRAG_THRESHOLD);
+            const tiny = mqPointPick || Math.hypot(x2 - x1, y2 - y1) < 6;
+            let mqIds = [];
+            if (mqPointPick) {
+                const pick = findHitPinPart(marqueeStartImgX, marqueeStartImgY);
+                if (pick && pick.defect && pick.defect.id) mqIds = [pick.defect.id];
+            } else if (!tiny) {
+                mqIds = collectMarqueeHits(x1, y1, x2, y2);
             }
-            marqueeAdditive = false;
+            // 새로 고름: 비우고 네모 안 것만(끌지 않은 클릭이면 해제) / 더함·뺌: 지금 선택에 더하거나 뺀다
+            applyCadSelection(selectedDefectIds, mqIds, mqMode);
             updateMapSelectionBar({ scrollToSelection: true });
             drawCanvas();
-            // PC: 드래그(마퀴)로 정확히 1개만 선택되면 클릭과 같이 결함 수정창 오픈
-            if (!endedFromTouch && !tiny && selectedDefectIds.size === 1) {
+            // PC: 드래그(마퀴)로 정확히 1개만 선택되면 클릭과 같이 결함 수정창 오픈 (더하기·빼기는 열지 않음)
+            if (!endedFromTouch && !tiny && mqMode === 'replace' && selectedDefectIds.size === 1) {
                 const onlyId = [...selectedDefectIds][0];
                 const d = getCurrentFloorDefects().find(def => def.id === onlyId);
                 if (d) openAddDefectModal(d.x, d.y, d.targetX, d.targetY, d, null, { revealMarkingAboveDrawer: true, fromCanvas: true });
@@ -3184,7 +3188,8 @@
             if (e.button === 0) {
                 handleDragStart(e.clientX, e.clientY, false, false, {
                     ctrlKey: e.ctrlKey,
-                    metaKey: e.metaKey
+                    metaKey: e.metaKey,
+                    shiftKey: e.shiftKey // 2026-11-17 Shift = 선택에서 뺌
                 });
             }
         });

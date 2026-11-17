@@ -938,7 +938,7 @@
             if (!chip) return;
             // 2026-10-20 고른 마킹 바로 근처면 메모가 가로채지 않고 마킹을 잡는다(PC 마우스)
             if (e.pointerType === 'mouse' && e.button === 0 && state.mode !== 'MEMO' && selectedMarkingClaimsClient(e.clientX, e.clientY)) {
-                handleDragStart(e.clientX, e.clientY, false, false, { ctrlKey: e.ctrlKey, metaKey: e.metaKey });
+                handleDragStart(e.clientX, e.clientY, false, false, { ctrlKey: e.ctrlKey, metaKey: e.metaKey, shiftKey: e.shiftKey });
                 return;
             }
             e.preventDefault();

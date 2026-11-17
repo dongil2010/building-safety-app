@@ -19273,3 +19273,27 @@ body.defect-modal-open .map-sel-photo-bar { display: none !important; }
     0%, 100% { box-shadow: 0 0 0 0 rgba(244, 63, 94, 0.0); }
     50% { box-shadow: 0 0 0 5px rgba(244, 63, 94, 0.55); }
 }
+
+/* 2026-11-17 레일 「추가」 단추: 더하기 = 초록, 빼기 = 빨강 (PC Ctrl·Shift 고르기 네모 색과 같음). #id#id — 태블릿 레일 active 규칙보다 우선 */
+button#mobileBtnAddSelect#mobileBtnAddSelect.is-select-add,
+button#mobileNdtBtnAddSelect#mobileNdtBtnAddSelect.is-select-add {
+    border-color: #16a34a !important;
+    background: #dcfce7 !important;
+    color: #15803d !important;
+    box-shadow: 0 0 0 2px rgba(22, 163, 74, 0.22) !important;
+}
+button#mobileBtnAddSelect#mobileBtnAddSelect.is-select-add i,
+button#mobileNdtBtnAddSelect#mobileNdtBtnAddSelect.is-select-add i {
+    color: #16a34a !important;
+}
+button#mobileBtnAddSelect#mobileBtnAddSelect.is-select-remove,
+button#mobileNdtBtnAddSelect#mobileNdtBtnAddSelect.is-select-remove {
+    border-color: #dc2626 !important;
+    background: #fee2e2 !important;
+    color: #b91c1c !important;
+    box-shadow: 0 0 0 2px rgba(220, 38, 38, 0.22) !important;
+}
+button#mobileBtnAddSelect#mobileBtnAddSelect.is-select-remove i,
+button#mobileNdtBtnAddSelect#mobileNdtBtnAddSelect.is-select-remove i {
+    color: #dc2626 !important;
+}

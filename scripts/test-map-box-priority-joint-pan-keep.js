@@ -76,7 +76,9 @@ assert.ok(emptyIdx > 0);
 const emptyPart = start.slice(emptyIdx, start.indexOf("if (state.mode === 'MARK') {", emptyIdx));
 assert.ok(emptyPart.includes('emptyTapPending = { closeModal: closeOnTap, clearSel: clearOnTap, moved: false }'), '터치는 뗄 때까지 미룸');
 assert.ok(emptyPart.includes("if (isTouch && state.mode !== 'MARK' && state.mode !== 'AREA')"), '마킹·영역 그리기 모드는 예전대로');
-assert.ok(emptyPart.includes("if (!isTouch && state.mode === 'PAN'"), '마우스 빈곳 클릭 해제는 예전대로');
+// 2026-11-17 CAD식: 마우스 빈 곳은 누르자마자 해제하지 않고 늘 고르기 네모(끌지 않고 떼면 해제 — test-cad-select-rules)
+assert.ok(!emptyPart.includes("if (!isTouch && state.mode === 'PAN'"), '마우스 빈곳: 누르는 순간 해제(네모 막음) 없음');
+assert.ok(emptyPart.includes('늘 고르기 네모'), '마우스 빈곳 = 고르기 네모');
 const move = fn('handleDragMove');
 assert.ok(move.includes('emptyTapPending.moved = true;'), '끌면 탭 아님');
 const end = fn('handleDragEnd');

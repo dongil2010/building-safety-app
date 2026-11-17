@@ -4139,6 +4139,26 @@
         btn.setAttribute('aria-pressed', on ? 'true' : 'false');
     }
 
+    /** 2026-11-17 레일 「추가」 단추 모양: 끔 = 「추가」 / 더하기 = 「더하기」(초록) / 빼기 = 「빼기」(빨강) */
+    function syncTouchSelectAddBtn(btn, mode) {
+        if (!btn) return;
+        syncMobileToggleBtn(btn, !!mode);
+        btn.classList.toggle('is-select-add', mode === 'add');
+        btn.classList.toggle('is-select-remove', mode === 'remove');
+        const label = btn.querySelector('span');
+        if (label) label.textContent = mode === 'remove' ? '빼기' : (mode === 'add' ? '더하기' : '추가');
+        const icon = btn.querySelector('i');
+        if (icon) {
+            icon.className = mode === 'remove' ? 'fa-solid fa-minus' : (mode === 'add' ? 'fa-solid fa-plus' : 'fa-solid fa-object-ungroup');
+        }
+    }
+
+    function touchSelectAddModeToast(mode) {
+        if (mode === 'add') return '더하기 — 누르는 마킹을 선택에 더합니다 (한 번 더 누르면 빼기)';
+        if (mode === 'remove') return '빼기 — 누르는 마킹을 선택에서 뺍니다 (한 번 더 누르면 끔)';
+        return '추가 선택 끔 — 누르면 그 마킹만 선택';
+    }
+
     const btnToggleMapStyleSize = document.getElementById('btnToggleMapStyleSize');
     if (btnToggleMapStyleSize && !btnToggleMapStyleSize.dataset.pcToggleBound) {
         btnToggleMapStyleSize.dataset.pcToggleBound = '1';
@@ -4230,13 +4250,9 @@
     const mobileBtnAddSelect = document.getElementById('mobileBtnAddSelect');
     if (mobileBtnAddSelect) {
         mobileBtnAddSelect.addEventListener('click', () => {
-            mobileAddSelectEnabled = !mobileAddSelectEnabled;
-            syncMobileToggleBtn(mobileBtnAddSelect, mobileAddSelectEnabled);
-            window.showToast(
-                mobileAddSelectEnabled ? '추가 선택 ON — 터치마다 선택 토글' : '추가 선택 OFF',
-                'info',
-                2200
-            );
+            mobileSelectAddMode = nextTouchSelectAddMode(mobileSelectAddMode);
+            syncTouchSelectAddBtn(mobileBtnAddSelect, mobileSelectAddMode);
+            window.showToast(touchSelectAddModeToast(mobileSelectAddMode), 'info', 2400);
         });
     }
 
@@ -4343,13 +4359,9 @@
     const mobileNdtBtnAddSelect = document.getElementById('mobileNdtBtnAddSelect');
     if (mobileNdtBtnAddSelect) {
         mobileNdtBtnAddSelect.addEventListener('click', () => {
-            ndtAddSelectEnabled = !ndtAddSelectEnabled;
-            syncMobileToggleBtn(mobileNdtBtnAddSelect, ndtAddSelectEnabled);
-            window.showToast(
-                ndtAddSelectEnabled ? '추가 선택 ON — 터치마다 선택 토글' : '추가 선택 OFF',
-                'info',
-                2200
-            );
+            ndtSelectAddMode = nextTouchSelectAddMode(ndtSelectAddMode);
+            syncTouchSelectAddBtn(mobileNdtBtnAddSelect, ndtSelectAddMode);
+            window.showToast(touchSelectAddModeToast(ndtSelectAddMode), 'info', 2400);
         });
     }
     const mobileNdtBtnModeMark = document.getElementById('mobileNdtBtnModeMark');

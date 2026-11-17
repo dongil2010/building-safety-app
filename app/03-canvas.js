@@ -1605,9 +1605,10 @@
                 const y1 = Math.min(marqueeStartImgY, marqueeCurImgY);
                 const x2 = Math.max(marqueeStartImgX, marqueeCurImgX);
                 const y2 = Math.max(marqueeStartImgY, marqueeCurImgY);
+                const mqColors = cadMarqueeColors(marqueeMode);
                 ctx.save();
-                ctx.fillStyle = 'rgba(37, 99, 235, 0.14)';
-                ctx.strokeStyle = '#2563eb';
+                ctx.fillStyle = mqColors.fill;
+                ctx.strokeStyle = mqColors.stroke;
                 ctx.lineWidth = 1.5 / Math.max(state.view.scale || 1, 0.01);
                 ctx.setLineDash([6 / Math.max(state.view.scale || 1, 0.01), 4 / Math.max(state.view.scale || 1, 0.01)]);
                 ctx.fillRect(x1, y1, x2 - x1, y2 - y1);
@@ -1737,14 +1738,15 @@
     let pendingNdtLongPressTimer = null;
     let ndtActivePointerIsTouch = false;
     let ndtMarqueeSelectEnabled = false;
-    let ndtAddSelectEnabled = false;
+    // 2026-11-17 우측 레일 「추가」: '' = 끔 / 'add' = 누르는 마킹을 더함 / 'remove' = 누르는 마킹을 뺌 (resolveCadSelectMode)
+    let ndtSelectAddMode = '';
     // 2026-10-20 결함위치도와 같게: 0.3초 꾹 누른 뒤 끌면 이동(예전 0.5초). PC 마우스는 그대로.
     const NDT_TOUCH_LONG_PRESS_MS = 300;
     let isDraggingNdtPinGroup = false;
     let ndtGroupDragLastX = 0;
     let ndtGroupDragLastY = 0;
     let isNdtMarqueeSelecting = false;
-    let ndtMarqueeAdditive = false;
+    let ndtMarqueeMode = 'replace'; // 'replace' | 'add' | 'remove' (resolveCadSelectMode)
     let ndtMarqueeStartX = 0;
     let ndtMarqueeStartY = 0;
     let ndtMarqueeCurX = 0;
@@ -1759,24 +1761,64 @@
         return `disp_${groupId}`;
     }
 
+    // ---- 2026-11-17 CAD식 마킹 선택 (결함위치도·비파괴 공통) ----
+    // 클릭·드래그 = 새로 고름 / Ctrl(⌘)+클릭·드래그 = 지금 선택에 더함 / Shift+클릭·드래그 = 지금 선택에서 뺌.
+    // 수정키가 없는 폰·태블릿은 우측 레일 「추가」 단추(누를 때마다 끔 → 더하기 → 빼기)가 같은 뜻.
+    /** @returns {'replace'|'add'|'remove'} */
+    function resolveCadSelectMode(mods, touchMode) {
+        if (mods && mods.shiftKey) return 'remove';
+        if (mods && (mods.ctrlKey || mods.metaKey)) return 'add';
+        if (touchMode === 'add' || touchMode === 'remove') return touchMode;
+        return 'replace';
+    }
+    window.__bsaResolveCadSelectMode = resolveCadSelectMode;
+
+    /** 선택 묶음(Set)을 제자리에서 바꾼다: replace = 비우고 ids만 / add = 더함 / remove = 뺌 */
+    function applyCadSelection(set, ids, mode) {
+        const list = (Array.isArray(ids) ? ids : [...(ids || [])]).filter(Boolean);
+        if (mode === 'remove') {
+            list.forEach((id) => set.delete(id));
+            return set;
+        }
+        if (mode !== 'add') set.clear();
+        list.forEach((id) => set.add(id));
+        return set;
+    }
+    window.__bsaApplyCadSelection = applyCadSelection;
+
+    /** 레일 「추가」 단추: 끔('') → 더하기 → 빼기 → 끔 */
+    function nextTouchSelectAddMode(mode) {
+        if (mode === 'add') return 'remove';
+        if (mode === 'remove') return '';
+        return 'add';
+    }
+
+    /** 고르기 네모 색: 새로 고름 = 파랑, 더함 = 초록, 뺌 = 빨강 */
+    function cadMarqueeColors(mode) {
+        if (mode === 'remove') return { fill: 'rgba(220, 38, 38, 0.12)', stroke: '#dc2626' };
+        if (mode === 'add') return { fill: 'rgba(22, 163, 74, 0.13)', stroke: '#16a34a' };
+        return { fill: 'rgba(37, 99, 235, 0.14)', stroke: '#2563eb' };
+    }
+
     /**
      * 2026-10-20 비파괴 도면 터치 탭 — 결함위치도와 같은 규칙.
-     * 'open' = 이미 선택된 것을 다시 탭 → 수정창 / 'select' = 처음 탭 → 선택만 / 'toggle' = 추가 선택 모드 /
+     * 'open' = 이미 선택된 것을 다시 탭 → 수정창 / 'select' = 처음 탭 → 선택만 /
+     * 'add'·'remove' = 「추가」 단추가 더하기·빼기일 때(2026-11-17, 예전 'toggle') /
      * 'none' = 0.3초 이상 꾹 눌렀다 그냥 뗌(이동 준비만, 탭 아님)
      */
     function ndtTouchTapAction(pend, armed, addMode) {
         if (!pend) return 'none';
         if (armed) return 'none';
-        if (addMode) return 'toggle';
+        if (addMode === 'remove') return 'remove';
+        if (addMode) return 'add';
         return pend.wasSelected ? 'open' : 'select';
     }
     window.__bsaNdtTouchTapAction = ndtTouchTapAction;
 
     function applyNdtTouchTapSelection(act, key) {
         if (!key) return;
-        if (act === 'toggle') {
-            if (selectedNdtIds.has(key)) selectedNdtIds.delete(key);
-            else selectedNdtIds.add(key);
+        if (act === 'add' || act === 'remove') {
+            applyCadSelection(selectedNdtIds, [key], act);
         } else if (act === 'select' || act === 'open') {
             if (!selectedNdtIds.has(key) || selectedNdtIds.size > 1) selectedNdtIds = new Set([key]);
         } else {

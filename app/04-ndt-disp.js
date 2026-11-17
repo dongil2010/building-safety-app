@@ -1244,9 +1244,13 @@
             const y1 = Math.min(ndtMarqueeStartY, ndtMarqueeCurY);
             const x2 = Math.max(ndtMarqueeStartX, ndtMarqueeCurX);
             const y2 = Math.max(ndtMarqueeStartY, ndtMarqueeCurY);
+            // 2026-11-17 더함 = 초록, 뺌 = 빨강 (새로 고름은 예전 회색)
+            const mqColors = ndtMarqueeMode === 'replace'
+                ? { fill: 'rgba(40, 40, 40, 0.12)', stroke: '#2a2a2a' }
+                : cadMarqueeColors(ndtMarqueeMode);
             ctx.save();
-            ctx.fillStyle = 'rgba(40, 40, 40, 0.12)';
-            ctx.strokeStyle = '#2a2a2a';
+            ctx.fillStyle = mqColors.fill;
+            ctx.strokeStyle = mqColors.stroke;
             ctx.lineWidth = 1.5 / Math.max(ndtView.scale || 1, 0.01);
             ctx.setLineDash([6 / Math.max(ndtView.scale || 1, 0.01), 4 / Math.max(ndtView.scale || 1, 0.01)]);
             ctx.fillRect(x1, y1, x2 - x1, y2 - y1);
@@ -2388,6 +2392,58 @@
         return { x: vx, y: vy };
     }
 
+    /** 2026-11-17 비파괴 고르기 네모 시작 — mode: 'replace' | 'add' | 'remove' */
+    function beginNdtMarquee(vx, vy, clientX, clientY, mode) {
+        isNdtMarqueeSelecting = true;
+        ndtMarqueeMode = mode || 'replace';
+        ndtMarqueeStartX = vx;
+        ndtMarqueeStartY = vy;
+        ndtMarqueeCurX = vx;
+        ndtMarqueeCurY = vy;
+        ndtMarqueeStartClientX = clientX;
+        ndtMarqueeStartClientY = clientY;
+        const cv = document.getElementById('ndtCanvas');
+        if (cv) cv.style.cursor = 'crosshair';
+        drawNdtCanvas();
+    }
+
+    /** 누른 자리의 비파괴 마킹 선택 키(핀 id 또는 disp_구역) — 없으면 '' */
+    function ndtSelKeyAt(vx, vy) {
+        if (currentNdtCategory === '변위' || currentNdtCategory === '부재변위') {
+            const hd = findNdtDisplacementHit(vx, vy, { boxOnly: true }) || findNdtDisplacementHit(vx, vy);
+            if (hd && hd.group && hd.group.id) return ndtDispSelKey(hd.group.id);
+        }
+        const hp = findNdtPinAt(vx, vy);
+        return (hp && hp.item && hp.item.id) || '';
+    }
+
+    /**
+     * 비파괴 고르기 네모 끝(마우스·터치 공통). screenDist = 누른 곳에서 뗀 곳까지 화면 거리.
+     * 새로 고름: 비우고 네모 안 것만(끌지 않은 클릭이면 해제) / 더함·뺌: 끌었으면 네모 안 것, 안 끌었으면 누른 자리 하나.
+     */
+    function finishNdtMarqueeSelection(screenDist) {
+        isNdtMarqueeSelecting = false;
+        const mode = ndtMarqueeMode || 'replace';
+        ndtMarqueeMode = 'replace';
+        const x1 = Math.min(ndtMarqueeStartX, ndtMarqueeCurX);
+        const y1 = Math.min(ndtMarqueeStartY, ndtMarqueeCurY);
+        const x2 = Math.max(ndtMarqueeStartX, ndtMarqueeCurX);
+        const y2 = Math.max(ndtMarqueeStartY, ndtMarqueeCurY);
+        // 화면 픽셀 기준으로 탭/드래그 구분 (이미지 좌표 임계값은 줌아웃 시 오선택 유발)
+        const tiny = screenDist < 10;
+        let ids = [];
+        if (tiny) {
+            if (mode !== 'replace') ids = [ndtSelKeyAt(ndtMarqueeStartX, ndtMarqueeStartY)];
+        } else {
+            ids = collectNdtMarqueeHits(x1, y1, x2, y2);
+        }
+        applyCadSelection(selectedNdtIds, ids, mode);
+        updateNdtSelectionBar();
+        const cv = document.getElementById('ndtCanvas');
+        if (cv) cv.style.cursor = ndtMode === 'MARK' ? 'crosshair' : 'default';
+        drawNdtCanvas();
+    }
+
     function initNdtEvents() {
         const canvas = document.getElementById('ndtCanvas');
         if (!canvas || canvas._ndtBound) return;
@@ -2413,7 +2469,9 @@
                 return;
             }
             if (e.button !== 0) return;
-            const additive = !!(e.ctrlKey || e.metaKey);
+            // 2026-11-17 CAD식 선택: 그냥 = 새로 고름 / Ctrl(⌘) = 더함 / Shift = 뺌 (결함위치도와 같음)
+            const selMode = resolveCadSelectMode(e, ndtSelectAddMode);
+            const additive = selMode !== 'replace';
             const rect = canvas.getBoundingClientRect();
             const mouseX = e.clientX - rect.left;
             const mouseY = e.clientY - rect.top;
@@ -2427,6 +2485,13 @@
             ndtStartMouseY = e.clientY;
             ndtInitialOffsetX = ndtView.offsetX;
             ndtInitialOffsetY = ndtView.offsetY;
+
+            // 2026-11-17 Ctrl·Shift를 누른 채 누르면 마킹 위든 빈 곳이든 고르기 네모(더함·뺌).
+            // 끌지 않고 떼면 누른 자리의 마킹 하나만 더하거나 뺀다(mouseup). 끌어 옮기기는 수정키 없이.
+            if (additive && ndtMode === 'PAN') {
+                beginNdtMarquee(vx, vy, e.clientX, e.clientY, selMode);
+                return;
+            }
 
             // 균열모니터: 도면에 찍은 게이지 마킹(아래 일반 핀 처리)이 우선, 없으면 예전 방식의
             // 균열 결함 연결 게이지 핀. 빈 곳은 MARK면 새 게이지 마킹, PAN이면 열린 팝업 닫기.
@@ -2449,8 +2514,7 @@
                     const selKey = gid ? ndtDispSelKey(gid) : null;
                     if (selKey) {
                         if (additive) {
-                            if (selectedNdtIds.has(selKey)) selectedNdtIds.delete(selKey);
-                            else selectedNdtIds.add(selKey);
+                            applyCadSelection(selectedNdtIds, [selKey], selMode);
                         } else if (!selectedNdtIds.has(selKey) || selectedNdtIds.size <= 1) {
                             selectedNdtIds = new Set([selKey]);
                         }
@@ -2474,8 +2538,7 @@
                     const id = hitPin.item && hitPin.item.id;
                     if (id) {
                         if (additive) {
-                            if (selectedNdtIds.has(id)) selectedNdtIds.delete(id);
-                            else selectedNdtIds.add(id);
+                            applyCadSelection(selectedNdtIds, [id], selMode);
                         } else if (!selectedNdtIds.has(id) || selectedNdtIds.size <= 1) {
                             selectedNdtIds = new Set([id]);
                         }
@@ -2528,16 +2591,7 @@
                 window._ndtMarkCurrentCoords = { x: vx, y: vy };
             } else {
                 // 좌클릭 빈 곳 = 마퀴 선택 (화면 이동은 휠클릭)
-                isNdtMarqueeSelecting = true;
-                ndtMarqueeAdditive = additive;
-                ndtMarqueeStartX = vx;
-                ndtMarqueeStartY = vy;
-                ndtMarqueeCurX = vx;
-                ndtMarqueeCurY = vy;
-                ndtMarqueeStartClientX = e.clientX;
-                ndtMarqueeStartClientY = e.clientY;
-                canvas.style.cursor = 'crosshair';
-                drawNdtCanvas();
+                beginNdtMarquee(vx, vy, e.clientX, e.clientY, selMode);
             }
         });
 
@@ -2798,33 +2852,10 @@
                 drawNdtCanvas();
             }
             if (isNdtMarqueeSelecting) {
-                isNdtMarqueeSelecting = false;
-                const x1 = Math.min(ndtMarqueeStartX, ndtMarqueeCurX);
-                const y1 = Math.min(ndtMarqueeStartY, ndtMarqueeCurY);
-                const x2 = Math.max(ndtMarqueeStartX, ndtMarqueeCurX);
-                const y2 = Math.max(ndtMarqueeStartY, ndtMarqueeCurY);
-                // 화면 픽셀 기준으로 탭/드래그 구분 (이미지 좌표 임계값은 줌아웃 시 오선택 유발)
-                const screenDist = Math.hypot(
+                finishNdtMarqueeSelection(Math.hypot(
                     (e.clientX || 0) - ndtMarqueeStartClientX,
                     (e.clientY || 0) - ndtMarqueeStartClientY
-                );
-                const tiny = screenDist < 10;
-                if (!ndtMarqueeAdditive) selectedNdtIds.clear();
-                if (!tiny) {
-                    collectNdtMarqueeHits(x1, y1, x2, y2).forEach((id) => {
-                        if (ndtMarqueeAdditive) {
-                            if (selectedNdtIds.has(id)) selectedNdtIds.delete(id);
-                            else selectedNdtIds.add(id);
-                        } else {
-                            selectedNdtIds.add(id);
-                        }
-                    });
-                }
-                ndtMarqueeAdditive = false;
-                updateNdtSelectionBar();
-                const canvas = document.getElementById('ndtCanvas');
-                if (canvas) canvas.style.cursor = ndtMode === 'MARK' ? 'crosshair' : 'default';
-                drawNdtCanvas();
+                ));
             }
             if (isNdtMarkingDrag) {
                 isNdtMarkingDrag = false;
@@ -2979,7 +3010,7 @@
                         pendingNdtPinArmed = true;
                         const hid = pendingNdtPinHit.item && pendingNdtPinHit.item.id;
                         if (hid && !selectedNdtIds.has(hid)) {
-                            if (ndtAddSelectEnabled) selectedNdtIds.add(hid);
+                            if (ndtSelectAddMode) selectedNdtIds.add(hid);
                             else selectedNdtIds = new Set([hid]);
                             updateNdtSelectionBar();
                         }
@@ -3004,7 +3035,7 @@
                             if (!pendingNdtDispHit || !pendingNdtDispIsTouch) return;
                             pendingNdtDispArmed = true;
                             if (dispKey && !selectedNdtIds.has(dispKey)) {
-                                if (ndtAddSelectEnabled) selectedNdtIds.add(dispKey);
+                                if (ndtSelectAddMode) selectedNdtIds.add(dispKey);
                                 else selectedNdtIds = new Set([dispKey]);
                                 updateNdtSelectionBar();
                             }
@@ -3030,16 +3061,7 @@
                     window._ndtMarkCurrentCoords = { x: vx, y: vy };
                 } else if (ndtMarqueeSelectEnabled && ndtMode === 'PAN') {
                     if (e.cancelable) e.preventDefault();
-                    isNdtMarqueeSelecting = true;
-                    ndtMarqueeAdditive = ndtAddSelectEnabled;
-                    ndtMarqueeStartX = vx;
-                    ndtMarqueeStartY = vy;
-                    ndtMarqueeCurX = vx;
-                    ndtMarqueeCurY = vy;
-                    ndtMarqueeStartClientX = touch.clientX;
-                    ndtMarqueeStartClientY = touch.clientY;
-                    canvas.style.cursor = 'crosshair';
-                    drawNdtCanvas();
+                    beginNdtMarquee(vx, vy, touch.clientX, touch.clientY, resolveCadSelectMode(null, ndtSelectAddMode));
                 } else if (layoutIsCompactWidth()) {
                     // 모바일 PAN: 도면 위 한손가락 드래그는 페이지 스크롤이 아니라 도면 팬만
                     ndtTouchMayPageScroll = false;
@@ -3325,7 +3347,8 @@
                 && !pendingNdtPinHit && !pendingNdtDispHit && !pendingNdtCrackDefectHit
                 && !isDraggingNdtPin && !isDraggingNdtDisplacement && !isDraggingNdtPinGroup
                 && !isNdtMarkingDrag && !isNdtDisplacementMarking && !isNdtPinching
-                && ndtMode === 'PAN' && tapMoved < 14;
+                && ndtMode === 'PAN' && tapMoved < 14
+                && !ndtSelectAddMode; // 2026-11-17 「추가」 더하기·빼기 중엔 빈 곳 탭으로 선택을 지우지 않음(결함위치도와 같음)
 
             ndtActivePointerIsTouch = false;
             ndtTouchMayPageScroll = false;
@@ -3343,7 +3366,7 @@
                 pendingNdtPinHit = null;
                 pendingNdtPinArmed = false;
                 if (pend.part === 'rotate') return;
-                const act = ndtTouchTapAction(pend, armed, ndtAddSelectEnabled);
+                const act = ndtTouchTapAction(pend, armed, ndtSelectAddMode);
                 applyNdtTouchTapSelection(act, pend.item && pend.item.id);
                 if (act === 'open' && pend.item) openNdtItemEditor(pend.item);
                 return;
@@ -3355,7 +3378,7 @@
                 pendingNdtDispHit = null;
                 pendingNdtDispArmed = false;
                 // 부동침하·부재변위 마킹은 한 번 탭에 바로 입력창 (선택 단계 없음)
-                const actD = ndtTouchTapAction(Object.assign({}, pendD, { wasSelected: true }), armedD, ndtAddSelectEnabled);
+                const actD = ndtTouchTapAction(Object.assign({}, pendD, { wasSelected: true }), armedD, ndtSelectAddMode);
                 applyNdtTouchTapSelection(actD, hit.group && hit.group.id ? ndtDispSelKey(hit.group.id) : '');
                 if (actD !== 'open') {
                     if (hit.group) setActiveNdtDispGroup(hit.group);
@@ -3458,31 +3481,9 @@
                 });
             }
             if (isNdtMarqueeSelecting) {
-                isNdtMarqueeSelecting = false;
-                const x1 = Math.min(ndtMarqueeStartX, ndtMarqueeCurX);
-                const y1 = Math.min(ndtMarqueeStartY, ndtMarqueeCurY);
-                const x2 = Math.max(ndtMarqueeStartX, ndtMarqueeCurX);
-                const y2 = Math.max(ndtMarqueeStartY, ndtMarqueeCurY);
-                const screenDist = t
+                finishNdtMarqueeSelection(t
                     ? Math.hypot(t.clientX - ndtMarqueeStartClientX, t.clientY - ndtMarqueeStartClientY)
-                    : 99;
-                const tiny = screenDist < 10;
-                if (!ndtMarqueeAdditive) selectedNdtIds.clear();
-                if (!tiny) {
-                    collectNdtMarqueeHits(x1, y1, x2, y2).forEach((id) => {
-                        if (ndtMarqueeAdditive) {
-                            if (selectedNdtIds.has(id)) selectedNdtIds.delete(id);
-                            else selectedNdtIds.add(id);
-                        } else {
-                            selectedNdtIds.add(id);
-                        }
-                    });
-                }
-                ndtMarqueeAdditive = false;
-                updateNdtSelectionBar();
-                const canvas = document.getElementById('ndtCanvas');
-                if (canvas) canvas.style.cursor = ndtMode === 'MARK' ? 'crosshair' : 'default';
-                drawNdtCanvas();
+                    : 99);
             }
             isNdtDragging = false;
 

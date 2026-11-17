@@ -18,7 +18,12 @@ const tap = new Function(fn('ndtTouchTapAction') + '\nreturn ndtTouchTapAction;'
 assert.strictEqual(tap({ wasSelected: false }, false, false), 'select', '처음 탭 = 선택만');
 assert.strictEqual(tap({ wasSelected: true }, false, false), 'open', '선택된 것 다시 탭 = 수정창');
 assert.strictEqual(tap({ wasSelected: true }, true, false), 'none', '꾹 눌렀다 뗌 = 탭 아님');
-assert.strictEqual(tap({ wasSelected: false }, false, true), 'toggle', '추가 선택 모드');
+// 2026-11-17 「추가」 단추: 끔 → 더하기 → 빼기 (예전 'toggle'은 더하기·빼기로 나뉨)
+assert.strictEqual(tap({ wasSelected: false }, false, 'add'), 'add', '더하기 모드');
+assert.strictEqual(tap({ wasSelected: true }, false, 'add'), 'add', '더하기 모드는 이미 고른 것도 더하기(빼지 않음)');
+assert.strictEqual(tap({ wasSelected: true }, false, 'remove'), 'remove', '빼기 모드');
+assert.strictEqual(tap({ wasSelected: false }, false, ''), 'select', '끔 = 처음 탭 선택');
+assert.strictEqual(tap({ wasSelected: false }, true, 'add'), 'none', '꾹 눌렀다 뗌은 더하기 모드에서도 탭 아님');
 assert.strictEqual(tap(null, false, false), 'none');
 
 assert.ok(/const NDT_TOUCH_LONG_PRESS_MS = 300;/.test(app), '0.3초');
