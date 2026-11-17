@@ -2944,6 +2944,301 @@
         return job;
     }
 
+    // ===== 2026-11-17 이미 꼬인 층 자동 정리 =====
+    // 기기(IndexedDB·메모리)에 남은 도면이 서버의 지금 도면과 다른 층을 찾아 서버 도면으로 바꾼다.
+    // 서버 메타 문서에 올린 파일의 바이트 수(size)가 적혀 있어, 기기 사본의 바이트 수와 비교하면 그림을
+    // 받지 않고도 다른지 안다. 다를 때만 서버 그림을 받아 바꾼다(받기에 실패하면 기기 사본을 그대로 둔다).
+    // 이 기기에서 바꿨는데 아직 서버에 못 올린 층(올릴 것 표시·교체 직후·서버 사본이 마지막 교체보다 옛것)은 건드리지 않는다.
+    const DRAWING_VERIFIED_LS_KEY = 'bsa_drawing_verified_v1';
+    const _drawingIntegrityCheckedFloors = new Set();
+    let _drawingIntegrityRun = null;
+    let _drawingIntegrityTimer = null;
+
+    /** data:…;base64 문자열이 담은 실제 바이트 수(서버 size와 비교용). 모르면 0 */
+    function dataUrlByteLength(url) {
+        if (typeof url !== 'string' || url.indexOf('data:') !== 0) return 0;
+        const comma = url.indexOf(',');
+        if (comma < 0 || !/;base64$/i.test(url.slice(0, comma))) return 0;
+        const len = url.length - comma - 1;
+        if (len <= 0) return 0;
+        let pad = 0;
+        if (url.charCodeAt(url.length - 1) === 61) pad++;
+        if (url.charCodeAt(url.length - 2) === 61) pad++;
+        return Math.floor(len * 3 / 4) - pad;
+    }
+
+    /**
+     * 기기 사본 판정: 'ok'(서버와 같음) · 'stale'(서버 도면으로 바꿀 것) · 'skip'(모름/건드리면 안 됨)
+     * o: { localBytes, serverSize, serverUpdatedMs, floorStampMs, pendingUpload, replaceGuarded, slackMs }
+     */
+    function judgeLocalDrawingCopy(o) {
+        if (!o || o.pendingUpload || o.replaceGuarded) return 'skip';
+        const local = Number(o.localBytes) || 0;
+        const server = Number(o.serverSize) || 0;
+        if (!local || !server) return 'skip';
+        if (local === server) return 'ok';
+        // 이 층을 마지막으로 바꾼 시각보다 서버 사본이 (여유 15분을 두고도) 옛것이면 서버가 덜 올라간 것 — 기기 쪽을 믿는다
+        const stamp = Number(o.floorStampMs) || 0;
+        if (stamp) {
+            const upd = Number(o.serverUpdatedMs) || 0;
+            const slack = o.slackMs != null ? Number(o.slackMs) : 15 * 60 * 1000;
+            if (!upd || upd < stamp - slack) return 'skip';
+        }
+        return 'stale';
+    }
+
+    function readDrawingVerifiedMap() {
+        try {
+            const raw = localStorage.getItem(DRAWING_VERIFIED_LS_KEY);
+            const obj = raw ? JSON.parse(raw) : {};
+            return obj && typeof obj === 'object' ? obj : {};
+        } catch (_e) {
+            return {};
+        }
+    }
+
+    function writeDrawingVerifiedMap(map) {
+        try {
+            const keys = Object.keys(map || {});
+            const out = keys.length > 4000 ? {} : map;
+            localStorage.setItem(DRAWING_VERIFIED_LS_KEY, JSON.stringify(out || {}));
+        } catch (_e) { /* ignore */ }
+    }
+
+    function firestoreTimestampMs(v) {
+        if (!v) return 0;
+        if (typeof v.toMillis === 'function') return v.toMillis();
+        if (typeof v.seconds === 'number') return v.seconds * 1000;
+        const n = Number(v);
+        return isFinite(n) ? n : 0;
+    }
+
+    function sameIdBuildingObjects(bldg) {
+        const objs = new Set();
+        if (bldg) objs.add(bldg);
+        (window.state.buildings || []).forEach((b) => { if (b && bldg && b.id === bldg.id) objs.add(b); });
+        if (window.state.currentBuilding && bldg && window.state.currentBuilding.id === bldg.id) objs.add(window.state.currentBuilding);
+        return [...objs];
+    }
+
+    /** 층 하나 검사·정리. 반환 { fixed: 바꾼 칸 수, checked: 서버와 비교한 칸 수, pdfFixed } */
+    async function verifyFloorDrawingAgainstCloud(bldg, floorCode) {
+        const result = { fixed: 0, checked: 0, pdfFixed: false };
+        if (!db || !window.state.companyId || !bldg || !bldg.id || !floorCode) return result;
+        if (typeof navigator !== 'undefined' && navigator.onLine === false) return result;
+        if (isFirestoreReadPaused()) return result;
+        if (isDeletedDrawingFloor(bldg, floorCode)) return result;
+        const objs = sameIdBuildingObjects(bldg);
+        if (objs.some((b) => isDrawingReplaceGuarded(b, floorCode))) return result;
+        const floorKey = `${bldg.id}_${floorCode}`;
+        const pendingUpload = !!readPendingDrawingUploads()[floorKey];
+        if (pendingUpload) return result;
+        const floorStampMs = Math.max(0, ...objs.map((b) => floorPdfUpdatedAtOf(b, floorCode)));
+
+        const companyRef = db.collection('safety_app').doc(getCompanyDocId());
+        const tierCol = getFloorDrawingTiersCollection();
+        const items = [
+            { kind: 'raster', store: 'floorDrawings', key: floorKey, docRef: companyRef.collection('floorDrawings').doc(floorKey) },
+            { kind: 'pdf', store: 'floorDrawingPdfs', key: floorKey, docRef: companyRef.collection('floorDrawingPdfs').doc(floorKey) }
+        ];
+        (window.FLOOR_DRAWING_TIER_DIMS || [4000, 8000, 16000]).forEach((dim) => {
+            if (!tierCol) return;
+            items.push({
+                kind: 'tier',
+                dim: String(dim),
+                store: 'floorDrawingTiers',
+                key: floorDrawingTierIdbKey(bldg.id, floorCode, dim),
+                docRef: tierCol.doc(floorDrawingTierCloudDocId(bldg.id, floorCode, dim))
+            });
+        });
+        const memValuesOf = (it) => objs.map((b) => {
+            if (it.kind === 'raster') return b.floorDrawings && b.floorDrawings[floorCode];
+            if (it.kind === 'pdf') return b.floorDrawingPdfs && b.floorDrawingPdfs[floorCode];
+            const t = b.floorDrawingTiers && b.floorDrawingTiers[floorCode];
+            return t && t[it.dim];
+        }).filter((v) => typeof v === 'string' && v.indexOf('data:') === 0);
+
+        // 기기에 사본이 있는 칸만 서버 메타를 읽는다
+        for (const it of items) {
+            it.hasLocal = memValuesOf(it).length > 0 || await idbHas(it.store, it.key);
+            if (!it.hasLocal) continue;
+            try {
+                const snap = await it.docRef.get();
+                it.snapData = snap.exists ? (snap.data() || {}) : null;
+            } catch (e) {
+                it.snapData = null;
+                console.warn('[도면 점검] 서버 메타 조회 실패:', it.key, e);
+            }
+            const d = it.snapData;
+            it.serverSize = d && d.backend === 'storage' && typeof d.size === 'number' ? d.size : 0;
+            it.serverPath = d && typeof d.storagePath === 'string' ? d.storagePath : '';
+            it.serverUpdatedMs = d ? firestoreTimestampMs(d.updatedAt) : 0;
+        }
+        // 서버의 그림(raster)과 일반 확대(4000)는 같은 그림을 올린다. 서로 크기가 다르면 서버가 반쯤 올라간 상태 — 둘 다 건드리지 않는다
+        const rasterIt = items.find((it) => it.kind === 'raster');
+        const baseIt = items.find((it) => it.kind === 'tier' && it.dim === '4000');
+        if (rasterIt && baseIt && rasterIt.serverSize && baseIt.serverSize && rasterIt.serverSize !== baseIt.serverSize) {
+            console.warn('[도면 점검] 서버 그림과 4000 단계 크기가 달라 건너뜀:', floorKey);
+            rasterIt.skip = true;
+            baseIt.skip = true;
+        }
+
+        const verified = readDrawingVerifiedMap();
+        let verifiedDirty = false;
+        let baseFixed = false;
+        const retireKeys = floorDrawingRetireKeys(bldg.id, floorCode);
+        for (const it of items) {
+            if (!it.hasLocal || it.skip || !it.serverSize) continue;
+            const vKey = `${it.store}:${it.key}`;
+            // 이 서버 사본으로 이미 맞춰 둔 칸은 다시 받지 않는다(옛 도면이 메모리에 되살아나면 지문 정리가 뺀다)
+            if (it.serverPath && verified[vKey] === it.serverPath) continue;
+            await yieldToUiGesture();
+            const idbVal = await idbGet(it.store, it.key);
+            const locals = [...new Set([idbVal, ...memValuesOf(it)].filter((v) => typeof v === 'string' && v.indexOf('data:') === 0))];
+            if (!locals.length) continue;
+            result.checked++;
+            const verdicts = locals.map((v) => judgeLocalDrawingCopy({
+                localBytes: dataUrlByteLength(v),
+                serverSize: it.serverSize,
+                serverUpdatedMs: it.serverUpdatedMs,
+                floorStampMs
+            }));
+            if (verdicts.every((v) => v === 'ok')) {
+                if (it.serverPath) { verified[vKey] = it.serverPath; verifiedDirty = true; }
+                continue;
+            }
+            const stale = locals.filter((v, i) => verdicts[i] === 'stale');
+            if (!stale.length) continue;
+            // 서버 그림을 먼저 받는다 — 못 받으면 기기 사본을 그대로 둔다(오프라인에서 도면이 없어지면 안 됨)
+            let serverUrl = null;
+            try {
+                serverUrl = await decodeChunkedPayloadFromData(it.snapData, it.docRef);
+            } catch (e) {
+                console.warn('[도면 점검] 서버 도면 받기 실패:', it.key, e);
+            }
+            if (typeof serverUrl !== 'string' || serverUrl.indexOf('data:') !== 0 || serverUrl.length < 32) continue;
+            if (it.kind !== 'pdf' && !isUsableRasterDrawingUrl(serverUrl)) continue;
+            if (isRetiredDrawingContent(it.key, serverUrl)) {
+                // 서버 사본은 이 기기가 이미 바꿔 버린 옛 도면 — 기기 쪽이 새것
+                console.warn('[도면 점검] 서버 사본이 이 기기에서 바꾼 옛 도면이라 그대로 둠:', it.key);
+                continue;
+            }
+            if (objs.some((b) => isDrawingReplaceGuarded(b, floorCode))) return result; // 그사이 사용자가 도면을 바꿈
+            retireDrawingContent(retireKeys, stale);
+            unretireDrawingContent(retireKeys, [serverUrl]);
+            const ok = await idbSet(it.store, it.key, serverUrl);
+            if (!ok) continue;
+            if (it.kind === 'raster') _idbPersistedDrawingKeys.add(it.key, serverUrl);
+            else if (it.kind === 'pdf') _idbPersistedPdfKeys.add(it.key, serverUrl);
+            else _idbPersistedTierKeys.add(it.key, serverUrl);
+            objs.forEach((b) => {
+                if (it.kind === 'raster') {
+                    if (b.floorDrawings && b.floorDrawings[floorCode]) b.floorDrawings[floorCode] = serverUrl;
+                } else if (it.kind === 'pdf') {
+                    if (b.floorDrawingPdfs && b.floorDrawingPdfs[floorCode]) b.floorDrawingPdfs[floorCode] = serverUrl;
+                } else {
+                    const t = b.floorDrawingTiers && b.floorDrawingTiers[floorCode];
+                    if (t && t[it.dim]) t[it.dim] = serverUrl;
+                }
+            });
+            if (it.serverPath) { verified[vKey] = it.serverPath; verifiedDirty = true; }
+            result.fixed++;
+            if (it.kind === 'pdf') result.pdfFixed = true;
+            if (it.kind === 'raster' || (it.kind === 'tier' && it.dim === '4000')) baseFixed = true;
+            console.warn('[도면 점검] 기기의 옛 도면을 서버 도면으로 바꿈:', it.key, `${dataUrlByteLength(stale[0])}B → ${it.serverSize}B`);
+        }
+        if (verifiedDirty) writeDrawingVerifiedMap(verified);
+
+        if (result.fixed) {
+            if (baseFixed) {
+                // 원본(확대용 원래 그림)은 기기에만 있어 서버와 비교할 수 없다 — 옛 도면 것일 수 있으니 버린다(확대는 단계 그림으로)
+                const oldSource = await idbGet('floorDrawingSources', floorKey);
+                const memSources = objs.map((b) => b.floorDrawingSources && b.floorDrawingSources[floorCode]).filter(Boolean);
+                retireDrawingContent(retireKeys, [oldSource, ...memSources].filter(Boolean));
+                objs.forEach((b) => { if (b.floorDrawingSources) delete b.floorDrawingSources[floorCode]; });
+                _idbPersistedSourceKeys.delete(floorKey);
+                await idbDelete('floorDrawingSources', floorKey);
+                await idbDelete('floorDrawingTiers', floorKey); // 옛 묶음 형식
+            }
+            const prefix = `${floorKey}_`;
+            if (state.floorDrawingTierImageCache) {
+                Object.keys(state.floorDrawingTierImageCache).forEach((k) => {
+                    if (k.startsWith(prefix)) delete state.floorDrawingTierImageCache[k];
+                });
+            }
+            if (state.floorImageCache) delete state.floorImageCache[floorKey];
+            if (result.pdfFixed && typeof window.invalidatePdfPageCache === 'function') window.invalidatePdfPageCache(floorKey);
+        }
+        return result;
+    }
+
+    /** 건물의 모든 층을(지금 층 먼저) 뒤에서 차례로 검사. 같은 층은 한 번 실행에 한 번만. */
+    async function runBuildingDrawingIntegrityCheck(bldg, firstFloor) {
+        if (!bldg || !bldg.id) return { fixed: 0, floors: [] };
+        const codes = [...collectKnownFloorCodesForBuilding(bldg)];
+        if (firstFloor && codes.includes(firstFloor)) {
+            codes.splice(codes.indexOf(firstFloor), 1);
+            codes.unshift(firstFloor);
+        }
+        const fixedFloors = [];
+        let fixed = 0;
+        for (const fc of codes) {
+            if (window.state.currentBuildingId !== bldg.id) break; // 다른 건물로 넘어감 — 다음에 그 건물에서 다시
+            if (typeof navigator !== 'undefined' && navigator.onLine === false) break;
+            const fk = `${bldg.id}_${fc}`;
+            if (_drawingIntegrityCheckedFloors.has(fk)) continue;
+            await yieldToUiGesture();
+            let r;
+            try {
+                r = await verifyFloorDrawingAgainstCloud(bldg, fc);
+            } catch (e) {
+                console.warn('[도면 점검] 층 검사 실패:', fk, e);
+                continue;
+            }
+            _drawingIntegrityCheckedFloors.add(fk);
+            if (!r.fixed) continue;
+            fixed += r.fixed;
+            fixedFloors.push(fc);
+            if (window.state.currentBuildingId === bldg.id && window.state.currentFloor === fc
+                && typeof loadFloorDrawing === 'function') {
+                if (r.pdfFixed) window.state.floorPlanRef = null;
+                loadFloorDrawing(fc, { forceClear: true, preserveView: !r.pdfFixed });
+            }
+        }
+        if (fixedFloors.length && typeof window.showToast === 'function') {
+            const labels = fixedFloors.map((fc) => (typeof window.getFloorLabelFromCode === 'function'
+                ? window.getFloorLabelFromCode(fc) : fc) || fc);
+            window.showToast(`기기에 남아 있던 옛 도면을 서버 도면으로 바꿨습니다 (${labels.join(', ')})`, 'info', 5000);
+        }
+        return { fixed, floors: fixedFloors };
+    }
+
+    /** 점검 진입·인터넷 복귀 때 부른다. 화면이 자리 잡은 뒤(기본 5초) 뒤에서 돈다. */
+    function scheduleFloorDrawingIntegrityCheck(bldg, opts) {
+        const options = opts || {};
+        if (!bldg || !bldg.id) return;
+        if (_drawingIntegrityTimer) clearTimeout(_drawingIntegrityTimer);
+        _drawingIntegrityTimer = setTimeout(() => {
+            _drawingIntegrityTimer = null;
+            if (_drawingIntegrityRun) {
+                // 도는 중이면 끝난 뒤 한 번 더(새 건물일 수 있음)
+                _drawingIntegrityRun.then(() => scheduleFloorDrawingIntegrityCheck(bldg, options));
+                return;
+            }
+            const live = (window.state.buildings || []).find((b) => b && b.id === bldg.id) || bldg;
+            _drawingIntegrityRun = runBuildingDrawingIntegrityCheck(live, options.firstFloor || window.state.currentFloor)
+                .catch((e) => console.warn('[도면 점검] 실패:', e))
+                .finally(() => { _drawingIntegrityRun = null; });
+        }, options.delayMs != null ? options.delayMs : 5000);
+    }
+    window.scheduleFloorDrawingIntegrityCheck = scheduleFloorDrawingIntegrityCheck;
+    window.verifyFloorDrawingAgainstCloud = verifyFloorDrawingAgainstCloud;
+    window.addEventListener('online', () => {
+        const cur = window.state.currentBuilding
+            || (window.state.buildings || []).find((b) => b && b.id === window.state.currentBuildingId);
+        if (cur) scheduleFloorDrawingIntegrityCheck(cur, { delayMs: 8000 });
+    });
+
     async function uploadFloorDrawingTiers(buildingId, floorCode, tiers) {
         if (!buildingId || !floorCode || !tiers) return false;
         const col = getFloorDrawingTiersCollection();

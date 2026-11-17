@@ -1478,6 +1478,10 @@ ${roundMobile ? '' : `<button type="button" class="icon-btn icon-btn-trash" titl
 
                 populateFloorSelectDropdown(bldg);
                 const curFloor = window.state.currentFloor;
+                // 2026-11-17 이미 꼬인 층 자동 정리: 기기에 남은 도면이 서버 도면과 다르면 뒤에서 서버 도면으로 바꾼다(지금 층 먼저)
+                if (canFetchDrawings && typeof window.scheduleFloorDrawingIntegrityCheck === 'function') {
+                    window.scheduleFloorDrawingIntegrityCheck(bldg, { firstFloor: curFloor });
+                }
                 const refMismatch = window.state.floorPlanRef
                     && window.state.floorPlanRef.floorCode !== curFloor;
                 if (window.state.currentBuildingId === entryBuildingId
