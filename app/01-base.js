@@ -3235,8 +3235,9 @@ document.addEventListener('DOMContentLoaded', () => {
                 // 2026-10-19 지시선 끝 기본 = 동그라미. 직접 고른 기기만 tipShapeChosen 으로 그 값을 지킨다
             tipShape: window.state.tipShape || 'circle',
             tipShapeChosen: !!window.state.tipShapeChosen,
-                areaFillStyle: window.state.areaFillStyle || 'solid',
-                areaBorderStyle: window.state.areaBorderStyle || 'solid',
+                areaFillStyle: window.state.areaFillStyle || 'hatch',
+                areaStyleDefault: 2,
+                areaBorderStyle: window.state.areaBorderStyle || 'dashed',
                 snapToCad: window.state.snapToCad !== false
             };
             const stateKeyForSave = getLocalStorageStateKey(window.state.companyId);
@@ -3506,11 +3507,13 @@ document.addEventListener('DOMContentLoaded', () => {
                 } else {
                     window.state.tipShape = 'circle';
                 }
-                if (parsed.areaFillStyle) {
-                    window.state.areaFillStyle = parsed.areaFillStyle;
-                }
-                if (parsed.areaBorderStyle) {
-                    window.state.areaBorderStyle = parsed.areaBorderStyle;
+                // 2026-11-17 영역 마킹 기본 = 내부 빗금 + 점선. 예전엔 저장값이 늘 'solid'(기본)로 쓰여서 한 번만 새 기본으로 바꿈
+                if (parsed.areaStyleDefault === 2) {
+                    if (parsed.areaFillStyle) window.state.areaFillStyle = parsed.areaFillStyle;
+                    if (parsed.areaBorderStyle) window.state.areaBorderStyle = parsed.areaBorderStyle;
+                } else {
+                    window.state.areaFillStyle = 'hatch';
+                    window.state.areaBorderStyle = 'dashed';
                 }
                 if (parsed.snapToCad !== undefined) {
                     window.state.snapToCad = parsed.snapToCad !== false;

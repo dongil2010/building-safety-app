@@ -1,5 +1,5 @@
 // @@app-parts 자동 생성 파일 — 여기를 고치지 말고 app/ 조각을 고친 뒤 `node scripts/app-parts.js join` (CLAUDE.md 「app.js 조각」)
-// @@app-part 01-base.js sha=092898cd69e0 — 원본은 app/01-base.js (여기 말고 거기서 고칠 것)
+// @@app-part 01-base.js sha=2e25fdf6a14c — 원본은 app/01-base.js (여기 말고 거기서 고칠 것)
 /* ==========================================================================
    스마트 건축물 안전점검 현장점검 시스템 — UI 부트스트랩
    전역 상태·IndexedDB·이미지 헬퍼: js/core/state.js
@@ -3236,8 +3236,9 @@ document.addEventListener('DOMContentLoaded', () => {
                 // 2026-10-19 지시선 끝 기본 = 동그라미. 직접 고른 기기만 tipShapeChosen 으로 그 값을 지킨다
             tipShape: window.state.tipShape || 'circle',
             tipShapeChosen: !!window.state.tipShapeChosen,
-                areaFillStyle: window.state.areaFillStyle || 'solid',
-                areaBorderStyle: window.state.areaBorderStyle || 'solid',
+                areaFillStyle: window.state.areaFillStyle || 'hatch',
+                areaStyleDefault: 2,
+                areaBorderStyle: window.state.areaBorderStyle || 'dashed',
                 snapToCad: window.state.snapToCad !== false
             };
             const stateKeyForSave = getLocalStorageStateKey(window.state.companyId);
@@ -3507,11 +3508,13 @@ document.addEventListener('DOMContentLoaded', () => {
                 } else {
                     window.state.tipShape = 'circle';
                 }
-                if (parsed.areaFillStyle) {
-                    window.state.areaFillStyle = parsed.areaFillStyle;
-                }
-                if (parsed.areaBorderStyle) {
-                    window.state.areaBorderStyle = parsed.areaBorderStyle;
+                // 2026-11-17 영역 마킹 기본 = 내부 빗금 + 점선. 예전엔 저장값이 늘 'solid'(기본)로 쓰여서 한 번만 새 기본으로 바꿈
+                if (parsed.areaStyleDefault === 2) {
+                    if (parsed.areaFillStyle) window.state.areaFillStyle = parsed.areaFillStyle;
+                    if (parsed.areaBorderStyle) window.state.areaBorderStyle = parsed.areaBorderStyle;
+                } else {
+                    window.state.areaFillStyle = 'hatch';
+                    window.state.areaBorderStyle = 'dashed';
                 }
                 if (parsed.snapToCad !== undefined) {
                     window.state.snapToCad = parsed.snapToCad !== false;
@@ -23718,7 +23721,7 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
         return bestKey;
     }
 
-// @@app-part 06-defect-edit.js sha=4d6947b0d260 — 원본은 app/06-defect-edit.js (여기 말고 거기서 고칠 것)
+// @@app-part 06-defect-edit.js sha=9ef9e69a3f1a — 원본은 app/06-defect-edit.js (여기 말고 거기서 고칠 것)
     // --- 결함 회차 일괄 재지정 모달 ---
     // 건물 전체(또는 현재 층)가 잘못된 회차로 통째로 등록됐을 때, 결함들의 surveyRound를
     // 한번에 올바른 값으로 옮기는 관리자용 복구 기능. 결함 내용은 건드리지 않고 회차 값만 바꾼다.
@@ -27095,11 +27098,11 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
     // 영역(면적) 형태 결함 렌더링 — 화면 캔버스와 보고서 캔버스(drawPinSafe) 양쪽에서 공용으로 사용
     // 번호 네모칸은 여기에 고정하지 않고, drawPin이 지시선으로 연결해 그린다.
     function normalizeAreaFillStyle(v) {
-        return (v === 'hatch' || v === 'none') ? v : 'solid';
+        return (v === 'solid' || v === 'none' || v === 'hatch') ? v : 'hatch'; // 2026-11-17 기본 빗금
     }
 
     function normalizeAreaBorderStyle(v) {
-        return v === 'dashed' ? 'dashed' : 'solid';
+        return v === 'solid' ? 'solid' : 'dashed'; // 2026-11-17 기본 점선
     }
 
     function getAreaFillStyle(defect) {
@@ -27115,12 +27118,13 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
     function getSelectedAreaFillFromUi() {
         if (document.getElementById('btnAreaFillHatch')?.classList.contains('active')) return 'hatch';
         if (document.getElementById('btnAreaFillNone')?.classList.contains('active')) return 'none';
-        return 'solid';
+        if (document.getElementById('btnAreaFillSolid')?.classList.contains('active')) return 'solid';
+        return 'hatch';
     }
 
     function getSelectedAreaBorderFromUi() {
-        if (document.getElementById('btnAreaBorderDashed')?.classList.contains('active')) return 'dashed';
-        return 'solid';
+        if (document.getElementById('btnAreaBorderSolid')?.classList.contains('active')) return 'solid';
+        return 'dashed';
     }
 
     function syncDefectAreaStyleUi(fillStyle, borderStyle) {
@@ -27753,8 +27757,8 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
         defect.areaAngle = 0;
         defect.areaPoints = undefined;
         defect.areaDrawings = Array.isArray(defect.areaDrawings) ? defect.areaDrawings : [];
-        defect.areaFillStyle = defect.areaFillStyle || state.areaFillStyle || 'solid';
-        defect.areaBorderStyle = defect.areaBorderStyle || state.areaBorderStyle || 'solid';
+        defect.areaFillStyle = defect.areaFillStyle || state.areaFillStyle || 'hatch';
+        defect.areaBorderStyle = defect.areaBorderStyle || state.areaBorderStyle || 'dashed';
         if (typeof ensureAreaPinPlacement === 'function') ensureAreaPinPlacement(defect);
         if (typeof touchDefectPositionUpdatedAt === 'function') touchDefectPositionUpdatedAt(defect);
         touchDefectUpdatedAt(defect);
@@ -36431,7 +36435,7 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
         }
     }
 
-// @@app-part 09-settings-input-camera.js sha=838a0ef76e84 — 원본은 app/09-settings-input-camera.js (여기 말고 거기서 고칠 것)
+// @@app-part 09-settings-input-camera.js sha=68cb067769a8 — 원본은 app/09-settings-input-camera.js (여기 말고 거기서 고칠 것)
     // --- 카테고리별 핀/박스 색상 설정 모달 ---
     // 결함 색상은 getDefectColor()가 쓰는 등급·상태 키와 맞춰야 도면에 바로 반영됨
     const STYLE_COLOR_FIELDS = [
@@ -40271,11 +40275,11 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
 
         const allArea = defects.every(d => d.shapeType === 'area' && d.areaX1 !== undefined);
         if (allArea) {
-            const fill = bulkFieldConsensus(defects, d => d.areaFillStyle || 'solid');
-            const border = bulkFieldConsensus(defects, d => d.areaBorderStyle || 'solid');
+            const fill = bulkFieldConsensus(defects, d => d.areaFillStyle || 'hatch');
+            const border = bulkFieldConsensus(defects, d => d.areaBorderStyle || 'dashed');
             syncDefectAreaStyleUi(
-                fill.mixed ? (rep.areaFillStyle || 'solid') : (fill.value || 'solid'),
-                border.mixed ? (rep.areaBorderStyle || 'solid') : (border.value || 'solid')
+                fill.mixed ? (rep.areaFillStyle || 'hatch') : (fill.value || 'hatch'),
+                border.mixed ? (rep.areaBorderStyle || 'dashed') : (border.value || 'dashed')
             );
         }
 
@@ -40718,8 +40722,8 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
         if (isAreaModal) {
             const src = existingPin || window._defectMarkingTemplate || null;
             syncDefectAreaStyleUi(
-                (src && src.areaFillStyle) || state.areaFillStyle || 'solid',
-                (src && src.areaBorderStyle) || state.areaBorderStyle || 'solid'
+                (src && src.areaFillStyle) || state.areaFillStyle || 'hatch',
+                (src && src.areaBorderStyle) || state.areaBorderStyle || 'dashed'
             );
         }
 
@@ -47414,7 +47418,7 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
         });
     }
 
-// @@app-part 11-cad-import.js sha=6331a8729435 — 원본은 app/11-cad-import.js (여기 말고 거기서 고칠 것)
+// @@app-part 11-cad-import.js sha=e2b50e56d36b — 원본은 app/11-cad-import.js (여기 말고 거기서 고칠 것)
     // --- 9-1. CAD Defect Pins 2-Point Calibration Engine (v2.0) ---
     window.cadCalibrationState = null;
 
@@ -48562,7 +48566,7 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
                 setDefectAreaStylePanelVisible(!!toArea, defect);
             }
             if (toArea && typeof syncDefectAreaStyleUi === 'function') {
-                syncDefectAreaStyleUi(defect.areaFillStyle || 'solid', defect.areaBorderStyle || 'solid');
+                syncDefectAreaStyleUi(defect.areaFillStyle || 'hatch', defect.areaBorderStyle || 'dashed');
             }
             const titleEl2 = document.getElementById('defectModalTitle');
             if (titleEl2) titleEl2.textContent = toArea ? '⬚ 결함 영역 수정' : '📍 결함 핀 수정';
@@ -48645,7 +48649,7 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
             const angEl = document.getElementById('defectAreaAngle');
             if (angEl) angEl.value = String(Math.round(Number(defect.areaAngle) || 0));
             if (!wasArea) {
-                if (typeof syncDefectAreaStyleUi === 'function') syncDefectAreaStyleUi(defect.areaFillStyle || 'solid', defect.areaBorderStyle || 'solid');
+                if (typeof syncDefectAreaStyleUi === 'function') syncDefectAreaStyleUi(defect.areaFillStyle || 'hatch', defect.areaBorderStyle || 'dashed');
                 const titleElConv = document.getElementById('defectModalTitle');
                 if (titleElConv) titleElConv.textContent = '⬚ 결함 영역 수정';
             }

@@ -3838,11 +3838,11 @@
 
         const allArea = defects.every(d => d.shapeType === 'area' && d.areaX1 !== undefined);
         if (allArea) {
-            const fill = bulkFieldConsensus(defects, d => d.areaFillStyle || 'solid');
-            const border = bulkFieldConsensus(defects, d => d.areaBorderStyle || 'solid');
+            const fill = bulkFieldConsensus(defects, d => d.areaFillStyle || 'hatch');
+            const border = bulkFieldConsensus(defects, d => d.areaBorderStyle || 'dashed');
             syncDefectAreaStyleUi(
-                fill.mixed ? (rep.areaFillStyle || 'solid') : (fill.value || 'solid'),
-                border.mixed ? (rep.areaBorderStyle || 'solid') : (border.value || 'solid')
+                fill.mixed ? (rep.areaFillStyle || 'hatch') : (fill.value || 'hatch'),
+                border.mixed ? (rep.areaBorderStyle || 'dashed') : (border.value || 'dashed')
             );
         }
 
@@ -4285,8 +4285,8 @@
         if (isAreaModal) {
             const src = existingPin || window._defectMarkingTemplate || null;
             syncDefectAreaStyleUi(
-                (src && src.areaFillStyle) || state.areaFillStyle || 'solid',
-                (src && src.areaBorderStyle) || state.areaBorderStyle || 'solid'
+                (src && src.areaFillStyle) || state.areaFillStyle || 'hatch',
+                (src && src.areaBorderStyle) || state.areaBorderStyle || 'dashed'
             );
         }
 

@@ -16,8 +16,8 @@ if (!window.state) {
         mode: 'PAN', // 'PAN' | 'MARK' | 'AREA'
         rotationAngle: 0,
         tipShape: 'circle',  // 'arrow' | 'circle' — 2026-10-19 기본 동그라미(직접 고르면 tipShapeChosen)
-        areaFillStyle: 'solid',   // 'solid' | 'hatch' | 'none' — 영역 마킹 채우기
-        areaBorderStyle: 'solid', // 'solid' | 'dashed' — 영역 마킹 테두리
+        areaFillStyle: 'hatch',   // 'solid' | 'hatch' | 'none' — 영역 마킹 채우기
+        areaBorderStyle: 'dashed', // 'solid' | 'dashed' — 영역 마킹 테두리
         areaCreateShape: 'rect',  // 'rect' | 'ellipse' | 'polygon' | 'polyline'
     markCreateShape: 'pin',   // 마킹 모드 모양: 'pin' | 'polygon' | 'polyline' (다각형·선은 영역 마킹과 같은 길)
         areaInkTool: null,        // null | 'line' | 'rect' | 'polygon' | 'ellipse' | 'path'

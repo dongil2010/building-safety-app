@@ -3375,11 +3375,11 @@
     // 영역(면적) 형태 결함 렌더링 — 화면 캔버스와 보고서 캔버스(drawPinSafe) 양쪽에서 공용으로 사용
     // 번호 네모칸은 여기에 고정하지 않고, drawPin이 지시선으로 연결해 그린다.
     function normalizeAreaFillStyle(v) {
-        return (v === 'hatch' || v === 'none') ? v : 'solid';
+        return (v === 'solid' || v === 'none' || v === 'hatch') ? v : 'hatch'; // 2026-11-17 기본 빗금
     }
 
     function normalizeAreaBorderStyle(v) {
-        return v === 'dashed' ? 'dashed' : 'solid';
+        return v === 'solid' ? 'solid' : 'dashed'; // 2026-11-17 기본 점선
     }
 
     function getAreaFillStyle(defect) {
@@ -3395,12 +3395,13 @@
     function getSelectedAreaFillFromUi() {
         if (document.getElementById('btnAreaFillHatch')?.classList.contains('active')) return 'hatch';
         if (document.getElementById('btnAreaFillNone')?.classList.contains('active')) return 'none';
-        return 'solid';
+        if (document.getElementById('btnAreaFillSolid')?.classList.contains('active')) return 'solid';
+        return 'hatch';
     }
 
     function getSelectedAreaBorderFromUi() {
-        if (document.getElementById('btnAreaBorderDashed')?.classList.contains('active')) return 'dashed';
-        return 'solid';
+        if (document.getElementById('btnAreaBorderSolid')?.classList.contains('active')) return 'solid';
+        return 'dashed';
     }
 
     function syncDefectAreaStyleUi(fillStyle, borderStyle) {
@@ -4033,8 +4034,8 @@
         defect.areaAngle = 0;
         defect.areaPoints = undefined;
         defect.areaDrawings = Array.isArray(defect.areaDrawings) ? defect.areaDrawings : [];
-        defect.areaFillStyle = defect.areaFillStyle || state.areaFillStyle || 'solid';
-        defect.areaBorderStyle = defect.areaBorderStyle || state.areaBorderStyle || 'solid';
+        defect.areaFillStyle = defect.areaFillStyle || state.areaFillStyle || 'hatch';
+        defect.areaBorderStyle = defect.areaBorderStyle || state.areaBorderStyle || 'dashed';
         if (typeof ensureAreaPinPlacement === 'function') ensureAreaPinPlacement(defect);
         if (typeof touchDefectPositionUpdatedAt === 'function') touchDefectPositionUpdatedAt(defect);
         touchDefectUpdatedAt(defect);

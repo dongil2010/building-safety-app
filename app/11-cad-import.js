@@ -1146,7 +1146,7 @@
                 setDefectAreaStylePanelVisible(!!toArea, defect);
             }
             if (toArea && typeof syncDefectAreaStyleUi === 'function') {
-                syncDefectAreaStyleUi(defect.areaFillStyle || 'solid', defect.areaBorderStyle || 'solid');
+                syncDefectAreaStyleUi(defect.areaFillStyle || 'hatch', defect.areaBorderStyle || 'dashed');
             }
             const titleEl2 = document.getElementById('defectModalTitle');
             if (titleEl2) titleEl2.textContent = toArea ? '⬚ 결함 영역 수정' : '📍 결함 핀 수정';
@@ -1229,7 +1229,7 @@
             const angEl = document.getElementById('defectAreaAngle');
             if (angEl) angEl.value = String(Math.round(Number(defect.areaAngle) || 0));
             if (!wasArea) {
-                if (typeof syncDefectAreaStyleUi === 'function') syncDefectAreaStyleUi(defect.areaFillStyle || 'solid', defect.areaBorderStyle || 'solid');
+                if (typeof syncDefectAreaStyleUi === 'function') syncDefectAreaStyleUi(defect.areaFillStyle || 'hatch', defect.areaBorderStyle || 'dashed');
                 const titleElConv = document.getElementById('defectModalTitle');
                 if (titleElConv) titleElConv.textContent = '⬚ 결함 영역 수정';
             }
