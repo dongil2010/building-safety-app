@@ -262,6 +262,10 @@ assert.strictEqual(parseFloat(ll[1].get(20)), 500 - 2 * 25); // 머리줄 iy=10+
 const lt = d.ents.filter((e) => e.type === 'TEXT');
 assert.strictEqual(lt.length, 2 + 6);
 assert.strictEqual(lt[0].get(1), '\\U+AD6C\\U+BD84');
+assert.strictEqual(lt[0].get(62), '7'); // 머리글「구분」흰색
+assert.strictEqual(lt[1].get(62), '7'); // 머리글「내 용」흰색
+assert.ok(ll.every((e) => e.get(62) === '7')); // 칸 선 흰색
+assert.strictEqual(polys(d, 'BSA_LEGEND')[0].e.get(62), '7'); // 테두리 흰색
 assert.strictEqual(lt[2].get(62), '1'); // 빨강
 assert.strictEqual(lt[4].get(62), '5');
 assert.strictEqual(parseFloat(lt[2].get(20)), 500 - 2 * (10 + 15 + 7.5));

@@ -464,8 +464,8 @@
             var col2W = Number(legendPlan.col2W) || (lw - col1W);
             var headerH = Number(legendPlan.headerRowH) || 0;
             var rowH = Number(legendPlan.rowH) || 0;
-            var grayAci = 8;
-            var headerAci = hexToAci('#64748b');
+            var grayAci = 7; // 범례 테두리·칸: 흰색(캐드 검정 바탕에서 잘 보이게, 출력 시 검정) — 2026-11-17 사용자 요청
+            var headerAci = 7; // 「구분·내 용」 머리글도 흰색
             var legFont = Math.max(4, Number(legendPlan.fontSize) || 12) * upp;
 
             addPoly('BSA_LEGEND', grayAci, [W(lx, ly), W(lx + lw, ly), W(lx + lw, ly + lh), W(lx, ly + lh)], true);
