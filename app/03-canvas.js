@@ -193,6 +193,8 @@
     function cacheFloorDrawingTierToDevice(bldg, floorCode, tierDim, dataUrl) {
         if (!bldg || !floorCode || !dataUrl || !tierDim) return;
         if (typeof dataUrl === 'string' && /^https?:\/\//i.test(dataUrl)) return;
+        // 2026-11-17 바꾸기 전 옛 도면(서버에 아직 남은 옛 사본 등)은 메모리·기기에 다시 넣지 않는다
+        if (isRetiredFloorDrawingUrl(bldg.id, floorCode, dataUrl)) return;
         if (isDrawingReplaceGuarded(bldg, floorCode)) {
             // 교체 직후: 메모리에 이미 새 티어가 있으면 클라우드/옛 IDB 값으로 덮지 않음
             const dimKeyEarly = String(tierDim);
@@ -221,21 +223,22 @@
                 && isDrawingReplaceGuarded(bldg, floorCode))) {
                 bldg.floorDrawings[floorCode] = dataUrl;
             }
-            if (!_idbPersistedDrawingKeys.has(idbKey) && !_idbPendingDrawingKeys.has(idbKey)) {
+            const rasterNow = bldg.floorDrawings[floorCode];
+            if (!_idbPersistedDrawingKeys.hasSame(idbKey, rasterNow) && !_idbPendingDrawingKeys.has(idbKey)) {
                 _idbPendingDrawingKeys.add(idbKey);
-                idbSet('floorDrawings', idbKey, dataUrl).then((ok) => {
+                idbSet('floorDrawings', idbKey, rasterNow).then((ok) => {
                     _idbPendingDrawingKeys.delete(idbKey);
-                    if (ok) _idbPersistedDrawingKeys.add(idbKey);
+                    if (ok) _idbPersistedDrawingKeys.add(idbKey, rasterNow);
                 });
             }
         }
         _idbPersistedTierKeys.delete(`${bldg.id}_${floorCode}`);
         const tierKey = floorDrawingTierIdbKey(bldg.id, floorCode, dimKey);
-        if (!_idbPersistedTierKeys.has(tierKey) && !_idbPendingTierKeys.has(tierKey)) {
+        if (!_idbPersistedTierKeys.hasSame(tierKey, dataUrl) && !_idbPendingTierKeys.has(tierKey)) {
             _idbPendingTierKeys.add(tierKey);
             idbSet('floorDrawingTiers', tierKey, dataUrl).then((ok) => {
                 _idbPendingTierKeys.delete(tierKey);
-                if (ok) _idbPersistedTierKeys.add(tierKey);
+                if (ok) _idbPersistedTierKeys.add(tierKey, dataUrl);
             });
         }
         // 다른 티어(8000/16000)는 RAM에 유지 — 병행 hydrate·줌 LOD가 서로 지우면 모바일에서 고해상도 전환이 실패함
@@ -248,7 +251,7 @@
         const idbKey = `${bldg.id}_${floorCode}`;
         _idbPersistedSourceKeys.delete(idbKey);
         idbSet('floorDrawingSources', idbKey, sourceDataUrl).then((ok) => {
-            if (ok) _idbPersistedSourceKeys.add(idbKey);
+            if (ok) _idbPersistedSourceKeys.add(idbKey, sourceDataUrl);
         });
     }
 
@@ -261,7 +264,7 @@
         if (cached) {
             if (!bldg.floorDrawingSources) bldg.floorDrawingSources = {};
             bldg.floorDrawingSources[floorCode] = cached;
-            _idbPersistedSourceKeys.add(`${bldg.id}_${floorCode}`);
+            _idbPersistedSourceKeys.add(`${bldg.id}_${floorCode}`, cached);
             return cached;
         }
         return null;
@@ -423,6 +426,49 @@
         return now;
     }
 
+    /** 교체 직전 이 층의 옛 도면(메모리의 모든 같은 건물 객체 + 기기 저장소) 지문을 남긴다 */
+    async function retireFloorDrawingContentBeforeReplace(bldg, floorCode) {
+        if (typeof retireDrawingContent !== 'function' || !bldg || !bldg.id || !floorCode) return 0;
+        const bldgId = bldg.id;
+        const floorKey = `${bldgId}_${floorCode}`;
+        const values = [];
+        const objs = new Set([bldg]);
+        (window.state.buildings || []).forEach((b) => { if (b && b.id === bldgId) objs.add(b); });
+        if (state.currentBuilding && state.currentBuilding.id === bldgId) objs.add(state.currentBuilding);
+        if (window.currentEditingBuilding && window.currentEditingBuilding.id === bldgId) objs.add(window.currentEditingBuilding);
+        objs.forEach((b) => {
+            values.push(b.floorDrawings && b.floorDrawings[floorCode]);
+            values.push(b.floorDrawingSources && b.floorDrawingSources[floorCode]);
+            values.push(b.floorDrawingPdfs && b.floorDrawingPdfs[floorCode]);
+            const tiers = b.floorDrawingTiers && b.floorDrawingTiers[floorCode];
+            if (tiers && typeof tiers === 'object') Object.values(tiers).forEach((v) => values.push(v));
+        });
+        const reads = [
+            idbGet('floorDrawings', floorKey),
+            idbGet('floorDrawingSources', floorKey),
+            idbGet('floorDrawingPdfs', floorKey),
+            idbGet('floorDrawingTiers', floorKey)
+        ];
+        (window.FLOOR_DRAWING_TIER_DIMS || [4000, 8000, 16000]).forEach((d) => {
+            reads.push(idbGet('floorDrawingTiers', floorDrawingTierIdbKey(bldgId, floorCode, d)));
+        });
+        const got = await Promise.all(reads.map((p) => Promise.resolve(p).catch(() => null)));
+        got.forEach((v) => {
+            if (v && typeof v === 'object') Object.values(v).forEach((x) => values.push(x));
+            else values.push(v);
+        });
+        return retireDrawingContent(floorDrawingRetireKeys(bldgId, floorCode), values);
+    }
+
+    /** 새로 넣은 도면은 (옛 파일을 그대로 다시 넣었더라도) 막지 않는다 */
+    function unretireNewFloorDrawingContent(bldgId, floorCode, prepared) {
+        if (typeof unretireDrawingContent !== 'function' || !prepared) return;
+        const vals = [prepared.rasterDataUrl, prepared.sourceDataUrl, prepared.pdfDataUrl];
+        if (prepared.tiers && typeof prepared.tiers === 'object') Object.values(prepared.tiers).forEach((v) => vals.push(v));
+        unretireDrawingContent(floorDrawingRetireKeys(bldgId, floorCode), vals.filter(Boolean));
+    }
+    window.unretireNewFloorDrawingContent = unretireNewFloorDrawingContent;
+
     async function invalidateFloorDrawingBeforeReplace(bldg, floorCode) {
         if (!bldg || !bldg.id || !floorCode) return;
         const bldgId = bldg.id;
@@ -430,6 +476,13 @@
         // 2026-11-12 지우기 전에 옛 도면 그림을 보관 — 바꾼 뒤 「마킹 맞추기」에서 새 도면 위에 겹쳐 기준점을 찍는다(실패해도 교체는 계속)
         if (typeof window.captureFloorDrawingForAlign === 'function') {
             await window.captureFloorDrawingForAlign(bldg, floorCode);
+        }
+        // 2026-11-17 옛 도면 내용의 지문을 남긴다 — 늦게 끝난 옛 저장·동기화 병합·서버의 옛 사본이 옛 도면을
+        // 기기 저장소나 화면에 되살리지 못하게(맞게 넣었는데 오프라인에서 옛 도면이 보이던 문제)
+        try {
+            await retireFloorDrawingContentBeforeReplace(bldg, floorCode);
+        } catch (e) {
+            console.warn('옛 도면 지문 기록 실패(교체는 계속):', e);
         }
         // 교체 세대: 진행 중이던 클라우드/IDB 티어 fetch가 새 도면을 덮지 못하게 함
         if (!bldg._drawingEpoch) bldg._drawingEpoch = {};
@@ -846,6 +899,8 @@
         const loadToken = ++floorDrawingTierLoadToken;
 
         const bldg = refreshCurrentBuildingFromState() || state.currentBuilding;
+        // 2026-11-17 동기화가 되살린 옛 도면이 메모리에 있으면 빼고 고른다(기기 저장소·서버의 새 도면을 다시 읽음)
+        if (bldg) scrubRetiredFloorDrawingMemory(bldg);
         const baseTier = (typeof window.getFloorDrawingBaseTierDim === 'function')
             ? window.getFloorDrawingBaseTierDim()
             : 4000;
@@ -871,7 +926,7 @@
             if (typeof fetchAndCacheCloudFloorDrawingTier === 'function' && navigator.onLine !== false) {
                 const cloud4000 = await fetchAndCacheCloudFloorDrawingTier(bldg, floorCode, 4000);
                 if (loadToken !== floorDrawingTierLoadToken || state.currentFloor !== floorCode) return false;
-                if (isUsableRasterDrawingUrl(cloud4000)) {
+                if (isUsableRasterDrawingUrl(cloud4000) && !isRetiredFloorDrawingUrl(bldg.id, floorCode, cloud4000)) {
                     tryLoadImage(cloud4000);
                     return true;
                 }
@@ -879,7 +934,8 @@
             if (typeof fetchCloudFloorDrawingDataUrl === 'function' && navigator.onLine !== false) {
                 const cloudRaster = await fetchCloudFloorDrawingDataUrl(bldg.id, floorCode);
                 if (loadToken !== floorDrawingTierLoadToken || state.currentFloor !== floorCode) return false;
-                if (isUsableRasterDrawingUrl(cloudRaster) && !isPdfDrawingUrl(cloudRaster)) {
+                if (isUsableRasterDrawingUrl(cloudRaster) && !isPdfDrawingUrl(cloudRaster)
+                    && !isRetiredFloorDrawingUrl(bldg.id, floorCode, cloudRaster)) {
                     if (!bldg.floorDrawings) bldg.floorDrawings = {};
                     bldg.floorDrawings[floorCode] = cloudRaster;
                     tryLoadImage(cloudRaster);
@@ -910,8 +966,10 @@
                 // 2026-11-16 큰 도면 그림(4000px)의 압축 풀기를 화면 스레드 밖에서 미리 끝낸다 — 첫 그리기 때 화면이 멈칫하던 것 방지
                 if (typeof img.decode === 'function') {
                     try { await img.decode(); } catch (_e) { /* 못 하면 예전처럼 그릴 때 푼다 */ }
-                    if (loadToken !== floorDrawingTierLoadToken || state.currentFloor !== floorCode) return;
                 }
+                // 2026-11-17 그사이 다른 층·다른 건물로 넘어갔으면 이 그림을 붙이지 않는다(decode가 없는 기기도 확인)
+                if (loadToken !== floorDrawingTierLoadToken || state.currentFloor !== floorCode) return;
+                if (bldg && bldg.id && state.currentBuildingId && state.currentBuildingId !== bldg.id) return;
                 applyFloorDrawingTarget(img, null, { immediate: !state.bgImage });
                 updateFloorDrawingEmptyOverlay(null);
                 floorDrawingActiveTierDim = baseTier;

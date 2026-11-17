@@ -79,7 +79,107 @@ function openLocalImageDb() {
     return _localImageDbPromise;
 }
 
+// --- 1C. 교체된 옛 도면 지문 (2026-11-17) ---
+// 층 도면을 다시 넣으면 옛 그림의 「지문」을 층 키별로 남긴다. 그 뒤로는 어떤 경로로든(늦게 끝난 옛 저장,
+// 동기화 병합이 되살린 옛 메모리, 아직 안 바뀐 클라우드 사본) 옛 그림이 기기 저장소에 다시 써지거나
+// 기기 저장소에서 읽혀 화면에 나오지 않는다. — 「맞게 넣었는데 오프라인에서 옛 도면/다른 도면이 보임」
+const RETIRED_DRAWING_LS_KEY = 'bsa_retired_drawing_content_v1';
+const RETIRED_DRAWING_TTL_MS = 21 * 24 * 3600 * 1000;
+const RETIRED_DRAWING_STORES = new Set(['floorDrawings', 'floorDrawingTiers', 'floorDrawingSources', 'floorDrawingPdfs']);
+let _retiredDrawingMap = null; // { idbKey: { sig: ts } }
+
+/** 큰 base64 문자열의 빠른 지문 — 길이 + 고르게 뽑은 글자 + 끝부분 해시 */
+function drawingContentSig(v) {
+    if (typeof v !== 'string' || v.length < 32) return '';
+    const n = v.length;
+    let h = 0x811c9dc5;
+    const step = Math.max(1, Math.floor(n / 1024));
+    for (let i = 0; i < n; i += step) {
+        h ^= v.charCodeAt(i);
+        h = Math.imul(h, 0x01000193) >>> 0;
+    }
+    for (let i = Math.max(0, n - 256); i < n; i++) {
+        h ^= v.charCodeAt(i);
+        h = Math.imul(h, 0x01000193) >>> 0;
+    }
+    return n.toString(36) + '.' + h.toString(36);
+}
+
+function loadRetiredDrawingMap() {
+    if (_retiredDrawingMap) return _retiredDrawingMap;
+    let obj = {};
+    try {
+        const raw = localStorage.getItem(RETIRED_DRAWING_LS_KEY);
+        obj = raw ? JSON.parse(raw) : {};
+        if (!obj || typeof obj !== 'object') obj = {};
+    } catch (_e) { obj = {}; }
+    const now = Date.now();
+    Object.keys(obj).forEach((k) => {
+        const sigs = obj[k];
+        if (!sigs || typeof sigs !== 'object') { delete obj[k]; return; }
+        Object.keys(sigs).forEach((s) => { if (!(now - Number(sigs[s]) < RETIRED_DRAWING_TTL_MS)) delete sigs[s]; });
+        if (!Object.keys(sigs).length) delete obj[k];
+    });
+    _retiredDrawingMap = obj;
+    return obj;
+}
+
+function saveRetiredDrawingMap() {
+    try { localStorage.setItem(RETIRED_DRAWING_LS_KEY, JSON.stringify(_retiredDrawingMap || {})); } catch (_e) { /* ignore */ }
+}
+
+/** data: 그림만 지문으로 남긴다(서버 주소는 다시 올려도 같은 주소일 수 있어 막지 않음) */
+function isRetirableDrawingValue(v) {
+    return typeof v === 'string' && v.length >= 32 && v.indexOf('data:') === 0;
+}
+
+function retireDrawingContent(keys, values) {
+    const map = loadRetiredDrawingMap();
+    const now = Date.now();
+    const sigs = [...new Set((values || []).filter(isRetirableDrawingValue).map(drawingContentSig).filter(Boolean))];
+    if (!sigs.length) return 0;
+    (keys || []).forEach((k) => {
+        if (!k) return;
+        if (!map[k]) map[k] = {};
+        sigs.forEach((s) => { map[k][s] = now; });
+        const entries = Object.entries(map[k]).sort((a, b) => b[1] - a[1]);
+        if (entries.length > 12) map[k] = Object.fromEntries(entries.slice(0, 12));
+    });
+    saveRetiredDrawingMap();
+    return sigs.length;
+}
+
+function unretireDrawingContent(keys, values) {
+    const map = loadRetiredDrawingMap();
+    const sigs = (values || []).map(drawingContentSig).filter(Boolean);
+    if (!sigs.length) return;
+    let changed = false;
+    (keys || []).forEach((k) => {
+        if (!k || !map[k]) return;
+        sigs.forEach((s) => { if (map[k][s]) { delete map[k][s]; changed = true; } });
+        if (!Object.keys(map[k]).length) delete map[k];
+    });
+    if (changed) saveRetiredDrawingMap();
+}
+
+function isRetiredDrawingContent(key, value) {
+    if (!key || !isRetirableDrawingValue(value)) return false;
+    const map = loadRetiredDrawingMap();
+    const sigs = map[key];
+    if (!sigs) return false;
+    return !!sigs[drawingContentSig(value)];
+}
+window.drawingContentSig = drawingContentSig;
+window.retireDrawingContent = retireDrawingContent;
+window.unretireDrawingContent = unretireDrawingContent;
+window.isRetiredDrawingContent = isRetiredDrawingContent;
+
 async function idbSet(storeName, key, value) {
+    if (RETIRED_DRAWING_STORES.has(storeName) && isRetiredDrawingContent(key, value)) {
+        // 바꾸기 전 옛 도면 — 기기 저장소에 다시 쓰지 않는다(저장한 것처럼 true: 실패 안내를 띄우지 않음)
+        console.warn(`[도면] 교체된 옛 도면은 기기에 다시 저장하지 않음 (${storeName}/${key})`);
+        return true;
+    }
     try {
         const db = await openLocalImageDb();
         return await new Promise((resolve, reject) => {
@@ -97,12 +197,19 @@ async function idbSet(storeName, key, value) {
 async function idbGet(storeName, key) {
     try {
         const db = await openLocalImageDb();
-        return await new Promise((resolve, reject) => {
+        const got = await new Promise((resolve, reject) => {
             const tx = db.transaction(storeName, 'readonly');
             const req = tx.objectStore(storeName).get(key);
             req.onsuccess = () => resolve(req.result || null);
             req.onerror = () => reject(req.error);
         });
+        if (got && RETIRED_DRAWING_STORES.has(storeName) && isRetiredDrawingContent(key, got)) {
+            // 교체 전 옛 도면이 남아 있었다(늦게 끝난 옛 저장 등) — 보여 주지 않고 지운다
+            console.warn(`[도면] 기기에 남은 옛 도면을 버림 (${storeName}/${key})`);
+            idbDelete(storeName, key);
+            return null;
+        }
+        return got;
     } catch (e) {
         console.warn(`IndexedDB 조회 실패 (${storeName}/${key}):`, e);
         return null;

@@ -314,7 +314,7 @@
                         const stored = await idbGet('floorDrawings', idbKey);
                         if (!isUsableRasterDrawingUrl(stored)) {
                             await idbSet('floorDrawings', idbKey, base);
-                            _idbPersistedDrawingKeys.add(idbKey);
+                            _idbPersistedDrawingKeys.add(idbKey, base);
                         }
                         bytes += prep.dataUrlBytes(base);
                         rec.drawings.ok++;
@@ -1848,7 +1848,7 @@
         else if (!bldg.floorDrawingPdfs) bldg.floorDrawingPdfs = {};
         bldg.floorDrawingPdfs[floorCode] = pdf;
         await idbSet('floorDrawingPdfs', idbKey, pdf);
-        _idbPersistedPdfKeys.add(idbKey);
+        _idbPersistedPdfKeys.add(idbKey, pdf);
         markFloorPdfKnown(bldg.id, floorCode, true);
         if (!window._cloudSyncedPdfKeys) window._cloudSyncedPdfKeys = initCloudSyncedKeySet('pdfs');
         window._cloudSyncedPdfKeys.add(idbKey);
@@ -1885,7 +1885,7 @@
             if (typeof window.ensureFloorDrawingPdfs === 'function') window.ensureFloorDrawingPdfs(bldg);
             else if (!bldg.floorDrawingPdfs) bldg.floorDrawingPdfs = {};
             bldg.floorDrawingPdfs[floorCode] = cached;
-            _idbPersistedPdfKeys.add(idbKey);
+            _idbPersistedPdfKeys.add(idbKey, cached);
             return cached;
         }
 
@@ -3407,9 +3407,9 @@
         const tasks = [];
         const key = `${bldg.id}_${floorCode}`;
         const raster = bldg.floorDrawings && bldg.floorDrawings[floorCode];
-        if (isUsableRasterDrawingUrl(raster) && !_idbPersistedDrawingKeys.has(key)) {
+        if (isUsableRasterDrawingUrl(raster) && !_idbPersistedDrawingKeys.hasSame(key, raster)) {
             tasks.push(idbSet('floorDrawings', key, raster).then((ok) => {
-                if (ok) _idbPersistedDrawingKeys.add(key);
+                if (ok) _idbPersistedDrawingKeys.add(key, raster);
             }));
         }
         const tiers = bldg.floorDrawingTiers && bldg.floorDrawingTiers[floorCode];
@@ -3417,9 +3417,9 @@
             Object.entries(tiers).forEach(([dim, url]) => {
                 if (typeof url !== 'string' || url.length < 32) return;
                 const tierKey = floorDrawingTierIdbKey(bldg.id, floorCode, dim);
-                if (_idbPersistedTierKeys.has(tierKey)) return;
+                if (_idbPersistedTierKeys.hasSame(tierKey, url)) return;
                 tasks.push(idbSet('floorDrawingTiers', tierKey, url).then((ok) => {
-                    if (ok) _idbPersistedTierKeys.add(tierKey);
+                    if (ok) _idbPersistedTierKeys.add(tierKey, url);
                 }));
             });
         }
@@ -3447,7 +3447,8 @@
                 if (!val) return;
                 if (isDeletedDrawingFloor(bldg, floorCode)) return;
                 const key = `${bldg.id}_${floorCode}`;
-                if (isSessionDeletedDrawingKey(key) || persistedSet.has(key)) return;
+                if (isSessionDeletedDrawingKey(key)) return;
+                if (typeof persistedSet.hasSame === 'function' ? persistedSet.hasSame(key, val) : persistedSet.has(key)) return;
                 pendingSet.add(key);
                 tasks.push(idbSet(storeName, key, val).then((ok) => {
                     pendingSet.delete(key);
@@ -3455,7 +3456,7 @@
                         idbDelete(storeName, key);
                         return;
                     }
-                    if (ok) persistedSet.add(key);
+                    if (ok) persistedSet.add(key, val);
                 }));
             });
         };
@@ -3468,7 +3469,7 @@
             Object.entries(tiersObj).forEach(([dim, url]) => {
                 if (typeof url !== 'string' || url.length < 32) return;
                 const key = floorDrawingTierIdbKey(bldg.id, floorCode, dim);
-                if (_idbPersistedTierKeys.has(key) || _idbPendingTierKeys.has(key)) return;
+                if (_idbPersistedTierKeys.hasSame(key, url) || _idbPendingTierKeys.has(key)) return;
                 _idbPendingTierKeys.add(key);
                 tasks.push(idbSet('floorDrawingTiers', key, url).then((ok) => {
                     _idbPendingTierKeys.delete(key);
@@ -3476,7 +3477,7 @@
                         idbDelete('floorDrawingTiers', key);
                         return;
                     }
-                    if (ok) _idbPersistedTierKeys.add(key);
+                    if (ok) _idbPersistedTierKeys.add(key, url);
                 }));
             });
         });

@@ -2386,7 +2386,7 @@ ${roundMobile ? '' : `<button type="button" class="icon-btn icon-btn-trash" titl
             if (!isUsableRasterDrawingUrl(url)) continue;
             const tierKey = floorDrawingTierIdbKey(newBuildingId, floorCode, dim);
             await idbSet('floorDrawingTiers', tierKey, url);
-            _idbPersistedTierKeys.add(tierKey);
+            _idbPersistedTierKeys.add(tierKey, url);
         }
         await uploadFloorDrawingTiers(newBuildingId, floorCode, targetBldg.floorDrawingTiers[floorCode]);
         const base = tiers['4000'] || tiers[4000];
@@ -2395,7 +2395,7 @@ ${roundMobile ? '' : `<button type="button" class="icon-btn icon-btn-trash" titl
         targetBldg.floorDrawings[floorCode] = base;
         const newKey = `${newBuildingId}_${floorCode}`;
         await idbSet('floorDrawings', newKey, base);
-        _idbPersistedDrawingKeys.add(newKey);
+        _idbPersistedDrawingKeys.add(newKey, base);
         await uploadFloorDrawing(newBuildingId, floorCode, base);
     }
 
@@ -2448,7 +2448,7 @@ ${roundMobile ? '' : `<button type="button" class="icon-btn icon-btn-trash" titl
                 if (isUsableRasterDrawingUrl(raster)) {
                     targetBldg.floorDrawings[fc] = raster;
                     await idbSet('floorDrawings', newKey, raster);
-                    _idbPersistedDrawingKeys.add(newKey);
+                    _idbPersistedDrawingKeys.add(newKey, raster);
                     await uploadFloorDrawing(newBuildingId, fc, raster);
                 }
             }
@@ -2474,7 +2474,7 @@ ${roundMobile ? '' : `<button type="button" class="icon-btn icon-btn-trash" titl
                 if (srcUrl) {
                     targetBldg.floorDrawingSources[fc] = srcUrl;
                     await idbSet('floorDrawingSources', newKey, srcUrl);
-                    _idbPersistedSourceKeys.add(newKey);
+                    _idbPersistedSourceKeys.add(newKey, srcUrl);
                 }
             }
         }
@@ -4419,6 +4419,43 @@ ${roundMobile ? '' : `<button type="button" class="icon-btn icon-btn-trash" titl
         });
     }
 
+    /**
+     * 2026-11-17 수정 창이 들고 있는 건물 객체와 목록(state.buildings)의 건물 객체가 갈라져 있으면
+     * (도면을 차례로 올리는 사이 동기화가 목록을 새 객체로 바꿈) 새 도면을 목록 쪽 객체에도 넣는다.
+     * 예전엔 목록 쪽 객체에 옛 도면이 남아 화면에 옛 도면이 보이고, 그 옛 도면이 기기 저장소에 다시 써졌다.
+     */
+    function mirrorFloorDrawingToLiveBuildings(bldg, floorCode) {
+        if (!bldg || !bldg.id || !floorCode) return;
+        const live = new Set();
+        (window.state.buildings || []).forEach((b) => { if (b && b.id === bldg.id && b !== bldg) live.add(b); });
+        if (window.state.currentBuilding && window.state.currentBuilding.id === bldg.id && window.state.currentBuilding !== bldg) {
+            live.add(window.state.currentBuilding);
+        }
+        live.forEach((b) => {
+            ['floorDrawings', 'floorDrawingSources', 'floorDrawingPdfs'].forEach((field) => {
+                const v = bldg[field] && bldg[field][floorCode];
+                if (!b[field]) b[field] = {};
+                if (v) b[field][floorCode] = v;
+                else delete b[field][floorCode];
+            });
+            const tiers = bldg.floorDrawingTiers && bldg.floorDrawingTiers[floorCode];
+            if (!b.floorDrawingTiers) b.floorDrawingTiers = {};
+            if (tiers && typeof tiers === 'object') b.floorDrawingTiers[floorCode] = { ...tiers };
+            else delete b.floorDrawingTiers[floorCode];
+            // 이 층은 방금 사용자가 넣은 그대로(PDF 뺀 표시를 지웠으면 목록 쪽에서도 지운다)
+            const stampMine = Number(bldg.floorPdfUpdatedAt && bldg.floorPdfUpdatedAt[floorCode]) || 0;
+            const stampTheirs = Number(b.floorPdfUpdatedAt && b.floorPdfUpdatedAt[floorCode]) || 0;
+            if (stampMine > stampTheirs) b.floorPdfUpdatedAt = Object.assign({}, b.floorPdfUpdatedAt, { [floorCode]: stampMine });
+            const removedMine = Number(bldg.floorPdfRemovedAt && bldg.floorPdfRemovedAt[floorCode]) || 0;
+            const removedNext = Object.assign({}, b.floorPdfRemovedAt);
+            if (removedMine) removedNext[floorCode] = removedMine;
+            else delete removedNext[floorCode];
+            b.floorPdfRemovedAt = removedNext;
+            if (bldg._drawingEpoch) b._drawingEpoch = Object.assign({}, b._drawingEpoch, bldg._drawingEpoch);
+            if (bldg._drawingReplaceGuard) b._drawingReplaceGuard = Object.assign({}, b._drawingReplaceGuard, bldg._drawingReplaceGuard);
+        });
+    }
+
     // Save Edit Building & Merge New Drawings Action
     const btnSaveEditBuilding = document.getElementById('btnSaveEditBuilding');
     if (btnSaveEditBuilding) {
@@ -4511,6 +4548,10 @@ ${roundMobile ? '' : `<button type="button" class="icon-btn icon-btn-trash" titl
                                     : window.compressDrawingImage(item.file).then((rasterDataUrl) => ({ rasterDataUrl, pdfDataUrl: null }));
                                 const prepared = await withTimeout(preparePromise, 120000, 'prepare-drawing');
                                 await invalidateFloorDrawingBeforeReplace(bldg, item.floorCode);
+                                // 같은 파일을 다시 넣었어도 새 도면은 막지 않는다(옛 도면 지문에서 뺌)
+                                if (typeof window.unretireNewFloorDrawingContent === 'function') {
+                                    window.unretireNewFloorDrawingContent(bldg.id, item.floorCode, prepared);
+                                }
                                 clearFloorDrawingRotation(bldg.id, item.floorCode);
                                 if (prepared && prepared.pdfDataUrl && bldg.floorDrawingPdfs) {
                                     delete bldg.floorDrawingPdfs[item.floorCode];
@@ -4554,7 +4595,8 @@ ${roundMobile ? '' : `<button type="button" class="icon-btn icon-btn-trash" titl
                                 bumpDrawingEpoch(bldg, item.floorCode);
                                 bldg._drawingReplaceGuard = bldg._drawingReplaceGuard || {};
                                 bldg._drawingReplaceGuard[item.floorCode] = Date.now() + 120000;
-await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
+                                await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
+                                mirrorFloorDrawingToLiveBuildings(bldg, item.floorCode);
                                 syncBuildingDrawingFloorCodes(bldg);
                                 saveStateToLocalStorage();
                             } catch (err) {

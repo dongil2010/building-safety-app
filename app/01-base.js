@@ -1425,14 +1425,42 @@ document.addEventListener('DOMContentLoaded', () => {
 
     // 이미 IndexedDB에 저장해둔 이미지는 매번 다시 쓰지 않도록 키를 기억해둔다
     // (saveStateToLocalStorage는 아주 자주 호출되므로, 안 그러면 같은 이미지를 계속 다시 쓰게 된다)
-    const _idbPersistedDrawingKeys = new Set();
+    // 2026-11-17 도면 「저장됨」 표시는 키만이 아니라 저장한 내용의 지문도 기억한다. 예전엔 키만 봐서
+    // 도면을 바꾼 직후 늦게 끝난 옛 저장이 「저장됨」을 찍으면 새 도면은 기기에 안 써진 채 넘어갔고,
+    // 메모리에서도 내려가 오프라인에서 옛 도면이 나왔다. add(key, 값)이면 그 값과 같을 때만 「같은 내용 저장됨」.
+    class PersistedContentKeySet extends Set {
+        add(key, value) {
+            super.add(key);
+            if (!this._sig) this._sig = new Map();
+            const sig = (value !== undefined && typeof drawingContentSig === 'function') ? drawingContentSig(value) : '';
+            if (sig) this._sig.set(key, sig);
+            else this._sig.delete(key);
+            return this;
+        }
+        delete(key) {
+            if (this._sig) this._sig.delete(key);
+            return super.delete(key);
+        }
+        clear() {
+            if (this._sig) this._sig.clear();
+            super.clear();
+        }
+        /** 이 키에 바로 이 값이 저장돼 있나(지문을 모르면 예전처럼 키만 본다) */
+        hasSame(key, value) {
+            if (!super.has(key)) return false;
+            const sig = this._sig && this._sig.get(key);
+            if (!sig || value === undefined || typeof drawingContentSig !== 'function') return true;
+            return sig === drawingContentSig(value);
+        }
+    }
+    const _idbPersistedDrawingKeys = new PersistedContentKeySet();
     const _idbPersistedPhotoKeys = new Set();
-    const _idbPersistedPdfKeys = new Set();
+    const _idbPersistedPdfKeys = new PersistedContentKeySet();
     // PDF를 뺀 층(floorPdfRemovedAt) — 이 세션에서 옛 PDF를 버린 층 / 클라우드에서 지워진 걸 확인한 층
     const _droppedRemovedPdfKeys = new Set();
     const _confirmedGoneCloudPdfKeys = new Set();
-    const _idbPersistedTierKeys = new Set();
-    const _idbPersistedSourceKeys = new Set();
+    const _idbPersistedTierKeys = new PersistedContentKeySet();
+    const _idbPersistedSourceKeys = new PersistedContentKeySet();
     // 저장이 아직 끝나지 않은 키(진행 중). 실제 저장이 성공하기 전까지는 "저장됨"으로
     // 표시하지 않아서, 실패 시 다음 saveStateToLocalStorage 호출 때 재시도되게 한다.
     const _idbPendingDrawingKeys = new Set();
@@ -1489,22 +1517,24 @@ document.addEventListener('DOMContentLoaded', () => {
         const keepDim = opts && opts.keepDim != null ? String(opts.keepDim) : null;
         // 2026-11-09 기기(IndexedDB)에도 서버에도 없는 도면은 비우지 않는다. 예전엔 기기 저장이 실패해도(저장 공간 부족 등)
         // 무조건 비워서, 서버 업로드까지 실패하면 도면이 어디에도 안 남고 「저장 완료」 뒤 통째로 사라졌다.
-        const safe = (persisted, cloud, key) => !!((persisted && persisted.has(key)) || (cloud && cloud.has(key)));
+        // 2026-11-17 기기에 「바로 이 내용」이 저장됐을 때만 비운다(다른 옛 내용이 저장돼 있으면 새 도면을 메모리에 둔다)
+        const safe = (persisted, cloud, key, value) => !!((persisted && (typeof persisted.hasSame === 'function'
+            ? persisted.hasSame(key, value) : persisted.has(key))) || (cloud && cloud.has(key)));
         const floorKey = (fc) => `${bldg.id}_${fc}`;
         Object.keys(bldg.floorDrawingPdfs || {}).forEach((fc) => {
-            if (safe(_idbPersistedPdfKeys, window._cloudSyncedPdfKeys, floorKey(fc))) delete bldg.floorDrawingPdfs[fc];
+            if (safe(_idbPersistedPdfKeys, window._cloudSyncedPdfKeys, floorKey(fc), bldg.floorDrawingPdfs[fc])) delete bldg.floorDrawingPdfs[fc];
         });
         Object.keys(bldg.floorDrawingSources || {}).forEach((fc) => {
-            if (safe(_idbPersistedSourceKeys, null, floorKey(fc))) delete bldg.floorDrawingSources[fc];
+            if (safe(_idbPersistedSourceKeys, null, floorKey(fc), bldg.floorDrawingSources[fc])) delete bldg.floorDrawingSources[fc];
         });
         Object.keys(bldg.floorDrawings || {}).forEach((fc) => {
             if (keepFloor && fc === keepFloor) return;
-            if (safe(_idbPersistedDrawingKeys, window._cloudSyncedDrawingKeys, floorKey(fc))) delete bldg.floorDrawings[fc];
+            if (safe(_idbPersistedDrawingKeys, window._cloudSyncedDrawingKeys, floorKey(fc), bldg.floorDrawings[fc])) delete bldg.floorDrawings[fc];
         });
         Object.keys(bldg.floorDrawingTiers || {}).forEach((fc) => {
             const tiers = bldg.floorDrawingTiers[fc];
             if (!tiers) return;
-            const tierSafe = (d) => safe(_idbPersistedTierKeys, window._cloudSyncedTierKeys, `${bldg.id}_${fc}_${d}`);
+            const tierSafe = (d) => safe(_idbPersistedTierKeys, window._cloudSyncedTierKeys, `${bldg.id}_${fc}_${d}`, tiers[d]);
             if (keepFloor && fc === keepFloor) {
                 Object.keys(tiers).forEach((d) => {
                     if (keepDim && d !== keepDim && d !== '4000' && tierSafe(d)) delete tiers[d];
@@ -2332,6 +2362,51 @@ document.addEventListener('DOMContentLoaded', () => {
         return !!(key && _sessionDeletedDrawingKeys.has(key));
     }
 
+    /** 한 층 도면이 기기 저장소에서 쓰는 키 전부(그림·확대 단계·원본·PDF) */
+    function floorDrawingRetireKeys(bldgId, floorCode) {
+        if (!bldgId || !floorCode) return [];
+        const floorKey = `${bldgId}_${floorCode}`;
+        const keys = [floorKey];
+        (window.FLOOR_DRAWING_TIER_DIMS || [4000, 8000, 16000]).concat([2000]).forEach((d) => {
+            keys.push(`${floorKey}_${d}`);
+        });
+        return [...new Set(keys)];
+    }
+
+    function isRetiredFloorDrawingUrl(bldgId, floorCode, url) {
+        if (typeof isRetiredDrawingContent !== 'function' || !bldgId || !floorCode) return false;
+        return isRetiredDrawingContent(`${bldgId}_${floorCode}`, url);
+    }
+
+    /**
+     * 2026-11-17 교체 전 옛 도면이 메모리(건물 객체)에 되살아나 있으면 뺀다.
+     * 동기화 병합이 시작할 때 잡아 둔 옛 도면을 새 건물 객체에 다시 넣는 일이 있었다 → 그 객체가 화면·기기 저장에 쓰여
+     * 맞게 넣었는데도 옛 도면이 보였다. 빠진 칸은 기기 저장소(새 도면)나 서버에서 다시 채운다.
+     */
+    function scrubRetiredFloorDrawingMemory(bldg) {
+        if (!bldg || !bldg.id || typeof isRetiredDrawingContent !== 'function') return 0;
+        let n = 0;
+        const scrubMap = (map) => {
+            if (!map || typeof map !== 'object') return;
+            Object.keys(map).forEach((fc) => {
+                if (isRetiredFloorDrawingUrl(bldg.id, fc, map[fc])) { delete map[fc]; n++; }
+            });
+        };
+        scrubMap(bldg.floorDrawings);
+        scrubMap(bldg.floorDrawingSources);
+        scrubMap(bldg.floorDrawingPdfs);
+        Object.keys(bldg.floorDrawingTiers || {}).forEach((fc) => {
+            const tiers = bldg.floorDrawingTiers[fc];
+            if (!tiers || typeof tiers !== 'object') return;
+            Object.keys(tiers).forEach((d) => {
+                if (isRetiredFloorDrawingUrl(bldg.id, fc, tiers[d])) { delete tiers[d]; n++; }
+            });
+            if (!Object.keys(tiers).length) delete bldg.floorDrawingTiers[fc];
+        });
+        if (n) console.warn('[도면] 메모리에 되살아난 옛 도면을 뺌:', bldg.id, n);
+        return n;
+    }
+
     function clearLocalDrawingPersistFlags(bldgId, floorCode) {
         if (!bldgId || !floorCode) return;
         const floorKey = `${bldgId}_${floorCode}`;
@@ -2894,13 +2969,14 @@ document.addEventListener('DOMContentLoaded', () => {
     // 훨씬 여유롭다.) 새로 생긴 이미지만 골라서 저장하므로 매 호출마다 부담이 크지 않다.
     function persistLocalImagesToIndexedDb(buildings, defectsMap) {
         (buildings || []).forEach(b => {
+            scrubRetiredFloorDrawingMemory(b);
             const drawings = b.floorDrawings || {};
             Object.entries(drawings).forEach(([floorCode, dataUrl]) => {
                 if (!dataUrl) return;
                 if (isDeletedDrawingFloor(b, floorCode)) return;
                 const key = `${b.id}_${floorCode}`;
                 if (isSessionDeletedDrawingKey(key)) return;
-                if (_idbPersistedDrawingKeys.has(key) || _idbPendingDrawingKeys.has(key)) return;
+                if (_idbPersistedDrawingKeys.hasSame(key, dataUrl) || _idbPendingDrawingKeys.has(key)) return;
                 _idbPendingDrawingKeys.add(key);
                 idbSet('floorDrawings', key, dataUrl).then(ok => {
                     _idbPendingDrawingKeys.delete(key);
@@ -2909,7 +2985,7 @@ document.addEventListener('DOMContentLoaded', () => {
                         return;
                     }
                     if (ok) {
-                        _idbPersistedDrawingKeys.add(key);
+                        _idbPersistedDrawingKeys.add(key, dataUrl);
                         _idbSaveFailedNotified = false;
                     } else {
                         notifyIndexedDbSaveFailure();
@@ -2924,7 +3000,7 @@ document.addEventListener('DOMContentLoaded', () => {
                 Object.entries(tiersObj).forEach(([dim, url]) => {
                     if (typeof url !== 'string' || url.length < 32) return;
                     const key = floorDrawingTierIdbKey(b.id, floorCode, dim);
-                    if (_idbPersistedTierKeys.has(key) || _idbPendingTierKeys.has(key)) return;
+                    if (_idbPersistedTierKeys.hasSame(key, url) || _idbPendingTierKeys.has(key)) return;
                     _idbPendingTierKeys.add(key);
                     idbSet('floorDrawingTiers', key, url).then(ok => {
                         _idbPendingTierKeys.delete(key);
@@ -2933,7 +3009,7 @@ document.addEventListener('DOMContentLoaded', () => {
                             return;
                         }
                         if (ok) {
-                            _idbPersistedTierKeys.add(key);
+                            _idbPersistedTierKeys.add(key, url);
                             _idbSaveFailedNotified = false;
                         } else {
                             notifyIndexedDbSaveFailure();
@@ -2948,7 +3024,7 @@ document.addEventListener('DOMContentLoaded', () => {
                 if (isDeletedDrawingFloor(b, floorCode)) return;
                 const key = `${b.id}_${floorCode}`;
                 if (isSessionDeletedDrawingKey(key)) return;
-                if (_idbPersistedSourceKeys.has(key) || _idbPendingSourceKeys.has(key)) return;
+                if (_idbPersistedSourceKeys.hasSame(key, sourceUrl) || _idbPendingSourceKeys.has(key)) return;
                 _idbPendingSourceKeys.add(key);
                 idbSet('floorDrawingSources', key, sourceUrl).then(ok => {
                     _idbPendingSourceKeys.delete(key);
@@ -2957,7 +3033,7 @@ document.addEventListener('DOMContentLoaded', () => {
                         return;
                     }
                     if (ok) {
-                        _idbPersistedSourceKeys.add(key);
+                        _idbPersistedSourceKeys.add(key, sourceUrl);
                         _idbSaveFailedNotified = false;
                     } else {
                         notifyIndexedDbSaveFailure();
@@ -2972,7 +3048,7 @@ document.addEventListener('DOMContentLoaded', () => {
                 if (isDeletedDrawingFloor(b, floorCode)) return;
                 const key = `${b.id}_${floorCode}`;
                 if (isSessionDeletedDrawingKey(key)) return;
-                if (_idbPersistedPdfKeys.has(key) || _idbPendingPdfKeys.has(key)) return;
+                if (_idbPersistedPdfKeys.hasSame(key, pdfDataUrl) || _idbPendingPdfKeys.has(key)) return;
                 _idbPendingPdfKeys.add(key);
                 idbSet('floorDrawingPdfs', key, pdfDataUrl).then(ok => {
                     _idbPendingPdfKeys.delete(key);
@@ -2981,7 +3057,7 @@ document.addEventListener('DOMContentLoaded', () => {
                         return;
                     }
                     if (ok) {
-                        _idbPersistedPdfKeys.add(key);
+                        _idbPersistedPdfKeys.add(key, pdfDataUrl);
                         _idbSaveFailedNotified = false;
                     } else {
                         notifyIndexedDbSaveFailure();
@@ -3814,23 +3890,25 @@ document.addEventListener('DOMContentLoaded', () => {
             }
         });
         const assets = prevAssetsById || captureBuildingDrawingAssetsById(localBuildings);
+        // 2026-11-17 지금 건물 객체(localMatch)의 도면이 동기화 시작 때 잡아 둔 사본(assets)보다 우선한다.
+        // 예전엔 사본이 이겨서, 동기화 도중 도면을 다시 넣으면 병합 결과에 옛 도면이 들어가 화면·기기 저장에 쓰였다.
         const mergedRemote = remoteFiltered.map((b) => {
             const localMatch = (localBuildings || []).find((lb) => lb.id === b.id);
             const bundle = {
                 floorDrawings: mergeDrawingAssetMaps(
-                    mergeDrawingAssetMaps(assets[b.id]?.floorDrawings, localMatch?.floorDrawings),
+                    mergeDrawingAssetMaps(localMatch?.floorDrawings, assets[b.id]?.floorDrawings),
                     b.floorDrawings
                 ),
                 floorDrawingPdfs: mergeDrawingAssetMaps(
-                    mergeDrawingAssetMaps(assets[b.id]?.floorDrawingPdfs, localMatch?.floorDrawingPdfs),
+                    mergeDrawingAssetMaps(localMatch?.floorDrawingPdfs, assets[b.id]?.floorDrawingPdfs),
                     b.floorDrawingPdfs
                 ),
                 floorDrawingTiers: mergeDrawingAssetMaps(
-                    mergeDrawingAssetMaps(assets[b.id]?.floorDrawingTiers, localMatch?.floorDrawingTiers),
+                    mergeDrawingAssetMaps(localMatch?.floorDrawingTiers, assets[b.id]?.floorDrawingTiers),
                     b.floorDrawingTiers
                 ),
                 floorDrawingSources: mergeDrawingAssetMaps(
-                    mergeDrawingAssetMaps(assets[b.id]?.floorDrawingSources, localMatch?.floorDrawingSources),
+                    mergeDrawingAssetMaps(localMatch?.floorDrawingSources, assets[b.id]?.floorDrawingSources),
                     b.floorDrawingSources
                 )
             };
@@ -5589,7 +5667,7 @@ document.addEventListener('DOMContentLoaded', () => {
         if (isUsableRasterDrawingUrl(idbRaster)) {
             if (!bldg.floorDrawings) bldg.floorDrawings = {};
             bldg.floorDrawings[floorCode] = idbRaster;
-            _idbPersistedDrawingKeys.add(idbKey);
+            _idbPersistedDrawingKeys.add(idbKey, idbRaster);
             return true;
         }
         // 화면 표시는 레스터만 사용. PDF→JPEG 변환은 최초 등록·동기화(ensureRasterTiersForSync)에서만.
@@ -5665,7 +5743,7 @@ document.addEventListener('DOMContentLoaded', () => {
             const cached = await idbGet('floorDrawings', idbKey);
             if (isUsableRasterDrawingUrl(cached)) {
                 bldg.floorDrawings[floorCode] = cached;
-                _idbPersistedDrawingKeys.add(idbKey);
+                _idbPersistedDrawingKeys.add(idbKey, cached);
                 hydrated = true;
             } else if (cached) {
                 _idbPersistedDrawingKeys.delete(idbKey);
@@ -5693,7 +5771,7 @@ document.addEventListener('DOMContentLoaded', () => {
                 hydrated = true;
                 if (refreshDue) {
                     idbSet('floorDrawings', idbKey, cloud4000);
-                    _idbPersistedDrawingKeys.add(idbKey);
+                    _idbPersistedDrawingKeys.add(idbKey, cloud4000);
                     [8000, 16000].forEach((d) => {
                         idbDelete('floorDrawingTiers', floorDrawingTierIdbKey(bldg.id, floorCode, d));
                     });
@@ -5703,7 +5781,7 @@ document.addEventListener('DOMContentLoaded', () => {
                 if (cloudRaster && isUsableRasterDrawingUrl(cloudRaster) && !isPdfDrawingUrl(cloudRaster)) {
                     bldg.floorDrawings[floorCode] = cloudRaster;
                     idbSet('floorDrawings', idbKey, cloudRaster);
-                    _idbPersistedDrawingKeys.add(idbKey);
+                    _idbPersistedDrawingKeys.add(idbKey, cloudRaster);
                     hydrated = true;
                 } else if (cloudRaster && isPdfDrawingUrl(cloudRaster)) {
                     // 표시용 아님 — 벡터/재등록용으로만 보관
