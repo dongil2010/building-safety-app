@@ -14,6 +14,23 @@
     return String(s == null ? '' : s).replace(/[\\/:*?"<>|]/g, '_');
   }
 
+  /**
+   * 파일 이름용 층 이름 — 층 고르기 목록에 보이는 이름(floorLabel). 끝의 「(1F)」 같은 코드 꼬리는 뗀다.
+   * 층 코드가 도면 파일 이름인 현장도 있어서(예: 「…결함위치도_006」) 코드를 그대로 쓰지 않는다.
+   */
+  function floorFileName(bldg, floorCode) {
+    let label = '';
+    const fi = window.BSA && window.BSA.floorIdentity;
+    if (fi && typeof fi.lookupFloorLabel === 'function') {
+      label = fi.lookupFloorLabel(floorCode, bldg);
+    } else {
+      const f = bldg && (bldg.floorsList || []).find((x) => x && String(x.floorCode) === String(floorCode));
+      label = (f && f.floorLabel) || '';
+    }
+    label = String(label || '').replace(/\s*\([^)]*\)\s*$/, '').trim() || String(floorCode || 'floor');
+    return safeName(label).trim() || 'floor';
+  }
+
   /** DXF 로 올릴 때 PDF 안에 적어 둔 변환값. 모듈이 없거나 못 읽으면 null */
   async function readDxfMeta(pdfDataUrl) {
     try {
@@ -192,7 +209,7 @@
         toast('이 층에는 내보낼 마킹이 없습니다.', 'warning', 5000);
         return;
       }
-      window.downloadBlobFile(makeDxfBlob(info.text), `${safeName(floorCode || 'floor')}.dxf`);
+      window.downloadBlobFile(makeDxfBlob(info.text), `${floorFileName(bldg, floorCode)}.dxf`);
       toast(`마킹 DXF 내보내기 완료 (좌표: ${systemLabel(info.system)}${info.withDrawing ? ', 원본 도면 포함' : ', 마킹만 — 캐드에서 원본 도면에 겹쳐 쓰세요'})`, 'success', 6000);
     } catch (err) {
       console.error(err);
@@ -222,6 +239,7 @@
     const skipped = [];
     const systems = new Set();
     const stamp = Date.now();
+    const usedNames = new Set();
     if (typeof window.showLoading === 'function') window.showLoading(`전층 마킹 DXF 준비 중 (0/${floorCodes.length})...`);
     try {
       for (let i = 0; i < floorCodes.length; i++) {
@@ -230,7 +248,11 @@
         try {
           const info = await window.buildFloorMarkingDxfInfo(bldg, floorCode, state.currentBuildingId);
           if (!info.count) { skipped.push(floorCode); continue; }
-          zip.file(`${safeName(floorCode)}.dxf`, info.text);
+          const base = floorFileName(bldg, floorCode);
+          let name = base;
+          for (let n = 2; usedNames.has(name.toLowerCase()); n++) name = `${base} (${n})`;
+          usedNames.add(name.toLowerCase());
+          zip.file(`${name}.dxf`, info.text);
           systems.add(info.system);
           ok += 1;
         } catch (e) {
@@ -272,7 +294,7 @@
     }
     if (typeof window.appChoose === 'function') {
       const k = await window.appChoose('마킹 DXF 범위를 고르세요.', [
-        { label: '현재 층만', detail: String(state.currentFloor || '-') },
+        { label: '현재 층만', detail: state.currentFloor ? floorFileName(state.currentBuilding, state.currentFloor) + '.dxf' : '-' },
         { label: '각 층 전부 (층마다 DXF, zip 묶음)', detail: floors.length + '층' }
       ], { title: '마킹 DXF', okText: '내보내기', defaultIndex: 0 });
       if (k === null || k === undefined) return;
