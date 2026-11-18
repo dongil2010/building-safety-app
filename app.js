@@ -43321,7 +43321,7 @@ ${roundMobile ? '' : `<button type="button" class="icon-btn icon-btn-trash" titl
         });
     }
 
-// @@app-part 10-marking.js sha=b13019158f40 — 원본은 app/10-marking.js (여기 말고 거기서 고칠 것)
+// @@app-part 10-marking.js sha=addac6e022b7 — 원본은 app/10-marking.js (여기 말고 거기서 고칠 것)
     // --- 9. BUTTON CONTROLS & LISTENERS ---
 
     // Main Navigation Tabs Click Listener
@@ -46256,8 +46256,11 @@ ${roundMobile ? '' : `<button type="button" class="icon-btn icon-btn-trash" titl
         if (!G) return cur;
         const raw = state.floorGridLines && state.floorGridLines[getFloorMapStyleKey(state.currentBuildingId, fc)];
         const prefixes = ((raw && raw.groups) || []).map((g) => g && g.prefix);
+        // 2026-11-18 선에 직접 붙인 이름(W1·WA …)도 지울 대상 — 전에는 X·Y·머리글자+숫자만 알아봐 「지울 행·열이 없습니다」
+        const names = [];
+        ((raw && raw.groups) || []).forEach((g) => ((g && g.lines) || []).forEach((l) => { if (l && l.label) names.push(l.label); }));
         // 층·도면 이름을 떼지 않고 글자 전체에서 행·열만 뺀다(「정면 X1/Y2」→「정면」, 적힌 층 이름도 그대로)
-        const next = G.stripGridTextFromDetail(cur, { known: [d.gridLoc, d.gridLocAuto], prefixes });
+        const next = G.stripGridTextFromDetail(cur, { known: [d.gridLoc, d.gridLocAuto], prefixes, names });
         if (next === cur.trim()) return cur;
         return next || composeDefectLocation('', fc);
     }

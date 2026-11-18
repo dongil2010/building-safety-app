@@ -963,8 +963,17 @@
         const prefixes = ['X', 'Y'].concat(x.prefixes || [])
             .map((p) => String(p == null ? '' : p).trim()).filter(Boolean)
             .map((p) => p.replace(/[.*+?^${}()|[\]\\]/g, '\\$&'));
-        const unit = `(?:${Array.from(new Set(prefixes)).join('|')})\\d+`;
-        const range = `${unit}(?:\\s*~\\s*${unit})?`;
+        const esc = (s) => s.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+        // 2026-11-18 o.names: 그 층 선 이름(직접 붙인 이름 W1·WA 등) — 머리글자+숫자 꼴이 아니어도 지운다(광주글로벌모터스)
+        const names = Array.from(new Set((x.names || []).map((n) => String(n == null ? '' : n).trim()).filter(Boolean)))
+            .sort((a, b) => b.length - a.length);
+        const tails = new Set();
+        names.forEach((n) => { for (let i = 1; i < n.length; i += 1) tails.add(n.slice(i)); });
+        const unit = `(?:${names.map(esc).concat([`(?:${Array.from(new Set(prefixes)).join('|')})\\d+`]).join('|')})`;
+        // 범위 끝은 이름 전체 또는 짧은 표기(X1~2, WC~D) — 전에는 「~2」가 남아 행·열이 안 지워진 것처럼 보였다
+        const end = `(?:${unit}|\\d+${tails.size ? `|${Array.from(tails).sort((a, b) => b.length - a.length).map(esc).join('|')}` : ''})`;
+        // 열린 범위(W7~, ~W1)도 한 덩어리
+        const range = `(?:${unit}(?:\\s*~(?:\\s*${end})?)?|~\\s*${end})`;
         const re = new RegExp(`(^|[^A-Za-z0-9])${range}(?:\\s*[/,\\-]\\s*${range})*(?![A-Za-z0-9])`, 'gi');
         text = text.replace(re, '$1 ');
         return text.replace(/\(\s*\)/g, ' ')

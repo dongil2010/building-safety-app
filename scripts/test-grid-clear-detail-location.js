@@ -23,6 +23,19 @@ assert.strictEqual(G.stripGridTextFromDetail('기둥 C1 하부'), '기둥 C1 하
 assert.strictEqual(G.stripGridTextFromDetail('MAX12 배관'), 'MAX12 배관', '낱말 속 글자는 그대로');
 assert.strictEqual(G.stripGridTextFromDetail('A1/B2 거실', { prefixes: ['A', 'B'] }), '거실', '층에 정한 머리글자');
 assert.strictEqual(G.stripGridTextFromDetail('1-2 거실', { known: ['1-2'] }), '거실', '그 결함의 행·열 값');
+// 2026-11-18 짧은 표기(X1~2)·옛 표기와 새 표기가 겹쳐 적힌 글자 — 전에는 「~2」가 남았다
+assert.strictEqual(G.stripGridTextFromDetail('X1~2/Y3~4 사무실'), '사무실', '짧은 범위 표기');
+assert.strictEqual(G.stripGridTextFromDetail('X1~X2/Y1~Y2 X3~4/Y5~6 복도'), '복도', '두 표기가 겹친 글자');
+assert.strictEqual(G.stripGridTextFromDetail('X1~2, Y3 복도'), '복도');
+// 선에 직접 붙인 이름(광주글로벌모터스 차체공장: W1~W7 · WA~WG)
+const wNames = ['W1', 'W2', 'W3', 'W4', 'W5', 'W6', 'W7', 'WA', 'WB', 'WC', 'WD', 'WE', 'WF', 'WG'];
+assert.strictEqual(G.stripGridTextFromDetail('W5~6/WC~D', { names: wNames }), '', '직접 붙인 이름·짧은 표기');
+assert.strictEqual(G.stripGridTextFromDetail('W7~/WD~WC 기둥 C1', { names: wNames }), '기둥 C1', '열린 범위, 다른 글은 그대로');
+assert.strictEqual(G.stripGridTextFromDetail('~W1/WA~B 출입구', { names: wNames }), '출입구');
+assert.strictEqual(G.stripGridTextFromDetail('W4~5/WA 창고', { names: wNames }), '창고');
+assert.strictEqual(G.stripGridTextFromDetail('WALL 균열', { names: wNames }), 'WALL 균열', '낱말 속 이름은 그대로');
+assert.strictEqual(G.stripGridTextFromDetail('~C', { names: wNames }), '', '짧은 열린 범위(NO.49)');
+assert.strictEqual(G.stripGridTextFromDetail('기둥 C 하부', { names: wNames }), '기둥 C 하부', '~ 없는 짧은 글자는 그대로');
 
 function makeCtx(opts) {
     const calls = [];
