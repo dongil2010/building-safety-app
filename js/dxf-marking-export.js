@@ -178,6 +178,263 @@
     }
   }
 
+  // ---- 2026-11-19 「SVG 파일로 도면 출력」 (js/core/svg-write.js) ----
+  // 좌표 = 그림 픽셀. DXF 로 올린 층 = 원본 도면 선·글자까지 벡터 / PDF 로 올린 층 = PDF 쪽을 선명한 그림으로 / 그림 층 = 그 그림.
+  // 마킹(박스·지시선·영역·범례)은 어느 층이든 벡터.
+
+  /** 마킹 좌표의 기준 그림 크기(DXF 출력과 같은 규칙) */
+  async function floorRefImageSize(bldg, floorCode, key, pdfDataUrl) {
+    let w;
+    let h;
+    const stRef = window.state && window.state.floorPlanRef;
+    if (stRef && stRef.bldgId === bldg.id && stRef.floorCode === floorCode && stRef.w > 0 && stRef.h > 0) {
+      w = stRef.w;
+      h = stRef.h;
+    } else if (pdfDataUrl && typeof window.getPdfRefPixelSize === 'function') {
+      const dim = window.FLOOR_DRAWING_PDF_PREVIEW_DIM || 4000;
+      const size = await window.getPdfRefPixelSize(pdfDataUrl, dim, key);
+      w = size.w;
+      h = size.h;
+    } else {
+      const dims = window.getFloorPlanRefDimensions(bldg, floorCode);
+      w = dims.w;
+      h = dims.h;
+    }
+    return { w: Math.max(1, Number(w) || 1), h: Math.max(1, Number(h) || 1) };
+  }
+
+  /** PDF 첫 쪽 → JPEG data URL (긴 변 longPx). pdf.js 가 없거나 실패하면 null */
+  async function renderPdfPageDataUrl(pdfDataUrl, longPx) {
+    if (typeof pdfjsLib === 'undefined') return null;
+    let pdf = null;
+    try {
+      const bytes = window.dataUrlToUint8Array(pdfDataUrl);
+      if (!bytes) return null;
+      pdf = await pdfjsLib.getDocument({ data: bytes, verbosity: 0 }).promise;
+      const page = await pdf.getPage(1);
+      const vp1 = page.getViewport({ scale: 1 });
+      const scale = longPx / Math.max(vp1.width, vp1.height);
+      const vp = page.getViewport({ scale });
+      const c = document.createElement('canvas');
+      c.width = Math.round(vp.width);
+      c.height = Math.round(vp.height);
+      const ctx = c.getContext('2d');
+      ctx.fillStyle = '#fff';
+      ctx.fillRect(0, 0, c.width, c.height);
+      await page.render({ canvasContext: ctx, viewport: vp }).promise;
+      const url = c.toDataURL('image/jpeg', 0.9);
+      c.width = 1;
+      c.height = 1;
+      return url;
+    } catch (e) {
+      console.warn('[BSA_SVG] PDF 그림 만들기 실패', e);
+      return null;
+    } finally {
+      try { if (pdf) pdf.destroy(); } catch (_e) { /* ignore */ }
+    }
+  }
+
+  /** 지금 화면의 도면 그림(그림만 있는 층) → data URL. 다른 층이거나 못 읽으면 null */
+  function currentBgImageDataUrl(bldg, floorCode) {
+    const st = window.state;
+    if (!st || !st.bgImage || st.currentFloor !== floorCode || (st.currentBuilding && bldg && st.currentBuilding.id !== bldg.id)) return null;
+    try {
+      const img = st.bgImage;
+      const w = img.naturalWidth || img.width;
+      const h = img.naturalHeight || img.height;
+      if (!(w > 0) || !(h > 0)) return null;
+      const c = document.createElement('canvas');
+      c.width = w;
+      c.height = h;
+      const ctx = c.getContext('2d');
+      ctx.fillStyle = '#fff';
+      ctx.fillRect(0, 0, w, h);
+      ctx.drawImage(img, 0, 0, w, h);
+      return c.toDataURL('image/jpeg', 0.92);
+    } catch (e) {
+      console.warn('[BSA_SVG] 화면 도면 그림 읽기 실패', e);
+      return null;
+    }
+  }
+
+  /**
+   * 한 층 SVG 글자와 정보.
+   * @returns {Promise<{text:string, count:number, floorCode:string, background:'vector'|'pdf-image'|'image'|'none'}>}
+   */
+  window.buildFloorMarkingSvgInfo = async function (bldg, floorCode, buildingId) {
+    if (!bldg || !floorCode) throw new Error('층 정보가 없습니다.');
+    const api = window.BSA && window.BSA.svgWrite;
+    if (!api || typeof api.buildMarkingSvg !== 'function') {
+      throw new Error('SVG 쓰기 모듈이 없습니다. Ctrl+F5로 새로고침 후 다시 시도하세요.');
+    }
+    const id = buildingId || bldg.id || (window.state && window.state.currentBuildingId) || '';
+    const key = `${id}_${floorCode}`;
+    const defects = ((window.state && window.state.defects && window.state.defects[key]) || []).map((d) => (
+      d && (!d.floorCode || !d.buildingId) ? Object.assign({}, d, { floorCode: d.floorCode || floorCode, buildingId: d.buildingId || id }) : d
+    ));
+    let pdfDataUrl = null;
+    try {
+      pdfDataUrl = await window.resolveFloorPdfDataUrlAsync(bldg, floorCode);
+    } catch (e) {
+      console.warn('[BSA_SVG] PDF 원본 확인 실패(그림 기준으로 진행)', e);
+    }
+    const size = await floorRefImageSize(bldg, floorCode, key, pdfDataUrl);
+    const measureCtx = document.createElement('canvas').getContext('2d');
+    const plans = window.buildVectorPinPlansForDefects(defects, measureCtx);
+    const legendPlan = (typeof window.buildVectorLegendDrawPlan === 'function')
+      ? window.buildVectorLegendDrawPlan(measureCtx, size.w, size.h, floorCode)
+      : null;
+
+    let drawing = null;
+    let background = null;
+    let kind = 'none';
+    if (pdfDataUrl) {
+      const meta = await readDxfMeta(pdfDataUrl);
+      if (meta) {
+        try {
+          const view = window.BSA && window.BSA.dxfView;
+          const model = (view && typeof view.ensureModel === 'function') ? await view.ensureModel(key, pdfDataUrl) : null;
+          if (model) { drawing = { model }; kind = 'vector'; }
+        } catch (e) {
+          console.warn('[BSA_SVG] 원본 도면 벡터 읽기 실패(그림으로 넣음)', e);
+        }
+      }
+      if (!drawing) {
+        // 기준 그림의 1.5배(최대 긴 변 8000) — 확대해도 읽을 만하게
+        const longPx = Math.min(8000, Math.max(3000, Math.round(Math.max(size.w, size.h) * 1.5)));
+        const href = await renderPdfPageDataUrl(pdfDataUrl, longPx);
+        if (href) { background = { href, x: 0, y: 0, w: size.w, h: size.h }; kind = 'pdf-image'; }
+      }
+    }
+    if (!drawing && !background) {
+      const href = currentBgImageDataUrl(bldg, floorCode);
+      if (href) { background = { href, x: 0, y: 0, w: size.w, h: size.h }; kind = 'image'; }
+    }
+    const text = api.buildMarkingSvg({
+      width: size.w,
+      height: size.h,
+      plans,
+      legendPlan,
+      drawing,
+      background,
+      title: `${floorFileName(bldg, floorCode)} 결함위치도`
+    });
+    return { text, count: plans.length, floorCode: String(floorCode), background: kind };
+  };
+
+  function makeSvgBlob(text) {
+    return new Blob([text], { type: 'image/svg+xml;charset=utf-8' });
+  }
+
+  function svgBackgroundLabel(kind) {
+    if (kind === 'vector') return '도면까지 벡터';
+    if (kind === 'pdf-image') return '도면은 그림(PDF 층), 마킹은 벡터';
+    if (kind === 'image') return '도면은 그림, 마킹은 벡터';
+    return '도면 없이 마킹만';
+  }
+
+  window.exportCurrentFloorMarkingSvg = async function () {
+    const state = window.state;
+    if (!state || !state.currentBuildingId) {
+      toast('건물을 먼저 선택하세요.', 'warning');
+      return;
+    }
+    const bldg = state.currentBuilding;
+    const floorCode = state.currentFloor;
+    if (typeof window.showLoading === 'function') window.showLoading('SVG 만드는 중...');
+    try {
+      const info = await window.buildFloorMarkingSvgInfo(bldg, floorCode, state.currentBuildingId);
+      if (!info.count && info.background === 'none') {
+        toast('이 층에는 도면도 마킹도 없어 SVG를 만들지 않았습니다.', 'warning', 5000);
+        return;
+      }
+      window.downloadBlobFile(makeSvgBlob(info.text), `${floorFileName(bldg, floorCode)}.svg`);
+      toast(`SVG 출력 완료 — 마킹 ${info.count}개 (${svgBackgroundLabel(info.background)})`, 'success', 6000);
+    } catch (err) {
+      console.error(err);
+      toast(`SVG 출력 실패: ${err.message || err}`, 'error', 6000);
+    } finally {
+      if (typeof window.hideLoading === 'function') window.hideLoading();
+    }
+  };
+
+  /** 각 층 SVG → zip (층마다 파일 하나). 도면도 마킹도 없는 층은 건너뜀 */
+  async function exportAllFloorsMarkingSvg() {
+    const state = window.state;
+    const bldg = state.currentBuilding;
+    const id = state.currentBuildingId;
+    const floorCodes = typeof window.listFloorsForVectorPdfExport === 'function'
+      ? window.listFloorsForVectorPdfExport(bldg)
+      : [];
+    if (!floorCodes.length) {
+      toast('내보낼 층이 없습니다.', 'warning');
+      return;
+    }
+    if (typeof JSZip === 'undefined') {
+      toast('zip 도구가 없어 현재 층만 내보냅니다.', 'warning');
+      return window.exportCurrentFloorMarkingSvg();
+    }
+    const zip = new JSZip();
+    const used = new Set();
+    const skipped = [];
+    let ok = 0;
+    try {
+      for (let i = 0; i < floorCodes.length; i++) {
+        const fc = floorCodes[i];
+        if (typeof window.showLoading === 'function') window.showLoading(`전층 SVG (${i + 1}/${floorCodes.length}) ${floorFileName(bldg, fc)}...`);
+        try {
+          const info = await window.buildFloorMarkingSvgInfo(bldg, fc, id);
+          if (!info.count && info.background === 'none') { skipped.push(fc); continue; }
+          const base = floorFileName(bldg, fc);
+          let name = base;
+          for (let n = 2; used.has(`${name}.svg`.toLowerCase()); n++) name = `${base} (${n})`;
+          used.add(`${name}.svg`.toLowerCase());
+          zip.file(`${name}.svg`, info.text);
+          ok += 1;
+        } catch (e) {
+          console.warn('[exportAllFloorsMarkingSvg] skip', fc, e);
+          skipped.push(fc);
+        }
+      }
+      if (!ok) {
+        toast('SVG로 만들 층이 없습니다(도면·마킹 없음).', 'warning', 6000);
+        return;
+      }
+      if (typeof window.showLoading === 'function') window.showLoading('zip 묶는 중...');
+      const blob = await zip.generateAsync({ type: 'blob' });
+      const bldgName = safeName((bldg && (bldg.name || bldg.buildingName)) || id || 'building');
+      window.downloadBlobFile(blob, `결함위치도_SVG_전층_${bldgName}_${Date.now()}.zip`);
+      toast(`전층 SVG 완료 — ${ok}층 zip 묶음${skipped.length ? ` (제외 ${skipped.length}층: 도면·마킹 없음 등)` : ''}`, 'success', 6000);
+    } catch (err) {
+      console.error(err);
+      toast(`전층 SVG 실패: ${err.message || err}`, 'error', 6000);
+    } finally {
+      if (typeof window.hideLoading === 'function') window.hideLoading();
+    }
+  }
+  window.exportAllFloorsMarkingSvg = exportAllFloorsMarkingSvg;
+
+  /** 「SVG 출력」 버튼: 현재 층 / 각 층 전부(zip) */
+  window.exportMarkingSvgWithScopeChoice = async function () {
+    const state = window.state;
+    if (!state || !state.currentBuildingId) {
+      toast('건물을 먼저 선택하세요.', 'warning');
+      return;
+    }
+    const floors = typeof window.listFloorsForVectorPdfExport === 'function'
+      ? window.listFloorsForVectorPdfExport(state.currentBuilding)
+      : [];
+    if (floors.length <= 1 || typeof JSZip === 'undefined' || typeof window.appChoose !== 'function') {
+      return window.exportCurrentFloorMarkingSvg();
+    }
+    const k = await window.appChoose('결함위치도를 SVG(벡터 그림)로 내보냅니다.\nDXF로 올린 층은 도면까지 벡터, PDF·그림으로 올린 층은 도면을 그림으로 넣고 마킹만 벡터입니다.', [
+      { label: '현재 층만', detail: state.currentFloor ? floorFileName(state.currentBuilding, state.currentFloor) + '.svg' : '-' },
+      { label: '각 층 전부 (층마다 SVG, zip 묶음)', detail: floors.length + '층' }
+    ], { title: 'SVG 출력', okText: '내보내기', defaultIndex: 0 });
+    if (k === null || k === undefined) return;
+    return k === 1 ? exportAllFloorsMarkingSvg() : window.exportCurrentFloorMarkingSvg();
+  };
+
   /** 한 층 DXF 글자 */
   window.buildFloorMarkingDxfText = async function (bldg, floorCode, buildingId) {
     const info = await window.buildFloorMarkingDxfInfo(bldg, floorCode, buildingId);
