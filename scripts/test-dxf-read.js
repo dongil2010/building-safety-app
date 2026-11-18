@@ -219,6 +219,26 @@ function bbox(pts) {
     console.log('바깥 쓰레기 걸러내기: ok');
 }
 
+// 도곽 밖 가까운 부스러기(4배 안쪽) → 도곽 기준으로 걸러냄 (광주 굿모닝병원 지하1층)
+{
+    const L = (x1, y1, x2, y2) => ent('LINE', [[8, 'A'], [10, x1], [20, y1], [11, x2], [21, y2]]);
+    const items = [];
+    // 도곽 0..800 × 0..560, 본 도면은 100..700 × 50..500
+    items.push(...L(0, 0, 800, 0), ...L(800, 0, 800, 560), ...L(800, 560, 0, 560), ...L(0, 560, 0, 0));
+    for (let i = 0; i < 1000; i++) items.push(...L(100 + i * 0.6, 50, 100 + i * 0.6, 500));
+    // 도곽 아래 멀리·왼쪽 바깥·바로 위 작은 것
+    items.push(...L(95, -490, 96, -491), ...L(-96, 530, -95, 531), ...L(95, 566, 96, 567));
+    const f = flatOf([{ name: 'ENTITIES', items }]);
+    assert(f.stats.trimmed && f.stats.trimmedByFrame, '도곽 걸러냄');
+    assert.strictEqual(f.stats.droppedPolylines, 3);
+    near(f.bounds.minX, 0); near(f.bounds.minY, 0); near(f.bounds.maxX, 800); near(f.bounds.maxY, 560);
+    // 도곽에 걸친 것은 남김
+    const g = flatOf([{ name: 'ENTITIES', items: items.concat(L(790, 10, 850, 10)) }]);
+    assert.strictEqual(g.stats.droppedPolylines, 3);
+    near(g.bounds.maxX, 850);
+    console.log('도곽 밖 부스러기 걸러내기: ok');
+}
+
 // SPLINE·ELLIPSE·SOLID·HATCH·POLYLINE·DIMENSION·LEADER
 {
     const blocks = { name: 'BLOCKS', items: []

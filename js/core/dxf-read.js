@@ -1057,6 +1057,86 @@
             return [t.x + q[0] * c - q[1] * s, t.y + q[0] * s + q[1] * c];
         });
     }
+    /**
+     * 도곽(테두리 사각형) 밖 부스러기 걸러내기(2026-11-18, 광주 굿모닝병원 지하1층).
+     * 도곽 바깥 멀리 작은 원·짧은 선 몇 개가 있으면 범위가 세로로 늘어나 도면이 작게 한쪽으로 쏠렸다.
+     * TRIM_RATIO(4배)에 못 미치는 거리라 기존 걸러내기로는 안 잡힘.
+     * - 도곽: 본 도면(꼭짓점 1~99%) 폭·높이보다 긴 수평선 위·아래 + 수직선 왼·오른쪽이 사각형을 이루고
+     *   꼭짓점 99% 이상이 그 안에 있을 때만
+     * - 도곽과 아예 안 겹치는 객체(글자는 기준점이 밖)만 빼고, 빼는 꼭짓점이 전체 2% 이하일 때만
+     */
+    function trimOutsideFrame(polylines, texts, stats, full, core, xs, ys) {
+        var cw = core.maxX - core.minX, ch = core.maxY - core.minY;
+        if (!(cw > 0) || !(ch > 0)) return null;
+        var hs = [], vs = [];
+        polylines.forEach(function (p) {
+            for (var i = 0; i + 3 < p.pts.length; i += 2) {
+                var x1 = p.pts[i], y1 = p.pts[i + 1], x2 = p.pts[i + 2], y2 = p.pts[i + 3];
+                var dx = Math.abs(x2 - x1), dy = Math.abs(y2 - y1);
+                if (dx >= cw && dy <= dx * 1e-6) hs.push({ y: (y1 + y2) / 2, a: Math.min(x1, x2), b: Math.max(x1, x2) });
+                else if (dy >= ch && dx <= dy * 1e-6) vs.push({ x: (x1 + x2) / 2, a: Math.min(y1, y2), b: Math.max(y1, y2) });
+            }
+        });
+        if (hs.length < 2 || vs.length < 2) return null;
+        function pick(arr, key, low) {
+            var best = arr[0];
+            arr.forEach(function (s) { if (low ? s[key] < best[key] : s[key] > best[key]) best = s; });
+            return best;
+        }
+        var bot = pick(hs, 'y', true), top = pick(hs, 'y', false), lef = pick(vs, 'x', true), rig = pick(vs, 'x', false);
+        var fr = { minX: lef.x, maxX: rig.x, minY: bot.y, maxY: top.y };
+        var fw = fr.maxX - fr.minX, fh = fr.maxY - fr.minY;
+        if (!(fw > 0) || !(fh > 0)) return null;
+        var tol = Math.max(fw, fh) * 0.01;
+        function spans(s, lo, hi) { return s.a <= lo + tol && s.b >= hi - tol; }
+        if (!spans(bot, fr.minX, fr.maxX) || !spans(top, fr.minX, fr.maxX) ||
+            !spans(lef, fr.minY, fr.maxY) || !spans(rig, fr.minY, fr.maxY)) return null;
+        // 이미 도곽이 곧 전체 범위면 할 일 없음
+        if (full.minX >= fr.minX - tol && full.maxX <= fr.maxX + tol &&
+            full.minY >= fr.minY - tol && full.maxY <= fr.maxY + tol) return null;
+        var inCnt = 0;
+        for (var k = 0; k < xs.length; k++) {
+            if (xs[k] >= fr.minX - tol && xs[k] <= fr.maxX + tol && ys[k] >= fr.minY - tol && ys[k] <= fr.maxY + tol) inCnt++;
+        }
+        if (inCnt < xs.length * 0.99) return null;
+        // 도곽 바로 바깥 작은 원도 빼도록 겹침 판정 여유는 작게(0.1%)
+        var et = Math.max(fw, fh) * 0.001;
+        var box = { minX: fr.minX - et, minY: fr.minY - et, maxX: fr.maxX + et, maxY: fr.maxY + et };
+        var keep = { p: new Array(polylines.length), t: new Array(texts.length) };
+        var nb = { minX: Infinity, minY: Infinity, maxX: -Infinity, maxY: -Infinity };
+        function grow(x, y) {
+            if (x < nb.minX) nb.minX = x; if (x > nb.maxX) nb.maxX = x;
+            if (y < nb.minY) nb.minY = y; if (y > nb.maxY) nb.maxY = y;
+        }
+        var dropP = 0, dropT = 0, dropV = 0, totalV = texts.length;
+        polylines.forEach(function (p, idx) {
+            totalV += p.pts.length / 2;
+            var a = { minX: Infinity, minY: Infinity, maxX: -Infinity, maxY: -Infinity };
+            for (var i = 0; i < p.pts.length; i += 2) {
+                var x = p.pts[i], y = p.pts[i + 1];
+                if (x < a.minX) a.minX = x; if (x > a.maxX) a.maxX = x;
+                if (y < a.minY) a.minY = y; if (y > a.maxY) a.maxY = y;
+            }
+            var inside = !(a.maxX < box.minX || a.minX > box.maxX || a.maxY < box.minY || a.minY > box.maxY);
+            keep.p[idx] = inside;
+            if (!inside) { dropP++; dropV += p.pts.length / 2; return; }
+            for (var j = 0; j < p.pts.length; j += 2) grow(p.pts[j], p.pts[j + 1]);
+        });
+        texts.forEach(function (tx, idx) {
+            var inside = tx.x >= box.minX && tx.x <= box.maxX && tx.y >= box.minY && tx.y <= box.maxY;
+            keep.t[idx] = inside;
+            if (!inside) { dropT++; dropV++; return; }
+            textCorners(tx).forEach(function (c) { grow(c[0], c[1]); });
+        });
+        if (!(dropP + dropT) || dropV > totalV * 0.02 || !isFinite(nb.minX)) return null;
+        stats.droppedPolylines += dropP;
+        stats.droppedTexts += dropT;
+        stats.trimmed = true;
+        stats.trimmedByFrame = true;
+        stats.fullBounds = full;
+        return { box: nb, keep: keep };
+    }
+
     function computeBounds(polylines, texts, stats, allowTrim) {
         var full = { minX: Infinity, minY: Infinity, maxX: -Infinity, maxY: -Infinity };
         var total = 0;
@@ -1089,6 +1169,8 @@
         var tw = t.maxX - t.minX, th = t.maxY - t.minY;
         var size = Math.max(tw, th);
         if (!(size > 0)) return untrimmed();
+        var framed = trimOutsideFrame(polylines, texts, stats, full, t, xs, ys);
+        if (framed) return framed;
         var fw = full.maxX - full.minX, fh = full.maxY - full.minY;
         if (Math.max(fw, fh) <= size * TRIM_RATIO) return untrimmed();
         // 여유: 걸러낸 범위 크기의 절반씩
