@@ -418,11 +418,60 @@
         return '';
     }
 
+    /**
+     * 2026-11-18 광주 굿모닝병원 지하1층: 축 번호가 「X」(큰 글자)와 「0」(작은 아래첨자)처럼 따로 쓴 글자 두 개였다.
+     * 따로 보면 X·X·X…(이름이 다 같음)와 0·1·2…(숫자만) 줄이 되어 열을 엉뚱하게 잡았다.
+     * 읽는 방향으로 바로 뒤에 붙은 숫자(1~3자리)를 앞 글자(영문 1~2자)에 이어 하나의 글자(X0)로 만든다.
+     */
+    function joinSplitLabels(texts) {
+        const list = (texts || []).filter(Boolean);
+        const used = new Set();
+        const out = [];
+        list.forEach((t, i) => {
+            if (used.has(i)) return;
+            const s = String(t.str).trim();
+            if (!/^[A-Za-z]{1,2}['’′ʼ´`]?$/.test(s) || !(t.th > 0)) { out.push(t); return; }
+            const ux = Number.isFinite(t.dx) ? t.dx : 1;
+            const uy = Number.isFinite(t.dy) ? t.dy : 0;
+            const tw = t.tw > 0 ? t.tw : t.th * 0.6 * s.length;
+            let best = null;
+            list.forEach((q, j) => {
+                if (j === i || used.has(j)) return;
+                if (!/^\d{1,3}$/.test(String(q.str).trim())) return;
+                const qx = Number.isFinite(q.dx) ? q.dx : 1;
+                const qy = Number.isFinite(q.dy) ? q.dy : 0;
+                if (qx * ux + qy * uy < 0.98) return;           // 같은 읽는 방향
+                const rx = q.x - t.x, ry = q.y - t.y;
+                const along = rx * ux + ry * uy;
+                const perp = Math.abs(-rx * uy + ry * ux);
+                const qw = q.tw > 0 ? q.tw : (q.th || t.th) * 0.6 * String(q.str).trim().length;
+                if (along <= 0 || along > tw / 2 + qw / 2 + t.th * 0.6) return;
+                if (perp > t.th * 0.6) return;
+                if (!best || along < best.along) best = { j, q, along, qw };
+            });
+            if (!best) { out.push(t); return; }
+            used.add(best.j);
+            const q = best.q;
+            // 합친 글자 상자: 앞 글자 시작 ~ 숫자 끝, 가운데는 그 사이
+            const start = -tw / 2;
+            const end = best.along + best.qw / 2;
+            const mid = (start + end) / 2;
+            out.push(Object.assign({}, t, {
+                str: s + String(q.str).trim(),
+                x: t.x + ux * mid,
+                y: t.y + uy * mid,
+                tw: end - start,
+                th: Math.max(t.th, q.th || 0)
+            }));
+        });
+        return out;
+    }
+
     /** 표시 후보: 풍선(안 글자 포함) + 풍선 밖의 도면 글자 */
     function findMarkers(data, dims, o) {
         const bubbles = findBubbles(data.small, dims, o);
         const markers = bubbles.map((b) => ({ x: b.x, y: b.y, r: b.r, bubble: true, label: textInside(data.texts, b), tipX: b.tipX, tipY: b.tipY }));
-        (data.texts || []).forEach((t) => {
+        joinSplitLabels(data.texts).forEach((t) => {
             if (!t || !isLabelText(t.str)) return;
             if (bubbles.some((b) => Math.hypot(t.x - b.x, t.y - b.y) <= b.r * 1.3)) return; // 이미 풍선 안
             markers.push({ x: t.x, y: t.y, r: 0, bubble: false, label: String(t.str).trim(), dx: t.dx, dy: t.dy, tw: t.tw, th: t.th });
@@ -606,7 +655,9 @@
             if (d > reach) return;
             const ov = Math.min(p.a1, k + ha) - Math.max(p.a0, k - ha);
             if (ov < Math.min(len, ha * 2) * 0.5) return;     // 글자 높이와 겹쳐야
-            if (!best || d < best.d) best = { d, p };
+            // 2026-11-18 깃발(▌) 모양 표시: 짧은 테두리선 여럿 중 가장 긴 기둥(도면 쪽으로 더 내려온 선)이 통심선이다
+            // (굿모닝병원 지하1층: 기둥 1300 · 깃발 테두리 780). 길이가 거의 같으면 가까운 쪽.
+            if (!best || len > best.len * 1.1 || (len >= best.len / 1.1 && d < best.d)) best = { d, p, len };
         });
         return best ? best.p : null;
     }
@@ -769,7 +820,7 @@
         };
     }
 
-    const api = { footprintRange, isOuterGroup, DEFAULTS, LABEL_RE, isLabelText, labelClass, seriesIndexes, textFromItem, poleBesideText, textInside, splitAxisSegments, chainPieces, labelAtEnd, bubbleAtEnd, findBubbles, findMarkers, alignGroups, labelOrder, detect };
+    const api = { joinSplitLabels, footprintRange, isOuterGroup, DEFAULTS, LABEL_RE, isLabelText, labelClass, seriesIndexes, textFromItem, poleBesideText, textInside, splitAxisSegments, chainPieces, labelAtEnd, bubbleAtEnd, findBubbles, findMarkers, alignGroups, labelOrder, detect };
     root.BSA = root.BSA || {};
     root.BSA.gridAutoDetect = api;
     if (typeof module !== 'undefined' && module.exports) module.exports = api;

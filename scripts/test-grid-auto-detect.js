@@ -562,3 +562,33 @@ console.log('test-grid-auto-detect: 12 cases ok');
     assert.ok(Math.abs(rp.cols[0].x - 100) < 1 && Math.abs(rp.cols[7].x - 1360) < 1, '글자 옆 기둥선 위치 사용: ' + rp.cols.map((c) => c.x));
 }
 console.log('test-grid-auto-detect: 13 cases ok');
+
+// 14) ★ 2026-11-18 광주 굿모닝병원 지하1층: 「X」와 아래첨자 「0」이 따로 쓴 글자 + 깃발(▌) 표시(긴 기둥 + 짧은 테두리)
+{
+    const j = D.joinSplitLabels([
+        { str: 'X', x: 100, y: 50, dx: 1, dy: 0, tw: 20, th: 32 },
+        { str: '0', x: 120, y: 54, dx: 1, dy: 0, tw: 13, th: 22 },
+        { str: '6,000', x: 130, y: 90, dx: 1, dy: 0, tw: 60, th: 20 },
+        { str: 'Y', x: 40, y: 500, dx: 0, dy: -1, tw: 20, th: 32 },
+        { str: '3', x: 44, y: 480, dx: 0, dy: -1, tw: 13, th: 22 },
+        { str: 'A', x: 400, y: 50, dx: 1, dy: 0, tw: 20, th: 32 },
+        { str: '1', x: 520, y: 50, dx: 1, dy: 0, tw: 13, th: 22 }   // 멀리 떨어진 숫자는 안 붙임
+    ]).map((t) => t.str).sort();
+    assert.deepStrictEqual(j, ['1', '6,000', 'A', 'X0', 'Y3'], '나뉜 번호 잇기: ' + j);
+
+    const segs = [];
+    const texts = [];
+    for (let i = 0; i < 8; i++) {
+        const px = 100 + i * 180;
+        segs.push([px, 70, px, 160]);              // 긴 기둥(아래로 더 내려옴)
+        segs.push([px, 70, px + 12, 70], [px + 12, 70, px + 12, 115], [px + 6, 115, px + 12, 115], [px + 6, 70, px + 6, 115]); // 깃발 테두리
+        texts.push({ str: 'X', x: px + 28, y: 95, dx: 1, dy: 0, tw: 20, th: 32 });
+        texts.push({ str: String(i), x: px + 46, y: 100, dx: 1, dy: 0, tw: 13, th: 22 });
+    }
+    for (let i = 0; i < 40; i++) { segs.push([100 + i * 30, 400, 100 + i * 30, 900]); segs.push([100, 400 + i * 10, 1500, 400 + i * 10]); }
+    const rp = D.detect({ segments: segs, small: [], texts }, { w: 1600, h: 1000 }, { outerOnly: false });
+    assert.strictEqual(rp.cols.length, 8, '열 8개: ' + rp.cols.map((c) => c.label));
+    assert.deepStrictEqual(rp.cols.map((c) => c.label), ['X0', 'X1', 'X2', 'X3', 'X4', 'X5', 'X6', 'X7']);
+    assert.ok(rp.cols.every((c, i) => Math.abs(c.x - (100 + i * 180)) < 1), '긴 기둥선 위치: ' + rp.cols.map((c) => c.x));
+}
+console.log('test-grid-auto-detect: 14 cases ok');
