@@ -47898,7 +47898,7 @@ ${roundMobile ? '' : `<button type="button" class="icon-btn icon-btn-trash" titl
         });
     }
 
-// @@app-part 11-cad-import.js sha=e2b50e56d36b — 원본은 app/11-cad-import.js (여기 말고 거기서 고칠 것)
+// @@app-part 11-cad-import.js sha=79279812e348 — 원본은 app/11-cad-import.js (여기 말고 거기서 고칠 것)
     // --- 9-1. CAD Defect Pins 2-Point Calibration Engine (v2.0) ---
     window.cadCalibrationState = null;
 
@@ -48862,57 +48862,152 @@ ${roundMobile ? '' : `<button type="button" class="icon-btn icon-btn-trash" titl
         }, ms));
     }
 
+    /** 번호가 바뀐 결함(_numberChanged)을 저장·동기화 대상으로 표시 */
+    function commitCompactedNumberKeys(keys) {
+        Array.from(new Set(keys)).forEach((k) => {
+            const arr = state.defects[k] || [];
+            if (arr.some((d) => d && d._numberChanged) && typeof markFloorKeyDirty === 'function') markFloorKeyDirty(k);
+            arr.forEach((d) => {
+                if (d && d._numberChanged) {
+                    delete d._numberChanged;
+                    if (typeof journalDefectChange === 'function') journalDefectChange('edit', d, k);
+                }
+            });
+        });
+    }
+
+    /** 이 번호 목록(층 하나, 외부면 외부 전체)이 들어 있는 층 키들 */
+    function numberingPoolKeys(list) {
+        return Object.keys(state.defects || {}).filter((k) => {
+            const arr = state.defects[k];
+            return Array.isArray(arr) && arr.some((d) => list.indexOf(d) >= 0);
+        });
+    }
+
+    /**
+     * 2026-11-18 「빈칸 당기기 하면 전체층 일괄로 당기는 옵션」 — 이 건물(동)의 층마다 빈 번호를 센다.
+     * 층마다 번호가 따로라 층별로 당기고, 외부 입면(외부1·2·…)은 한 번호 공간이라 한 번만.
+     * 반환 [{ key, fc, label, list, gaps }] (마킹이 있는 층만)
+     */
+    function planCompactGapsForAllFloors(bId) {
+        const base = (typeof planClearDetailForAllFloors === 'function') ? planClearDetailForAllFloors(bId, () => false) : { floors: [] };
+        const seenPool = new Set();
+        const out = [];
+        base.floors.forEach((f) => {
+            const list = getFloorDefectsForNumbering(f.key);
+            if (!list.length) return;
+            if (list.some((d) => seenPool.has(d))) return; // 외부: 같은 번호 공간은 한 번
+            list.forEach((d) => seenPool.add(d));
+            let gaps = [];
+            try { gaps = findDefectMarkingNumberGaps(list); } catch (_e) { gaps = []; }
+            out.push({ key: f.key, fc: f.fc, label: String(f.label || f.fc).replace(/\s*\([^)]*\)\s*$/, ''), list, gaps });
+        });
+        return out;
+    }
+
+    async function compactGapsAllFloors(bId) {
+        // 고르는 사이 동기화가 결함을 새 객체로 바꿨을 수 있다 — 다시 읽는다
+        const plan = planCompactGapsForAllFloors(bId);
+        if (!plan.length) return;
+        const allKeys = Array.from(new Set(plan.reduce((a, f) => a.concat(numberingPoolKeys(f.list), [f.key]), [])));
+        if (typeof pushDefectHistory === 'function') pushDefectHistory(allKeys);
+        let moved = 0;
+        let healed = 0;
+        const done = [];
+        plan.forEach((f) => {
+            const r = compactDefectMarkingNumberGaps(f.list);
+            if (!r || (!r.moved && !r.healed)) return;
+            moved += r.moved || 0;
+            healed += r.healed || 0;
+            done.push(f.label + (r.moved ? ` ${r.moved}개` : ''));
+        });
+        if (!moved && !healed) {
+            window.showToast?.('채울 빈 번호가 없습니다.', 'info');
+            return;
+        }
+        commitCompactedNumberKeys(allKeys);
+        if (typeof discardStalePendingRemoteAfterLocalPinEdit === 'function') discardStalePendingRemoteAfterLocalPinEdit();
+        saveStateToLocalStorage();
+        refreshAfterDefectNumberChange();
+        scheduleCompactGapsRecheck(`${state.currentBuildingId}_${state.currentFloor}`);
+        const shown = done.slice(0, 6).join(', ') + (done.length > 6 ? ` 외 ${done.length - 6}개 층` : '');
+        window.showToast?.(moved
+            ? `전체 층 빈칸 땡기기: ${done.length}개 층 · 번호 ${moved}개 이동 (${shown})`
+            : `도면 번호 ${healed}개를 표 번호에 맞췄습니다.`, 'success', 5500);
+    }
+
+    async function compactGapsCurrentFloor(key, exteriorPool, askConfirm) {
+        const confirmMsg = exteriorPool
+            ? '외부 도면(외부1·2·…) 전체를 한 번호로 보고 빈 칸을 뒤에서부터 앞으로 땡길까요?\n(한 도면의 빈 번호는 다른 외부 도면에 있을 수 있습니다.)'
+            : '현재 층의 마킹번호 빈 칸을 뒤에서부터 앞으로 땡길까요?\n(예: 1번 삭제 후 2,3,4 → 1,2,3 / 14,15,17,18 → 14,15,16,17)';
+        if (askConfirm && !await window.appConfirm(confirmMsg)) return;
+        // 2026-10-23 확인창을 기다리는 사이 동기화가 층 결함을 새 객체로 바꿔 끼우면, 확인 전에 잡아 둔 목록을 고쳐도
+        // 화면·저장에 안 남아 두세 번 눌러야 됐다 — 확인 뒤 목록을 다시 읽는다.
+        const list = getFloorDefectsForNumbering(key);
+        // 외부 입면처럼 여러 도면이 한 번호 공간이면 그 층들을 모두 한 되돌리기 기록에 담는다
+        const poolKeys = numberingPoolKeys(list);
+        if (typeof pushDefectHistory === 'function') pushDefectHistory(poolKeys);
+        const result = compactDefectMarkingNumberGaps(list);
+        if (!result || (!result.moved && !result.healed)) {
+            if (typeof window.showToast === 'function') window.showToast('채울 빈 번호가 없습니다.', 'info');
+            return;
+        }
+        commitCompactedNumberKeys(poolKeys.concat([key]));
+        if (typeof discardStalePendingRemoteAfterLocalPinEdit === 'function') {
+            discardStalePendingRemoteAfterLocalPinEdit();
+        }
+        saveStateToLocalStorage();
+        refreshAfterDefectNumberChange();
+        scheduleCompactGapsRecheck(key);
+        if (typeof window.showToast === 'function') {
+            window.showToast(result.moved
+                ? `마킹번호 ${result.moved}개 이동: ${result.before} → ${result.after}`
+                : `도면 번호 ${result.healed}개를 표 번호에 맞췄습니다.`, 'success', 4500);
+        }
+    }
+
     const btnCompactMarkingGaps = document.getElementById('btnCompactMarkingGaps');
     if (btnCompactMarkingGaps) {
         btnCompactMarkingGaps.addEventListener('click', async () => {
-            const key = `${state.currentBuildingId}_${state.currentFloor}`;
-            let list = getFloorDefectsForNumbering(key);
+            const bId = state.currentBuildingId;
+            const key = `${bId}_${state.currentFloor}`;
+            const list = getFloorDefectsForNumbering(key);
             const exteriorPool = (typeof isExteriorFloorCode === 'function')
                 ? isExteriorFloorCode(state.currentFloor)
                 : (typeof window.isExteriorFloorCode === 'function' && window.isExteriorFloorCode(state.currentFloor));
-            if (!list.length) {
-                if (typeof window.showToast === 'function') window.showToast(exteriorPool ? '외부 입면에 마킹이 없습니다.' : '현재 층에 마킹이 없습니다.', 'warning');
+            // 2026-11-18 다른 층에도 빈 번호가 있으면 범위를 묻는다(이 층만 / 전체 층 일괄)
+            let plan = [];
+            try { plan = bId ? planCompactGapsForAllFloors(bId) : []; } catch (e) { console.warn('[빈칸 당기기] 전체 층 확인 실패', e); plan = []; }
+            const gapFloors = plan.filter((f) => f.gaps.length);
+            const here = plan.find((f) => f.list.some((d) => list.indexOf(d) >= 0));
+            const otherGapFloors = gapFloors.filter((f) => f !== here);
+            if (!otherGapFloors.length) {
+                if (!list.length) {
+                    if (typeof window.showToast === 'function') window.showToast(exteriorPool ? '외부 입면에 마킹이 없습니다.' : '현재 층에 마킹이 없습니다.', 'warning');
+                    return;
+                }
+                await compactGapsCurrentFloor(key, exteriorPool, true);
                 return;
             }
-            const confirmMsg = exteriorPool
-                ? '외부 도면(외부1·2·…) 전체를 한 번호로 보고 빈 칸을 뒤에서부터 앞으로 땡길까요?\n(한 도면의 빈 번호는 다른 외부 도면에 있을 수 있습니다.)'
-                : '현재 층의 마킹번호 빈 칸을 뒤에서부터 앞으로 땡길까요?\n(예: 1번 삭제 후 2,3,4 → 1,2,3 / 14,15,17,18 → 14,15,16,17)';
-            if (!await window.appConfirm(confirmMsg)) return;
-            // 2026-10-23 확인창을 기다리는 사이 동기화가 층 결함을 새 객체로 바꿔 끼우면, 확인 전에 잡아 둔 목록을 고쳐도
-            // 화면·저장에 안 남아 두세 번 눌러야 됐다 — 확인 뒤 목록을 다시 읽는다.
-            list = getFloorDefectsForNumbering(key);
-            // 외부 입면처럼 여러 도면이 한 번호 공간이면 그 층들을 모두 한 되돌리기 기록에 담는다
-            const poolKeys = Object.keys(state.defects || {}).filter((k) => {
-                const arr = state.defects[k];
-                return Array.isArray(arr) && arr.some((d) => list.indexOf(d) >= 0);
+            const gapCount = gapFloors.reduce((s, f) => s + f.gaps.length, 0);
+            const herePart = here && here.gaps.length ? `빈 번호 ${here.gaps.slice(0, 6).join(', ')}${here.gaps.length > 6 ? ' …' : ''}` : '빈 번호 없음';
+            const hereLabel = exteriorPool ? '외부 도면 전체' : (here ? here.label : '이 층');
+            const choices = [];
+            if (list.length) choices.push({ key: 'floor', label: `이 층만 (${hereLabel})`, detail: herePart });
+            choices.push({
+                key: 'all',
+                label: `전체 층 일괄 (${gapFloors.length}개 층)`,
+                detail: `빈 번호 ${gapCount}개 · ${gapFloors.slice(0, 5).map((f) => f.label).join(', ')}${gapFloors.length > 5 ? ' …' : ''}`
             });
-            if (typeof pushDefectHistory === 'function') pushDefectHistory(poolKeys);
-            const result = compactDefectMarkingNumberGaps(list);
-            if (!result || (!result.moved && !result.healed)) {
-                if (typeof window.showToast === 'function') window.showToast('채울 빈 번호가 없습니다.', 'info');
-                return;
-            }
-            poolKeys.concat([key]).forEach((k) => {
-                const arr = state.defects[k] || [];
-                if (arr.some((d) => d && d._numberChanged) && typeof markFloorKeyDirty === 'function') markFloorKeyDirty(k);
-                arr.forEach((d) => {
-                    if (d && d._numberChanged) {
-                        delete d._numberChanged;
-                        if (typeof journalDefectChange === 'function') journalDefectChange('edit', d, k);
-                    }
-                });
-            });
-            if (typeof discardStalePendingRemoteAfterLocalPinEdit === 'function') {
-                discardStalePendingRemoteAfterLocalPinEdit();
-            }
-            saveStateToLocalStorage();
-            refreshAfterDefectNumberChange();
-            scheduleCompactGapsRecheck(key);
-            if (typeof window.showToast === 'function') {
-                window.showToast(result.moved
-                    ? `마킹번호 ${result.moved}개 이동: ${result.before} → ${result.after}`
-                    : `도면 번호 ${result.healed}개를 표 번호에 맞췄습니다.`, 'success', 4500);
-            }
+            const idx = await window.appChoose(
+                `「${describeBuildingForClear(bId)}」\n마킹번호 빈 칸을 뒤에서부터 앞으로 땡길 범위를 고르세요.\n` +
+                '층마다 번호를 따로 당깁니다(외부 입면은 외부 전체를 한 번호로).\n되돌리기(Ctrl+Z) 한 번으로 모두 되돌릴 수 있습니다.',
+                choices.map((c) => ({ label: c.label, detail: c.detail })),
+                { title: '빈칸 땡기기', okText: '땡기기', defaultIndex: 0 }
+            );
+            if (idx == null || !choices[idx]) return;
+            if (choices[idx].key === 'all') await compactGapsAllFloors(bId);
+            else await compactGapsCurrentFloor(key, exteriorPool, false);
         });
     }
 
