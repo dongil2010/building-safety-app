@@ -22,8 +22,8 @@ function makeCtx(o) {
     vm.runInContext(['normalizeHexColor', 'hexToLegendColorName', 'resolveLegendColorName', 'getDefaultLocationMapLegend',
         'legendStyleKeyByLabel', 'normalizeLegendLabelKey', 'resolveLegendItemStyleKey', 'floorHasPriorityManageMarking',
         'floorHasPriorityRepairedMarking', 'isGoodDefectType', 'getDefectRepairPhotoIndex', 'isDefectRepaired', 'isPriorityRepairedDefect',
-        'getLocationMapLegendDrawItems', 'enrichLocationMapLegendItem', 'getActiveLocationMapLegend']
-        .map((n) => extractFunction(app, 'function ' + n + '(')).join('\n') + "\nconst PRIORITY_REPAIRED_COLOR = '#000000';" + '\nthis.items = getLocationMapLegendDrawItems; this.defaults = getDefaultLocationMapLegend;', ctx);
+        'getLocationMapLegendDrawItems', 'enrichLocationMapLegendItem', 'getActiveLocationMapLegend', 'legendRenderOtherBuilding', 'getActiveLocationMapLegendBox']
+        .map((n) => extractFunction(app, 'function ' + n + '(')).join('\n') + "\nconst PRIORITY_REPAIRED_COLOR = '#000000';\nvar _hwpxRenderBldgOverride = null; this.setOverride = (b) => { _hwpxRenderBldgOverride = b; }; this.box = getActiveLocationMapLegendBox;" +'\nthis.items = getLocationMapLegendDrawItems; this.defaults = getDefaultLocationMapLegend;', ctx);
     return ctx;
 }
 const J = (v) => JSON.parse(JSON.stringify(v)); // vm 쪽 배열과 비교
@@ -80,7 +80,22 @@ const simple = (items) => J(items.map((i) => [i.label, i.color, i.colorName]));
 
 // 연결: 화면·보고서·벡터 PDF·범위 맞춤이 같은 줄을 쓴다
 assert.strictEqual((app.match(/const items = getLocationMapLegendDrawItems\((?:legendOpts && legendOpts\.floorCode|floorCode)\);/g) || []).length, 3, "그리는 층을 넘김");
-assert.strictEqual((app.match(/getActiveLocationMapLegend\(\)\.map\(enrichLocationMapLegendItem\)/g) || []).length, 1, 'getLocationMapLegendDrawItems 안에서만');
+assert.strictEqual((app.match(/getActiveLocationMapLegend\(\)\.map\(\(it\) => enrichLocationMapLegendItem\(it, lb\)\)/g) || []).length, 1, 'getLocationMapLegendDrawItems 안에서만');
 assert.ok(/items\[idx\]\.colorCustom = true;/.test(extractFunction(app, 'window.recolorLocationMapLegendItem = function(')), '직접 고른 색 표시');
 assert.ok(/drawCanvas\(\)/.test(extractFunction(app, 'window.renameLocationMapLegendItem = function(')), '이름 바꾸면 다시 그림');
 console.log('test-location-map-legend-audit: ok');
+
+// 2026-11-18 여러 동 한글 출력: 다른 동 위치도는 그 동의 범례 줄·범례 자리·중점관리 마킹 기준(광주글로벌모터스 의장공장)
+{
+    const other = { id: 'E', locationMapLegend: [{ label: '결함발생', color: '#dc2626' }, { label: '상태양호', color: '#2563eb' },
+        { label: '트러스 휨 검토 완료부위', color: '#16a34a', styleKey: 'priorityManage', autoKind: 'priorityManage' }], locationMapLegendBox: { nx: 0.1, ny: 0.8, scale: 2 } };
+    const c = makeCtx({ defects: { B_1F: [{ id: 'a' }], E_1F: [{ id: 'e', isPriorityManage: true }] } });
+    c.state.locationMapLegendBox = { nx: 0.9, ny: 0.1 };
+    assert.strictEqual(c.items('1F').length, 2, '화면 동(B)엔 중점관리 없음');
+    c.setOverride(other);
+    assert.deepStrictEqual(J(c.items('1F').map((i) => i.label)), ['결함발생', '상태양호', '트러스 휨 검토 완료부위'], '그리는 동(E)의 범례·중점관리');
+    assert.deepStrictEqual(J(c.box()), { nx: 0.1, ny: 0.8, scale: 2 }, '그리는 동의 범례 자리');
+    c.setOverride({ id: 'B' });
+    assert.deepStrictEqual(J(c.box()), { nx: 0.9, ny: 0.1 }, '화면 동이면 지금 범례 자리');
+}
+console.log('test-location-map-legend-audit: multi-dong ok');

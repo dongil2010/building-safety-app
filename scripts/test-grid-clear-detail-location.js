@@ -36,6 +36,19 @@ assert.strictEqual(G.stripGridTextFromDetail('W4~5/WA 창고', { names: wNames }
 assert.strictEqual(G.stripGridTextFromDetail('WALL 균열', { names: wNames }), 'WALL 균열', '낱말 속 이름은 그대로');
 assert.strictEqual(G.stripGridTextFromDetail('~C', { names: wNames }), '', '짧은 열린 범위(NO.49)');
 assert.strictEqual(G.stripGridTextFromDetail('기둥 C 하부', { names: wNames }), '기둥 C 하부', '~ 없는 짧은 글자는 그대로');
+// 이름 없는 선의 자동 이름(머리글자 G + 번호/글자) — 광주글로벌모터스 의장공장
+const autoGrid = {
+    groups: [
+        { axis: 'col', prefix: 'G', start: 1, lines: [1, 2, 3].map((i) => ({ id: `c${i}`, seq: i, pts: [{ x: i * 100, y: 0 }, { x: i * 100, y: 900 }] })) },
+        { axis: 'row', prefix: 'G', start: 1, lines: [1, 2, 3].map((i) => ({ id: `r${i}`, seq: i, pts: [{ x: 0, y: i * 100 }, { x: 900, y: i * 100 }] })) }
+    ]
+};
+const gNames = G.gridLineNames(autoGrid);
+assert.ok(gNames.includes('G1') && gNames.length === 6, `자동 이름: ${gNames}`);
+const gAll = gNames.concat(['GA', 'GB', 'GC', 'GE', 'GF', 'GG', 'GH', 'G10']);
+[['1~2/GA-1~B', ''], ['1/GH', ''], ['GB~B-1', ''], ['GF1', ''], ['1~10/GA', ''], ['GE-1', ''], ['1~2/GA 내부', '내부'], ['GF~G 계단실', '계단실']]
+    .forEach(([s, want]) => assert.strictEqual(G.stripGridTextFromDetail(s, { names: gAll }), want, s));
+assert.strictEqual(G.stripGridTextFromDetail('101호 A동 2층', { names: gAll }), '101호 A동 2층', '이름 없는 숫자·글자만은 그대로');
 
 function makeCtx(opts) {
     const calls = [];

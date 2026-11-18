@@ -2865,14 +2865,14 @@
      * 2026-10-20 건물 단위로 보던 것을 층(도면) 단위로 — 중점관리가 없는 층 도면에도 줄이 붙던 것.
      */
     function floorHasPriorityManageMarking(floorCode, bldgId) {
-        const id = bldgId || state.currentBuildingId;
+        const id = bldgId || (legendRenderOtherBuilding() || {}).id || state.currentBuildingId;
         const fc = floorCode || state.currentFloor;
         if (!id || !fc || !state.defects) return false;
         return (state.defects[`${id}_${fc}`] || []).some((d) => d && d.isPriorityManage && !d.mapUnregistered && !isDefectRepaired(d));
     }
     /** 그 층 도면에 중점관리였다가 보수된(검정) 마킹이 있나 — 1·2종 범례에 「보수완료」 검정 줄 */
     function floorHasPriorityRepairedMarking(floorCode, bldgId) {
-        const id = bldgId || state.currentBuildingId;
+        const id = bldgId || (legendRenderOtherBuilding() || {}).id || state.currentBuildingId;
         const fc = floorCode || state.currentFloor;
         if (!id || !fc || !state.defects) return false;
         return (state.defects[`${id}_${fc}`] || []).some((d) => d && !d.mapUnregistered && isPriorityRepairedDefect(d));
@@ -2882,8 +2882,9 @@
      * 1·2종도 중점관리 마킹은 녹색으로 그려지는데 기본 범례엔 그 줄이 없었다 → 중점관리 마킹이 있으면 줄을 붙인다.
      */
     function getLocationMapLegendDrawItems(floorCode) {
-        let items = getActiveLocationMapLegend().map(enrichLocationMapLegendItem);
-        if (!isGrade3Building()) {
+        const lb = legendRenderOtherBuilding() || state.currentBuilding;
+        let items = getActiveLocationMapLegend().map((it) => enrichLocationMapLegendItem(it, lb));
+        if (!isGrade3Building(lb)) {
             // 2026-11-16 autoKind: 범례 설정에서 글·색을 고친 「중점관리」「보수완료」 줄 — 저장은 되지만
             // 자동 줄과 똑같이 그 마킹이 있는 층 도면에만 그린다(이름을 바꿔도 자동 줄이 또 붙지 않는다).
             const hasPm = floorHasPriorityManageMarking(floorCode);
@@ -2891,7 +2892,7 @@
             items = items.filter((it) => !(it.autoKind === 'priorityManage' && !hasPm)
                 && !(it.autoKind === 'priorityRepaired' && !hasRep));
             const hasRow = items.some((it) => it.autoKind === 'priorityManage'
-                || resolveLegendItemStyleKey(it) === 'priorityManage'
+                || resolveLegendItemStyleKey(it, lb) === 'priorityManage'
                 || normalizeLegendLabelKey(it.label) === '중점관리');
             if (!hasRow && hasPm) {
                 items.push(enrichLocationMapLegendItem({ label: '중점관리', color: getStyleColor('priorityManage'), styleKey: 'priorityManage', auto: true }));
@@ -3021,7 +3022,24 @@
         if (typeof drawCanvas === 'function') drawCanvas();
     };
 
+    /**
+     * 2026-11-18 여러 동 한글 출력 중 「다른 동」 위치도를 그리고 있으면 그 동(아니면 null).
+     * 범례 줄·범례 자리·중점관리 유무를 화면에 연 동이 아니라 그리는 동 기준으로 — 광주글로벌모터스에서 차체·의장공장
+     * 범례(「트러스 휨 검토 완료부위」 녹색 줄)가 빠지고 범례 자리가 달라지던 문제.
+     */
+    function legendRenderOtherBuilding() {
+        const o = _hwpxRenderBldgOverride;
+        return (o && o.id && o.id !== state.currentBuildingId) ? o : null;
+    }
+    function getActiveLocationMapLegendBox() {
+        const ob = legendRenderOtherBuilding();
+        if (ob) return ob.locationMapLegendBox || {};
+        return state.locationMapLegendBox || {};
+    }
+
     function getActiveLocationMapLegend() {
+        const ob = legendRenderOtherBuilding();
+        if (ob) return (Array.isArray(ob.locationMapLegend) && ob.locationMapLegend.length) ? ob.locationMapLegend : getDefaultLocationMapLegend(ob);
         return (state.locationMapLegend && state.locationMapLegend.length) ? state.locationMapLegend : getDefaultLocationMapLegend();
     }
 
@@ -3329,8 +3347,8 @@
         return hexToLegendColorName(hex);
     }
 
-    function enrichLocationMapLegendItem(item) {
-        const key = resolveLegendItemStyleKey(item);
+    function enrichLocationMapLegendItem(item, bldg) {
+        const key = resolveLegendItemStyleKey(item, bldg);
         const color = (key && getStyleColor(key)) || (item && item.color);
         const out = { ...item, color };
         return { ...out, colorName: resolveLegendColorName(out) };
@@ -3374,7 +3392,7 @@
         }
 
         // legendOpts.box: 출력 범위 안에 범례를 다시 놓을 때 쓰는 임시 박스(저장된 박스는 건드리지 않는다)
-        const box = (legendOpts && legendOpts.box) || state.locationMapLegendBox || {};
+        const box = (legendOpts && legendOpts.box) || getActiveLocationMapLegendBox();
         const scale = resolveLocationMapLegendDrawScale(box, imgW, imgH);
         const dims = measureLocationMapLegendTable(ctx, items, scale);
         const { col1W, col2W, boxW, boxH, rowH, headerRowH, fontSize, cellPadX, cellPadY } = dims;
@@ -3487,7 +3505,7 @@
     window.buildVectorLegendDrawPlan = function(measureCtx, imgW, imgH, floorCode) {
         const items = getLocationMapLegendDrawItems(floorCode);
         if (!items.length) return null;
-        const box = state.locationMapLegendBox || {};
+        const box = getActiveLocationMapLegendBox();
         const scale = resolveLocationMapLegendDrawScale(box, imgW, imgH);
         const dims = measureLocationMapLegendTable(measureCtx || null, items, scale);
         const margin = 16 * scale;
@@ -3716,7 +3734,7 @@
     function measureLegendForPrintCrop(crop, floorCode) {
         const items = getLocationMapLegendDrawItems(floorCode);
         if (!items.length || !crop) return null;
-        const scale = resolveLocationMapLegendDrawScale(state.locationMapLegendBox || {}, crop.w, crop.h);
+        const scale = resolveLocationMapLegendDrawScale(getActiveLocationMapLegendBox(), crop.w, crop.h);
         const dims = measureLocationMapLegendTable(document.createElement('canvas').getContext('2d'), items, scale);
         return { boxW: dims.boxW, boxH: dims.boxH, margin: 16 * scale };
     }
@@ -3726,7 +3744,7 @@
      * crop.lc(구석)가 있으면 그 구석에, 없으면 도면 전체에서의 상대 위치를 범위 안에서도 그대로.
      */
     function legendBoxForPrintCrop(imgW, imgH, crop, floorCode) {
-        const box = Object.assign({}, state.locationMapLegendBox || {});
+        const box = Object.assign({}, getActiveLocationMapLegendBox());
         if (box.nx == null && box.x !== undefined && imgW > 0) box.nx = box.x / imgW;
         if (box.ny == null && box.y !== undefined && imgH > 0) box.ny = box.y / imgH;
         if (crop && crop.lc) {

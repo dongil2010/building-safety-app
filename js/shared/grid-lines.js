@@ -951,6 +951,17 @@
      * o.known: 그 결함의 행·열 값(그대로 일치하는 글자를 뺌), o.prefixes: 그 층 선 머리글자(기본 X·Y).
      * 머리글자가 맞는 표기만 뺀다: X4, X4~X5, X4~X5/Y1~Y2, X1-Y2, X1,Y2. 「기둥 C1 하부」의 C1은 안 건드린다.
      */
+    /** 2026-11-18 그 층 모든 선의 화면 이름(직접 붙인 이름 또는 머리글자+번호 자동 이름 G1·GA …) — 상세위치 행·열 지우기용 */
+    function gridLineNames(rawGrid) {
+        const out = [];
+        try {
+            (normalizeGrid(rawGrid).groups || []).forEach((g) => {
+                orderedLines(g, { rot: 0, w: 4000, h: 3000 }).items.forEach((it) => { if (it.name) out.push(String(it.name)); });
+            });
+        } catch (e) { /* 이름을 못 구하면 X·Y·머리글자 규칙만 */ }
+        return out;
+    }
+
     function stripGridTextFromDetail(detail, o) {
         const x = o || {};
         let text = String(detail == null ? '' : detail).trim();
@@ -969,13 +980,15 @@
             .sort((a, b) => b.length - a.length);
         const tails = new Set();
         names.forEach((n) => { for (let i = 1; i < n.length; i += 1) tails.add(n.slice(i)); });
-        const unit = `(?:${names.map(esc).concat([`(?:${Array.from(new Set(prefixes)).join('|')})\\d+`]).join('|')})`;
-        // 범위 끝은 이름 전체 또는 짧은 표기(X1~2, WC~D) — 전에는 「~2」가 남아 행·열이 안 지워진 것처럼 보였다
-        const end = `(?:${unit}|\\d+${tails.size ? `|${Array.from(tails).sort((a, b) => b.length - a.length).map(esc).join('|')}` : ''})`;
+        const full = names.map(esc).concat([`(?:${Array.from(new Set(prefixes)).join('|')})\\d+`]).join('|');
+        // 한 칸: 이름 전체 · 짧은 표기(X1~2의 2, WC~D의 D, 머리글자 뺀 「1~2/GA」의 1) · 숫자, 뒤에 붙은 보조 번호(GA-1, GF1)
+        const tok = `(?:(?:${full})|${Array.from(tails).sort((a, b) => b.length - a.length).map(esc).concat(['\\d+']).join('|')})(?:-?\\d+)?`;
         // 열린 범위(W7~, ~W1)도 한 덩어리
-        const range = `(?:${unit}(?:\\s*~(?:\\s*${end})?)?|~\\s*${end})`;
-        const re = new RegExp(`(^|[^A-Za-z0-9])${range}(?:\\s*[/,\\-]\\s*${range})*(?![A-Za-z0-9])`, 'gi');
-        text = text.replace(re, '$1 ');
+        const range = `(?:${tok}(?:\\s*~(?:\\s*${tok})?)?|~\\s*${tok})`;
+        const re = new RegExp(`(^|[^A-Za-z0-9])(${range}(?:\\s*[/,\\-]\\s*${range})*)(?![A-Za-z0-9])`, 'gi');
+        // 지우는 건 이름 전체가 하나라도 든 덩어리, 또는 「~C」처럼 ~ 뒤 글자 — 「101호」「A동」의 숫자·글자만으로는 안 지움
+        const hasFull = new RegExp(`(?:^|[^A-Za-z0-9])(?:${full})(?![A-Za-z])`, 'i');
+        text = text.replace(re, (m, pre, body) => ((hasFull.test(body) || /~\s*[A-Za-z]/.test(body)) ? `${pre} ` : m));
         return text.replace(/\(\s*\)/g, ' ')
             .replace(/\s+/g, ' ')
             .replace(/^[\s,/·-]+|[\s,/·-]+$/g, '')
@@ -1548,6 +1561,7 @@
         gridLocTextEm,
         cellTextUnits,
         stripGridTextFromDetail,
+        gridLineNames,
         compactGridLoc,
         splitGridLocLines,
         gridLocBreakableHtml,
