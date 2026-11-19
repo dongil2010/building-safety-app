@@ -3677,7 +3677,7 @@
         if (!usable(img)) return null;
         const imgW = img.naturalWidth;
         const imgH = img.naturalHeight;
-        const measureCtx = document.createElement('canvas').getContext('2d');
+        const measureCtx = svgTextMeasureCtx();
         const crop = getFloorPrintCrop(bId, floorCode, imgW, imgH);
         let page;
         let legendPlan;
@@ -3713,6 +3713,17 @@
         return { text: info.text, w: page.w, h: page.h, background: info.background };
     }
     window.renderFloorPlanSvgForReport = renderFloorPlanSvgForReport; // 점검·테스트용
+
+    /**
+     * 2026-11-19 SVG 글자 글꼴(맑은 고딕)로 폭을 재는 측정 캔버스(js/core/svg-write.js svgMeasureCtx).
+     * 화면 글꼴(Pretendard)로 재면 숫자 1 이 좁게 재져서 SVG 에서 NO.11 같은 번호만 박스가 글자보다 좁았다.
+     * family: SVG 글꼴 목록(비파괴 SVG 는 vector-canvas 의 SVG_FONT). 모듈이 없으면 그냥 캔버스.
+     */
+    function svgTextMeasureCtx(family) {
+        const ctx = document.createElement('canvas').getContext('2d');
+        const SW = window.BSA && window.BSA.svgWrite;
+        return (SW && typeof SW.svgMeasureCtx === 'function') ? SW.svgMeasureCtx(ctx, family) : ctx;
+    }
 
     // --- 위치도 출력 범위 (2026-10-07) ---
     // 도면에 여백이 많으면 한글·PDF 위치도에서 결함 박스가 작게 나온다. 층마다 출력 범위를 정해 두면
@@ -4554,7 +4565,10 @@
         if (!customSrc && typeof window.getFloorDxfDrawingModel === 'function') {
             try { model = await window.getFloorDxfDrawingModel(bldg, floorCode, bId); } catch (_e) { model = null; }
         }
-        const measureCtx = document.createElement('canvas').getContext('2d');
+        // 'image'(비파괴 DXF)는 화면 글꼴 그대로, 그 밖(한글 위치도 SVG)은 SVG 글꼴로 글자 폭을 잰다
+        const measureCtx = mode === 'image'
+            ? document.createElement('canvas').getContext('2d')
+            : svgTextMeasureCtx(VC.SVG_FONT);
         const drawMarks = (ctx) => {
             pinDefects.forEach((d) => drawPin(ctx, d));
             ndtItems.forEach((item) => drawNdtPin(ctx, item, ndtItems));

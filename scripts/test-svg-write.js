@@ -91,6 +91,42 @@ const legend = (W) => ({
         console.log('마킹만: ok');
     }
 
+    // 1-1) 글자 폭은 SVG 글꼴로 잰다(2026-11-19): 화면 글꼴(Pretendard)은 숫자 1 이 좁아 NO.11 박스만 좁았다
+    {
+        const F = S.FONT;
+        assert(/Malgun Gothic/.test(F), 'SVG 글꼴 = 맑은 고딕 먼저');
+        assert.strictEqual(S.withFontFamily('bold 11px "Pretendard", "Malgun Gothic", "맑은 고딕", sans-serif', F), 'bold 11px ' + F);
+        assert.strictEqual(S.withFontFamily('10px sans-serif', 'X'), '10px X');
+        assert.strictEqual(S.withFontFamily('italic bold 12.5px/1.2 "Pretendard"', 'X'), 'italic bold 12.5px/1.2 X');
+        assert.strictEqual(S.withFontFamily('bold .5em Pretendard', 'X'), 'bold .5em X');
+        assert.strictEqual(S.withFontFamily('', 'X'), '', '크기 없으면 그대로');
+        // 가짜 캔버스: font 를 받을 때만 글꼴이 바뀌고 나머지는 진짜 ctx 그대로
+        const seen = [];
+        const real = {
+            font: '10px sans-serif',
+            textAlign: 'start',
+            saved: 0,
+            save() { this.saved += 1; },
+            restore() { this.saved -= 1; },
+            measureText(t) { seen.push(this.font); return { width: String(t).length }; }
+        };
+        const m = S.svgMeasureCtx(real);
+        m.save();
+        m.font = 'bold 11px "Pretendard", "Malgun Gothic", sans-serif';
+        m.textAlign = 'center';
+        assert.strictEqual(m.measureText('NO.11').width, 5);
+        m.restore();
+        assert.strictEqual(real.font, 'bold 11px ' + F, '글꼴만 SVG 글꼴로');
+        assert.strictEqual(seen[0], 'bold 11px ' + F, '잴 때 SVG 글꼴');
+        assert.strictEqual(real.textAlign, 'center', '다른 값은 그대로');
+        assert.strictEqual(real.saved, 0, 'save/restore 는 진짜 ctx 에서');
+        assert.strictEqual(m.font, 'bold 11px ' + F, '읽기도 진짜 ctx 값');
+        S.svgMeasureCtx(real, "'Y'").font = 'bold 9px Pretendard';
+        assert.strictEqual(real.font, "bold 9px 'Y'", '글꼴 목록 지정');
+        assert.strictEqual(S.svgMeasureCtx(null), null);
+        console.log('글자 폭은 SVG 글꼴로: ok');
+    }
+
     // 1-2) 한글 위치도 종이(page): 크기·변환·자르기, 범례는 자르기 밖
     {
         const W = 1000, H = 700, s = 0.5;

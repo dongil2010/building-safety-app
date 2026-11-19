@@ -409,7 +409,33 @@
         return parts.join('\n');
     }
 
-    var api = { buildMarkingSvg: buildMarkingSvg, drawingSvg: drawingSvg, areaOutlinePoints: areaOutlinePoints, escapeXml: esc };
+    /** CSS font 글자('bold 11px "Pretendard", …')의 글꼴 이름 목록만 family 로 바꾼다. 크기를 못 찾으면 그대로 */
+    function withFontFamily(spec, family) {
+        var s = String(spec == null ? '' : spec);
+        var m = s.match(/^(.*?(?:^|\s)\d*\.?\d+(?:px|pt|em|rem|%)(?:\s*\/\s*\S+)?)\s+\S/);
+        return m ? m[1] + ' ' + (family || FONT) : s;
+    }
+
+    /**
+     * 2026-11-19 SVG 에 쓸 글자 폭을 재는 측정 캔버스 — ctx.font 를 넣을 때 글꼴 이름만 SVG 글꼴(family, 기본 FONT)로 바꾼다.
+     * 마킹 박스·범례 칸 폭은 화면 글꼴(Pretendard)로 재는데, Pretendard 는 숫자 폭이 제각각(1 이 좁다)이고
+     * SVG 를 여는 프로그램(한글·브라우저·일러스트레이터)은 맑은 고딕(숫자 폭이 모두 같다)으로 그린다 →
+     * NO.10·NO.11·NO.12 처럼 1 이 든 번호만 박스가 글자보다 좁았다(NO.08·NO.09 는 알맞음).
+     * 나머지(save·restore·measureText …)는 진짜 ctx 그대로.
+     */
+    function svgMeasureCtx(ctx, family) {
+        if (!ctx || typeof Proxy !== 'function') return ctx;
+        var fam = family || FONT;
+        return new Proxy(ctx, {
+            get: function (t, k) { var v = t[k]; return typeof v === 'function' ? v.bind(t) : v; },
+            set: function (t, k, v) { t[k] = k === 'font' ? withFontFamily(v, fam) : v; return true; }
+        });
+    }
+
+    var api = {
+        buildMarkingSvg: buildMarkingSvg, drawingSvg: drawingSvg, areaOutlinePoints: areaOutlinePoints, escapeXml: esc,
+        FONT: FONT, withFontFamily: withFontFamily, svgMeasureCtx: svgMeasureCtx
+    };
     if (typeof module !== 'undefined' && module.exports) module.exports = api;
     if (root) { root.BSA = root.BSA || {}; root.BSA.svgWrite = api; }
 })(typeof window !== 'undefined' ? window : globalThis);

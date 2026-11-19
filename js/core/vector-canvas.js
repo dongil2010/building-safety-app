@@ -401,7 +401,8 @@
         return out.join('\n') + '\n';
     }
 
-    var api = { createVectorContext: createVectorContext, opsToSvg: opsToSvg, parseColor: parseColor, parseFont: parseFont };
+    // SVG_FONT: 비파괴 SVG 글자 글꼴 — 글자 폭도 이 글꼴로 재야 박스가 맞는다(svg-write.js svgMeasureCtx)
+    var api = { createVectorContext: createVectorContext, opsToSvg: opsToSvg, parseColor: parseColor, parseFont: parseFont, SVG_FONT: SVG_FONT };
     if (typeof module !== 'undefined' && module.exports) module.exports = api;
     if (root) { root.BSA = root.BSA || {}; root.BSA.vectorCanvas = api; }
 })(typeof window !== 'undefined' ? window : globalThis);

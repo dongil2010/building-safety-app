@@ -288,7 +288,9 @@
     const size = (opts.size && opts.size.w > 0 && opts.size.h > 0)
       ? { w: Number(opts.size.w), h: Number(opts.size.h) }
       : await floorRefImageSize(bldg, floorCode, key, pdfDataUrl);
-    const measureCtx = document.createElement('canvas').getContext('2d');
+    // 박스·범례 폭은 SVG 글꼴(맑은 고딕)로 잰다 — 화면 글꼴로 재면 NO.11 처럼 1 이 든 번호만 박스가 좁았다
+    const plainCtx = document.createElement('canvas').getContext('2d');
+    const measureCtx = typeof api.svgMeasureCtx === 'function' ? api.svgMeasureCtx(plainCtx) : plainCtx;
     const plans = window.buildVectorPinPlansForDefects(defects, measureCtx);
     const legendPlan = opts.legendPlan !== undefined
       ? opts.legendPlan
