@@ -10,9 +10,12 @@ const { extractFunction } = require('./lib-extract-fn');
 const app = fs.readFileSync(path.join(__dirname, '..', 'app.js'), 'utf8').replace(/\r\n/g, '\n');
 
 const render = extractFunction(app, 'function renderNdtFloorPlanCanvasDataUrl(');
-assert.ok(/categoryFilter === '균열모니터'/.test(render), '균열모니터 분류');
-assert.ok(/\.filter\(isCrackGaugeNdtItem\)/.test(render), '게이지 마킹만');
-assert.ok(/isLegacyCrackMonitorDefect/.test(render), '예전 방식 게이지 결함 핀');
+// 2026-11-19 항목 고르기는 collectNdtMapItems 로 옮김(그림·SVG·DXF 위치도가 같이 씀)
+const collect = extractFunction(app, 'function collectNdtMapItems(');
+assert.ok(/collectNdtMapItems\(key, categoryFilter\)/.test(render), '그림 위치도도 같은 고르기');
+assert.ok(/categoryFilter === '균열모니터'/.test(collect), '균열모니터 분류');
+assert.ok(/\.filter\(isCrackGaugeNdtItem\)/.test(collect), '게이지 마킹만');
+assert.ok(/isLegacyCrackMonitorDefect/.test(collect), '예전 방식 게이지 결함 핀');
 assert.strictEqual((render.match(/pinDefects\.forEach\(d => drawPin\(ctx, d\)\)/g) || []).length, 2, '가로·세로 도면 둘 다');
 assert.ok(/renderNdtPrintCropCanvas\([^)]*pinDefects\)/.test(render), '출력 범위 정한 층도');
 assert.ok(/pinDefects/.test(extractFunction(app, 'function renderNdtPrintCropCanvas(')));

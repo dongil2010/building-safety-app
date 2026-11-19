@@ -447,6 +447,88 @@
     return k === 1 ? exportAllFloorsMarkingSvg() : window.exportCurrentFloorMarkingSvg();
   };
 
+  /** DXF 로 올린 층의 원본 도면 모델(js/core/dxf-view.js). DXF 층이 아니거나 못 읽으면 null — 비파괴 SVG·DXF 가 쓴다 */
+  window.getFloorDxfDrawingModel = async function (bldg, floorCode, buildingId) {
+    const id = buildingId || (bldg && bldg.id) || '';
+    let pdfDataUrl = null;
+    try { pdfDataUrl = await window.resolveFloorPdfDataUrlAsync(bldg, floorCode); } catch (_e) { return null; }
+    if (!pdfDataUrl || !(await readDxfMeta(pdfDataUrl))) return null;
+    const view = window.BSA && window.BSA.dxfView;
+    if (!view || typeof view.ensureModel !== 'function') return null;
+    try { return await view.ensureModel(`${id}_${floorCode}`, pdfDataUrl); } catch (_e) { return null; }
+  };
+
+  // ---- 2026-11-19 「비파괴도 dxf 출력」 ----
+  // 비파괴 탭 화면 그리기(drawNdtPin·변위 묶음 …)를 벡터 기록 캔버스(js/core/vector-canvas.js)로 돌려 BSA_NDT 레이어에 쓴다.
+  // 좌표는 결함 마킹 DXF 와 같은 규칙: DXF 층 = 원래 캐드 좌표(원본 도면 포함) / PDF 층 = 종이 mm / 그림 층·비파괴 전용 도면 = 그림 픽셀.
+  window.buildFloorNdtDxfInfo = async function (bldg, floorCode, buildingId) {
+    const api = window.BSA && window.BSA.dxfWrite;
+    if (!api || typeof api.buildMarkingDxf !== 'function' || typeof window.recordNdtFloorMap !== 'function') {
+      throw new Error('DXF 모듈이 없습니다. Ctrl+F5로 새로고침 후 다시 시도하세요.');
+    }
+    const id = buildingId || bldg.id || '';
+    const rec = await window.recordNdtFloorMap(floorCode, null, 'image');
+    if (!rec) return { text: '', count: 0, system: 'pixel', floorCode: String(floorCode) };
+    const imgW = rec.imgW;
+    const imgH = rec.imgH;
+    let system = 'pixel';
+    let toWorld = (ix, iy) => ({ x: ix, y: imgH - iy });
+    let unitPerPx = 1;
+    let drawing = null;
+    // 비파괴 전용 도면(따로 올린 그림)은 층 도면과 좌표가 달라 그림 픽셀 그대로
+    let pdfDataUrl = null;
+    if (!rec.custom) {
+      try { pdfDataUrl = await window.resolveFloorPdfDataUrlAsync(bldg, floorCode); } catch (_e) { pdfDataUrl = null; }
+    }
+    const size = pdfDataUrl ? await readPdfPageSize(pdfDataUrl) : null;
+    if (size) {
+      const meta = await readDxfMeta(pdfDataUrl);
+      const sxPt = size.w / imgW;
+      const syPt = size.h / imgH;
+      if (meta) {
+        const s = Number(meta.s);
+        const ox = Number(meta.ox);
+        const oy = Number(meta.oy);
+        system = 'cad';
+        toWorld = (ix, iy) => ({ x: (ix * sxPt) / s + ox, y: (size.h - iy * syPt) / s + oy });
+        unitPerPx = ((sxPt + syPt) / 2) / s;
+        if (rec.model) drawing = { model: rec.model, toWorld: (px, py) => ({ x: px / s + ox, y: py / s + oy }), unitPerPt: 1 / s };
+      } else {
+        const mm = 25.4 / 72;
+        system = 'paper';
+        toWorld = (ix, iy) => ({ x: ix * sxPt * mm, y: (size.h - iy * syPt) * mm });
+        unitPerPx = ((sxPt + syPt) / 2) * mm;
+      }
+    }
+    const text = api.buildMarkingDxf({ plans: [], legendPlan: null, vectorOps: rec.ops, toWorld, unitPerPx, drawing });
+    return { text, count: rec.count, system, floorCode: String(floorCode), withDrawing: !!drawing };
+  };
+
+  window.exportCurrentFloorNdtDxf = async function () {
+    const state = window.state;
+    if (!state || !state.currentBuildingId) {
+      toast('건물을 먼저 선택하세요.', 'warning');
+      return;
+    }
+    const bldg = state.currentBuilding;
+    const floorCode = state.currentFloor;
+    if (typeof window.showLoading === 'function') window.showLoading('비파괴 DXF 만드는 중...');
+    try {
+      const info = await window.buildFloorNdtDxfInfo(bldg, floorCode, state.currentBuildingId);
+      if (!info.count) {
+        toast('이 층에는 내보낼 비파괴 마킹이 없습니다(또는 도면을 못 읽음).', 'warning', 5000);
+        return;
+      }
+      window.downloadBlobFile(makeDxfBlob(info.text), `${floorFileName(bldg, floorCode)}_비파괴.dxf`);
+      toast(`비파괴 DXF 내보내기 완료 — 마킹 ${info.count}개 (좌표: ${systemLabel(info.system)}${info.withDrawing ? ', 원본 도면 포함' : ''})`, 'success', 6000);
+    } catch (err) {
+      console.error(err);
+      toast(`비파괴 DXF 내보내기 실패: ${err.message || err}`, 'error', 6000);
+    } finally {
+      if (typeof window.hideLoading === 'function') window.hideLoading();
+    }
+  };
+
   /** 한 층 DXF 글자 */
   window.buildFloorMarkingDxfText = async function (bldg, floorCode, buildingId) {
     const info = await window.buildFloorMarkingDxfInfo(bldg, floorCode, buildingId);

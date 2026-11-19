@@ -409,7 +409,7 @@
         return parts.join('\n');
     }
 
-    var api = { buildMarkingSvg: buildMarkingSvg, areaOutlinePoints: areaOutlinePoints, escapeXml: esc };
+    var api = { buildMarkingSvg: buildMarkingSvg, drawingSvg: drawingSvg, areaOutlinePoints: areaOutlinePoints, escapeXml: esc };
     if (typeof module !== 'undefined' && module.exports) module.exports = api;
     if (root) { root.BSA = root.BSA || {}; root.BSA.svgWrite = api; }
 })(typeof window !== 'undefined' ? window : globalThis);

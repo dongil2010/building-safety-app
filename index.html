@@ -896,6 +896,7 @@
                         <div class="filter-group">
                             <button type="button" id="btnOpenStyleColorModalNdt" class="chip"><i class="fa-solid fa-palette"></i> 스타일 설정</button>
                             <button type="button" class="chip" onclick="window.exportCurrentFloorNdtVectorPdf && window.exportCurrentFloorNdtVectorPdf()" title="PDF 원본 + NDT 마킹 벡터"><i class="fa-solid fa-file-pdf"></i> 벡터 PDF</button>
+                            <button type="button" id="btnExportNdtDxf" class="chip" onclick="window.exportCurrentFloorNdtDxf && window.exportCurrentFloorNdtDxf()" title="이 층 비파괴 마킹을 DXF로 — DXF로 올린 층은 원래 캐드 좌표에 원본 도면까지(BSA_NDT 레이어), PDF 층은 종이 mm"><i class="fa-solid fa-drafting-compass"></i> DXF</button>
                         </div>
                         <button type="button" id="btnRotateNdtDrawing" class="btn-rotate-hero" onclick="window.rotateNdtDrawing()">
                             <i class="fa-solid fa-rotate-right"></i> 🔄 도면 90° 회전
@@ -3598,6 +3599,7 @@
     <script src="js/pdf-vector-snap.js?v=20261118_101924"></script>
     <script src="js/core/dxf-write.js?v=20261118_101924"></script>
     <script src="js/core/svg-write.js?v=20261118_101924"></script>
+    <script src="js/core/vector-canvas.js?v=20261118_101924"></script>
     <script src="js/core/marking-align.js?v=20261118_101924"></script>
     <script src="js/dxf-marking-export.js?v=20261118_101924"></script>
     <script src="js/core/layout-mode.js?v=20261118_101924"></script>

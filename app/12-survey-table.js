@@ -4351,11 +4351,8 @@
         return html;
     }
 
-    function renderNdtFloorPlanCanvasDataUrl(floorCode, categoryFilter = null) {
-        try {
-            const bldg = hwpxRenderBuilding();
-            const currentBldgId = bldg.id || state.currentBuildingId || 'default';
-            const key = `${currentBldgId}_${floorCode}`;
+    /** 비파괴 위치도에 그릴 것(항목 구분별) — 그림(PNG)·벡터(SVG·DXF) 위치도가 같이 쓴다 */
+    function collectNdtMapItems(key, categoryFilter) {
             let ndtItems = (state.ndtData ? (state.ndtData[key] || []) : []).filter((item) => !isCrackGaugeNdtItem(item));
             let displacementGroups = state.ndtDisplacementGroups ? (state.ndtDisplacementGroups[key] || []) : [];
             // 균열게이지 위치도(2026-10-28): 화면 「균열모니터」 탭과 같게 — 예전 방식(균열 결함에 연결) 게이지는 그 결함 핀으로
@@ -4387,6 +4384,15 @@
                     displacementGroups = [];
                 }
             }
+            return { ndtItems, displacementGroups, pinDefects };
+    }
+
+    function renderNdtFloorPlanCanvasDataUrl(floorCode, categoryFilter = null) {
+        try {
+            const bldg = hwpxRenderBuilding();
+            const currentBldgId = bldg.id || state.currentBuildingId || 'default';
+            const key = `${currentBldgId}_${floorCode}`;
+            const { ndtItems, displacementGroups, pinDefects } = collectNdtMapItems(key, categoryFilter);
 
             // 전용 도면이 있는 층은 그 그림만 쓴다(층 그림 캐시가 있어도) — 비동기 쪽이 미리 읽어 둔다
             const customSrc = currentNdtCustomDrawingSrc(key);
@@ -4514,6 +4520,132 @@
         ctx.restore();
         return canvas;
     }
+
+    /**
+     * 2026-11-19 비파괴 위치도를 벡터로 기록(js/core/vector-canvas.js) — 화면·그림 위치도와 같은 그리기 코드
+     * (drawPin·drawNdtPin·drawNdtDisplacementGroup)를 그대로 돌린다.
+     * mode 'report': 한글 종이(1800×2540, 출력 범위면 그 크기)·같은 돌림/자르기 — 바탕 도면 포함
+     * mode 'image' : 그림 픽셀 좌표 그대로, 바탕 없이 마킹만(DXF 용 — 원본 도면은 DXF 쪽이 따로 넣는다)
+     * DXF 로 올린 층(전용 비파괴 도면이 아닐 때)은 바탕을 캐드 선·글자 벡터로, 그 밖은 그림으로.
+     * 반환 { ops, w, h, imgW, imgH, img, model, custom, count } | null
+     */
+    async function recordNdtFloorMap(floorCode, categoryFilter, mode) {
+        const VC = window.BSA && window.BSA.vectorCanvas;
+        if (!VC) return null;
+        const bldg = hwpxRenderBuilding();
+        const bId = bldg.id || state.currentBuildingId || 'default';
+        const key = `${bId}_${floorCode}`;
+        const { ndtItems, displacementGroups, pinDefects } = collectNdtMapItems(key, categoryFilter || null);
+        const usable = (im) => !!(im && im.complete && im.naturalWidth > 0);
+        const customSrc = currentNdtCustomDrawingSrc(key);
+        const customEntry = customSrc && state.ndtCustomImageCache && state.ndtCustomImageCache[key];
+        let img = customSrc
+            ? ((customEntry && customEntry.src === customSrc) ? customEntry.img : null)
+            : (state.floorImageCache ? state.floorImageCache[key] : null);
+        if (!usable(img) && !customSrc && hwpxRenderIsScreenFloor(floorCode) && usable(state.bgImage)) img = state.bgImage;
+        if (!usable(img)) {
+            const src = customSrc || getNdtFloorDrawingSrc(bldg, floorCode);
+            if (src) img = await loadImageElementFromSrc(src);
+        }
+        if (!usable(img)) return null;
+        const imgW = img.naturalWidth;
+        const imgH = img.naturalHeight;
+        let model = null;
+        if (!customSrc && typeof window.getFloorDxfDrawingModel === 'function') {
+            try { model = await window.getFloorDxfDrawingModel(bldg, floorCode, bId); } catch (_e) { model = null; }
+        }
+        const measureCtx = document.createElement('canvas').getContext('2d');
+        const drawMarks = (ctx) => {
+            pinDefects.forEach((d) => drawPin(ctx, d));
+            ndtItems.forEach((item) => drawNdtPin(ctx, item, ndtItems));
+            displacementGroups.forEach((g) => drawNdtDisplacementGroup(ctx, g));
+        };
+        const count = pinDefects.length + ndtItems.length + displacementGroups.length;
+        if (mode === 'image') {
+            const ctx = VC.createVectorContext({ width: imgW, height: imgH, measureCtx });
+            drawMarks(ctx);
+            return { ops: ctx.ops, w: imgW, h: imgH, imgW, imgH, img, model, custom: !!customSrc, count };
+        }
+        // 바탕: 도면 진하게(합성 모드)는 벡터에 못 넣어 그림 한 번만
+        const drawBg = (ctx) => { if (model) ctx.drawVectorDrawing(model, imgW, imgH); else ctx.drawImage(img, 0, 0, imgW, imgH); };
+        const crop = getNdtPrintCrop(bId, floorCode, imgW, imgH);
+        let ctx;
+        if (crop) {
+            // renderNdtPrintCropCanvas 와 같은 변환
+            const fit = printCropApi().fitCrop(crop.w, crop.h, 1800, 2540);
+            ctx = VC.createVectorContext({ width: fit.canvasW, height: fit.canvasH, measureCtx });
+            ctx.save();
+            if (fit.rotate) {
+                ctx.translate(fit.canvasW / 2, fit.canvasH / 2);
+                ctx.rotate(-Math.PI / 2);
+                ctx.scale(fit.scale, fit.scale);
+                ctx.translate(-crop.w / 2, -crop.h / 2);
+            } else {
+                ctx.scale(fit.scale, fit.scale);
+            }
+            ctx.translate(-crop.x, -crop.y);
+            ctx.beginPath();
+            ctx.rect(crop.x, crop.y, crop.w, crop.h);
+            ctx.clip();
+            drawBg(ctx);
+            drawMarks(ctx);
+            ctx.restore();
+            return { ops: ctx.ops, w: fit.canvasW, h: fit.canvasH, imgW, imgH, img, model, custom: !!customSrc, count };
+        }
+        // renderNdtFloorPlanCanvasDataUrl 과 같은 변환(가로 도면은 왼쪽으로 90°)
+        const cw = 1800;
+        const ch = 2540;
+        ctx = VC.createVectorContext({ width: cw, height: ch, measureCtx });
+        ctx.save();
+        if (imgW > imgH) {
+            ctx.translate(cw / 2, ch / 2);
+            ctx.rotate(-Math.PI / 2);
+            const scale = Math.min(cw / imgH, ch / imgW);
+            ctx.scale(scale, scale);
+            ctx.translate(-imgW / 2, -imgH / 2);
+        } else {
+            const scale = Math.min(cw / imgW, ch / imgH);
+            ctx.translate((cw - imgW * scale) / 2, (ch - imgH * scale) / 2);
+            ctx.scale(scale, scale);
+        }
+        drawBg(ctx);
+        drawMarks(ctx);
+        ctx.restore();
+        return { ops: ctx.ops, w: cw, h: ch, imgW, imgH, img, model, custom: !!customSrc, count };
+    }
+    window.recordNdtFloorMap = recordNdtFloorMap;
+
+    function imageElementToJpegDataUrl(img) {
+        try {
+            const c = document.createElement('canvas');
+            c.width = img.naturalWidth || img.width;
+            c.height = img.naturalHeight || img.height;
+            const x = c.getContext('2d');
+            x.fillStyle = '#ffffff';
+            x.fillRect(0, 0, c.width, c.height);
+            x.drawImage(img, 0, 0, c.width, c.height);
+            return c.toDataURL('image/jpeg', 0.92);
+        } catch (_e) {
+            return null;
+        }
+    }
+
+    /** 한글 비파괴 위치도 SVG — { text, w, h } | null(그림으로 대신) */
+    async function renderNdtFloorPlanSvgForReport(floorCode, categoryFilter) {
+        const VC = window.BSA && window.BSA.vectorCanvas;
+        const SW = window.BSA && window.BSA.svgWrite;
+        if (!VC || !SW) return null;
+        const r = await recordNdtFloorMap(floorCode, categoryFilter, 'report');
+        if (!r) return null;
+        const text = VC.opsToSvg(r.ops, {
+            width: r.w,
+            height: r.h,
+            imageHref: imageElementToJpegDataUrl,
+            drawingSvg: (m, w, h) => SW.drawingSvg(m, w, h)
+        });
+        return { text, w: r.w, h: r.h, vector: !!r.model };
+    }
+    window.renderNdtFloorPlanSvgForReport = renderNdtFloorPlanSvgForReport; // 점검·테스트용
 
     /** 지금 비파괴 탭에 띄운 도면(다 불러온 것). 없으면 null. */
     function getCurrentNdtDrawingImage() {

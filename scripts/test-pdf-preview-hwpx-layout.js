@@ -20,7 +20,7 @@ assert.ok(hwpxStart > 0 && hwpxEnd > hwpxStart);
 const shared = ['function paginateSurveyDefects(', 'function formatSurveyReportNo(', 'function getReportSurveyRowValues(']
     .map((h) => extractFunction(app, h)).join('\n');
 const FP = {
-    "hwpxExport": "32d1586ef7d14d56", // 2026-11-19 위치도 형식 묻기(그림 PNG / SVG 벡터) — 일부러 바꿈
+    "hwpxExport": "e67e091c3da78ec1", // 2026-11-19 위치도 형식 묻기(그림 PNG / SVG 벡터) + 비파괴 위치도도 SVG — 일부러 바꿈
     "sharedRows": "0ce605cc38dd62c3", // 2026-11-11 번호 칸: 직접 준 하위번호(noManual, NO.74-2)는 꼬리 유지 — 일부러 바꿈
     "hwpx-survey-row-fit.js": "3d22dcdf170a4bc4",
     "hwpx-font-8pt.js": "792b4169159c5676",

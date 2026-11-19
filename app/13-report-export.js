@@ -2496,10 +2496,10 @@
         try { if (localStorage.getItem(HWPX_MAP_MODE_KEY) === 'svg') last = 'svg'; } catch (_e) { /* 저장소 없음 */ }
         if (typeof window.appChoose !== 'function') return last;
         const idx = await window.appChoose(
-            '결함 위치도(도면)를 한글에 어떤 형식으로 넣을까요?',
+            '위치도(결함·비파괴 도면)를 한글에 어떤 형식으로 넣을까요?',
             [
                 { label: '그림(PNG) — 지금까지와 같음', detail: '어느 한글 버전에서나 열림' },
-                { label: 'SVG(벡터) — 확대해도 선명', detail: '한글 2020 이상 · DXF로 올린 층은 도면 선·글자까지 벡터(PDF·그림 층은 도면만 그림)' }
+                { label: 'SVG(벡터) — 확대해도 선명', detail: '한글 2020 이상 · 결함·비파괴 위치도 모두 · DXF로 올린 층은 도면 선·글자까지 벡터(PDF·그림 층은 도면만 그림)' }
             ],
             { title: '한글로 저장 — 위치도 형식', okText: '다음', defaultIndex: last === 'svg' ? 1 : 0 }
         );
@@ -2824,6 +2824,22 @@
                     return await renderNdtFloorPlanCanvasDataUrlAsync(sp.floorCode, category);
                 } finally {
                     _hwpxRenderBldgOverride = null;
+                }
+            };
+            // 2026-11-19 「SVG(벡터)」를 골랐을 때 비파괴 위치도 SVG(그림 위치도를 먼저 만들어 도면을 읽어 둔 뒤에 부른다)
+            const hwpxNdtMapSvgPicture = async (fc, category) => {
+                if (_hwpxMapImageMode !== 'svg') return null;
+                const sp = splitHwpxDongFloorCode(fc, dongParts);
+                if (sp.part) _hwpxRenderBldgOverride = sp.part.bldg;
+                try {
+                    const r = await renderNdtFloorPlanSvgForReport(sp.part ? sp.floorCode : fc, category);
+                    if (!r || !r.text) return null;
+                    return { bytes: new TextEncoder().encode(r.text), mime: 'image/svg', ext: 'svg', w: r.w, h: r.h };
+                } catch (e) {
+                    console.warn('[한글 비파괴 위치도 SVG] 그림으로 대신 넣음:', fc, category, e);
+                    return null;
+                } finally {
+                    if (sp.part) _hwpxRenderBldgOverride = null;
                 }
             };
             // 직전 보고서의 이미지 바이트가 계속 남아 사진이 많을수록 메모리가 누적된다
@@ -5270,8 +5286,13 @@
                                 mapAnchor = newPara;
 
                                 const pic = newPara.getElementsByTagNameNS(HP_NS, 'pic')[0];
-                                const { bytes, mime, ext } = await dataUrlToBytes(mapDataUrl);
-                                const size = await loadImageSize(mapDataUrl);
+                                let { bytes, mime, ext } = await dataUrlToBytes(mapDataUrl);
+                                let size = await loadImageSize(mapDataUrl);
+                                const ndtSvg = await hwpxNdtMapSvgPicture(floorForMap, category);
+                                if (ndtSvg) {
+                                    ({ bytes, mime, ext } = ndtSvg);
+                                    size = { w: ndtSvg.w, h: ndtSvg.h };
+                                }
                                 const imgId = `${imgIdPrefix}${imgCounter}`;
                                 zip.file(`BinData/${imgId}.${ext}`, bytes);
                                 manifestAdds.push(`<opf:item id="${imgId}" href="BinData/${imgId}.${ext}" media-type="${mime}" isEmbeded="1"/>`);
@@ -5934,6 +5955,22 @@
                     return await renderNdtFloorPlanCanvasDataUrlAsync(sp.floorCode, category);
                 } finally {
                     _hwpxRenderBldgOverride = null;
+                }
+            };
+            // 2026-11-19 「SVG(벡터)」를 골랐을 때 비파괴 위치도 SVG(그림 위치도를 먼저 만들어 도면을 읽어 둔 뒤에 부른다)
+            const hwpxNdtMapSvgPicture = async (fc, category) => {
+                if (_hwpxMapImageMode !== 'svg') return null;
+                const sp = splitHwpxDongFloorCode(fc, dongParts);
+                if (sp.part) _hwpxRenderBldgOverride = sp.part.bldg;
+                try {
+                    const r = await renderNdtFloorPlanSvgForReport(sp.part ? sp.floorCode : fc, category);
+                    if (!r || !r.text) return null;
+                    return { bytes: new TextEncoder().encode(r.text), mime: 'image/svg', ext: 'svg', w: r.w, h: r.h };
+                } catch (e) {
+                    console.warn('[한글 비파괴 위치도 SVG] 그림으로 대신 넣음:', fc, category, e);
+                    return null;
+                } finally {
+                    if (sp.part) _hwpxRenderBldgOverride = null;
                 }
             };
             // 직전 보고서의 이미지 바이트가 계속 남아 사진이 많을수록 메모리가 누적된다
@@ -7932,8 +7969,13 @@
                                 mapAnchor = newPara;
 
                                 const pic = newPara.getElementsByTagNameNS(HP_NS, 'pic')[0];
-                                const { bytes, mime, ext } = await dataUrlToBytes(mapDataUrl);
-                                const size = await loadImageSize(mapDataUrl);
+                                let { bytes, mime, ext } = await dataUrlToBytes(mapDataUrl);
+                                let size = await loadImageSize(mapDataUrl);
+                                const ndtSvg = await hwpxNdtMapSvgPicture(floorForMap, category);
+                                if (ndtSvg) {
+                                    ({ bytes, mime, ext } = ndtSvg);
+                                    size = { w: ndtSvg.w, h: ndtSvg.h };
+                                }
                                 const imgId = `${imgIdPrefix}${imgCounter}`;
                                 zip.file(`BinData/${imgId}.${ext}`, bytes);
                                 manifestAdds.push(`<opf:item id="${imgId}" href="BinData/${imgId}.${ext}" media-type="${mime}" isEmbeded="1"/>`);

@@ -14,6 +14,7 @@
         { name: 'BSA_LEADER', aci: 1 },
         { name: 'BSA_AREA', aci: 1 },
         { name: 'BSA_LEGEND', aci: 8 },
+        { name: 'BSA_NDT', aci: 5 },
         { name: 'BSA_REF', aci: 8 },
         { name: 'BSA_DRAWING', aci: 7 }
     ];
@@ -453,6 +454,67 @@
                 addText('BSA_PIN_TEXT', textAci, String(p.typeLabel), W(l + c1 + (bw - c1) / 2, by), fontH, (bw - c1) * upp);
             } else {
                 addText('BSA_PIN_TEXT', textAci, String(p.label || 'NO.01'), W(bx, by), fontH, bw * upp);
+            }
+        });
+
+        /* ----- 비파괴 마킹(벡터 기록 캔버스 ops, 그림 픽셀 좌표) — 2026-11-19 「비파괴도 dxf 출력」 -----
+         * js/core/vector-canvas.js 가 화면 그리기 코드를 그대로 돌려 받은 도형. 흰색(글자 테두리·흰 바탕)은 캐드에서 쓸모가 없어 뺀다. */
+        (Array.isArray(opts.vectorOps) ? opts.vectorOps : []).forEach(function (op) {
+            if (!op) return;
+            var NL = 'BSA_NDT';
+            var isWhite = function (c) { return /^#f[0-9a-f]f[0-9a-f]f[0-9a-f]$/i.test(String(c || '')); };
+            if (op.t === 'path') {
+                (op.subs || []).forEach(function (s) {
+                    var n = Math.floor((s.pts || []).length / 2);
+                    if (n < 2) return;
+                    var pts = [];
+                    for (var i = 0; i < n; i++) pts.push({ x: s.pts[i * 2], y: s.pts[i * 2 + 1] });
+                    if (op.stroke && !isWhite(op.stroke.color) && op.stroke.alpha > 0.05) {
+                        addPoly(NL, hexToAci(op.stroke.color), pts.map(function (p) { return W(p.x, p.y); }), !!s.closed,
+                            op.stroke.dash && op.stroke.dash.length ? 'DASHED' : null);
+                    }
+                    if (!op.stroke && op.fill && !isWhite(op.fill.color) && op.fill.alpha > 0.05) {
+                        var aci = hexToAci(op.fill.color);
+                        // 마지막 점이 첫 점과 같으면 뺀다
+                        if (n > 3 && Math.abs(pts[n - 1].x - pts[0].x) < 1e-6 && Math.abs(pts[n - 1].y - pts[0].y) < 1e-6) { pts.pop(); n--; }
+                        if (n === 3) { addTriangle(NL, aci, W(pts[0].x, pts[0].y), W(pts[1].x, pts[1].y), W(pts[2].x, pts[2].y)); return; }
+                        if (n === 4) { // SOLID 꼭짓점 순서 1·2·4·3
+                            var a = W(pts[0].x, pts[0].y), b = W(pts[1].x, pts[1].y), c = W(pts[2].x, pts[2].y), d = W(pts[3].x, pts[3].y);
+                            if (!a || !b || !c || !d) return;
+                            head('SOLID', NL, aci); pt(10, a); pt(11, b); pt(12, d); pt(13, c);
+                            return;
+                        }
+                        // 둥근 점(원) → 채운 원
+                        var cx = 0, cy = 0;
+                        pts.forEach(function (p) { cx += p.x; cy += p.y; });
+                        cx /= n; cy /= n;
+                        var rs = pts.map(function (p) { return Math.hypot(p.x - cx, p.y - cy); });
+                        var rm = rs.reduce(function (x, y) { return x + y; }, 0) / n;
+                        if (n >= 10 && rm > 0 && rs.every(function (r) { return Math.abs(r - rm) <= rm * 0.08; })) {
+                            addDisk(NL, aci, W(cx, cy), rm * upp);
+                            return;
+                        }
+                        addPoly(NL, aci, pts.map(function (p) { return W(p.x, p.y); }), true);
+                    }
+                });
+            } else if (op.t === 'text') {
+                var col = op.fill ? op.fill.color : (op.stroke && op.stroke.color);
+                if (!op.fill || isWhite(col) || !(op.fill.alpha > 0.05)) return; // 테두리 글자(흰 후광)는 뺀다
+                var tp = W(op.x, op.y);
+                var ts = encodeText(op.str);
+                var th = Number(op.size) * CAP_RATIO * upp;
+                if (!tp || !ts || !(th > 0) || !isFinite(th)) return;
+                // 그림 좌표는 아래로 +y — 화면 각 a 는 캐드에서 -a
+                var dirPt = W(op.x + Math.cos(op.angle * Math.PI / 180), op.y + Math.sin(op.angle * Math.PI / 180));
+                var ang = dirPt ? Math.atan2(dirPt.y - tp.y, dirPt.x - tp.x) * 180 / Math.PI : 0;
+                var ha = op.anchor === 'middle' ? 1 : (op.anchor === 'end' ? 2 : 0);
+                head('TEXT', NL, hexToAci(col));
+                pt(10, tp);
+                g(40, num(th));
+                g(1, ts);
+                if (Math.abs(ang) > 0.01) g(50, num(ang));
+                g(7, TEXT_STYLE);
+                if (ha) { g(72, ha); pt(11, tp); }
             }
         });
 
