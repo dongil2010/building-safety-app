@@ -91,6 +91,25 @@ const legend = (W) => ({
         console.log('마킹만: ok');
     }
 
+    // 1-2) 한글 위치도 종이(page): 크기·변환·자르기, 범례는 자르기 밖
+    {
+        const W = 1000, H = 700, s = 0.5;
+        const svg = S.buildMarkingSvg({
+            width: W, height: H, plans: samplePlans(W, H), legendPlan: legend(W),
+            page: { w: 1800, h: 2540, matrix: [0, -s, s, 0, 10, 2000], clip: { x: 100, y: 50, w: 800, h: 600 } }
+        });
+        assert(/width="1800" height="2540" viewBox="0 0 1800 2540"/.test(svg), '종이 크기');
+        assert(svg.includes('<g transform="matrix(0 -0.5 0.5 0 10 2000)">'), '변환');
+        assert(svg.includes('<clipPath id="bsaPageClip"><rect x="100" y="50" width="800" height="600"/></clipPath>'), '자르기 범위');
+        const clipAt = svg.indexOf('<g clip-path="url(#bsaPageClip)">');
+        const pinAt = svg.indexOf('id="BSA_PIN"');
+        const legAt = svg.indexOf('id="BSA_LEGEND"');
+        const clipEnd = svg.indexOf('</g>', svg.lastIndexOf('class="bsa-pin"'));
+        assert(clipAt > 0 && pinAt > clipAt && legAt > clipEnd, '마킹은 자르기 안, 범례는 밖');
+        assert.strictEqual((svg.match(/<g[ >]/g) || []).length, (svg.match(/<\/g>/g) || []).length, '<g> 짝');
+        console.log('한글 위치도 종이: ok');
+    }
+
     // 2) 그림 바탕
     {
         const svg = S.buildMarkingSvg({ width: 400, height: 300, plans: [], background: { href: 'data:image/jpeg;base64,AAAA', w: 400, h: 300 } });

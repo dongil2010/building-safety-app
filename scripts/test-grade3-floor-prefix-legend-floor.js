@@ -37,7 +37,8 @@ assert.notStrictEqual(ctx.p('옥탑2층'), ctx.p('2F'));
 assert.ok(/const items = getLocationMapLegendDrawItems\(legendOpts && legendOpts\.floorCode\);/.test(app));
 assert.ok(/drawLocationMapLegend\(ctx, imgW, imgH, false, 0, \{ floorCode \}\);/.test(extractFunction(app, 'function renderFloorPlanCanvasDataUrl(')), '한글·보고서 도면 그림');
 assert.ok(/legendBoxForPrintCrop\(imgW, imgH, crop, floorCode\), floorCode \}/.test(extractFunction(app, 'function renderFloorPrintCropCanvas(')), '출력 범위 그림');
-assert.ok(/window\.buildVectorLegendDrawPlan = function\(measureCtx, imgW, imgH, floorCode\)/.test(app));
+// 2026-11-19 다섯째 인자(boxOverride)는 한글 위치도 SVG 의 출력 범위용(선택)
+assert.ok(/window\.buildVectorLegendDrawPlan = function\(measureCtx, imgW, imgH, floorCode(, boxOverride)?\)/.test(app));
 const bridge = fs.readFileSync(path.join(root, 'js', 'pdf-vector-bridge.js'), 'utf8');
 assert.ok(/buildVectorLegendDrawPlan\(measureCtx, imgW, imgH, floorCode\)/.test(bridge), '벡터 PDF도 그 층');
 // 저장된 범례 박스에 비율을 찍는 것은 화면에서만

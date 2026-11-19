@@ -3502,10 +3502,11 @@
     }
 
     /** 결함위치도 범례 표 → 벡터 PDF용 (화면 drawLocationMapLegend와 동일 치수) */
-    window.buildVectorLegendDrawPlan = function(measureCtx, imgW, imgH, floorCode) {
+    window.buildVectorLegendDrawPlan = function(measureCtx, imgW, imgH, floorCode, boxOverride) {
         const items = getLocationMapLegendDrawItems(floorCode);
         if (!items.length) return null;
-        const box = getActiveLocationMapLegendBox();
+        // boxOverride: 출력 범위 안에 범례를 다시 놓을 때(drawLocationMapLegend 의 legendOpts.box 와 같음)
+        const box = boxOverride || getActiveLocationMapLegendBox();
         const scale = resolveLocationMapLegendDrawScale(box, imgW, imgH);
         const dims = measureLocationMapLegendTable(measureCtx || null, items, scale);
         const margin = 16 * scale;
@@ -3657,6 +3658,61 @@
             return null;
         }
     }
+
+    /**
+     * 2026-11-19 한글 위치도를 SVG(벡터)로 — renderFloorPlanCanvasDataUrl 과 같은 종이(1800×2540 세로, 출력 범위면 그 크기)·
+     * 같은 돌림/배율/자르기·같은 범례 자리로 만든다(그림 대신 넣어도 칸에 똑같이 앉게).
+     * 도면 바탕: DXF 로 올린 층 = 선·글자 벡터 / PDF 층 = PDF 를 선명한 그림으로 / 그림 층 = 그 그림.
+     * 메모 출력·도면 어둡게는 SVG 에 안 들어간다. 못 만들면 null(부르는 쪽이 그림으로 넣는다).
+     * 반환 { text, w, h, background }
+     */
+    async function renderFloorPlanSvgForReport(floorCode) {
+        if (typeof window.buildFloorMarkingSvgInfo !== 'function') return null;
+        const bldg = hwpxRenderBuilding();
+        const bId = bldg.id || state.currentBuildingId || 'default';
+        const cacheKey = `${bId}_${floorCode}`;
+        const usable = (im) => !!(im && im.complete && im.naturalWidth > 0);
+        let img = state.floorImageCache ? state.floorImageCache[cacheKey] : null;
+        if (!usable(img) && hwpxRenderIsScreenFloor(floorCode) && usable(state.bgImage)) img = state.bgImage;
+        if (!usable(img)) return null;
+        const imgW = img.naturalWidth;
+        const imgH = img.naturalHeight;
+        const measureCtx = document.createElement('canvas').getContext('2d');
+        const crop = getFloorPrintCrop(bId, floorCode, imgW, imgH);
+        let page;
+        let legendPlan;
+        if (crop) {
+            const fit = printCropApi().fitCrop(crop.w, crop.h, 1800, 2540);
+            const s = fit.scale;
+            // renderFloorPrintCropCanvas 와 같은 변환
+            const matrix = fit.rotate
+                ? [0, -s, s, 0, fit.canvasW / 2 - s * (crop.y + crop.h / 2), fit.canvasH / 2 + s * (crop.x + crop.w / 2)]
+                : [s, 0, 0, s, -s * crop.x, -s * crop.y];
+            page = { w: fit.canvasW, h: fit.canvasH, matrix, clip: { x: crop.x, y: crop.y, w: crop.w, h: crop.h } };
+            legendPlan = window.buildVectorLegendDrawPlan(measureCtx, crop.w, crop.h, floorCode, legendBoxForPrintCrop(imgW, imgH, crop, floorCode));
+            if (legendPlan) { legendPlan.boxX += crop.x; legendPlan.boxY += crop.y; }
+        } else {
+            const cw = 1800;
+            const ch = 2540;
+            let matrix;
+            if (imgW > imgH) {
+                // 가로 도면: 왼쪽으로 90° 돌려 세로 종이에 꽉(renderFloorPlanCanvasDataUrl 과 같음)
+                const s = Math.min(cw / imgH, ch / imgW);
+                matrix = [0, -s, s, 0, cw / 2 - s * imgH / 2, ch / 2 + s * imgW / 2];
+            } else {
+                const s = Math.min(cw / imgW, ch / imgH);
+                matrix = [s, 0, 0, s, (cw - imgW * s) / 2, (ch - imgH * s) / 2];
+            }
+            page = { w: cw, h: ch, matrix };
+            legendPlan = window.buildVectorLegendDrawPlan(measureCtx, imgW, imgH, floorCode);
+        }
+        const info = await window.buildFloorMarkingSvgInfo(bldg, floorCode, bId, {
+            size: { w: imgW, h: imgH }, page, legendPlan, backgroundImage: img
+        });
+        if (!info || !info.text) return null;
+        return { text: info.text, w: page.w, h: page.h, background: info.background };
+    }
+    window.renderFloorPlanSvgForReport = renderFloorPlanSvgForReport; // 점검·테스트용
 
     // --- 위치도 출력 범위 (2026-10-07) ---
     // 도면에 여백이 많으면 한글·PDF 위치도에서 결함 박스가 작게 나온다. 층마다 출력 범위를 정해 두면

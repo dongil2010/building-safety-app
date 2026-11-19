@@ -93,6 +93,7 @@
      *  - background: { href(data URL), x, y, w, h } — 그림 바탕(PDF·그림 층)
      *  - drawing: { model(js/core/dxf-view.js 모델, PDF 점 좌표, y 위로) } — DXF 층 원본 도면(벡터)
      *  - title: <title> 글자
+     *  - page: { w, h, matrix:[a,b,c,d,e,f](그림 픽셀 → 종이), clip:{x,y,w,h}(그림 픽셀, 범례 빼고 자름) } — 한글 위치도용(선택)
      * 반환 SVG 글자
      */
     function buildMarkingSvg(opts) {
@@ -104,13 +105,24 @@
         var out = [];
         var clipN = 0;
         var defs = [];
+        // 2026-11-19 한글 위치도(page): 종이 크기·변환(돌림·배율)·자르기 범위. 없으면 종이 = 그림.
+        var page = opts.page && Number(opts.page.w) > 0 && Number(opts.page.h) > 0 ? opts.page : null;
+        var PW = page ? Number(page.w) : W;
+        var PH = page ? Number(page.h) : H;
+        var M = page && Array.isArray(page.matrix) && page.matrix.length === 6 && finite.apply(null, page.matrix) ? page.matrix : null;
+        var clip = page && page.clip && finite(page.clip.x, page.clip.y, page.clip.w, page.clip.h) ? page.clip : null;
 
         out.push('<?xml version="1.0" encoding="UTF-8"?>');
         out.push('<svg xmlns="http://www.w3.org/2000/svg" xmlns:xlink="http://www.w3.org/1999/xlink" version="1.1"'
-            + ' width="' + n2(W) + '" height="' + n2(H) + '" viewBox="0 0 ' + n2(W) + ' ' + n2(H) + '">');
+            + ' width="' + n2(PW) + '" height="' + n2(PH) + '" viewBox="0 0 ' + n2(PW) + ' ' + n2(PH) + '">');
         if (opts.title) out.push('<title>' + esc(opts.title) + '</title>');
         var defsAt = out.length; // <defs> 자리(빗금 자르기 모양)
-        out.push('<rect id="BSA_PAPER" x="0" y="0" width="' + n2(W) + '" height="' + n2(H) + '" fill="#ffffff"/>');
+        out.push('<rect id="BSA_PAPER" x="0" y="0" width="' + n2(PW) + '" height="' + n2(PH) + '" fill="#ffffff"/>');
+        if (M) out.push('<g transform="matrix(' + M.map(function (v) { return String(Math.round(Number(v) * 1e6) / 1e6); }).join(' ') + ')">');
+        if (clip) {
+            defs.push('<clipPath id="bsaPageClip"><rect x="' + n2(clip.x) + '" y="' + n2(clip.y) + '" width="' + n2(clip.w) + '" height="' + n2(clip.h) + '"/></clipPath>');
+            out.push('<g clip-path="url(#bsaPageClip)">');
+        }
 
         /* ----- 바탕 도면 ----- */
         var bg = opts.background;
@@ -268,6 +280,7 @@
         if (areas.length) out.push('<g id="BSA_AREA">' + areas.join('') + '</g>');
         if (leaders.length) out.push('<g id="BSA_LEADER">' + leaders.join('') + '</g>');
         if (boxes.length) out.push('<g id="BSA_PIN">' + boxes.join('') + '</g>');
+        if (clip) out.push('</g>'); // 범례는 자르기 밖(범위 안 구석에 따로 놓는다)
 
         /* ----- 범례 표 ----- */
         if (legendPlan && legendPlan.items && legendPlan.items.length && finite(legendPlan.boxX, legendPlan.boxY, legendPlan.boxW, legendPlan.boxH)) {
@@ -301,6 +314,7 @@
             out.push(lg);
         }
 
+        if (M) out.push('</g>');
         if (defs.length) out.splice(defsAt, 0, '<defs>' + defs.join('') + '</defs>');
         out.push('</svg>');
         return out.join('\n') + '\n';

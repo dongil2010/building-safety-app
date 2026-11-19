@@ -50080,7 +50080,7 @@ ${roundMobile ? '' : `<button type="button" class="icon-btn icon-btn-trash" titl
             endDrawingAlign();
         }
     }, true);
-// @@app-part 12-survey-table.js sha=14bc1756e553 — 원본은 app/12-survey-table.js (여기 말고 거기서 고칠 것)
+// @@app-part 12-survey-table.js sha=abb7ca7f74ea — 원본은 app/12-survey-table.js (여기 말고 거기서 고칠 것)
     // --- 10. SURVEY TABLE & ALBUM RENDERING ---
 
     // 상태조사표 컬럼 기본 정의 (화면/PDF/엑셀 공통). size와 crackWidth/crackLength는 상호 배타적으로
@@ -53584,10 +53584,11 @@ ${roundMobile ? '' : `<button type="button" class="icon-btn icon-btn-trash" titl
     }
 
     /** 결함위치도 범례 표 → 벡터 PDF용 (화면 drawLocationMapLegend와 동일 치수) */
-    window.buildVectorLegendDrawPlan = function(measureCtx, imgW, imgH, floorCode) {
+    window.buildVectorLegendDrawPlan = function(measureCtx, imgW, imgH, floorCode, boxOverride) {
         const items = getLocationMapLegendDrawItems(floorCode);
         if (!items.length) return null;
-        const box = getActiveLocationMapLegendBox();
+        // boxOverride: 출력 범위 안에 범례를 다시 놓을 때(drawLocationMapLegend 의 legendOpts.box 와 같음)
+        const box = boxOverride || getActiveLocationMapLegendBox();
         const scale = resolveLocationMapLegendDrawScale(box, imgW, imgH);
         const dims = measureLocationMapLegendTable(measureCtx || null, items, scale);
         const margin = 16 * scale;
@@ -53739,6 +53740,61 @@ ${roundMobile ? '' : `<button type="button" class="icon-btn icon-btn-trash" titl
             return null;
         }
     }
+
+    /**
+     * 2026-11-19 한글 위치도를 SVG(벡터)로 — renderFloorPlanCanvasDataUrl 과 같은 종이(1800×2540 세로, 출력 범위면 그 크기)·
+     * 같은 돌림/배율/자르기·같은 범례 자리로 만든다(그림 대신 넣어도 칸에 똑같이 앉게).
+     * 도면 바탕: DXF 로 올린 층 = 선·글자 벡터 / PDF 층 = PDF 를 선명한 그림으로 / 그림 층 = 그 그림.
+     * 메모 출력·도면 어둡게는 SVG 에 안 들어간다. 못 만들면 null(부르는 쪽이 그림으로 넣는다).
+     * 반환 { text, w, h, background }
+     */
+    async function renderFloorPlanSvgForReport(floorCode) {
+        if (typeof window.buildFloorMarkingSvgInfo !== 'function') return null;
+        const bldg = hwpxRenderBuilding();
+        const bId = bldg.id || state.currentBuildingId || 'default';
+        const cacheKey = `${bId}_${floorCode}`;
+        const usable = (im) => !!(im && im.complete && im.naturalWidth > 0);
+        let img = state.floorImageCache ? state.floorImageCache[cacheKey] : null;
+        if (!usable(img) && hwpxRenderIsScreenFloor(floorCode) && usable(state.bgImage)) img = state.bgImage;
+        if (!usable(img)) return null;
+        const imgW = img.naturalWidth;
+        const imgH = img.naturalHeight;
+        const measureCtx = document.createElement('canvas').getContext('2d');
+        const crop = getFloorPrintCrop(bId, floorCode, imgW, imgH);
+        let page;
+        let legendPlan;
+        if (crop) {
+            const fit = printCropApi().fitCrop(crop.w, crop.h, 1800, 2540);
+            const s = fit.scale;
+            // renderFloorPrintCropCanvas 와 같은 변환
+            const matrix = fit.rotate
+                ? [0, -s, s, 0, fit.canvasW / 2 - s * (crop.y + crop.h / 2), fit.canvasH / 2 + s * (crop.x + crop.w / 2)]
+                : [s, 0, 0, s, -s * crop.x, -s * crop.y];
+            page = { w: fit.canvasW, h: fit.canvasH, matrix, clip: { x: crop.x, y: crop.y, w: crop.w, h: crop.h } };
+            legendPlan = window.buildVectorLegendDrawPlan(measureCtx, crop.w, crop.h, floorCode, legendBoxForPrintCrop(imgW, imgH, crop, floorCode));
+            if (legendPlan) { legendPlan.boxX += crop.x; legendPlan.boxY += crop.y; }
+        } else {
+            const cw = 1800;
+            const ch = 2540;
+            let matrix;
+            if (imgW > imgH) {
+                // 가로 도면: 왼쪽으로 90° 돌려 세로 종이에 꽉(renderFloorPlanCanvasDataUrl 과 같음)
+                const s = Math.min(cw / imgH, ch / imgW);
+                matrix = [0, -s, s, 0, cw / 2 - s * imgH / 2, ch / 2 + s * imgW / 2];
+            } else {
+                const s = Math.min(cw / imgW, ch / imgH);
+                matrix = [s, 0, 0, s, (cw - imgW * s) / 2, (ch - imgH * s) / 2];
+            }
+            page = { w: cw, h: ch, matrix };
+            legendPlan = window.buildVectorLegendDrawPlan(measureCtx, imgW, imgH, floorCode);
+        }
+        const info = await window.buildFloorMarkingSvgInfo(bldg, floorCode, bId, {
+            size: { w: imgW, h: imgH }, page, legendPlan, backgroundImage: img
+        });
+        if (!info || !info.text) return null;
+        return { text: info.text, w: page.w, h: page.h, background: info.background };
+    }
+    window.renderFloorPlanSvgForReport = renderFloorPlanSvgForReport; // 점검·테스트용
 
     // --- 위치도 출력 범위 (2026-10-07) ---
     // 도면에 여백이 많으면 한글·PDF 위치도에서 결함 박스가 작게 나온다. 층마다 출력 범위를 정해 두면
@@ -54668,7 +54724,7 @@ ${roundMobile ? '' : `<button type="button" class="icon-btn icon-btn-trash" titl
         }
     }
 
-// @@app-part 13-report-export.js sha=d6c6d6c19e94 — 원본은 app/13-report-export.js (여기 말고 거기서 고칠 것)
+// @@app-part 13-report-export.js sha=e0d96e6db025 — 원본은 app/13-report-export.js (여기 말고 거기서 고칠 것)
     // --- REPORT PREVIEW MODAL (Instant Modal Open & Pure White Paper Theme) ---
     window.openReportPreviewModalFunc = async function(opts) {
         const manageLoading = !(opts && opts.skipLoading);
@@ -57154,6 +57210,44 @@ ${roundMobile ? '' : `<button type="button" class="icon-btn icon-btn-trash" titl
     // 같은 현장·같은 회차에 동이 둘 이상이면 동을 고르게 한다. 고른 동의 층을 동 순서대로 이어 붙여
     // 「1) A동 지하1층 … 6) B동 지하1층」처럼 층 머리글 번호·[도면 N-M]·사진 번호가 동을 넘어 이어진다.
     // 한 동만 고르면(지금 연 동) 예전 출력 그대로.
+    // ---- 2026-11-19 한글 위치도 넣는 방식: 그림(PNG) / SVG(벡터) ----
+    // 사용자: 「한글에서 도면 출력할때 svg로 출력 할건지 그냥 이미지로 출력할건지 물어봐서 둘다 출력 가능하게 해」
+    // SVG 는 한글 2020 이상에서 열린다(한글이 직접 넣을 때와 같은 모양: BinData/*.svg, media-type image/svg).
+    let _hwpxMapImageMode = 'png';
+    const HWPX_MAP_MODE_KEY = 'bsa_hwpx_map_image_mode_v1';
+
+    /** 위치도 형식을 묻는다. 'png' | 'svg' | null(취소). 지난번 고른 것을 먼저 보여 준다 */
+    async function askHwpxMapImageMode() {
+        let last = 'png';
+        try { if (localStorage.getItem(HWPX_MAP_MODE_KEY) === 'svg') last = 'svg'; } catch (_e) { /* 저장소 없음 */ }
+        if (typeof window.appChoose !== 'function') return last;
+        const idx = await window.appChoose(
+            '결함 위치도(도면)를 한글에 어떤 형식으로 넣을까요?',
+            [
+                { label: '그림(PNG) — 지금까지와 같음', detail: '어느 한글 버전에서나 열림' },
+                { label: 'SVG(벡터) — 확대해도 선명', detail: '한글 2020 이상 · DXF로 올린 층은 도면 선·글자까지 벡터(PDF·그림 층은 도면만 그림)' }
+            ],
+            { title: '한글로 저장 — 위치도 형식', okText: '다음', defaultIndex: last === 'svg' ? 1 : 0 }
+        );
+        if (idx == null) return null;
+        const mode = idx === 1 ? 'svg' : 'png';
+        try { localStorage.setItem(HWPX_MAP_MODE_KEY, mode); } catch (_e) { /* 저장소 없음 */ }
+        return mode;
+    }
+
+    /** SVG 를 고른 출력에서 한 층 위치도 → { bytes, mime, ext, w, h } | null(그림 그대로 쓰기) */
+    async function hwpxLocationMapSvgPicture(floorCode) {
+        if (_hwpxMapImageMode !== 'svg') return null;
+        try {
+            const r = await renderFloorPlanSvgForReport(floorCode);
+            if (!r || !r.text) return null;
+            return { bytes: new TextEncoder().encode(r.text), mime: 'image/svg', ext: 'svg', w: r.w, h: r.h };
+        } catch (e) {
+            console.warn('[한글 위치도 SVG] 그림으로 대신 넣음:', floorCode, e);
+            return null;
+        }
+    }
+
     async function pickHwpxDongBuildings(bldg) {
         const siteKey = getBuildingSiteName(bldg);
         const roundKey = getBuildingSurveyRoundKey(bldg);
@@ -57326,6 +57420,9 @@ ${roundMobile ? '' : `<button type="button" class="icon-btn icon-btn-trash" titl
         if (!bldg || !bldgId) { window.showToast('건축물을 먼저 선택해주세요.', 'warning'); return; }
         const dongBuildings = await pickHwpxDongBuildings(bldg);
         if (!dongBuildings) return;
+        const mapMode = await askHwpxMapImageMode();
+        if (!mapMode) return;
+        _hwpxMapImageMode = mapMode;
         if (dongBuildings.length > 1 || dongBuildings[0].id !== bldg.id) {
             await exportHwpxSurveyTableDongs(dongBuildings, bldg);
             return;
@@ -58357,8 +58454,14 @@ ${roundMobile ? '' : `<button type="button" class="icon-btn icon-btn-trash" titl
                             mapMaxW = parseInt(cellSz.getAttribute('width'), 10) - marginL - marginR;
                             mapMaxH = parseInt(cellSz.getAttribute('height'), 10) - marginT - marginB;
                         }
-                        const { bytes, mime, ext } = await dataUrlToBytes(mapDataUrl);
-                        const size = await loadImageSize(mapDataUrl);
+                        let { bytes, mime, ext } = await dataUrlToBytes(mapDataUrl);
+                        let size = await loadImageSize(mapDataUrl);
+                        // 2026-11-19 「SVG(벡터)」를 골랐으면 같은 종이·배치의 SVG 로 바꿔 넣는다(못 만들면 그림 그대로)
+                        const svgPic = await hwpxLocationMapSvgPicture(floorCode);
+                        if (svgPic) {
+                            ({ bytes, mime, ext } = svgPic);
+                            size = { w: svgPic.w, h: svgPic.h };
+                        }
                         const mapImgId = `locationMapAuto${imgSeq}`;
                         zip.file(`BinData/${mapImgId}.${ext}`, bytes);
                         manifestAdds.push(`<opf:item id="${mapImgId}" href="BinData/${mapImgId}.${ext}" media-type="${mime}" isEmbeded="1"/>`);
@@ -61206,8 +61309,14 @@ ${roundMobile ? '' : `<button type="button" class="icon-btn icon-btn-trash" titl
                             mapMaxW = parseInt(cellSz.getAttribute('width'), 10) - marginL - marginR;
                             mapMaxH = parseInt(cellSz.getAttribute('height'), 10) - marginT - marginB;
                         }
-                        const { bytes, mime, ext } = await dataUrlToBytes(mapDataUrl);
-                        const size = await loadImageSize(mapDataUrl);
+                        let { bytes, mime, ext } = await dataUrlToBytes(mapDataUrl);
+                        let size = await loadImageSize(mapDataUrl);
+                        // 2026-11-19 「SVG(벡터)」를 골랐으면 같은 종이·배치의 SVG 로 바꿔 넣는다(못 만들면 그림 그대로)
+                        const svgPic = await hwpxLocationMapSvgPicture(floorCode);
+                        if (svgPic) {
+                            ({ bytes, mime, ext } = svgPic);
+                            size = { w: svgPic.w, h: svgPic.h };
+                        }
                         const mapImgId = `locationMapAuto${imgSeq}`;
                         zip.file(`BinData/${mapImgId}.${ext}`, bytes);
                         manifestAdds.push(`<opf:item id="${mapImgId}" href="BinData/${mapImgId}.${ext}" media-type="${mime}" isEmbeded="1"/>`);

@@ -234,12 +234,10 @@
     }
   }
 
-  /** 지금 화면의 도면 그림(그림만 있는 층) → data URL. 다른 층이거나 못 읽으면 null */
-  function currentBgImageDataUrl(bldg, floorCode) {
-    const st = window.state;
-    if (!st || !st.bgImage || st.currentFloor !== floorCode || (st.currentBuilding && bldg && st.currentBuilding.id !== bldg.id)) return null;
+  /** 도면 그림(img) → JPEG data URL. 못 읽으면 null */
+  function imageToDataUrl(img) {
     try {
-      const img = st.bgImage;
+      if (!img) return null;
       const w = img.naturalWidth || img.width;
       const h = img.naturalHeight || img.height;
       if (!(w > 0) || !(h > 0)) return null;
@@ -257,11 +255,20 @@
     }
   }
 
+  /** 지금 화면의 도면 그림(그림만 있는 층) → data URL. 다른 층이거나 못 읽으면 null */
+  function currentBgImageDataUrl(bldg, floorCode) {
+    const st = window.state;
+    if (!st || !st.bgImage || st.currentFloor !== floorCode || (st.currentBuilding && bldg && st.currentBuilding.id !== bldg.id)) return null;
+    return imageToDataUrl(st.bgImage);
+  }
+
   /**
    * 한 층 SVG 글자와 정보.
+   * opts(한글 위치도용, 선택): { size:{w,h}(마킹 좌표의 그림 크기), page(svg-write page), legendPlan(null = 범례 없음), backgroundImage(그림 층 바탕) }
    * @returns {Promise<{text:string, count:number, floorCode:string, background:'vector'|'pdf-image'|'image'|'none'}>}
    */
-  window.buildFloorMarkingSvgInfo = async function (bldg, floorCode, buildingId) {
+  window.buildFloorMarkingSvgInfo = async function (bldg, floorCode, buildingId, opts) {
+    opts = opts || {};
     if (!bldg || !floorCode) throw new Error('층 정보가 없습니다.');
     const api = window.BSA && window.BSA.svgWrite;
     if (!api || typeof api.buildMarkingSvg !== 'function') {
@@ -278,12 +285,16 @@
     } catch (e) {
       console.warn('[BSA_SVG] PDF 원본 확인 실패(그림 기준으로 진행)', e);
     }
-    const size = await floorRefImageSize(bldg, floorCode, key, pdfDataUrl);
+    const size = (opts.size && opts.size.w > 0 && opts.size.h > 0)
+      ? { w: Number(opts.size.w), h: Number(opts.size.h) }
+      : await floorRefImageSize(bldg, floorCode, key, pdfDataUrl);
     const measureCtx = document.createElement('canvas').getContext('2d');
     const plans = window.buildVectorPinPlansForDefects(defects, measureCtx);
-    const legendPlan = (typeof window.buildVectorLegendDrawPlan === 'function')
-      ? window.buildVectorLegendDrawPlan(measureCtx, size.w, size.h, floorCode)
-      : null;
+    const legendPlan = opts.legendPlan !== undefined
+      ? opts.legendPlan
+      : ((typeof window.buildVectorLegendDrawPlan === 'function')
+        ? window.buildVectorLegendDrawPlan(measureCtx, size.w, size.h, floorCode)
+        : null);
 
     let drawing = null;
     let background = null;
@@ -307,7 +318,7 @@
       }
     }
     if (!drawing && !background) {
-      const href = currentBgImageDataUrl(bldg, floorCode);
+      const href = (opts.backgroundImage && imageToDataUrl(opts.backgroundImage)) || currentBgImageDataUrl(bldg, floorCode);
       if (href) { background = { href, x: 0, y: 0, w: size.w, h: size.h }; kind = 'image'; }
     }
     const text = api.buildMarkingSvg({
@@ -317,6 +328,7 @@
       legendPlan,
       drawing,
       background,
+      page: opts.page || null,
       title: `${floorFileName(bldg, floorCode)} 결함위치도`
     });
     return { text, count: plans.length, floorCode: String(floorCode), background: kind };
