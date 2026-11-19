@@ -75,7 +75,13 @@ const legend = (W) => ({
         assert(svg.includes('fill-opacity="0.28"'), '채운 영역 28%');
         assert(svg.includes('stroke-dasharray="5 4"'), '점선 테두리');
         assert(/<circle [^>]*fill="#0000ff"/.test(svg), '동그라미 끝');
-        assert(/paint-order="stroke"/.test(svg), '테두리만 박스 번호는 흰 테두리 글자');
+        // 한글(HWP)은 paint-order·dominant-baseline 을 무시한다 → 쓰지 않고, 흰 테두리 글자를 따로 아래에 깐다
+        assert(!/paint-order|dominant-baseline/.test(svg), '한글에서 무시되는 속성 없음');
+        const halo = svg.indexOf('fill="#ffffff" stroke="#ffffff"');
+        const no1 = svg.indexOf('fill="#ff0000">NO.01</text>');
+        assert(halo > 0 && no1 > halo, '흰 테두리 글자가 번호 글자보다 먼저(아래)');
+        // 기준선: 박스 가운데(300, 140) + 0.35em(14 → 4.9)
+        assert(/<text x="300" y="144.9"[^>]*fill="#ff0000">NO.01</.test(svg), '기준선을 글자 가운데에 맞춤');
         assert(svg.includes('>균열</text>') && svg.includes('>결함발생</text>') && svg.includes('>구분</text>'), '글자들');
         // 화살촉: 끝점이 꼭짓점인 삼각형
         assert(/<polygon points="320,210 /.test(svg), '화살촉 끝 = 지시선 끝');

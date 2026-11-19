@@ -188,17 +188,25 @@
             return s;
         }
 
-        /** 가운데 맞춤 글자. halo = 흰 테두리(도면 선 위에서도 읽히게) */
+        /**
+         * 가운데 맞춤 글자. halo = 흰 테두리(도면 선 위에서도 읽히게).
+         * 2026-11-19 한글(HWP)에 SVG 를 넣으면 dominant-baseline 을 무시해 글자가 위로 올라가고,
+         * paint-order 도 무시해 흰 테두리가 글자를 덮어 번호가 안 보였다 →
+         * 기준선(y)을 직접 글자 가운데에 맞추고(대문자·한글 가운데 ≈ 기준선 위 0.35em),
+         * 흰 테두리는 같은 글자를 한 번 더 아래에 깔아 그린다(어느 프로그램에서나 같은 모양).
+         */
         function textSvg(str, cx, cy, size, col, halo, weight) {
             if (!finite(cx, cy, size) || !(size > 0)) return '';
             var t = String(str == null ? '' : str);
             if (!t) return '';
-            var stroke = halo
-                ? ' stroke="#ffffff" stroke-width="' + n2(Math.max(0.6, size * 0.22)) + '" stroke-linejoin="round" paint-order="stroke"'
-                : '';
-            return '<text x="' + n2(cx) + '" y="' + n2(cy) + '" font-family="' + FONT + '" font-size="' + n2(size) + '"'
-                + ' font-weight="' + (weight || 700) + '" fill="' + col + '" text-anchor="middle" dominant-baseline="central"' + stroke + '>'
-                + esc(t) + '</text>';
+            var base = ' x="' + n2(cx) + '" y="' + n2(Number(cy) + size * 0.35) + '" font-family="' + FONT + '" font-size="' + n2(size) + '"'
+                + ' font-weight="' + (weight || 700) + '" text-anchor="middle"';
+            var s = '';
+            if (halo) {
+                s += '<text' + base + ' fill="#ffffff" stroke="#ffffff" stroke-width="' + n2(Math.max(0.6, size * 0.22)) + '" stroke-linejoin="round">'
+                    + esc(t) + '</text>';
+            }
+            return s + '<text' + base + ' fill="' + col + '">' + esc(t) + '</text>';
         }
 
         /* ----- 핀(영역·지시선·번호 박스) ----- */
