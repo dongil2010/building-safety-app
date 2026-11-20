@@ -370,9 +370,40 @@
         }
 
         // 3) 글자 — 진짜 글꼴로
+        var drawn = drawTexts(ctx, model, M, vx0, vy0, vx1, vy1);
+        ctx.restore();
+        var t1 = (typeof performance !== 'undefined' && performance.now) ? performance.now() : Date.now();
+        return { ms: t1 - t0, segs: segs, texts: drawn };
+    }
+
+    /** 화면에 보이는 범위(PDF 점, 여유 4픽셀)와 점 → 픽셀 배율 */
+    function viewBounds(M, W, H) {
+        var a = M[0], b = M[1], c = M[2], d = M[3], e = M[4], f = M[5];
+        var det = a * d - b * c;
+        var k = Math.sqrt(Math.abs(det)) || 1;
+        var ia = d / det, ib = -b / det, ic = -c / det, id = a / det;
+        var ie = -(ia * e + ic * f), iff = -(ib * e + id * f);
+        var vx0 = Infinity, vy0 = Infinity, vx1 = -Infinity, vy1 = -Infinity;
+        var corners = [0, 0, W, 0, 0, H, W, H];
+        for (var ci = 0; ci < 8; ci += 2) {
+            var ux = ia * corners[ci] + ic * corners[ci + 1] + ie;
+            var uy = ib * corners[ci] + id * corners[ci + 1] + iff;
+            if (ux < vx0) vx0 = ux; if (ux > vx1) vx1 = ux;
+            if (uy < vy0) vy0 = uy; if (uy > vy1) vy1 = uy;
+        }
+        var padPt = 4 / k;
+        return { k: k, vx0: vx0 - padPt, vy0: vy0 - padPt, vx1: vx1 + padPt, vy1: vy1 + padPt };
+    }
+
+    /** 글자만 그린다(ctx 변환은 이 안에서 정하고 되돌린다). 그린 글자 수 */
+    function drawTexts(ctx, model, M, vx0, vy0, vx1, vy1) {
+        var a = M[0], b = M[1], c = M[2], d = M[3], e = M[4], f = M[5];
+        var k = Math.sqrt(Math.abs(a * d - b * c)) || 1;
         var texts = model.texts || [];
         var drawn = 0;
-        if (texts.length) {
+        if (!texts.length) return 0;
+        ctx.save();
+        {
             ctx.fillStyle = '#000000';
             ctx.textBaseline = 'alphabetic';
             var lastFont = '';
@@ -403,8 +434,304 @@
             }
         }
         ctx.restore();
-        var t1 = (typeof performance !== 'undefined' && performance.now) ? performance.now() : Date.now();
-        return { ms: t1 - t0, segs: segs, texts: drawn };
+        return drawn;
+    }
+
+    // ───────────────────────── GPU(WebGL)로 그리기 (2026-11-20) ─────────────────────────
+    // 선·채움·점 좌표를 그래픽카드에 한 번 올려 두고, 확대·이동 때는 배율 행렬만 바꿔 매 프레임 다시 그린다.
+    // CPU 한 코어로 선 수십만 개를 하나씩 긋던 것(큰 도면은 수백 ms)을 GPU가 몇 ms에 끝낸다. 글자는 캔버스(2D)로.
+    // WebGL을 못 쓰거나 잃으면(드라이버 문제 등) 위의 render()(CPU) 길로 그대로 그린다.
+
+    var GL = { canvas: null, gl: null, broken: false, progs: null, data: null, quad: null, onLost: null, lastMs: 0 };
+
+    var VS_COMMON =
+        'uniform vec4 u_m; uniform vec2 u_t; uniform vec2 u_o; uniform vec2 u_res;\n' +
+        'vec2 toPx(vec2 p) { vec2 q = p - u_o; return vec2(u_m.x * q.x + u_m.z * q.y + u_t.x, u_m.y * q.x + u_m.w * q.y + u_t.y); }\n' +
+        'vec4 toClip(vec2 s) { return vec4(s.x / u_res.x * 2.0 - 1.0, 1.0 - s.y / u_res.y * 2.0, 0.0, 1.0); }\n';
+    var VS_PLAIN = 'attribute vec2 a_p;\n' + VS_COMMON +
+        'void main() { gl_Position = toClip(toPx(a_p)); }';
+    var VS_POINT = 'attribute vec2 a_p; attribute float a_s; uniform float u_k; uniform float u_tiny; uniform float u_ps;\n' + VS_COMMON +
+        'void main() { gl_PointSize = u_ps; if (a_s * u_k >= u_tiny) { gl_Position = vec4(2.0, 2.0, 0.0, 1.0); return; }\n' +
+        '  vec2 s = floor(toPx(a_p)) + 0.5 * u_ps; gl_Position = toClip(s); }';
+    var VS_WIDE = 'attribute vec4 a_seg; attribute vec3 a_x; uniform float u_k; uniform float u_minpx;\n' + VS_COMMON +
+        'void main() { vec2 p0 = toPx(a_seg.xy); vec2 p1 = toPx(a_seg.zw); vec2 dv = p1 - p0; float l = length(dv);\n' +
+        '  vec2 dir = l > 1e-6 ? dv / l : vec2(1.0, 0.0); vec2 n = vec2(-dir.y, dir.x); float w = max(u_minpx, a_x.z * u_k) * 0.5;\n' +
+        '  vec2 s = mix(p0, p1, a_x.y) + n * a_x.x * w + dir * (a_x.y * 2.0 - 1.0) * w; gl_Position = toClip(s); }';
+    var FS_COLOR = 'precision mediump float; uniform vec4 u_c; void main() { gl_FragColor = u_c; }';
+
+    function glCompile(gl, vs, fs) {
+        function sh(type, src) {
+            var s = gl.createShader(type);
+            gl.shaderSource(s, src);
+            gl.compileShader(s);
+            if (!gl.getShaderParameter(s, gl.COMPILE_STATUS)) throw new Error('셰이더: ' + gl.getShaderInfoLog(s));
+            return s;
+        }
+        var p = gl.createProgram();
+        gl.attachShader(p, sh(gl.VERTEX_SHADER, vs));
+        gl.attachShader(p, sh(gl.FRAGMENT_SHADER, fs));
+        gl.linkProgram(p);
+        if (!gl.getProgramParameter(p, gl.LINK_STATUS)) throw new Error('프로그램: ' + gl.getProgramInfoLog(p));
+        var u = {}, names = ['u_m', 'u_t', 'u_o', 'u_res', 'u_c', 'u_k', 'u_tiny', 'u_ps', 'u_minpx'];
+        for (var i = 0; i < names.length; i++) u[names[i]] = gl.getUniformLocation(p, names[i]);
+        return { p: p, u: u, a_p: gl.getAttribLocation(p, 'a_p'), a_s: gl.getAttribLocation(p, 'a_s'),
+            a_seg: gl.getAttribLocation(p, 'a_seg'), a_x: gl.getAttribLocation(p, 'a_x') };
+    }
+
+    function glInit() {
+        if (GL.gl) return GL.gl;
+        if (GL.broken) return null;
+        try {
+            if (typeof document === 'undefined' || !document.createElement || (root && root.BSA_DXF_VIEW_NO_GL)) { GL.broken = true; return null; }
+            var cv = document.createElement('canvas');
+            var gl = cv.getContext('webgl', { antialias: true, stencil: true, alpha: true, premultipliedAlpha: true,
+                preserveDrawingBuffer: true, depth: false, failIfMajorPerformanceCaveat: true });
+            if (!gl) { GL.broken = true; return null; }
+            cv.addEventListener('webglcontextlost', function (ev) {
+                try { ev.preventDefault(); } catch (e) { /* ignore */ }
+                GL.broken = true; GL.gl = null; GL.data = null;
+                if (typeof console !== 'undefined' && console.warn) console.warn('[DXF 화면] GPU 그리기를 잃음 — CPU로 그림');
+                if (typeof GL.onLost === 'function') GL.onLost();
+            });
+            GL.progs = {
+                plain: glCompile(gl, VS_PLAIN, FS_COLOR),
+                point: glCompile(gl, VS_POINT, FS_COLOR),
+                wide: glCompile(gl, VS_WIDE, FS_COLOR)
+            };
+            GL.quad = gl.createBuffer();
+            GL.canvas = cv; GL.gl = gl;
+            return gl;
+        } catch (e) {
+            if (typeof console !== 'undefined' && console.warn) console.warn('[DXF 화면] GPU 그리기 준비 실패 — CPU로 그림', e);
+            GL.broken = true; GL.gl = null;
+            return null;
+        }
+    }
+
+    function isConvexRing(coords, s, cnt) {
+        var sign = 0;
+        for (var i = 0; i < cnt; i++) {
+            var i1 = (i + 1) % cnt, i2 = (i + 2) % cnt;
+            var ax = coords[s + i1 * 2] - coords[s + i * 2], ay = coords[s + i1 * 2 + 1] - coords[s + i * 2 + 1];
+            var bx = coords[s + i2 * 2] - coords[s + i1 * 2], by = coords[s + i2 * 2 + 1] - coords[s + i1 * 2 + 1];
+            var cr = ax * by - ay * bx;
+            if (Math.abs(cr) < 1e-9) continue;
+            var sg = cr > 0 ? 1 : -1;
+            if (!sign) sign = sg; else if (sg !== sign) return false;
+        }
+        return true;
+    }
+
+    /** 모델 → GPU 버퍼(한 번만). 채움: 볼록한 단일 다각형은 바로, 나머지 묶음은 스텐실(짝홀 규칙) */
+    function glBuildData(gl, model) {
+        var n = model.n, coords = model.coords, start = model.start, count = model.count, flags = model.flags;
+        var widths = model.width, groups = model.group, bbox = model.bbox, baseLw = model.lw;
+        var p, cnt, s, q;
+        // 1) 크기 세기
+        var nLineV = 0, nWideSeg = 0, nPts = 0, nFillV = 0;
+        for (p = 0; p < n; p++) {
+            cnt = count[p];
+            if (flags[p] & 2) { if (cnt >= 3) nFillV += (cnt - 2) * 3; continue; }
+            if (cnt < 1) continue;
+            nPts++;
+            if (cnt < 2) continue;
+            var segs0 = cnt - 1 + ((flags[p] & 1) ? 1 : 0);
+            if (widths[p] > baseLw + 1e-3) nWideSeg += segs0; else nLineV += segs0 * 2;
+        }
+        var lines = new Float32Array(nLineV * 2), pts = new Float32Array(nPts * 3);
+        var wide = new Float32Array(nWideSeg * 6 * 7), fill = new Float32Array(nFillV * 2);
+        var li = 0, pi = 0, wi = 0, fi = 0;
+        var WV = [[0, -1], [0, 1], [1, 1], [0, -1], [1, 1], [1, -1]];
+        var convexEnd = 0; // 채움 버퍼 앞쪽 = 볼록 단일 다각형(스텐실 없이 한 번에)
+        // 묶음별로 모은다: 볼록 단일 다각형은 앞으로, 나머지는 묶음 범위로
+        var stencilRanges = [];
+        var fillTmp = [];
+        // 2) 선·점
+        for (p = 0; p < n; p++) {
+            cnt = count[p];
+            if (flags[p] & 2) continue;
+            if (cnt < 1) continue;
+            s = start[p] * 2;
+            var bw = bbox[p * 4 + 2] - bbox[p * 4], bh = bbox[p * 4 + 3] - bbox[p * 4 + 1];
+            pts[pi++] = coords[s]; pts[pi++] = coords[s + 1]; pts[pi++] = Math.max(bw, bh);
+            if (cnt < 2) continue;
+            var isWide = widths[p] > baseLw + 1e-3;
+            var last = cnt - 1 + ((flags[p] & 1) ? 1 : 0);
+            for (q = 0; q < last; q++) {
+                var q1 = (q + 1) % cnt;
+                var x0 = coords[s + q * 2], y0 = coords[s + q * 2 + 1], x1 = coords[s + q1 * 2], y1 = coords[s + q1 * 2 + 1];
+                if (!isWide) { lines[li++] = x0; lines[li++] = y0; lines[li++] = x1; lines[li++] = y1; continue; }
+                for (var v = 0; v < 6; v++) {
+                    wide[wi++] = x0; wide[wi++] = y0; wide[wi++] = x1; wide[wi++] = y1;
+                    wide[wi++] = WV[v][1]; wide[wi++] = WV[v][0]; wide[wi++] = widths[p];
+                }
+            }
+        }
+        // 3) 채움 — 묶음(group)별
+        p = 0;
+        while (p < n) {
+            if (!(flags[p] & 2)) { p++; continue; }
+            var g = groups[p], p0 = p;
+            while (p < n && (flags[p] & 2) && groups[p] === g) p++;
+            var single = (p - p0 === 1) && count[p0] >= 3 && isConvexRing(coords, start[p0] * 2, count[p0]);
+            fillTmp.push({ from: p0, to: p, convex: single });
+        }
+        var emitFan = function (pp) {
+            var c0 = count[pp], s0 = start[pp] * 2;
+            for (var k2 = 1; k2 < c0 - 1; k2++) {
+                fill[fi++] = coords[s0]; fill[fi++] = coords[s0 + 1];
+                fill[fi++] = coords[s0 + k2 * 2]; fill[fi++] = coords[s0 + k2 * 2 + 1];
+                fill[fi++] = coords[s0 + k2 * 2 + 2]; fill[fi++] = coords[s0 + k2 * 2 + 3];
+            }
+        };
+        for (var a1 = 0; a1 < fillTmp.length; a1++) if (fillTmp[a1].convex) emitFan(fillTmp[a1].from);
+        convexEnd = fi / 2;
+        for (var a2 = 0; a2 < fillTmp.length; a2++) {
+            var r = fillTmp[a2];
+            if (r.convex) continue;
+            var first = fi / 2;
+            for (var pp2 = r.from; pp2 < r.to; pp2++) if (count[pp2] >= 3) emitFan(pp2);
+            if (fi / 2 > first) stencilRanges.push(first, fi / 2 - first);
+        }
+        var mk = function (arr) {
+            if (!arr.length) return null;
+            var b = gl.createBuffer();
+            gl.bindBuffer(gl.ARRAY_BUFFER, b);
+            gl.bufferData(gl.ARRAY_BUFFER, arr, gl.STATIC_DRAW);
+            return b;
+        };
+        return {
+            model: model,
+            lines: mk(lines), nLines: li / 2,
+            pts: mk(pts), nPts: pi / 3,
+            wide: mk(wide), nWide: wi / 7,
+            fill: mk(fill.subarray(0, fi)), nConvex: convexEnd, stencil: stencilRanges
+        };
+    }
+
+    function glSetCommon(gl, pr, M, W, H, ox, oy) {
+        gl.useProgram(pr.p);
+        gl.uniform4f(pr.u.u_m, M[0], M[1], M[2], M[3]);
+        gl.uniform2f(pr.u.u_t, M[0] * ox + M[2] * oy + M[4], M[1] * ox + M[3] * oy + M[5]);
+        gl.uniform2f(pr.u.u_o, ox, oy);
+        gl.uniform2f(pr.u.u_res, W, H);
+    }
+
+    function glAttrib(gl, loc, size, stride, offset) {
+        if (loc < 0) return;
+        gl.enableVertexAttribArray(loc);
+        gl.vertexAttribPointer(loc, size, gl.FLOAT, false, stride, offset);
+    }
+
+    function glOffAttribs(gl) {
+        var max = gl.getParameter(gl.MAX_VERTEX_ATTRIBS);
+        for (var i = 0; i < Math.min(max, 4); i++) gl.disableVertexAttribArray(i);
+    }
+
+    /** 선·채움·점을 GL 캔버스(W×H)에 그린다. 성공하면 GL 캔버스, 아니면 null */
+    function glDraw(model, M, W, H) {
+        var gl = glInit();
+        if (!gl) return null;
+        try {
+            var t0 = (typeof performance !== 'undefined' && performance.now) ? performance.now() : Date.now();
+            if (!GL.data || GL.data.model !== model) {
+                if (GL.data) {
+                    ['lines', 'pts', 'wide', 'fill'].forEach(function (key) { if (GL.data[key]) gl.deleteBuffer(GL.data[key]); });
+                }
+                GL.data = null;
+                GL.data = glBuildData(gl, model);
+            }
+            var D = GL.data;
+            if (GL.canvas.width !== W) GL.canvas.width = W;
+            if (GL.canvas.height !== H) GL.canvas.height = H;
+            gl.viewport(0, 0, W, H);
+            gl.disable(gl.BLEND);
+            gl.disable(gl.DEPTH_TEST);
+            gl.disable(gl.STENCIL_TEST);
+            gl.colorMask(true, true, true, true);
+            gl.clearColor(0, 0, 0, 0);
+            gl.clearStencil(0);
+            gl.clear(gl.COLOR_BUFFER_BIT | gl.STENCIL_BUFFER_BIT);
+            // 정밀도: 화면 가운데의 쪽 좌표를 원점으로 빼고 그린다(크게 확대해도 선이 흔들리지 않게)
+            var det = M[0] * M[3] - M[1] * M[2];
+            var cx = W / 2 - M[4], cy = H / 2 - M[5];
+            var ox = (M[3] * cx - M[2] * cy) / det, oy = (-M[1] * cx + M[0] * cy) / det;
+            var k = Math.sqrt(Math.abs(det)) || 1;
+            var P = GL.progs;
+            glOffAttribs(gl);
+
+            // 쪽(종이) 흰 바탕
+            var pw = model.pageW, ph = model.pageH;
+            gl.bindBuffer(gl.ARRAY_BUFFER, GL.quad);
+            gl.bufferData(gl.ARRAY_BUFFER, new Float32Array([0, 0, pw, 0, 0, ph, pw, ph]), gl.DYNAMIC_DRAW);
+            glSetCommon(gl, P.plain, M, W, H, ox, oy);
+            glAttrib(gl, P.plain.a_p, 2, 0, 0);
+            gl.uniform4f(P.plain.u.u_c, 1, 1, 1, 1);
+            gl.drawArrays(gl.TRIANGLE_STRIP, 0, 4);
+
+            // 1) 채움(회색)
+            if (D.fill) {
+                gl.bindBuffer(gl.ARRAY_BUFFER, D.fill);
+                glAttrib(gl, P.plain.a_p, 2, 0, 0);
+                gl.uniform4f(P.plain.u.u_c, 128 / 255, 128 / 255, 128 / 255, 1);
+                if (D.nConvex) gl.drawArrays(gl.TRIANGLES, 0, D.nConvex);
+                var SR = D.stencil;
+                if (SR.length) {
+                    gl.enable(gl.STENCIL_TEST);
+                    for (var si = 0; si < SR.length; si += 2) {
+                        gl.colorMask(false, false, false, false);
+                        gl.stencilFunc(gl.ALWAYS, 0, 1);
+                        gl.stencilOp(gl.KEEP, gl.KEEP, gl.INVERT);
+                        gl.drawArrays(gl.TRIANGLES, SR[si], SR[si + 1]);
+                        gl.colorMask(true, true, true, true);
+                        gl.stencilFunc(gl.NOTEQUAL, 0, 1);
+                        gl.stencilOp(gl.KEEP, gl.KEEP, gl.ZERO);
+                        gl.drawArrays(gl.TRIANGLES, SR[si], SR[si + 1]);
+                    }
+                    gl.disable(gl.STENCIL_TEST);
+                }
+            }
+            // 2) 기본 선 — 1픽셀
+            if (D.lines) {
+                gl.bindBuffer(gl.ARRAY_BUFFER, D.lines);
+                glAttrib(gl, P.plain.a_p, 2, 0, 0);
+                gl.uniform4f(P.plain.u.u_c, 0, 0, 0, 1);
+                gl.drawArrays(gl.LINES, 0, D.nLines);
+            }
+            glOffAttribs(gl);
+            // 굵은 폴리선 — 실제 폭(최소 1픽셀)
+            if (D.wide) {
+                glSetCommon(gl, P.wide, M, W, H, ox, oy);
+                gl.bindBuffer(gl.ARRAY_BUFFER, D.wide);
+                glAttrib(gl, P.wide.a_seg, 4, 28, 0);
+                glAttrib(gl, P.wide.a_x, 3, 28, 16);
+                gl.uniform1f(P.wide.u.u_k, k);
+                gl.uniform1f(P.wide.u.u_minpx, 1);
+                gl.uniform4f(P.wide.u.u_c, 0, 0, 0, 1);
+                gl.drawArrays(gl.TRIANGLES, 0, D.nWide);
+                glOffAttribs(gl);
+            }
+            // 화면에서 점처럼 작은 것 — 1픽셀 점(선으로는 안 보일 수 있어서)
+            if (D.pts) {
+                glSetCommon(gl, P.point, M, W, H, ox, oy);
+                gl.bindBuffer(gl.ARRAY_BUFFER, D.pts);
+                glAttrib(gl, P.point.a_p, 2, 12, 0);
+                glAttrib(gl, P.point.a_s, 1, 12, 8);
+                gl.uniform1f(P.point.u.u_k, k);
+                gl.uniform1f(P.point.u.u_tiny, 0.6);
+                gl.uniform1f(P.point.u.u_ps, 1);
+                gl.uniform4f(P.point.u.u_c, 0, 0, 0, 1);
+                gl.drawArrays(gl.POINTS, 0, D.nPts);
+                glOffAttribs(gl);
+            }
+            var t1 = (typeof performance !== 'undefined' && performance.now) ? performance.now() : Date.now();
+            GL.lastMs = t1 - t0;
+            return GL.canvas;
+        } catch (e) {
+            if (typeof console !== 'undefined' && console.warn) console.warn('[DXF 화면] GPU 그리기 실패 — CPU로 그림', e);
+            GL.broken = true; GL.gl = null; GL.data = null;
+            return null;
+        }
     }
 
     // ───────────────────────── 화면 연결: 모델 보관 + 그린 결과 재사용 ─────────────────────────
@@ -616,6 +943,26 @@
         var M = [T.a * kx, T.b * kx, -T.c * ky, -T.d * ky, T.e + T.c * imgH, T.f + T.d * imgH];
         if (!isFinite(M[0] + M[1] + M[2] + M[3] + M[4] + M[5]) || Math.abs(M[0] * M[3] - M[1] * M[2]) < 1e-12) return false;
 
+        // 2026-11-20 GPU로 그릴 수 있으면 매 프레임 그대로 새로 그린다(옮겨 붙이기·멈춘 뒤 다시 그리기 없음)
+        if (!GL.broken) {
+            GL.onLost = opts.requestRedraw || null;
+            var glCanvas = glDraw(model, M, W, H);
+            if (glCanvas) {
+                if (settleTimer) { clearTimeout(settleTimer); settleTimer = null; }
+                var vb = viewBounds(M, W, H);
+                var blitGl = function () {
+                    ctx.save();
+                    ctx.setTransform(1, 0, 0, 1, 0, 0);
+                    ctx.drawImage(glCanvas, 0, 0);
+                    ctx.restore();
+                    drawTexts(ctx, model, M, vb.vx0, vb.vy0, vb.vx1, vb.vy1);
+                };
+                blitGl();
+                if (typeof opts.darken === 'function') opts.darken(blitGl);
+                return true;
+            }
+        }
+
         var fresh = cache.canvas && cache.model === model && cache.W === W && cache.H === H && sameMatrix(cache.M, M);
         var stale = !fresh && cache.canvas && cache.model === model && cache.M;
 
@@ -706,7 +1053,10 @@
         dropModel: dropModel,
         drawOnCanvas: drawOnCanvas,
         resetCache: resetCache,
-        lastRenderMs: function () { return cache.ms; }
+        lastRenderMs: function () { return cache.ms; },
+        /** GPU로 그리는 중인가(true) / CPU(false) / 아직 모름(null) */
+        usingGpu: function () { return GL.gl ? true : (GL.broken ? false : null); },
+        lastGpuMs: function () { return GL.lastMs; }
     };
     if (typeof module !== 'undefined' && module.exports) module.exports = api;
     if (root) { root.BSA = root.BSA || {}; root.BSA.dxfView = api; }
