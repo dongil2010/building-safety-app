@@ -148,3 +148,50 @@
         refreshPerfModeUi();
     }
 })();
+
+/* 렉 측정(2026-11-20) — 콘솔에서 lagProbe() 로 켜고, 렉이 풀린 뒤 copy(lagReport()) 로 결과를 복사한다. 부르기 전엔 아무것도 안 한다. */
+window.lagProbe = function () {
+  if (window.__lag) { console.log('측정 중 — 렉이 풀린 뒤 copy(lagReport())'); return; }
+  const L = window.__lag = { calls: [], stalls: [], long: [], t0: performance.now() };
+  const short = (st) => (st || '').split('\n').slice(2, 8).map(s => s.trim().replace(/https?:\/\/[^/]+\/(building-safety-app\/)?/g, '')).join(' | ');
+  const wrap = (obj, name, label) => {
+    const orig = obj[name]; if (typeof orig !== 'function') return;
+    obj[name] = function () {
+      const t = performance.now();
+      try { return orig.apply(this, arguments); }
+      finally { const d = performance.now() - t; if (d > 15) L.calls.push({ at: Math.round(t - L.t0), ms: Math.round(d), what: label, stack: short(new Error().stack) }); }
+    };
+  };
+  wrap(JSON, 'stringify', 'JSON.stringify');
+  wrap(JSON, 'parse', 'JSON.parse');
+  wrap(Storage.prototype, 'setItem', 'localStorage.setItem');
+  wrap(Storage.prototype, 'getItem', 'localStorage.getItem');
+  wrap(window, 'atob', 'atob');
+  wrap(window, 'btoa', 'btoa');
+  wrap(IDBObjectStore.prototype, 'put', 'idb.put');
+  wrap(IDBObjectStore.prototype, 'get', 'idb.get');
+  wrap(CanvasRenderingContext2D.prototype, 'drawImage', 'drawImage');
+  wrap(CanvasRenderingContext2D.prototype, 'getImageData', 'getImageData');
+  wrap(HTMLCanvasElement.prototype, 'toDataURL', 'toDataURL');
+  if (window.BSA && BSA.dxfView && BSA.dxfView.drawOnCanvas) wrap(BSA.dxfView, 'drawOnCanvas', 'dxf.drawOnCanvas');
+  let last = performance.now();
+  setInterval(() => { const n = performance.now(); const gap = n - last - 16; if (gap > 60) L.stalls.push({ at: Math.round(last - L.t0), ms: Math.round(gap) }); last = n; }, 16);
+  try { new PerformanceObserver((list) => list.getEntries().forEach(e => L.long.push({ at: Math.round(e.startTime - L.t0), ms: Math.round(e.duration) }))).observe({ type: 'longtask' }); } catch (e) {}
+  window.lagReport = () => {
+    const sum = (a) => a.reduce((x, y) => x + y.ms, 0);
+    const perf = (window.BSA && BSA.performance) || {};
+    return JSON.stringify({
+      ua: navigator.userAgent, dpr: devicePixelRatio, cores: navigator.hardwareConcurrency, mem: navigator.deviceMemory,
+      lowEnd: perf.isLowEnd ? perf.isLowEnd() : null, perfMode: perf.getMode ? perf.getMode() : null,
+      canvas: window.state && state.canvas ? [state.canvas.width, state.canvas.height] : null,
+      bg: window.state && state.bgImage ? [state.bgImage.naturalWidth, state.bgImage.naturalHeight] : null,
+      gpu: window.BSA && BSA.dxfView ? BSA.dxfView.usingGpu() : null,
+      floor: window.state ? [state.currentBuildingId, state.currentFloor] : null,
+      seconds: Math.round((performance.now() - L.t0) / 1000),
+      stallCount: L.stalls.length, stallMs: sum(L.stalls),
+      topStalls: L.stalls.slice().sort((a, b) => b.ms - a.ms).slice(0, 15),
+      calls: L.calls.slice().sort((a, b) => b.ms - a.ms).slice(0, 40)
+    });
+  };
+  console.log('측정 시작 — 층을 열고 렉이 풀린 뒤 copy(lagReport()) 입력');
+};
