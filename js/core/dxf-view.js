@@ -534,6 +534,61 @@
     var forceNext = false;
     var FAST_MS = 28; // 이보다 빨리 그려지면 움직이는 동안에도 매번 새로 그린다
 
+    // 쪽 전체 그림(화면맞춤 근처용). kReq = 그릴 때의 배율(점 → 화면 픽셀), M0 = 쪽 점 → 이 그림 픽셀
+    var ov = { canvas: null, model: null, M0: null, kReq: 0, W: 0, H: 0, ms: 0 };
+    var OV_NEAR_FIT = 1.35; // 화면맞춤 배율의 이 배까지는 쪽 전체 그림을 쓴다
+
+    /** R = M × C⁻¹ (C로 그린 그림의 픽셀 → 지금 화면 픽셀) */
+    function relMatrix(M, C) {
+        var cdet = C[0] * C[3] - C[1] * C[2];
+        var i0 = C[3] / cdet, i1 = -C[1] / cdet, i2 = -C[2] / cdet, i3 = C[0] / cdet;
+        var i4 = -(i0 * C[4] + i2 * C[5]), i5 = -(i1 * C[4] + i3 * C[5]);
+        return [
+            M[0] * i0 + M[2] * i1, M[1] * i0 + M[3] * i1,
+            M[0] * i2 + M[2] * i3, M[1] * i2 + M[3] * i3,
+            M[0] * i4 + M[2] * i5 + M[4], M[1] * i4 + M[3] * i5 + M[5]
+        ];
+    }
+
+    /** 배율이 1이고 90° 단위 회전이면 정수 픽셀에 맞춘다(번지지 않게 그대로 복사) */
+    function snapToPixels(R) {
+        var near = function (v, t) { return Math.abs(v - t) < 0.004; };
+        var axis = (near(Math.abs(R[0]), 1) && near(R[1], 0) && near(R[2], 0) && near(Math.abs(R[3]), 1))
+            || (near(R[0], 0) && near(Math.abs(R[1]), 1) && near(Math.abs(R[2]), 1) && near(R[3], 0));
+        if (!axis) return R;
+        return [Math.round(R[0]), Math.round(R[1]), Math.round(R[2]), Math.round(R[3]), Math.round(R[4]), Math.round(R[5])];
+    }
+
+    function blitWith(ctx, canvas, R) {
+        ctx.save();
+        ctx.setTransform(R[0], R[1], R[2], R[3], R[4], R[5]);
+        ctx.drawImage(canvas, 0, 0);
+        ctx.restore();
+    }
+
+    /** 쪽 전체를 배율 k로 한 장에 그린다(화면 회전과 무관하게 쪽 방향 그대로) */
+    function buildOverview(model, k, W, H) {
+        if (!ov.canvas) {
+            ov.canvas = (typeof document !== 'undefined' && document.createElement) ? document.createElement('canvas') : null;
+            if (!ov.canvas) return false;
+        }
+        var pw = model.pageW, ph = model.pageH;
+        var kk = k;
+        var maxArea = Math.min(Math.max(W * H * 2.2, 4e6), 48e6);
+        if (pw * kk * ph * kk > maxArea) kk = Math.sqrt(maxArea / (pw * ph));
+        kk = Math.min(kk, 16000 / pw, 16000 / ph);
+        var ow = Math.max(1, Math.ceil(pw * kk)), oh = Math.max(1, Math.ceil(ph * kk));
+        if (ov.canvas.width !== ow) ov.canvas.width = ow;
+        if (ov.canvas.height !== oh) ov.canvas.height = oh;
+        var octx = ov.canvas.getContext('2d');
+        octx.setTransform(1, 0, 0, 1, 0, 0);
+        octx.clearRect(0, 0, ow, oh);
+        var M0 = [kk, 0, 0, -kk, 0, ph * kk];
+        var res = render(octx, model, M0, ow, oh, { minLinePx: 1 });
+        ov.model = model; ov.M0 = M0; ov.kReq = k; ov.W = W; ov.H = H; ov.ms = res.ms;
+        return true;
+    }
+
     function sameMatrix(A, B) {
         if (!A || !B) return false;
         for (var i = 0; i < 6; i++) {
@@ -563,7 +618,28 @@
 
         var fresh = cache.canvas && cache.model === model && cache.W === W && cache.H === H && sameMatrix(cache.M, M);
         var stale = !fresh && cache.canvas && cache.model === model && cache.M;
-        if (!fresh && (!stale || forceNext || cache.ms <= FAST_MS)) {
+
+        // 2026-11-20 전체가 보이는 배율(화면맞춤 근처)은 쪽 전체를 한 장으로 그려 두고(ov) 옮겨 붙이기만 한다.
+        // 예전엔 화면맞춤에서 움직이다 멈출 때마다 선 전부를 다시 그려(큰 도면은 수백 ms) 화면이 툭툭 멈췄고,
+        // 확대하면(보이는 선이 적어) 빨라져서 「크게 확대했다 풀어야 렉이 줄어든다」고 느껴졌다.
+        var k = Math.sqrt(Math.abs(M[0] * M[3] - M[1] * M[2]));
+        var kFit = Math.min(W / model.pageW, H / model.pageH);
+        var nearFit = k <= kFit * OV_NEAR_FIT;
+        var ovModel = !!(ov.canvas && ov.model === model);
+        var ovExact = ovModel && ov.W === W && ov.H === H && Math.abs(k / ov.kReq - 1) <= 0.03;
+        if (!fresh && !ovExact && nearFit && (!ovModel || forceNext || ov.ms <= FAST_MS)) {
+            if (buildOverview(model, k, W, H)) { ovModel = true; ovExact = true; forceNext = false; }
+        }
+        if (!fresh && ovExact) {
+            if (settleTimer) { clearTimeout(settleTimer); settleTimer = null; }
+            var RO = snapToPixels(relMatrix(M, ov.M0));
+            var blitOv = function () { blitWith(ctx, ov.canvas, RO); };
+            blitOv();
+            if (typeof opts.darken === 'function') opts.darken(blitOv);
+            return true;
+        }
+
+        if (!fresh && (!nearFit || !ovModel) && (!stale || forceNext || cache.ms <= FAST_MS)) {
             if (!cache.canvas) {
                 cache.canvas = (typeof document !== 'undefined' && document.createElement) ? document.createElement('canvas') : null;
                 if (!cache.canvas) return false;
@@ -588,23 +664,14 @@
                 ctx.restore();
             };
         } else {
-            // 느린 도면: 움직이는 동안은 방금 그린 것을 옮겨·늘려 보여 주고, 멈추면 다시 그린다
-            if (typeof opts.fallback === 'function') opts.fallback();
-            var C = cache.M;
-            var cdet = C[0] * C[3] - C[1] * C[2];
-            var i0 = C[3] / cdet, i1 = -C[1] / cdet, i2 = -C[2] / cdet, i3 = C[0] / cdet;
-            var i4 = -(i0 * C[4] + i2 * C[5]), i5 = -(i1 * C[4] + i3 * C[5]);
-            // R = M × C⁻¹ (옛 캔버스 픽셀 → 지금 캔버스 픽셀)
-            var R = [
-                M[0] * i0 + M[2] * i1, M[1] * i0 + M[3] * i1,
-                M[0] * i2 + M[2] * i3, M[1] * i2 + M[3] * i3,
-                M[0] * i4 + M[2] * i5 + M[4], M[1] * i4 + M[3] * i5 + M[5]
-            ];
+            // 느린 도면: 움직이는 동안은 방금 그린 것을 옮겨·늘려 보여 주고, 멈추면 다시 그린다.
+            // 밑에는 쪽 전체 그림(ov)을 깐다 — 없을 때만 래스터(큰 그림이면 매 프레임 무겁다)
+            var Rov = ovModel ? relMatrix(M, ov.M0) : null;
+            var R = stale ? relMatrix(M, cache.M) : null;
+            if (!Rov && typeof opts.fallback === 'function') opts.fallback();
             blit = function () {
-                ctx.save();
-                ctx.setTransform(R[0], R[1], R[2], R[3], R[4], R[5]);
-                ctx.drawImage(cache.canvas, 0, 0);
-                ctx.restore();
+                if (Rov) blitWith(ctx, ov.canvas, Rov);
+                if (R) blitWith(ctx, cache.canvas, R);
             };
             if (settleTimer) clearTimeout(settleTimer);
             settleTimer = setTimeout(function () {
@@ -620,6 +687,8 @@
 
     function resetCache() {
         cache.model = null; cache.M = null; cache.ms = 0;
+        ov.model = null; ov.M0 = null; ov.kReq = 0; ov.ms = 0;
+        if (ov.canvas) { ov.canvas.width = 1; ov.canvas.height = 1; }
         if (settleTimer) { clearTimeout(settleTimer); settleTimer = null; }
         forceNext = false;
     }
