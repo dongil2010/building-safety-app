@@ -2471,6 +2471,15 @@
                 if (!tiers && typeof idbGet === 'function') {
                     tiers = await idbGet('floorDrawingTiers', docId);
                 }
+                // 2026-11-20 기기 저장소의 티어는 크기별 키(건물_층_4000 …)로 옮겨져 있다. 예전엔 묶음 키만 보고 「없다」고 여겨
+                // 동기화할 때마다 PDF를 다시 그려(층마다 1초 넘게 화면 멈춤) 같은 그림을 또 만들었다.
+                if (typeof idbGetFloorDrawingTier === 'function') {
+                    for (const d of dims) {
+                        if (tiers && (tiers[String(d)] || tiers[d])) continue;
+                        const one = await idbGetFloorDrawingTier(b.id, floorCode, d);
+                        if (one) tiers = Object.assign({}, tiers || {}, { [String(d)]: one });
+                    }
+                }
                 const missing = dims.filter((d) => !(tiers && (tiers[String(d)] || tiers[d])));
                 if (missing.length) {
                     let pdfUrl = (b.floorDrawingPdfs && b.floorDrawingPdfs[floorCode]) || null;
@@ -4166,12 +4175,30 @@
             _bldgDocsFromServer = !(qs.metadata && qs.metadata.fromCache);
             if (qs.metadata && qs.metadata.hasPendingWrites) return;   // 내가 방금 쓴 것 — 이미 기기에 있음
             if (!changes.length) return;
-            const seq = ++_rootSnapSeq;
-            const next = await expandRootDocData(rootRef, _lastRootRaw);
-            if (seq !== _rootSnapSeq) return;
-            _lastRootSnapshotData = next;
-            await applyCombinedSnapshot();
+            scheduleBuildingMetaApply(rootRef);
         }, (err) => console.warn('[건물 문서] 리스너 경고', err));
+    }
+    // 2026-11-20 건물 문서 알림은 몰려온다(누가 여러 건물을 쓰면 문서마다 한 번씩). 예전엔 알림마다 전체를 합치고
+    // 기기에 저장해(한 번에 약 0.5초) 101번이면 수십 초 렉이 났다 — 잠깐 모았다가 한 번에 반영한다.
+    const BLDG_META_APPLY_QUIET_MS = 300;
+    const BLDG_META_APPLY_MAX_WAIT_MS = 1500;
+    let _bldgMetaApplyTimer = null;
+    let _bldgMetaApplyFirstAt = 0;
+    function scheduleBuildingMetaApply(rootRef) {
+        const now = Date.now();
+        if (!_bldgMetaApplyTimer) _bldgMetaApplyFirstAt = now;
+        else clearTimeout(_bldgMetaApplyTimer);
+        const wait = Math.max(0, Math.min(BLDG_META_APPLY_QUIET_MS, _bldgMetaApplyFirstAt + BLDG_META_APPLY_MAX_WAIT_MS - now));
+        _bldgMetaApplyTimer = setTimeout(async () => {
+            _bldgMetaApplyTimer = null;
+            const seq = ++_rootSnapSeq;
+            try {
+                const next = await expandRootDocData(rootRef, _lastRootRaw);
+                if (seq !== _rootSnapSeq) return;
+                _lastRootSnapshotData = next;
+                await applyCombinedSnapshot();
+            } catch (e) { console.warn('[건물 문서] 반영 실패', e); }
+        }, wait);
     }
     /** 나눠 쓰기(js/core/building-docs.js writeSplit) — 건물 문서 먼저, 루트는 부르는 쪽이 마지막에 */
     async function writeBuildingDocsForSync(docRef, dataToSync, deletedIds, serverRaw) {
@@ -4859,6 +4886,8 @@
             try { _bldgMetaUnsub(); } catch (e) { /* ignore */ }
             _bldgMetaUnsub = null;
         }
+        // 모아 두던 건물 문서 반영은 버린다(다른 회사·재구독 뒤에 옛 알림을 반영하지 않게)
+        if (_bldgMetaApplyTimer) { clearTimeout(_bldgMetaApplyTimer); _bldgMetaApplyTimer = null; }
         stopFloorRealtimeListeners();
         if (typeof stopPhoneRelayListener === 'function') stopPhoneRelayListener();
         _listeningCompanyId = null;

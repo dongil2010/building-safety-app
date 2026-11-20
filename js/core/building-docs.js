@@ -271,6 +271,18 @@
             var ref = col.doc(item.id);
             var s = await ref.get({ source: 'server' });
             var cur = s.exists ? (s.data() || {}) : null;
+            // 2026-11-20 서버에 이미 같은 내용(같은 h)이 있으면 쓰지 않는다. 예전엔 기기가 서버 문서 목록을 아직 못 받았을 때
+            // 건물 전부(101개)를 똑같은 내용으로 다시 써서, 모든 기기가 알림 101번을 하나씩 처리하느라 수십 초 렉이 났다.
+            // (조각으로 써야 하는데 통째 문서인 경우는 다시 쓴다)
+            if (item.kind === 'put' && cur && !cur.deleted && cur.h === item.h && !(item.parts && !cur.chunk)) {
+                var same = null;
+                try { same = await resolveDoc(col, item.id, cur, c); } catch (_e) { same = null; }
+                if (same) {   // 조각이 깨져 못 붙이면 아래에서 다시 써서 고친다
+                    docs[item.id] = same;
+                    skipped++;
+                    return;
+                }
+            }
             if (item.kind === 'put' && cur && !cur.deleted && (Number(cur.at) || 0) > item.at && cur.h !== item.h) {
                 var r = await resolveDoc(col, item.id, cur, c);
                 if (r) docs[item.id] = r;

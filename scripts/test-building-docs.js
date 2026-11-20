@@ -234,6 +234,21 @@ async function readView(db, root) {
         assert.throws(() => sr.collection(undefined), /empty path/);
     }
 
+    // 2026-11-20 기기가 서버 문서 목록을 아직 못 받았어도(docs 빈 칸) 서버에 같은 내용이 있으면 다시 쓰지 않는다
+    {
+        const sdb = makeDb(); const sr = sdb.ref('safety_app/same');
+        const list = Array.from({ length: 30 }, (_, i) => bld(i));
+        const first = await syncOnce(sr, list, [], {});
+        assert.strictEqual(first.wrote, 30);
+        const again = await syncOnce(sr, list, [], {});
+        assert.strictEqual(again.wrote, 0, '같은 내용은 안 씀');
+        assert.strictEqual(again.skipped, 30);
+        const changed = clone(list); changed[3].name = '바뀜'; changed[3].metaUpdatedAt = 99999;
+        const third = await syncOnce(sr, changed, [], {});
+        assert.strictEqual(third.wrote, 1, '바뀐 건물만');
+        assert.strictEqual((await readView(sdb, sr)).buildings.find((b) => b.id === 'b3').name, '바뀜');
+    }
+
     // 10) 앱 연결
     const app = fs.readFileSync(path.join(ROOT, 'app.js'), 'utf8');
     assert.ok(app.includes("return docRef.collection((api && api.COLLECTION) || 'buildingMeta');"), '상수가 없어도 빈 경로 안 씀');
