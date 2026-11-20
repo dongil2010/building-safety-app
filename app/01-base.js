@@ -1456,6 +1456,9 @@ document.addEventListener('DOMContentLoaded', () => {
     const _idbPersistedDrawingKeys = new PersistedContentKeySet();
     const _idbPersistedPhotoKeys = new Set();
     const _idbPersistedPdfKeys = new PersistedContentKeySet();
+    // 2026-11-20 기기 저장소에서 읽어 온 PDF는 「이미 저장됨」으로 적는다(pdf-vector-bridge가 부른다).
+    // 예전엔 적지 않아, 층을 열 때마다 다음 기기 저장에서 같은 PDF를 다시 써 화면이 0.3초쯤 멈췄다.
+    window.noteFloorPdfPersistedInIdb = (key, value) => { if (key && value) _idbPersistedPdfKeys.add(key, value); };
     // PDF를 뺀 층(floorPdfRemovedAt) — 이 세션에서 옛 PDF를 버린 층 / 클라우드에서 지워진 걸 확인한 층
     const _droppedRemovedPdfKeys = new Set();
     const _confirmedGoneCloudPdfKeys = new Set();

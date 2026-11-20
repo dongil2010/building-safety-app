@@ -356,6 +356,8 @@
         if (cached) {
           window.ensureFloorDrawingPdfs(bldg);
           bldg.floorDrawingPdfs[floorCode] = cached;
+          // 기기 저장소에서 읽은 것 — 다음 저장 때 같은 PDF를 다시 쓰지 않게 표시
+          if (typeof window.noteFloorPdfPersistedInIdb === 'function') window.noteFloorPdfPersistedInIdb(`${bldg.id}_${floorCode}`, cached);
           return cached;
         }
       } catch (e) {

@@ -1,5 +1,5 @@
 // @@app-parts 자동 생성 파일 — 여기를 고치지 말고 app/ 조각을 고친 뒤 `node scripts/app-parts.js join` (CLAUDE.md 「app.js 조각」)
-// @@app-part 01-base.js sha=d4cba5273ef8 — 원본은 app/01-base.js (여기 말고 거기서 고칠 것)
+// @@app-part 01-base.js sha=bf7d5d4c5de2 — 원본은 app/01-base.js (여기 말고 거기서 고칠 것)
 /* ==========================================================================
    스마트 건축물 안전점검 현장점검 시스템 — UI 부트스트랩
    전역 상태·IndexedDB·이미지 헬퍼: js/core/state.js
@@ -1457,6 +1457,9 @@ document.addEventListener('DOMContentLoaded', () => {
     const _idbPersistedDrawingKeys = new PersistedContentKeySet();
     const _idbPersistedPhotoKeys = new Set();
     const _idbPersistedPdfKeys = new PersistedContentKeySet();
+    // 2026-11-20 기기 저장소에서 읽어 온 PDF는 「이미 저장됨」으로 적는다(pdf-vector-bridge가 부른다).
+    // 예전엔 적지 않아, 층을 열 때마다 다음 기기 저장에서 같은 PDF를 다시 써 화면이 0.3초쯤 멈췄다.
+    window.noteFloorPdfPersistedInIdb = (key, value) => { if (key && value) _idbPersistedPdfKeys.add(key, value); };
     // PDF를 뺀 층(floorPdfRemovedAt) — 이 세션에서 옛 PDF를 버린 층 / 클라우드에서 지워진 걸 확인한 층
     const _droppedRemovedPdfKeys = new Set();
     const _confirmedGoneCloudPdfKeys = new Set();
@@ -10882,7 +10885,7 @@ ${roundMobile ? '' : `<button type="button" class="icon-btn icon-btn-trash" titl
         });
     }
 
-// @@app-part 03-canvas.js sha=a4e68e17169f — 원본은 app/03-canvas.js (여기 말고 거기서 고칠 것)
+// @@app-part 03-canvas.js sha=019e7c042504 — 원본은 app/03-canvas.js (여기 말고 거기서 고칠 것)
     // --- 8. DRAWING CANVAS ENGINE (PAN/ZOOM/ROTATE & PINS) ---
 
     function setupCanvas() {
@@ -11975,6 +11978,8 @@ ${roundMobile ? '' : `<button type="button" class="icon-btn icon-btn-trash" titl
                     if (!bldg.floorDrawingTiers) bldg.floorDrawingTiers = {};
                     if (!bldg.floorDrawingTiers[floorCode]) bldg.floorDrawingTiers[floorCode] = {};
                     bldg.floorDrawingTiers[floorCode]['4000'] = t4000;
+                    // 기기 저장소에서 읽은 것 — 다음 저장 때 다시 쓰지 않게
+                    _idbPersistedTierKeys.add(floorDrawingTierIdbKey(bldg.id, floorCode, 4000));
                     tryLoadImage(t4000);
                     return;
                 }
@@ -13602,8 +13607,13 @@ ${roundMobile ? '' : `<button type="button" class="icon-btn icon-btn-trash" titl
         if (!buildingId || !floorCode) return;
         const norm = normalizeDrawingRotation(angle);
         if (!state.floorDrawingRotations) state.floorDrawingRotations = {};
-        state.floorDrawingRotations[getFloorDrawingRotationKey(buildingId, floorCode)] = norm;
+        const rotKey = getFloorDrawingRotationKey(buildingId, floorCode);
+        const unchanged = Object.prototype.hasOwnProperty.call(state.floorDrawingRotations, rotKey)
+            && normalizeDrawingRotation(state.floorDrawingRotations[rotKey]) === norm;
+        state.floorDrawingRotations[rotKey] = norm;
         state.rotationAngle = norm;
+        // 2026-11-20 그대로면 기기 저장을 하지 않는다 — 층을 바꿀 때마다 전체 저장(약 0.2초)이 돌아 화면이 멈칫했다
+        if (unchanged) return;
         if (!opts || opts.persist !== false) {
             if (typeof saveStateToLocalStorage === 'function') saveStateToLocalStorage();
         }

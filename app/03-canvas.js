@@ -1091,6 +1091,8 @@
                     if (!bldg.floorDrawingTiers) bldg.floorDrawingTiers = {};
                     if (!bldg.floorDrawingTiers[floorCode]) bldg.floorDrawingTiers[floorCode] = {};
                     bldg.floorDrawingTiers[floorCode]['4000'] = t4000;
+                    // 기기 저장소에서 읽은 것 — 다음 저장 때 다시 쓰지 않게
+                    _idbPersistedTierKeys.add(floorDrawingTierIdbKey(bldg.id, floorCode, 4000));
                     tryLoadImage(t4000);
                     return;
                 }
@@ -2718,8 +2720,13 @@
         if (!buildingId || !floorCode) return;
         const norm = normalizeDrawingRotation(angle);
         if (!state.floorDrawingRotations) state.floorDrawingRotations = {};
-        state.floorDrawingRotations[getFloorDrawingRotationKey(buildingId, floorCode)] = norm;
+        const rotKey = getFloorDrawingRotationKey(buildingId, floorCode);
+        const unchanged = Object.prototype.hasOwnProperty.call(state.floorDrawingRotations, rotKey)
+            && normalizeDrawingRotation(state.floorDrawingRotations[rotKey]) === norm;
+        state.floorDrawingRotations[rotKey] = norm;
         state.rotationAngle = norm;
+        // 2026-11-20 그대로면 기기 저장을 하지 않는다 — 층을 바꿀 때마다 전체 저장(약 0.2초)이 돌아 화면이 멈칫했다
+        if (unchanged) return;
         if (!opts || opts.persist !== false) {
             if (typeof saveStateToLocalStorage === 'function') saveStateToLocalStorage();
         }
