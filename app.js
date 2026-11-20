@@ -10882,7 +10882,7 @@ ${roundMobile ? '' : `<button type="button" class="icon-btn icon-btn-trash" titl
         });
     }
 
-// @@app-part 03-canvas.js sha=8cb943a7b1f1 — 원본은 app/03-canvas.js (여기 말고 거기서 고칠 것)
+// @@app-part 03-canvas.js sha=a4e68e17169f — 원본은 app/03-canvas.js (여기 말고 거기서 고칠 것)
     // --- 8. DRAWING CANVAS ENGINE (PAN/ZOOM/ROTATE & PINS) ---
 
     function setupCanvas() {
@@ -11174,6 +11174,25 @@ ${roundMobile ? '' : `<button type="button" class="icon-btn icon-btn-trash" titl
         return Math.max(img.naturalWidth || img.width || 0, img.naturalHeight || img.height || 0);
     }
 
+    /**
+     * 2026-11-20 지금 붙은 도면 그림이 실제로 몇 px 급인지(4000/8000/16000).
+     * 층을 열 때 메모리에 4000 대신 8000·16000 그림만 남아 있으면 그걸 띄우면서도 「4000」으로 적어 두어서,
+     * 화면맞춤에서도 큰 그림을 매 프레임 그렸다(렉) — 크게 확대했다 풀어야 4000으로 바뀌던 문제.
+     */
+    function getBaseFloorTierDim() {
+        return (typeof window.getFloorDrawingBaseTierDim === 'function') ? window.getFloorDrawingBaseTierDim() : 4000;
+    }
+
+    function tierDimForLoadedImage(img, baseTier) {
+        const long = getImageLongSide(img);
+        const dims = window.FLOOR_DRAWING_TIER_DIMS || [4000, 8000, 16000];
+        let tier = Number(baseTier) || dims[0];
+        for (const d of dims) {
+            if (d > tier && long >= d * 0.72) tier = d;
+        }
+        return tier;
+    }
+
     function applyTierImageIfSharper(img, wantDim, fc, bldg, loadToken) {
         if (!img || loadToken !== floorDrawingTierLoadToken) return false;
         if (state.currentFloor !== fc || state.currentBuildingId !== bldg.id) return false;
@@ -11202,7 +11221,8 @@ ${roundMobile ? '' : `<button type="button" class="icon-btn icon-btn-trash" titl
         if (wantDim > baseTier && newLong > 0 && newLong < wantDim * 0.72) {
             return false;
         }
-        if (wantDim > baseTier && newLong > 0 && curLong > 0 && newLong <= curLong * 1.04) {
+        // (2026-11-20 지금 그림이 원하는 단계보다 훨씬 크면 — 16000 → 8000으로 내릴 때 — 이름만 바꾸지 말고 작은 그림으로 바꾼다)
+        if (wantDim > baseTier && newLong > 0 && curLong > 0 && newLong <= curLong * 1.04 && curLong <= wantDim * 1.3) {
             // 이미 동급 이상이면 active만 맞추고 재시도 루프 종료
             floorDrawingActiveTierDim = wantDim;
             updateMapZoomOverlay();
@@ -11652,7 +11672,9 @@ ${roundMobile ? '' : `<button type="button" class="icon-btn icon-btn-trash" titl
         if (floorDrawingTierSyncTimer) clearTimeout(floorDrawingTierSyncTimer);
         // 2026-11-12 DXF 층은 화면을 선으로 직접 그리므로 확대용 큰 그림(8000/16000)을 받지 않는다
         // (2026-11-16 층을 막 열어 벡터 자료를 아직 읽는 중이어도 — 지난번에 DXF였던 층이면 — 받지 않는다)
-        if (typeof isCurrentFloorDxfView === 'function' && isCurrentFloorDxfView()) {
+        // 2026-11-20 단, 이미 큰 그림이 붙어 있으면(밑그림으로 매번 그려져 렉) 기본 그림으로 내리는 건 한다
+        if (typeof isCurrentFloorDxfView === 'function' && isCurrentFloorDxfView()
+            && !(Number(floorDrawingActiveTierDim) > getBaseFloorTierDim())) {
             floorDrawingTierSyncTimer = null;
             return;
         }
@@ -11681,7 +11703,11 @@ ${roundMobile ? '' : `<button type="button" class="icon-btn icon-btn-trash" titl
             resetViewportPatchState();
         }
 
-        const wantDim = pickFloorDrawingTierDimForCurrentView();
+        let wantDim = pickFloorDrawingTierDimForCurrentView();
+        // DXF 층은 선으로 그리므로 기본 그림보다 큰 것은 받지 않는다(내리기만)
+        if (typeof isCurrentFloorDxfView === 'function' && isCurrentFloorDxfView()) {
+            wantDim = Math.min(wantDim, getBaseFloorTierDim());
+        }
         if (wantDim === floorDrawingActiveTierDim) return;
 
         const loadToken = ++floorDrawingTierLoadToken;
@@ -11696,14 +11722,23 @@ ${roundMobile ? '' : `<button type="button" class="icon-btn icon-btn-trash" titl
 
         const cacheKey = `${bldg.id}_${fc}_${wantDim}`;
         const cached = state.floorDrawingTierImageCache && state.floorDrawingTierImageCache[cacheKey];
+        // 2026-11-20 확대 단계는 한 번에 한 칸씩만 움직인다(16000 → 8000 → 4000). 예전엔 한 칸 내려간 뒤 멈춰서,
+        // 크게 확대했다가 「화면맞춤」하면 8000 그림이 그대로 남아 렉이 났다 — 맞는 단계까지 이어서 내린다.
+        const continueIfStillOff = (ok) => {
+            if (!ok || loadToken !== floorDrawingTierLoadToken) return;
+            if (state.currentFloor !== fc || state.currentBuildingId !== bldg.id) return;
+            let next = pickFloorDrawingTierDimForCurrentView();
+            if (typeof isCurrentFloorDxfView === 'function' && isCurrentFloorDxfView()) next = Math.min(next, getBaseFloorTierDim());
+            if (next < Number(floorDrawingActiveTierDim)) scheduleFloorDrawingTierSync();
+        };
         if (cached && cached.complete && getImageLongSide(cached) > 0) {
-            applyTierImageIfSharper(cached, wantDim, fc, bldg, loadToken);
+            continueIfStillOff(applyTierImageIfSharper(cached, wantDim, fc, bldg, loadToken));
             return;
         }
 
         try {
             const img = await loadRasterImageElement(dataUrl);
-            applyTierImageIfSharper(img, wantDim, fc, bldg, loadToken);
+            continueIfStillOff(applyTierImageIfSharper(img, wantDim, fc, bldg, loadToken));
         } catch (e) {
             if (loadToken === floorDrawingTierLoadToken) {
                 console.warn('도면 LOD 이미지 로드 실패:', fc, wantDim, e);
@@ -11856,7 +11891,7 @@ ${roundMobile ? '' : `<button type="button" class="icon-btn icon-btn-trash" titl
                 if (bldg && bldg.id && state.currentBuildingId && state.currentBuildingId !== bldg.id) return;
                 applyFloorDrawingTarget(img, null, { immediate: !state.bgImage });
                 updateFloorDrawingEmptyOverlay(null);
-                floorDrawingActiveTierDim = baseTier;
+                floorDrawingActiveTierDim = tierDimForLoadedImage(img, baseTier);
                 if (bldg && bldg.id) {
                     // 이 기기에 PDF가 없어도 서버에서 받아 스냅 선을 만든다.
                     // 크롬·엣지는 예전에 받은 PDF가 기기에 남아 스냅이 되고, 프로그램은 그림만 있어 안 붙었다.
@@ -11872,7 +11907,8 @@ ${roundMobile ? '' : `<button type="button" class="icon-btn icon-btn-trash" titl
                 }
                 if (!state.floorDrawingTierImageCache) state.floorDrawingTierImageCache = {};
                 if (bldg && bldg.id) {
-                    state.floorDrawingTierImageCache[`${bldg.id}_${floorCode}_${baseTier}`] = img;
+                    // 실제 크기 단계로 넣는다 — 8000 그림을 4000 자리에 넣으면 기본 그림으로 내릴 때 같은 큰 그림을 또 쓴다
+                    state.floorDrawingTierImageCache[`${bldg.id}_${floorCode}_${tierDimForLoadedImage(img, baseTier)}`] = img;
                 }
                 // Auto-detect Portrait drawing and auto-rotate 90° to Landscape for optimal architectural inspection
                 if (bldg && bldg.id) {
