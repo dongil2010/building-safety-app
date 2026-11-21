@@ -2882,6 +2882,8 @@
      * 1·2종도 중점관리 마킹은 녹색으로 그려지는데 기본 범례엔 그 줄이 없었다 → 중점관리 마킹이 있으면 줄을 붙인다.
      */
     function getLocationMapLegendDrawItems(floorCode) {
+        // 2026-11-21 「범례 숨기기」 — 화면·한글·벡터 PDF·DXF·SVG 범례가 모두 여기서 줄을 받으므로 빈 목록이면 안 그린다
+        if (typeof isLocationMapLegendHidden === 'function' && isLocationMapLegendHidden()) return [];
         const lb = legendRenderOtherBuilding() || state.currentBuilding;
         let items = getActiveLocationMapLegend().map((it) => enrichLocationMapLegendItem(it, lb));
         if (!isGrade3Building(lb)) {
@@ -3037,6 +3039,35 @@
         return state.locationMapLegendBox || {};
     }
 
+    /**
+     * 2026-11-21 범례 숨기기 · 결함 핀 한 색(빨강). 건물별 범례 박스(locationMapLegendBox)에 저장해
+     * 범례 위치처럼 건물을 따라가고 동기화된다. 여러 동 한글 출력 중이면 그리는 동의 값.
+     */
+    function isLocationMapLegendHidden() {
+        return !!getActiveLocationMapLegendBox().hidden;
+    }
+    function isLocationMapMonoPin() {
+        return !!getActiveLocationMapLegendBox().monoPin;
+    }
+    window.isLocationMapLegendHidden = isLocationMapLegendHidden;
+    window.isLocationMapMonoPin = isLocationMapMonoPin;
+
+    function setLocationMapLegendOption(key, on) {
+        const box = ensureLocationMapLegendBox();
+        if (on) box[key] = true; else delete box[key];
+        persistCurrentBuildingLocationMapLegend();
+        saveStateToLocalStorage();
+        if (typeof drawCanvas === 'function') drawCanvas();
+    }
+
+    function syncLocationMapLegendOptionChecks() {
+        const box = state.locationMapLegendBox || {};
+        const h = document.getElementById('chkLocationMapLegendHidden');
+        const m = document.getElementById('chkLocationMapMonoPin');
+        if (h) h.checked = !!box.hidden;
+        if (m) m.checked = !!box.monoPin;
+    }
+
     function getActiveLocationMapLegend() {
         const ob = legendRenderOtherBuilding();
         if (ob) return (Array.isArray(ob.locationMapLegend) && ob.locationMapLegend.length) ? ob.locationMapLegend : getDefaultLocationMapLegend(ob);
@@ -3182,6 +3213,7 @@
     window.openLocationMapLegendModal = function() {
         ensureLocationMapLegendInitialized();
         renderLocationMapLegendModalList();
+        syncLocationMapLegendOptionChecks();
         const modal = document.getElementById('locationMapLegendModal');
         if (modal) {
             modal.style.display = 'flex';
@@ -3236,6 +3268,11 @@
         const btnLock = document.getElementById('btnLockLocationMapLegend');
         if (btnLock) btnLock.addEventListener('click', window.toggleLocationMapLegendLock);
         syncLocationMapLegendLockButton();
+
+        const chkHidden = document.getElementById('chkLocationMapLegendHidden');
+        if (chkHidden) chkHidden.addEventListener('change', () => setLocationMapLegendOption('hidden', chkHidden.checked));
+        const chkMono = document.getElementById('chkLocationMapMonoPin');
+        if (chkMono) chkMono.addEventListener('change', () => setLocationMapLegendOption('monoPin', chkMono.checked));
 
         const btnClose1 = document.getElementById('btnCloseLocationMapLegendModal');
         if (btnClose1) btnClose1.addEventListener('click', closeLocationMapLegendModal);

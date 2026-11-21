@@ -2662,7 +2662,10 @@
     window.BSA = window.BSA || {};
     window.BSA.priorityRepair = { getDefectRepairPhotoIndex, getDefectRepairPhotoSrc, isDefectRepaired, isPriorityRepairedDefect };
 
+    // 2026-11-21 위치도 범례 설정 「결함 핀 모두 빨강 한 색으로」 — 화면·한글·벡터 PDF·DXF·SVG 가 모두 이 함수로 색을 얻는다
+    const MONO_PIN_COLOR = '#ff0000';
     function getDefectColor(defect) {
+        if (typeof window.isLocationMapMonoPin === 'function' && window.isLocationMapMonoPin()) return MONO_PIN_COLOR;
         if (defect.isPriorityManage) return isDefectRepaired(defect) ? PRIORITY_REPAIRED_COLOR : getStyleColor('priorityManage');
         const isGood = isGoodDefectType(defect.defectType);
         if (isGrade3Building()) {
