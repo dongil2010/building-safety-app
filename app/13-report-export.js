@@ -3241,7 +3241,8 @@
             const wrapHwpxCellText = (raw, maxChars = 16) => {
                 // -nEA 앞만 문단 분리한 뒤, 공용 래퍼가 어절·금칙·명시적 \\n을 처리한다.
                 // (예전처럼 입력 \\n을 공백으로 평탄화하지 않는다 — 진행\\n中 등 의도적 2줄 유지)
-                const prepared = insertHwpxEaCountLineBreaks(
+                // 2026-11-21 3종: -nEA 는 줄을 나누지 않고 측정값에 붙인다(0.2/0.5-2EA) — 넘치면 측정값째 다음 줄
+                const prepared = glueHwpxEaCountToMeasure(
                     String(normalizeEaSpacingInText(raw == null ? '' : raw))
                         .replace(/\r\n|\r/g, '\n')
                 );

@@ -1230,6 +1230,17 @@
             .replace(/([^\s\n])[ \t]*-(\d+)\s*EA\b/gi, '$1\n-$2EA');
     }
 
+    /**
+     * 2026-11-21 3종 한글 점검내용 칸 전용: -nEA 를 측정값에 공백 없이 붙이고, 줄은 그 측정값 앞에서 나눈다.
+     * 「보(G) 경사균열 0.2/0.5\n-2EA」 대신 「보(G) 경사균열\n0.2/0.5-2EA」. 줄 수는 예전(-nEA 앞 줄바꿈)과 같다.
+     * 1·2종(규모 칸이 따로 있음)은 insertHwpxEaCountLineBreaks 그대로.
+     */
+    function glueHwpxEaCountToMeasure(raw) {
+        return String(raw == null ? '' : raw)
+            .replace(/([^\s\n])[ \t]*-(\d+)\s*EA\b/gi, '$1-$2EA')
+            .replace(/[ \t]+([^\s\n]+-\d+EA\b)/g, '\n$1');
+    }
+
     function formatCrackMeasurePair(m) {
         const join = normalizeMeasureJoin(m && m.join);
         // 폭 칸에 "Cw:0.3"이 그대로 들어간 예전 값 → "Cw:Cw:0.3" 으로 두 번 붙지 않게

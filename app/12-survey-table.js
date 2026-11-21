@@ -1012,10 +1012,12 @@
     }
 
     /** 한글 칸과 같은 줄나눔(칸 폭 ÷ 글자 폭, 어절·금칙 — js/shared/korean-text-wrap.js) */
-    function reportHwpxWrapCell(raw, cellW, vertsize) {
+    function reportHwpxWrapCell(raw, cellW, vertsize, isGrade3) {
         const charW = Math.max(700, Math.round((vertsize || 800) * 0.95));
         const maxChars = Math.max(4, Math.floor(Math.max(charW, cellW) / charW));
-        const prepared = insertHwpxEaCountLineBreaks(String(normalizeEaSpacingInText(raw == null ? '' : raw)).replace(/\r\n|\r/g, '\n'));
+        // 3종은 한글 출력과 같이 -nEA 를 측정값에 붙인다(glueHwpxEaCountToMeasure), 1·2종은 -nEA 앞에서 줄바꿈
+        const eaRule = isGrade3 ? glueHwpxEaCountToMeasure : insertHwpxEaCountLineBreaks;
+        const prepared = eaRule(String(normalizeEaSpacingInText(raw == null ? '' : raw)).replace(/\r\n|\r/g, '\n'));
         const api = window.BSA && window.BSA.koreanTextWrap;
         if (api && typeof api.wrapHwpxCellText === 'function') {
             const cw = typeof api.defaultCharWidthUnits === 'function' ? api.defaultCharWidthUnits : undefined;
@@ -1090,7 +1092,7 @@
                         const units = G.cellTextUnits({ cellWidth: w, marginLeft: 0, marginRight: 0, fontHeight: spec.vertsize });
                         if (units > 0) return getDefectGridRoomForReport(d, ctx.floorCode, units) || v;
                     }
-                    return reportHwpxWrapCell(v, w, spec.vertsize);
+                    return reportHwpxWrapCell(v, w, spec.vertsize, isGrade3);
                 });
                 return `<tr style="height:${mm(rowH)}mm;">${vals.map((v, ci) => td(v, ci)).join('')}</tr>`;
             }).join('')

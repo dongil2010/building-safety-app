@@ -31860,7 +31860,7 @@ ${roundMobile ? '' : `<button type="button" class="icon-btn icon-btn-trash" titl
         refreshDefectQuickPickBar();
     }
 
-// @@app-part 08-defect-presets.js sha=5840f69e4f22 — 원본은 app/08-defect-presets.js (여기 말고 거기서 고칠 것)
+// @@app-part 08-defect-presets.js sha=b985a74c380e — 원본은 app/08-defect-presets.js (여기 말고 거기서 고칠 것)
     // --- Dynamic Defect Type Presets & Custom Adding ---
     const STEEL_MEMBER_DEFECTS = [
         '상태양호',
@@ -33090,6 +33090,17 @@ ${roundMobile ? '' : `<button type="button" class="icon-btn icon-btn-trash" titl
     function insertHwpxEaCountLineBreaks(raw) {
         return String(raw == null ? '' : raw)
             .replace(/([^\s\n])[ \t]*-(\d+)\s*EA\b/gi, '$1\n-$2EA');
+    }
+
+    /**
+     * 2026-11-21 3종 한글 점검내용 칸 전용: -nEA 를 측정값에 공백 없이 붙이고, 줄은 그 측정값 앞에서 나눈다.
+     * 「보(G) 경사균열 0.2/0.5\n-2EA」 대신 「보(G) 경사균열\n0.2/0.5-2EA」. 줄 수는 예전(-nEA 앞 줄바꿈)과 같다.
+     * 1·2종(규모 칸이 따로 있음)은 insertHwpxEaCountLineBreaks 그대로.
+     */
+    function glueHwpxEaCountToMeasure(raw) {
+        return String(raw == null ? '' : raw)
+            .replace(/([^\s\n])[ \t]*-(\d+)\s*EA\b/gi, '$1-$2EA')
+            .replace(/[ \t]+([^\s\n]+-\d+EA\b)/g, '\n$1');
     }
 
     function formatCrackMeasurePair(m) {
@@ -50129,7 +50140,7 @@ ${roundMobile ? '' : `<button type="button" class="icon-btn icon-btn-trash" titl
             endDrawingAlign();
         }
     }, true);
-// @@app-part 12-survey-table.js sha=55c4078ae8cf — 원본은 app/12-survey-table.js (여기 말고 거기서 고칠 것)
+// @@app-part 12-survey-table.js sha=8ff8d5b11536 — 원본은 app/12-survey-table.js (여기 말고 거기서 고칠 것)
     // --- 10. SURVEY TABLE & ALBUM RENDERING ---
 
     // 상태조사표 컬럼 기본 정의 (화면/PDF/엑셀 공통). size와 crackWidth/crackLength는 상호 배타적으로
@@ -51143,10 +51154,12 @@ ${roundMobile ? '' : `<button type="button" class="icon-btn icon-btn-trash" titl
     }
 
     /** 한글 칸과 같은 줄나눔(칸 폭 ÷ 글자 폭, 어절·금칙 — js/shared/korean-text-wrap.js) */
-    function reportHwpxWrapCell(raw, cellW, vertsize) {
+    function reportHwpxWrapCell(raw, cellW, vertsize, isGrade3) {
         const charW = Math.max(700, Math.round((vertsize || 800) * 0.95));
         const maxChars = Math.max(4, Math.floor(Math.max(charW, cellW) / charW));
-        const prepared = insertHwpxEaCountLineBreaks(String(normalizeEaSpacingInText(raw == null ? '' : raw)).replace(/\r\n|\r/g, '\n'));
+        // 3종은 한글 출력과 같이 -nEA 를 측정값에 붙인다(glueHwpxEaCountToMeasure), 1·2종은 -nEA 앞에서 줄바꿈
+        const eaRule = isGrade3 ? glueHwpxEaCountToMeasure : insertHwpxEaCountLineBreaks;
+        const prepared = eaRule(String(normalizeEaSpacingInText(raw == null ? '' : raw)).replace(/\r\n|\r/g, '\n'));
         const api = window.BSA && window.BSA.koreanTextWrap;
         if (api && typeof api.wrapHwpxCellText === 'function') {
             const cw = typeof api.defaultCharWidthUnits === 'function' ? api.defaultCharWidthUnits : undefined;
@@ -51221,7 +51234,7 @@ ${roundMobile ? '' : `<button type="button" class="icon-btn icon-btn-trash" titl
                         const units = G.cellTextUnits({ cellWidth: w, marginLeft: 0, marginRight: 0, fontHeight: spec.vertsize });
                         if (units > 0) return getDefectGridRoomForReport(d, ctx.floorCode, units) || v;
                     }
-                    return reportHwpxWrapCell(v, w, spec.vertsize);
+                    return reportHwpxWrapCell(v, w, spec.vertsize, isGrade3);
                 });
                 return `<tr style="height:${mm(rowH)}mm;">${vals.map((v, ci) => td(v, ci)).join('')}</tr>`;
             }).join('')
@@ -54956,7 +54969,7 @@ ${roundMobile ? '' : `<button type="button" class="icon-btn icon-btn-trash" titl
         }
     }
 
-// @@app-part 13-report-export.js sha=303afa952b1c — 원본은 app/13-report-export.js (여기 말고 거기서 고칠 것)
+// @@app-part 13-report-export.js sha=7867f197a229 — 원본은 app/13-report-export.js (여기 말고 거기서 고칠 것)
     // --- REPORT PREVIEW MODAL (Instant Modal Open & Pure White Paper Theme) ---
     window.openReportPreviewModalFunc = async function(opts) {
         const manageLoading = !(opts && opts.skipLoading);
@@ -58199,7 +58212,8 @@ ${roundMobile ? '' : `<button type="button" class="icon-btn icon-btn-trash" titl
             const wrapHwpxCellText = (raw, maxChars = 16) => {
                 // -nEA 앞만 문단 분리한 뒤, 공용 래퍼가 어절·금칙·명시적 \\n을 처리한다.
                 // (예전처럼 입력 \\n을 공백으로 평탄화하지 않는다 — 진행\\n中 등 의도적 2줄 유지)
-                const prepared = insertHwpxEaCountLineBreaks(
+                // 2026-11-21 3종: -nEA 는 줄을 나누지 않고 측정값에 붙인다(0.2/0.5-2EA) — 넘치면 측정값째 다음 줄
+                const prepared = glueHwpxEaCountToMeasure(
                     String(normalizeEaSpacingInText(raw == null ? '' : raw))
                         .replace(/\r\n|\r/g, '\n')
                 );

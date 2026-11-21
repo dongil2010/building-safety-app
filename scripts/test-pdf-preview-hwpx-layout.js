@@ -20,7 +20,7 @@ assert.ok(hwpxStart > 0 && hwpxEnd > hwpxStart);
 const shared = ['function paginateSurveyDefects(', 'function formatSurveyReportNo(', 'function getReportSurveyRowValues(']
     .map((h) => extractFunction(app, h)).join('\n');
 const FP = {
-    "hwpxExport": "e67e091c3da78ec1", // 2026-11-19 위치도 형식 묻기(그림 PNG / SVG 벡터) + 비파괴 위치도도 SVG — 일부러 바꿈
+    "hwpxExport": "ccac81f4fbcbc7bd", // 2026-11-21 3종 점검내용 -nEA 를 측정값에 붙임(보(G) 경사균열 / 0.2/0.5-2EA) — 일부러 바꿈
     "sharedRows": "0ce605cc38dd62c3", // 2026-11-11 번호 칸: 직접 준 하위번호(noManual, NO.74-2)는 꼬리 유지 — 일부러 바꿈
     "hwpx-survey-row-fit.js": "3d22dcdf170a4bc4",
     "hwpx-font-8pt.js": "792b4169159c5676",
@@ -107,7 +107,7 @@ assert.strictEqual(L.titleH, fit.STD_RESERVE_H, 'PDF 제목 높이 = 한글 제�
 const tableFn = extractFunction(app, 'function buildReportSurveyTableHtml(');
 assert.ok(/table-layout:fixed/.test(tableFn) && /letter-spacing:0/.test(tableFn) && /font-size:\$\{spec\.fontPt\}pt/.test(tableFn));
 assert.ok(/<col style="width:\$\{mm\(w\)\}mm;">/.test(tableFn));
-assert.ok(/reportHwpxWrapCell\(v, w, spec\.vertsize\)/.test(tableFn), '한글 칸과 같은 줄나눔');
+assert.ok(/reportHwpxWrapCell\(v, w, spec\.vertsize, isGrade3\)/.test(tableFn), '한글 칸과 같은 줄나눔(3종은 -nEA 를 측정값에 붙임)');
 
 // 미리보기: 상태조사표·위치도 쪽이 한글 쪽 틀 + [도면 N-M] 캡션
 const prev = extractFunction(app, 'window.openReportPreviewModalFunc = async function(');
