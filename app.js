@@ -36720,7 +36720,7 @@ ${roundMobile ? '' : `<button type="button" class="icon-btn icon-btn-trash" titl
         }
     }
 
-// @@app-part 09-settings-input-camera.js sha=5f3101edbf47 — 원본은 app/09-settings-input-camera.js (여기 말고 거기서 고칠 것)
+// @@app-part 09-settings-input-camera.js sha=919181985420 — 원본은 app/09-settings-input-camera.js (여기 말고 거기서 고칠 것)
     // --- 카테고리별 핀/박스 색상 설정 모달 ---
     // 결함 색상은 getDefectColor()가 쓰는 등급·상태 키와 맞춰야 도면에 바로 반영됨
     const STYLE_COLOR_FIELDS = [
@@ -40482,6 +40482,7 @@ ${roundMobile ? '' : `<button type="button" class="icon-btn icon-btn-trash" titl
         const redrawBtn = document.getElementById('btnRedrawDefectPolygon');
         if (redrawBtn && isBulk) redrawBtn.hidden = true;
         if (typeof syncMobileAddMarkingFab === 'function') syncMobileAddMarkingFab();
+        if (typeof window.syncDefectContentClipButtons === 'function') window.syncDefectContentClipButtons();
         if (isBulk) updateDefectBulkEditBanner();
     }
 
@@ -43353,6 +43354,140 @@ ${roundMobile ? '' : `<button type="button" class="icon-btn icon-btn-trash" titl
         );
     }
     window.unmergeSelectedDefects = unmergeSelectedDefects;
+
+    // ---- 2026-11-23 마킹 내용 복사·붙여넣기 ----
+    // 결함 창 머리의 「복사」로 이 마킹의 내용(분류·부재·종류·폭·길이·개수·규모·원인·진행중/누수/개구부)을 담아 두고,
+    // 다른 마킹(새로 찍은 마킹 포함)이나 여러 마킹 일괄 수정 창에서 「붙여넣기」로 그대로 채운다.
+    // 번호·위치·사진·전회차·중요 표시·화살표 방향은 마킹마다 달라서 복사하지 않는다. 이 기기에만 기억(새로고침해도 남음).
+    const DEFECT_CONTENT_CLIP_KEY = 'bsa_defectContentClip_v1';
+    let defectContentClip = null;
+    try {
+        const raw = window.localStorage.getItem(DEFECT_CONTENT_CLIP_KEY);
+        if (raw) defectContentClip = JSON.parse(raw) || null;
+    } catch (_e) { defectContentClip = null; }
+
+    function defectContentClipLabel(clip) {
+        if (!clip) return '';
+        const parts = [memberNameOut(clip.component) || '', clip.defectType || '', clip.size || ''].filter(Boolean);
+        return parts.join(' ') || '(빈 내용)';
+    }
+
+    function syncDefectContentClipButtons() {
+        const bulk = isDefectBulkEditMode();
+        const copyBtn = document.getElementById('btnCopyDefectContent');
+        const pasteBtn = document.getElementById('btnPasteDefectContent');
+        if (copyBtn) copyBtn.hidden = bulk;
+        if (pasteBtn) {
+            pasteBtn.disabled = !defectContentClip;
+            pasteBtn.title = defectContentClip
+                ? `복사한 내용 붙여넣기: ${defectContentClipLabel(defectContentClip)}${bulk ? ' (선택한 마킹 전부)' : ''}`
+                : '먼저 다른 마킹에서 「복사」를 누르세요';
+        }
+    }
+    window.syncDefectContentClipButtons = syncDefectContentClipButtons;
+
+    function getDefectFromModalPinId() {
+        const pinId = document.getElementById('defectPinId')?.value;
+        if (!pinId) return null;
+        return (state.defects[`${state.currentBuildingId}_${state.currentFloor}`] || []).find((x) => x && x.id === pinId) || null;
+    }
+
+    async function copyDefectContentFromModal() {
+        if (isDefectBulkEditMode()) return;
+        // 입력 중인 값이 아직 안 들어갔으면 먼저 넣고 복사한다
+        if (window._defectAutoApplyTimer) {
+            window.clearTimeout(window._defectAutoApplyTimer);
+            window._defectAutoApplyTimer = null;
+            await commitDefectFromForm({
+                pushHistory: !window._defectEditSessionHistoryPushed,
+                uploadPhotos: !!window._defectPhotosDirty
+            });
+            window._defectEditSessionHistoryPushed = true;
+        }
+        const d = getDefectFromModalPinId();
+        if (!d) {
+            window.showToast?.('복사할 마킹을 찾지 못했습니다.', 'warning', 2500);
+            return;
+        }
+        defectContentClip = {
+            category: d.category === '' ? '' : resolveDefectCategory(d.category),
+            component: d.component || '',
+            defectType: d.defectType || '',
+            cause: d.cause || '',
+            size: d.size || '',
+            crackMeasures: Array.isArray(d.crackMeasures) ? JSON.parse(JSON.stringify(d.crackMeasures)) : [],
+            crackWidth: d.crackWidth || '',
+            crackLength: d.crackLength || '',
+            itemCount: d.itemCount || '',
+            isProgress: !!d.isProgress,
+            isLeak: !!d.isLeak,
+            isOpeningCrack: !!d.isOpeningCrack,
+            openingPos: d.openingPos || '',
+            fromNo: d.no || ''
+        };
+        try { window.localStorage.setItem(DEFECT_CONTENT_CLIP_KEY, JSON.stringify(defectContentClip)); } catch (_e) { /* 이번 화면에서만 */ }
+        syncDefectContentClipButtons();
+        window.showToast?.(
+            `${d.no || '마킹'} 내용 복사됨 — ${defectContentClipLabel(defectContentClip)}. 다른 마킹 창에서 「붙여넣기」를 누르세요.`,
+            'success',
+            3200
+        );
+    }
+
+    function pasteDefectContentToModal() {
+        const clip = defectContentClip;
+        if (!clip || !isDefectModalOpen()) return;
+        const bulk = isDefectBulkEditMode();
+        const catEl = document.getElementById('defectCategory');
+        const sizeEl = document.getElementById('defectSize');
+        const flagEls = {
+            isProgress: document.getElementById('defectProgressCheck'),
+            isLeak: document.getElementById('defectLeakCheck'),
+            isOpeningCrack: document.getElementById('defectOpeningCrackCheck')
+        };
+        const cat = clip.category || '';
+        if (catEl) catEl.value = cat;
+        populateDefectComponentDropdown(cat, memberNameOut(clip.component) || '');
+        updateDefectTypeDropdown(cat || '구조체', clip.defectType || '');
+        // 종류에 맞춘 자동 원인이 아니라 복사한 원인을 그대로 쓴다
+        window._defectAutoCauses = [];
+        updateDefectCauseDropdown(clip.defectType || '', clip.cause || '');
+        if (sizeEl) sizeEl.value = clip.size || '';
+        setCrackMeasuresToUi(clip);
+        if (sizeEl) {
+            const composed = composeDefectSizeFromMeasures();
+            sizeEl.dataset.autoSize = (composed && ((clip.size || '') === composed
+                || isMeasureOnlySizeText(clip.size))) ? '1' : '';
+        }
+        Object.keys(flagEls).forEach((k) => {
+            const el = flagEls[k];
+            if (!el) return;
+            el.checked = !!clip[k];
+            el.indeterminate = false;
+            delete el.dataset.bulkMixed;
+        });
+        if (!bulk) setDefectOpeningPosUi(clip.openingPos || '');
+        if (bulk) {
+            ['category', 'component', 'defectType', 'cause', 'size', 'crackMeasures', 'isProgress', 'isLeak', 'isOpeningCrack']
+                .forEach((k) => markDefectBulkFieldChanged(k));
+        }
+        if (typeof refreshDefectQuickPickBar === 'function') refreshDefectQuickPickBar();
+        if (typeof window.syncDefectProgressiveSections === 'function') window.syncDefectProgressiveSections();
+        scheduleDefectAutoApply();
+        const n = bulk ? getDefectsForBulkEdit().length : 0;
+        window.showToast?.(
+            bulk ? `선택한 마킹 ${n}개에 내용 붙여넣음 — ${defectContentClipLabel(clip)}`
+                : `내용 붙여넣음 — ${defectContentClipLabel(clip)}`,
+            'success',
+            2500
+        );
+    }
+
+    const btnCopyDefectContent = document.getElementById('btnCopyDefectContent');
+    if (btnCopyDefectContent) btnCopyDefectContent.addEventListener('click', () => { copyDefectContentFromModal(); });
+    const btnPasteDefectContent = document.getElementById('btnPasteDefectContent');
+    if (btnPasteDefectContent) btnPasteDefectContent.addEventListener('click', () => { pasteDefectContentToModal(); });
+    syncDefectContentClipButtons();
 
     const btnAddAnotherMarking = document.getElementById('btnAddAnotherMarking');
     if (btnAddAnotherMarking) {

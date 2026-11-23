@@ -19297,3 +19297,33 @@ button#mobileBtnAddSelect#mobileBtnAddSelect.is-select-remove i,
 button#mobileNdtBtnAddSelect#mobileNdtBtnAddSelect.is-select-remove i {
     color: #dc2626 !important;
 }
+
+/* 2026-11-23 결함 수정창 머리: 마킹 내용 복사·붙여넣기 */
+#defectModal .defect-content-clip {
+    display: flex;
+    gap: 0.25rem;
+    flex: 0 0 auto;
+}
+#defectModal .defect-content-clip[hidden] { display: none; }
+#defectModal .defect-content-clip-btn {
+    display: inline-flex;
+    align-items: center;
+    gap: 0.25rem;
+    padding: 0.18rem 0.5rem;
+    border: 1px solid var(--border-color, rgba(148, 163, 184, 0.45));
+    border-radius: 6px;
+    background: transparent;
+    color: inherit;
+    font-size: 0.78rem;
+    font-weight: 600;
+    line-height: 1.4;
+    cursor: pointer;
+    white-space: nowrap;
+}
+#defectModal .defect-content-clip-btn:hover:not(:disabled) { background: rgba(59, 130, 246, 0.12); border-color: #3b82f6; }
+#defectModal .defect-content-clip-btn:disabled { opacity: 0.4; cursor: not-allowed; }
+#defectModal .defect-content-clip-btn[hidden] { display: none; }
+@media (max-width: 480px) {
+    #defectModal .defect-content-clip-btn span { display: none; }
+    #defectModal .defect-content-clip-btn { padding: 0.25rem 0.45rem; }
+}
