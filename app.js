@@ -36720,7 +36720,7 @@ ${roundMobile ? '' : `<button type="button" class="icon-btn icon-btn-trash" titl
         }
     }
 
-// @@app-part 09-settings-input-camera.js sha=919181985420 — 원본은 app/09-settings-input-camera.js (여기 말고 거기서 고칠 것)
+// @@app-part 09-settings-input-camera.js sha=c851b3099224 — 원본은 app/09-settings-input-camera.js (여기 말고 거기서 고칠 것)
     // --- 카테고리별 핀/박스 색상 설정 모달 ---
     // 결함 색상은 getDefectColor()가 쓰는 등급·상태 키와 맞춰야 도면에 바로 반영됨
     const STYLE_COLOR_FIELDS = [
@@ -43380,8 +43380,8 @@ ${roundMobile ? '' : `<button type="button" class="icon-btn icon-btn-trash" titl
         if (pasteBtn) {
             pasteBtn.disabled = !defectContentClip;
             pasteBtn.title = defectContentClip
-                ? `복사한 내용 붙여넣기: ${defectContentClipLabel(defectContentClip)}${bulk ? ' (선택한 마킹 전부)' : ''}`
-                : '먼저 다른 마킹에서 「복사」를 누르세요';
+                ? `복사한 내용 붙여넣기(Ctrl+V): ${defectContentClipLabel(defectContentClip)}${bulk ? ' (선택한 마킹 전부)' : ''}`
+                : '먼저 다른 마킹에서 「복사」(Ctrl+C)를 누르세요';
         }
     }
     window.syncDefectContentClipButtons = syncDefectContentClipButtons;
@@ -43404,7 +43404,10 @@ ${roundMobile ? '' : `<button type="button" class="icon-btn icon-btn-trash" titl
             });
             window._defectEditSessionHistoryPushed = true;
         }
-        const d = getDefectFromModalPinId();
+        copyDefectContentFromDefect(getDefectFromModalPinId());
+    }
+
+    function copyDefectContentFromDefect(d) {
         if (!d) {
             window.showToast?.('복사할 마킹을 찾지 못했습니다.', 'warning', 2500);
             return;
@@ -43428,7 +43431,7 @@ ${roundMobile ? '' : `<button type="button" class="icon-btn icon-btn-trash" titl
         try { window.localStorage.setItem(DEFECT_CONTENT_CLIP_KEY, JSON.stringify(defectContentClip)); } catch (_e) { /* 이번 화면에서만 */ }
         syncDefectContentClipButtons();
         window.showToast?.(
-            `${d.no || '마킹'} 내용 복사됨 — ${defectContentClipLabel(defectContentClip)}. 다른 마킹 창에서 「붙여넣기」를 누르세요.`,
+            `${d.no || '마킹'} 내용 복사됨 — ${defectContentClipLabel(defectContentClip)}. 다른 마킹을 누르고 Ctrl+V(또는 「붙여넣기」)`,
             'success',
             3200
         );
@@ -43488,6 +43491,76 @@ ${roundMobile ? '' : `<button type="button" class="icon-btn icon-btn-trash" titl
     const btnPasteDefectContent = document.getElementById('btnPasteDefectContent');
     if (btnPasteDefectContent) btnPasteDefectContent.addEventListener('click', () => { pasteDefectContentToModal(); });
     syncDefectContentClipButtons();
+
+    // 2026-11-23 도면에서 마킹 누르고 Ctrl+C → 다른 마킹 누르고 Ctrl+V.
+    // 수정창이 열려 있으면 그 창(단건·일괄)에, 창 없이 선택만 돼 있으면 1개는 수정창을, 여러 개는 일괄 수정 창을 열고 붙인다.
+    // 입력칸에서 글을 쓰는 중이거나 화면의 글자를 드래그해 골라 둔 때는 보통 복사·붙여넣기 그대로 둔다.
+    async function waitDefectFormReady(timeoutMs) {
+        const until = Date.now() + (timeoutMs || 4000);
+        while (Date.now() < until) {
+            if (isDefectModalOpen() && !window._defectFormHydrating) return true;
+            await new Promise((r) => setTimeout(r, 60));
+        }
+        return isDefectModalOpen() && !window._defectFormHydrating;
+    }
+
+    function getSelectedDefectsOnFloor() {
+        const list = state.defects[`${state.currentBuildingId}_${state.currentFloor}`] || [];
+        return [...selectedDefectIds].map((id) => list.find((d) => d && d.id === id)).filter(Boolean);
+    }
+
+    window.addEventListener('keydown', async (e) => {
+        if (!(e.ctrlKey || e.metaKey) || e.shiftKey || e.altKey) return;
+        const k = e.key ? e.key.toLowerCase() : '';
+        if (k !== 'c' && k !== 'v') return;
+        if (state.currentTab !== 'tab-map' && !document.getElementById('tab-map')?.classList.contains('active')) return;
+        const t = e.target;
+        const tag = (t && t.tagName) ? t.tagName.toLowerCase() : '';
+        if (tag === 'input' || tag === 'textarea' || tag === 'select' || (t && t.isContentEditable)) return;
+        if (k === 'c') {
+            const sel = window.getSelection ? String(window.getSelection() || '') : '';
+            if (sel.trim()) return;
+        }
+        // 다른 창(확인창 등)이 결함 창 위에 떠 있으면 건드리지 않는다
+        if (document.querySelector('.modal-overlay.open:not(#defectModal)')) return;
+        const modalOpen = isDefectModalOpen();
+        const bulk = modalOpen && isDefectBulkEditMode();
+
+        if (k === 'c') {
+            if (modalOpen && !bulk) {
+                e.preventDefault();
+                await copyDefectContentFromModal();
+                return;
+            }
+            const sel = getSelectedDefectsOnFloor();
+            if (sel.length === 1) {
+                e.preventDefault();
+                copyDefectContentFromDefect(sel[0]);
+            } else if (sel.length > 1) {
+                e.preventDefault();
+                window.showToast?.('내용 복사는 마킹 1개만 골라서 하세요.', 'info', 2200);
+            }
+            return;
+        }
+
+        // Ctrl+V
+        if (!defectContentClip) return;
+        if (modalOpen) {
+            e.preventDefault();
+            if (await waitDefectFormReady()) pasteDefectContentToModal();
+            return;
+        }
+        const sel = getSelectedDefectsOnFloor();
+        if (!sel.length) return;
+        e.preventDefault();
+        if (sel.length === 1) {
+            const d = sel[0];
+            openAddDefectModal(d.x, d.y, d.targetX, d.targetY, d, null, { revealMarkingAboveDrawer: false });
+        } else {
+            openBulkDefectEditModal();
+        }
+        if (await waitDefectFormReady()) pasteDefectContentToModal();
+    });
 
     const btnAddAnotherMarking = document.getElementById('btnAddAnotherMarking');
     if (btnAddAnotherMarking) {
