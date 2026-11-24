@@ -3827,6 +3827,29 @@
         return stored;
     }
 
+    /** 2026-11-24 「전체 층에 적용」 대상 층 — 이 동의 층 목록 + 도면 있는 층(회차 손글씨 메모 자리 제외), 지금 층 포함 */
+    function printCropAllFloorCodes(bldg, currentFloor) {
+        const codes = new Set(typeof getBuildingFloorCodesForStyle === 'function' ? getBuildingFloorCodesForStyle(bldg) : []);
+        if (currentFloor) codes.add(currentFloor);
+        codes.delete('ROUND_SKETCH_MEMO');
+        return Array.from(codes);
+    }
+
+    /** 같은 비율 범위를 여러 층에 넣는다(저장·동기화는 부르는 쪽에서 한 번). 넣은 저장값(null=도면 전체)을 돌려준다. */
+    function applyPrintCropToFloors(buildingId, floorCodes, crop, imgW, imgH, isNdt) {
+        const api = printCropApi();
+        if (!api || !buildingId) return null;
+        if (!state.floorPrintCrops || typeof state.floorPrintCrops !== 'object') state.floorPrintCrops = {};
+        const stored = crop ? api.toStored(crop, imgW, imgH) : null;
+        (floorCodes || []).forEach((fc) => {
+            if (!fc) return;
+            const key = isNdt ? ndtPrintCropKey(buildingId, fc) : getFloorMapStyleKey(buildingId, fc);
+            // 층마다 따로 고칠 수 있게 객체는 층마다 새로
+            state.floorPrintCrops[key] = stored ? Object.assign({}, stored) : null;
+        });
+        return stored;
+    }
+
     /** 이 층에 비파괴 출력 범위가 정해져 있으면 버튼에 표시 */
     let _ndtPrintCropBtnState = null;
     function updateNdtPrintCropButtons() {
@@ -4056,6 +4079,7 @@
                     <button type="button" class="btn btn-sm" data-role="auto"><i class="fa-solid fa-wand-magic-sparkles"></i> 자동 맞춤</button>
                     <button type="button" class="btn btn-sm" data-role="legend" ${isNdt ? 'hidden' : ''} title="범위 안에서 범례를 놓을 구석을 바꿉니다"><i class="fa-solid fa-list"></i> 범례 자리 바꾸기</button>
                     <button type="button" class="btn btn-sm" data-role="reset">도면 전체(기본)</button>
+                    <button type="button" class="btn btn-sm" data-role="all" title="지금 범위(도면 크기 대비 비율)를 이 동의 모든 층에 똑같이 넣습니다"><i class="fa-solid fa-layer-group"></i> 전체 층에 적용</button>
                     <span style="flex:1;"></span>
                     <button type="button" class="btn btn-sm" data-role="cancel">취소</button>
                     <button type="button" class="btn btn-sm btn-primary" data-role="save">저장</button>
@@ -4224,6 +4248,29 @@
             paint();
         });
         overlay.querySelector('[data-role="cancel"]').addEventListener('click', close);
+        // 2026-11-24 지금 범위를 이 동의 모든 층에 같은 비율로(층마다 도곽·배치가 같은 도면용)
+        overlay.querySelector('[data-role="all"]').addEventListener('click', async () => {
+            const norm = crop ? api.normalizeCrop(crop, imgW, imgH) : null;
+            const codes = printCropAllFloorCodes(state.currentBuilding, fc);
+            const what = isNdt ? '비파괴 조사 위치도' : '위치도';
+            const msg = (norm
+                ? `지금 범위를 이 동의 ${codes.length}개 층 ${what}에 똑같이 넣습니다.`
+                : `이 동의 ${codes.length}개 층 ${what}를 모두 도면 전체(기본)로 되돌립니다.`)
+                + '\n다른 층에 정해 둔 범위는 덮어씁니다.';
+            const ok = await window.appConfirm(msg, { title: '출력 범위 전체 층 적용', okText: '적용' });
+            if (!ok) return;
+            const stored = applyPrintCropToFloors(bId, codes, norm, imgW, imgH, isNdt);
+            if (typeof saveStateToLocalStorage === 'function') saveStateToLocalStorage();
+            if (typeof scheduleSyncToFirebase === 'function') scheduleSyncToFirebase();
+            close();
+            if (isNdt) {
+                updateNdtPrintCropButtons();
+                if (typeof drawNdtCanvas === 'function') drawNdtCanvas();
+            } else if (typeof drawCanvas === 'function') drawCanvas();
+            window.showToast(stored
+                ? `${codes.length}개 층 ${what} 출력 범위를 저장했습니다.`
+                : `${codes.length}개 층 ${what}를 도면 전체로 출력합니다.`, 'success', 3500);
+        });
         overlay.querySelector('[data-role="save"]').addEventListener('click', () => {
             const norm = crop ? api.normalizeCrop(crop, imgW, imgH) : null;
             if (isNdt) setNdtPrintCrop(bId, fc, norm, imgW, imgH);

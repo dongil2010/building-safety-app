@@ -46,8 +46,9 @@ assert.strictEqual(fit.paraHeight([{ vertpos: 0, vertsize: 1200, spacing: 1440 }
 
 // 연결: 3종 상태조사표만(1·2종 표는 그대로)
 const app = fs.readFileSync(path.join(root, 'app.js'), 'utf8').replace(/\r\n/g, '\n');
-assert.strictEqual((app.match(/const fitSurveyPageRows = \(destTbl, pageRows\) =>/g) || []).length, 1, '3종 한 곳');
-assert.ok(/if \(fitRows\.length\) fitSurveyPageRows\(destTbl, fitRows\);/.test(app));
+assert.strictEqual((app.match(/const fitSurveyPageRows = \(destTbl, pageRows, extraReserveH\) =>/g) || []).length, 1, '3종 한 곳');
+// 2026-11-24 셋째 인자 = 동 마지막 쪽 표 밑 「※ 범례」 줄 자리
+assert.ok(/if \(fitRows\.length\) fitSurveyPageRows\(destTbl, fitRows, legendReserve\);/.test(app));
 assert.ok(/applyRowHeightFromLines\(newRow, rowMaxLines, rowLineMetric, 2800\);/.test(app), '1·2종은 예전 그대로');
 const html = fs.readFileSync(path.join(root, 'index.html'), 'utf8');
 assert.ok(/js\/shared\/hwpx-survey-row-fit\.js\?v=/.test(html) && html.indexOf('js/shared/hwpx-survey-row-fit.js') < html.indexOf('src="app.js'));

@@ -50829,7 +50829,7 @@ ${roundMobile ? '' : `<button type="button" class="icon-btn icon-btn-trash" titl
             endDrawingAlign();
         }
     }, true);
-// @@app-part 12-survey-table.js sha=8aa3303a29a0 — 원본은 app/12-survey-table.js (여기 말고 거기서 고칠 것)
+// @@app-part 12-survey-table.js sha=b78ad01e6ead — 원본은 app/12-survey-table.js (여기 말고 거기서 고칠 것)
     // --- 10. SURVEY TABLE & ALBUM RENDERING ---
 
     // 상태조사표 컬럼 기본 정의 (화면/PDF/엑셀 공통). size와 crackWidth/crackLength는 상호 배타적으로
@@ -54658,6 +54658,29 @@ ${roundMobile ? '' : `<button type="button" class="icon-btn icon-btn-trash" titl
         return stored;
     }
 
+    /** 2026-11-24 「전체 층에 적용」 대상 층 — 이 동의 층 목록 + 도면 있는 층(회차 손글씨 메모 자리 제외), 지금 층 포함 */
+    function printCropAllFloorCodes(bldg, currentFloor) {
+        const codes = new Set(typeof getBuildingFloorCodesForStyle === 'function' ? getBuildingFloorCodesForStyle(bldg) : []);
+        if (currentFloor) codes.add(currentFloor);
+        codes.delete('ROUND_SKETCH_MEMO');
+        return Array.from(codes);
+    }
+
+    /** 같은 비율 범위를 여러 층에 넣는다(저장·동기화는 부르는 쪽에서 한 번). 넣은 저장값(null=도면 전체)을 돌려준다. */
+    function applyPrintCropToFloors(buildingId, floorCodes, crop, imgW, imgH, isNdt) {
+        const api = printCropApi();
+        if (!api || !buildingId) return null;
+        if (!state.floorPrintCrops || typeof state.floorPrintCrops !== 'object') state.floorPrintCrops = {};
+        const stored = crop ? api.toStored(crop, imgW, imgH) : null;
+        (floorCodes || []).forEach((fc) => {
+            if (!fc) return;
+            const key = isNdt ? ndtPrintCropKey(buildingId, fc) : getFloorMapStyleKey(buildingId, fc);
+            // 층마다 따로 고칠 수 있게 객체는 층마다 새로
+            state.floorPrintCrops[key] = stored ? Object.assign({}, stored) : null;
+        });
+        return stored;
+    }
+
     /** 이 층에 비파괴 출력 범위가 정해져 있으면 버튼에 표시 */
     let _ndtPrintCropBtnState = null;
     function updateNdtPrintCropButtons() {
@@ -54887,6 +54910,7 @@ ${roundMobile ? '' : `<button type="button" class="icon-btn icon-btn-trash" titl
                     <button type="button" class="btn btn-sm" data-role="auto"><i class="fa-solid fa-wand-magic-sparkles"></i> 자동 맞춤</button>
                     <button type="button" class="btn btn-sm" data-role="legend" ${isNdt ? 'hidden' : ''} title="범위 안에서 범례를 놓을 구석을 바꿉니다"><i class="fa-solid fa-list"></i> 범례 자리 바꾸기</button>
                     <button type="button" class="btn btn-sm" data-role="reset">도면 전체(기본)</button>
+                    <button type="button" class="btn btn-sm" data-role="all" title="지금 범위(도면 크기 대비 비율)를 이 동의 모든 층에 똑같이 넣습니다"><i class="fa-solid fa-layer-group"></i> 전체 층에 적용</button>
                     <span style="flex:1;"></span>
                     <button type="button" class="btn btn-sm" data-role="cancel">취소</button>
                     <button type="button" class="btn btn-sm btn-primary" data-role="save">저장</button>
@@ -55055,6 +55079,29 @@ ${roundMobile ? '' : `<button type="button" class="icon-btn icon-btn-trash" titl
             paint();
         });
         overlay.querySelector('[data-role="cancel"]').addEventListener('click', close);
+        // 2026-11-24 지금 범위를 이 동의 모든 층에 같은 비율로(층마다 도곽·배치가 같은 도면용)
+        overlay.querySelector('[data-role="all"]').addEventListener('click', async () => {
+            const norm = crop ? api.normalizeCrop(crop, imgW, imgH) : null;
+            const codes = printCropAllFloorCodes(state.currentBuilding, fc);
+            const what = isNdt ? '비파괴 조사 위치도' : '위치도';
+            const msg = (norm
+                ? `지금 범위를 이 동의 ${codes.length}개 층 ${what}에 똑같이 넣습니다.`
+                : `이 동의 ${codes.length}개 층 ${what}를 모두 도면 전체(기본)로 되돌립니다.`)
+                + '\n다른 층에 정해 둔 범위는 덮어씁니다.';
+            const ok = await window.appConfirm(msg, { title: '출력 범위 전체 층 적용', okText: '적용' });
+            if (!ok) return;
+            const stored = applyPrintCropToFloors(bId, codes, norm, imgW, imgH, isNdt);
+            if (typeof saveStateToLocalStorage === 'function') saveStateToLocalStorage();
+            if (typeof scheduleSyncToFirebase === 'function') scheduleSyncToFirebase();
+            close();
+            if (isNdt) {
+                updateNdtPrintCropButtons();
+                if (typeof drawNdtCanvas === 'function') drawNdtCanvas();
+            } else if (typeof drawCanvas === 'function') drawCanvas();
+            window.showToast(stored
+                ? `${codes.length}개 층 ${what} 출력 범위를 저장했습니다.`
+                : `${codes.length}개 층 ${what}를 도면 전체로 출력합니다.`, 'success', 3500);
+        });
         overlay.querySelector('[data-role="save"]').addEventListener('click', () => {
             const norm = crop ? api.normalizeCrop(crop, imgW, imgH) : null;
             if (isNdt) setNdtPrintCrop(bId, fc, norm, imgW, imgH);
@@ -55662,7 +55709,7 @@ ${roundMobile ? '' : `<button type="button" class="icon-btn icon-btn-trash" titl
         }
     }
 
-// @@app-part 13-report-export.js sha=cf16ea241250 — 원본은 app/13-report-export.js (여기 말고 거기서 고칠 것)
+// @@app-part 13-report-export.js sha=8bc602ab874a — 원본은 app/13-report-export.js (여기 말고 거기서 고칠 것)
     // --- REPORT PREVIEW MODAL (Instant Modal Open & Pure White Paper Theme) ---
     window.openReportPreviewModalFunc = async function(opts) {
         const manageLoading = !(opts && opts.skipLoading);
@@ -58473,6 +58520,35 @@ ${roundMobile ? '' : `<button type="button" class="icon-btn icon-btn-trash" titl
                 _hwpxRenderBldgOverride = curDongPart ? curDongPart.bldg : null;
                 dongOpts.setCurrent(curDongPart);
             };
+            let surveyDongTitleNo = 0;   // 2026-11-24 여러 동: 상태조사표 동 머리 제목 번호(1) 본관동 상태조사표, 2) …)
+            // 2026-11-24 동(건물)마다 마지막 상태조사표 밑 층 번호 범례. 범례 한 줄 자리만큼 그 쪽 표를 줄인다.
+            const FLOOR_LEGEND_RESERVE_H = 1600;
+            const isDongLastSurveySlot = (i) => i === floorsData.length - 1
+                || (floorsData[i + 1] && floorsData[i + 1].dongPart) !== (floorsData[i] && floorsData[i].dongPart);
+            /** 이 동의 층을 표 순서대로 「B1-지하1층 / 1-지상1층 / … / O-외부」(같은 접두사는 한 번) */
+            const buildDongFloorLegendText = (i) => {
+                const dong = floorsData[i] && floorsData[i].dongPart;
+                const seen = new Set();
+                const items = [];
+                floorsData.forEach((e) => {
+                    if (!e || e.dongPart !== dong) return;
+                    let prefix = '';
+                    let label = '';
+                    if (e.exteriorCombined) {
+                        prefix = 'O';
+                        label = '외부';
+                    } else {
+                        try { prefix = typeof getGrade3FloorPrefix === 'function' ? getGrade3FloorPrefix(e.floorCode) : ''; } catch (_e) { prefix = ''; }
+                        label = String((dong ? dong.rawLabel(e.floorCode) : getFloorLabel(e.floorCode)) || e.floorCode)
+                            .replace(/\s*\([^)]*\)\s*$/, '').trim();
+                        if (prefix === 'O') label = '외부';
+                    }
+                    if (!prefix || seen.has(prefix)) return;
+                    seen.add(prefix);
+                    items.push(`${prefix}-${label}`);
+                });
+                return items.length ? `※ 범례 : ${items.join(' / ')}` : '';
+            };
             // 표 안 칸(3종 구분 「층」 등)은 동 이름 없이 — 표 위 「N) A동 지하1층」 머리글에만 동
             const rowFloorLabel = (fc) => (curDongPart ? curDongPart.rawLabel(fc) : getFloorLabel(fc));
             const dongTitlePrefix = () => (curDongPart ? `${curDongPart.dongLabel} ` : '');
@@ -59534,6 +59610,7 @@ ${roundMobile ? '' : `<button type="button" class="icon-btn icon-btn-trash" titl
                     window.updateLoadingText(`한글(hwpx) 상태조사표 생성 중... (${slotIdx + 1}/${floorsData.length} 층)`);
                 }
                 if (typeof yieldToUi === 'function') await yieldToUi();
+                if (slotIdx === 0) surveyDongTitleNo = 0;
 
                 // 표 바로 위에는 원본 표본 문서의 "1) 지하1층" 같은 고정 텍스트 문단이 그대로
                 // 남아있었다. 실제 층 이름으로 바꾸되, 표본 문서와 같은 "N) 층명" 형식을 유지하도록
@@ -59543,7 +59620,19 @@ ${roundMobile ? '' : `<button type="button" class="icon-btn icon-btn-trash" titl
                     if (t) {
                         const extCombined = !!(floorsData[slotIdx] && floorsData[slotIdx].exteriorCombined);
                         const titleFloor = extCombined ? `${dongTitlePrefix()}건축물 외부` : getFloorLabel(floorCode);
-                        t.textContent = `${slotIdx + 1}) ${titleFloor} 상태조사표 `; // 제목 글자와 표 사이 스페이스 1
+                        if (dongParts && dongParts.length > 1) {
+                            // 2026-11-24 여러 동: 동 첫 층에만 「N) 동 상태조사표」(N = 동 순서), 나머지 층은 제목 글자 없이
+                            // (제목 줄은 남겨 표 위치·쪽 나눔은 그대로)
+                            const prevDong = slotIdx > 0 ? floorsData[slotIdx - 1].dongPart : undefined;
+                            if (curDongPart && curDongPart !== prevDong) {
+                                surveyDongTitleNo++;
+                                t.textContent = `${surveyDongTitleNo}) ${curDongPart.dongLabel} 상태조사표 `;
+                            } else {
+                                t.textContent = '';
+                            }
+                        } else {
+                            t.textContent = `${slotIdx + 1}) ${titleFloor} 상태조사표 `; // 제목 글자와 표 사이 스페이스 1
+                        }
                         normalizeHwpxTitleParaFont(slot.titlePara, t, await hwpxCharPrHeightsFromZip(zip));
                     }
                     if (slotIdx === 0) {
@@ -59669,13 +59758,14 @@ ${roundMobile ? '' : `<button type="button" class="icon-btn icon-btn-trash" titl
                     }) : 0;
                 })();
                 /** 한 쪽(표 하나)의 데이터 행 높이를 정해 넣는다 */
-                const fitSurveyPageRows = (destTbl, pageRows) => {
+                const fitSurveyPageRows = (destTbl, pageRows, extraReserveH) => {
                     const outM = Array.from(destTbl.children).find((c) => c.localName === 'outMargin');
                     const tableMarginV = outM ? (parseInt(outM.getAttribute('top'), 10) || 0) + (parseInt(outM.getAttribute('bottom'), 10) || 0) : 280;
                     const headerH = surveyHeaderHeight(destTbl);
                     const plan = rowFitApi.planRows({
                         bodyH: surveyPageBodyH,
-                        reserveH: surveyReserveAbove(destTbl),
+                        // extraReserveH: 표 아래 「※ 범례」 줄 자리(동 마지막 쪽)
+                        reserveH: surveyReserveAbove(destTbl) + (extraReserveH || 0),
                         headerH,
                         tableMarginV,
                         stdReserveH: rowFitApi.STD_RESERVE_H,
@@ -59706,6 +59796,7 @@ ${roundMobile ? '' : `<button type="button" class="icon-btn icon-btn-trash" titl
                 // 본번호가 15·30·45에서 끝나게 한다.
                 const surveyPages = paginateSurveyDefects(pageDefects);
                 const neededPages = Math.max(1, surveyPages.length);
+                const floorLegendText = isDongLastSurveySlot(slotIdx) ? buildDongFloorLegendText(slotIdx) : '';
 
                 let pageTbls = slot.statusTbls.slice();
                 if (pageTbls.length > neededPages) {
@@ -59806,8 +59897,29 @@ ${roundMobile ? '' : `<button type="button" class="icon-btn icon-btn-trash" titl
                         destTbl.appendChild(newRow);
                     });
                     destTbl.setAttribute('rowCnt', String(HEADER_ROW_COUNT + pageItems.length));
-                    if (fitRows.length) fitSurveyPageRows(destTbl, fitRows);
+                    const legendReserve = (floorLegendText && pageIdx === surveyPages.length - 1) ? FLOOR_LEGEND_RESERVE_H : 0;
+                    if (fitRows.length) fitSurveyPageRows(destTbl, fitRows, legendReserve);
                 });
+
+                // 2026-11-24 동(건물) 마지막 표 밑에 「※ 범례 : B1-지하1층 / 1-지상1층 / … / R-옥상층 / O-외부」
+                if (floorLegendText) {
+                    try {
+                        const lastTbl = pageTbls[pageTbls.length - 1];
+                        let lastP = lastTbl;
+                        while (lastP && lastP.localName !== 'p') lastP = lastP.parentNode;
+                        if (lastP && lastP.parentNode) {
+                            const legendP = makeHwpxTextParaFromStamp(slot.titlePara, floorLegendText, HP_NS, false);
+                            // 글자 모양은 표 안 글자와 같게(제목 글자는 커서 한 줄을 넘는다)
+                            const cellRun = Array.from(lastTbl.getElementsByTagNameNS(HP_NS, 'run'))
+                                .find((r) => r.getElementsByTagNameNS(HP_NS, 't').length && r.getAttribute('charPrIDRef'));
+                            const legendRun = Array.from(legendP.children).find((c) => c.localName === 'run');
+                            if (cellRun && legendRun) legendRun.setAttribute('charPrIDRef', cellRun.getAttribute('charPrIDRef'));
+                            lastP.parentNode.insertBefore(legendP, lastP.nextSibling);
+                        }
+                    } catch (legendErr) {
+                        console.warn(`${floorCode} 상태조사표 범례 넣기 실패(나머지는 계속 진행):`, legendErr);
+                    }
+                }
 
                 // ---- 층별 사진첩 제거(전역 앨범으로 이동) ----
                 // 표본 사진 표는 항상 지운다. 빈 사진 문단(pageBreak)이 층 사이에 남지 않도록 문단도 제거.
