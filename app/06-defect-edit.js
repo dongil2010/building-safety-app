@@ -549,7 +549,28 @@
     // 백그라운드 사진 로딩(hydrateDefectPhotos)이 아직 안 끝난 사이에 한글 내보내기를 누르면,
     // IDB·캐시 둘 다 아직 없어서(클라우드 재조회 없이) 사진이 "안 찍은 것처럼" 빠진 채로 나갔다
     // (사용자가 실제로 겪음).
-    const _nonExistentPhotoIds = new Set();
+    /**
+     * 2026-11-24 「서버에 없음」·「이미 받아 봄」 표시는 잠깐만 믿는다(Set처럼 has/add/delete/clear).
+     * 예전엔 앱을 새로 열 때까지 영원히 기억해서, 컴퓨터가 보고서·앨범을 먼저 열고 현장 폰이 나중에 사진을 올리면
+     * 그 사진을 다시 안 받아 보고서에서 빠졌다(새로고침해야 나옴). 다시 보는 건 사진 한 장당 ttl에 한 번이라 읽기는 거의 안 는다.
+     */
+    function createExpiringIdSet(ttlMs) {
+        const at = new Map();
+        return {
+            has(id) {
+                const t = at.get(id);
+                if (t == null) return false;
+                if (Date.now() - t < ttlMs) return true;
+                at.delete(id);
+                return false;
+            },
+            add(id) { at.set(id, Date.now()); return this; },
+            delete(id) { return at.delete(id); },
+            clear() { at.clear(); },
+            get size() { return at.size; }
+        };
+    }
+    const _nonExistentPhotoIds = createExpiringIdSet(60 * 1000);
 
     async function acquirePhotoFetchSlot() {
         if (typeof isFirestoreReadPaused === 'function' && isFirestoreReadPaused()) return false;
@@ -597,10 +618,12 @@
 
     async function loadPhotoByIdWithCloudFallback(pid) {
         if (!pid) return null;
-        if (_nonExistentPhotoIds.has(pid)) return null;
+        // 2026-11-24 캐시를 먼저 본다 — 보고서 직전 「모든 층 최신 받기」가 넣어 준 사진 주소가 있는데도
+        // 예전에 「없음」으로 본 번호라며 빈 칸으로 내보냈다
         if (window._photoCache && window._photoCache[pid]) {
             return window._photoCache[pid];
         }
+        if (_nonExistentPhotoIds.has(pid)) return null;
         const fromIdb = await idbGet('photos', pid);
         if (fromIdb) {
             if (!window._photoCache) window._photoCache = {};

@@ -24180,7 +24180,7 @@ ${roundMobile ? '' : `<button type="button" class="icon-btn icon-btn-trash" titl
         return bestKey;
     }
 
-// @@app-part 06-defect-edit.js sha=9ef9e69a3f1a — 원본은 app/06-defect-edit.js (여기 말고 거기서 고칠 것)
+// @@app-part 06-defect-edit.js sha=181e084e9b1d — 원본은 app/06-defect-edit.js (여기 말고 거기서 고칠 것)
     // --- 결함 회차 일괄 재지정 모달 ---
     // 건물 전체(또는 현재 층)가 잘못된 회차로 통째로 등록됐을 때, 결함들의 surveyRound를
     // 한번에 올바른 값으로 옮기는 관리자용 복구 기능. 결함 내용은 건드리지 않고 회차 값만 바꾼다.
@@ -24731,7 +24731,28 @@ ${roundMobile ? '' : `<button type="button" class="icon-btn icon-btn-trash" titl
     // 백그라운드 사진 로딩(hydrateDefectPhotos)이 아직 안 끝난 사이에 한글 내보내기를 누르면,
     // IDB·캐시 둘 다 아직 없어서(클라우드 재조회 없이) 사진이 "안 찍은 것처럼" 빠진 채로 나갔다
     // (사용자가 실제로 겪음).
-    const _nonExistentPhotoIds = new Set();
+    /**
+     * 2026-11-24 「서버에 없음」·「이미 받아 봄」 표시는 잠깐만 믿는다(Set처럼 has/add/delete/clear).
+     * 예전엔 앱을 새로 열 때까지 영원히 기억해서, 컴퓨터가 보고서·앨범을 먼저 열고 현장 폰이 나중에 사진을 올리면
+     * 그 사진을 다시 안 받아 보고서에서 빠졌다(새로고침해야 나옴). 다시 보는 건 사진 한 장당 ttl에 한 번이라 읽기는 거의 안 는다.
+     */
+    function createExpiringIdSet(ttlMs) {
+        const at = new Map();
+        return {
+            has(id) {
+                const t = at.get(id);
+                if (t == null) return false;
+                if (Date.now() - t < ttlMs) return true;
+                at.delete(id);
+                return false;
+            },
+            add(id) { at.set(id, Date.now()); return this; },
+            delete(id) { return at.delete(id); },
+            clear() { at.clear(); },
+            get size() { return at.size; }
+        };
+    }
+    const _nonExistentPhotoIds = createExpiringIdSet(60 * 1000);
 
     async function acquirePhotoFetchSlot() {
         if (typeof isFirestoreReadPaused === 'function' && isFirestoreReadPaused()) return false;
@@ -24779,10 +24800,12 @@ ${roundMobile ? '' : `<button type="button" class="icon-btn icon-btn-trash" titl
 
     async function loadPhotoByIdWithCloudFallback(pid) {
         if (!pid) return null;
-        if (_nonExistentPhotoIds.has(pid)) return null;
+        // 2026-11-24 캐시를 먼저 본다 — 보고서 직전 「모든 층 최신 받기」가 넣어 준 사진 주소가 있는데도
+        // 예전에 「없음」으로 본 번호라며 빈 칸으로 내보냈다
         if (window._photoCache && window._photoCache[pid]) {
             return window._photoCache[pid];
         }
+        if (_nonExistentPhotoIds.has(pid)) return null;
         const fromIdb = await idbGet('photos', pid);
         if (fromIdb) {
             if (!window._photoCache) window._photoCache = {};
@@ -66147,7 +66170,7 @@ ${roundMobile ? '' : `<button type="button" class="icon-btn icon-btn-trash" titl
         btnDownloadImportTemplate.addEventListener('click', window.downloadImportDefectExcelTemplate);
     }
 
-// @@app-part 15-firebase-sync.js sha=1b891603e023 — 원본은 app/15-firebase-sync.js (여기 말고 거기서 고칠 것)
+// @@app-part 15-firebase-sync.js sha=3e2cbbcd9704 — 원본은 app/15-firebase-sync.js (여기 말고 거기서 고칠 것)
     // ==========================================================================
     // 🌐 FIREBASE REALTIME SYNC ENGINE (구글 파이어베이스 실시간 1초 동기화)
     // ==========================================================================
@@ -66406,7 +66429,8 @@ ${roundMobile ? '' : `<button type="button" class="icon-btn icon-btn-trash" titl
     /** 한 hydrateDefectPhotos 호출당 클라우드 photos.doc.get 상한 (층에 사진 많을 때 폭주 방지) */
     const PHOTO_FETCH_MAX_PER_HYDRATE = 24;
     /** 세션 중 이미 클라우드 get을 시도한 photoId — 층전환/스냅샷마다 재조회 금지 */
-    const _cloudPhotoFetchAttempted = new Set();
+    // 2026-11-24 2분 지나면 다시 시도(예전엔 새로고침 전까지 다시 안 받아, 늦게 올라온 사진이 계속 빈 칸)
+    const _cloudPhotoFetchAttempted = createExpiringIdSet(2 * 60 * 1000);
     /** 읽기 할당량 초과 시 모든 클라우드 사진/재구독 get을 잠시 중단 */
     let _firestoreReadPausedUntil = 0;
 
@@ -71153,7 +71177,12 @@ ${roundMobile ? '' : `<button type="button" class="icon-btn icon-btn-trash" titl
         Object.keys(urlsById).forEach((pid) => {
             if (!pid || window._photoCache[pid]) return;
             const url = urlsById[pid];
-            if (url) window._photoCache[pid] = url;
+            if (url) {
+                window._photoCache[pid] = url;
+                // 2026-11-24 서버 층 묶음에 주소가 있다 = 이제 올라간 사진 — 「없음」 표시를 지워 바로 받게
+                if (typeof _nonExistentPhotoIds !== 'undefined') _nonExistentPhotoIds.delete(pid);
+                _cloudPhotoFetchAttempted.delete(pid);
+            }
         });
     }
 

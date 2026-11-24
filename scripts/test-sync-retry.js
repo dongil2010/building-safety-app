@@ -153,6 +153,24 @@ assert.strictEqual(s.gate.state().fails, 0);
     const on = app.slice(app.indexOf("window.addEventListener('online', () => {\n        updateOfflineBadge();"));
     assert.ok(on.indexOf('bsaClearNetworkBackoff') > 0 && on.indexOf('bsaClearNetworkBackoff') < on.indexOf("runOfflineReturnSync('online')"), '온라인 복귀 때 대기 먼저 풂');
     assert.ok(/bsaKickPendingUploads\('visible'\)/.test(app) && /bsaKickPendingUploads\('timer'\)/.test(app), '앱 복귀·주기적으로 남은 사진 올림');
+    // 2026-11-24 받는 쪽: 「서버에 없음」 표시는 잠깐만 — 늦게 올라온 사진도 다시 받는다
+    const ex = app.slice(app.indexOf('function createExpiringIdSet('));
+    const src = ex.slice(0, ex.indexOf('\n    }\n') + 6);
+    const realNow = Date.now;
+    let fake = 1000;
+    Date.now = () => fake;
+    try {
+        const mk = new Function(src + '\nreturn createExpiringIdSet;')();
+        const s = mk(60000);
+        s.add('p');
+        assert.ok(s.has('p'));
+        fake += 61000;
+        assert.ok(!s.has('p'), '1분 지나면 다시 받음');
+    } finally { Date.now = realNow; }
+    const load = app.slice(app.indexOf('async function loadPhotoByIdWithCloudFallback('), app.indexOf('async function ensureDefectPhotosLoaded('));
+    assert.ok(load.indexOf('window._photoCache[pid]') < load.indexOf('_nonExistentPhotoIds.has(pid)'), '캐시에 주소가 있으면 「없음」 표시보다 먼저');
+    const seed = app.slice(app.indexOf('function seedPhotoCacheFromUrlMap('), app.indexOf('function mergeFloorBundleIntoState('));
+    assert.ok(seed.includes('_nonExistentPhotoIds.delete(pid)'), '서버 층 묶음에 주소가 오면 「없음」 해제');
 }
 
 // 탭 사이 잠금: 하나만 잡힘

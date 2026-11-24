@@ -257,7 +257,8 @@
     /** 한 hydrateDefectPhotos 호출당 클라우드 photos.doc.get 상한 (층에 사진 많을 때 폭주 방지) */
     const PHOTO_FETCH_MAX_PER_HYDRATE = 24;
     /** 세션 중 이미 클라우드 get을 시도한 photoId — 층전환/스냅샷마다 재조회 금지 */
-    const _cloudPhotoFetchAttempted = new Set();
+    // 2026-11-24 2분 지나면 다시 시도(예전엔 새로고침 전까지 다시 안 받아, 늦게 올라온 사진이 계속 빈 칸)
+    const _cloudPhotoFetchAttempted = createExpiringIdSet(2 * 60 * 1000);
     /** 읽기 할당량 초과 시 모든 클라우드 사진/재구독 get을 잠시 중단 */
     let _firestoreReadPausedUntil = 0;
 
@@ -5004,7 +5005,12 @@
         Object.keys(urlsById).forEach((pid) => {
             if (!pid || window._photoCache[pid]) return;
             const url = urlsById[pid];
-            if (url) window._photoCache[pid] = url;
+            if (url) {
+                window._photoCache[pid] = url;
+                // 2026-11-24 서버 층 묶음에 주소가 있다 = 이제 올라간 사진 — 「없음」 표시를 지워 바로 받게
+                if (typeof _nonExistentPhotoIds !== 'undefined') _nonExistentPhotoIds.delete(pid);
+                _cloudPhotoFetchAttempted.delete(pid);
+            }
         });
     }
 
