@@ -66203,7 +66203,7 @@ ${roundMobile ? '' : `<button type="button" class="icon-btn icon-btn-trash" titl
         btnDownloadImportTemplate.addEventListener('click', window.downloadImportDefectExcelTemplate);
     }
 
-// @@app-part 15-firebase-sync.js sha=7a3b7ecdc47c — 원본은 app/15-firebase-sync.js (여기 말고 거기서 고칠 것)
+// @@app-part 15-firebase-sync.js sha=ec39b90fe4ed — 원본은 app/15-firebase-sync.js (여기 말고 거기서 고칠 것)
     // ==========================================================================
     // 🌐 FIREBASE REALTIME SYNC ENGINE (구글 파이어베이스 실시간 1초 동기화)
     // ==========================================================================
@@ -66687,7 +66687,7 @@ ${roundMobile ? '' : `<button type="button" class="icon-btn icon-btn-trash" titl
     window._justRegistering = false;
 
     // 앱 번호. 포팅하면 이 번호가 1 오르고, 같은 번호가 Storage releases/latest.json 에 올라간다.
-    window.BSA_APP_BUILD = { versionCode: 49, versionName: '1.3.41' };
+    window.BSA_APP_BUILD = { versionCode: 50, versionName: '1.3.42' };
 
     function isNativeAndroidApp() {
         try {
