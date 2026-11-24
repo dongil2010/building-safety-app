@@ -958,7 +958,12 @@
                     // 2026-11-24 블록 안 「고정 속성」(70&2)은 블록에 박힌 글자라 캐드에 그대로 보인다(행·열 풍선 번호 등).
                     // 고정이 아닌 속성은 블록을 넣을 때 ATTRIB로 따로 들어오므로 정의는 그리지 않는다.
                     if (depth > 0 && (gi(e, 70, 0) & 2) && !(gi(e, 70, 0) & 1)) doText(e, m, layer, 74);
-                    else stats.skipped.attdef++;
+                    else if (depth === 0 && !(gi(e, 70, 0) & 1) && String(gs(e, 2, '')).trim()) {
+                        // 2026-11-24 모형 공간에 혼자 있는 속성 정의 = 블록을 분해하고 남은 것. 캐드는 「태그」(2)를 글자로 보여 준다
+                        // (영광스포티움 지하1층: 행·열 풍선을 분해해 「A」「3」 태그가 남음 → 예전엔 46개 전부 빠졌다)
+                        var tagPairs = e.pairs.filter(function (p) { return p[0] !== 1; }).concat([[1, gs(e, 2, '')]]);
+                        doText({ type: 'ATTDEF', pairs: tagPairs }, m, layer, 74);
+                    } else stats.skipped.attdef++;
                     break;
                 case 'INSERT':
                     doInsert(e, m, layer, depth);

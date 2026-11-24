@@ -85,10 +85,17 @@ const bubbleBlock = [
     assert(t, '고정 속성 X3');
     near(t.x, 7000); near(t.y, 3000);
     assert(!flat.texts.some((x) => x.text === 'DEF' || x.text === 'TAG'), '고정 아닌 속성 정의는 안 그림');
-    // 모형 공간에 남은 속성 정의(블록 밖)는 그리지 않는다
-    const flat2 = R.flattenDxf(R.parseDxf(build([], [[0, 'ATTDEF'], [8, '0'], [10, 0], [20, 0], [40, 100], [1, 'Z'], [2, 'TAG'], [70, 2]])));
-    assert.strictEqual(flat2.texts.length, 0);
     console.log('고정 속성(ATTDEF): ok');
+    // 모형 공간에 남은 속성 정의(블록을 분해하고 남음) — 캐드처럼 태그를 글자로 (영광스포티움 「A」「3」)
+    const loose = [
+        [0, 'ATTDEF'], [8, '0'], [10, 100], [20, 200], [40, 800], [1, ''], [7, '돋음'], [3, ''], [2, 'A'], [70, 0],
+        [0, 'ATTDEF'], [8, '0'], [10, 900], [20, 200], [40, 800], [1, ''], [3, ''], [2, '3'], [70, 0],
+        [0, 'ATTDEF'], [8, '0'], [10, 0], [20, 0], [40, 800], [1, ''], [2, 'HIDE'], [70, 1]
+    ];
+    const flat2 = R.flattenDxf(R.parseDxf(build([], loose)));
+    assert.deepStrictEqual(flat2.texts.map((x) => x.text), ['A', '3'], '태그를 글자로, 숨김 속성은 안 그림');
+    near(flat2.texts[0].x, 100); near(flat2.texts[0].h, 800);
+    console.log('분해하고 남은 속성 정의(태그): ok');
 }
 
 // 4) 표(ACAD_TABLE) — 익명 블록을 넣는다
