@@ -28773,7 +28773,7 @@ ${roundMobile ? '' : `<button type="button" class="icon-btn icon-btn-trash" titl
         ctx.restore();
     }
 
-// @@app-part 07-defect-component.js sha=46a350af808a — 원본은 app/07-defect-component.js (여기 말고 거기서 고칠 것)
+// @@app-part 07-defect-component.js sha=2f014ae5c688 — 원본은 app/07-defect-component.js (여기 말고 거기서 고칠 것)
     // --- Dynamic Defect Component(부재 명칭) — 분류별 플랫 프리셋 ---
     // 2026-09-28 접합부는 거더/빔 구분이 필요 없음 — 큰보·작은보 → 보, 철골거더·철골빔 → 철골보
     // 2026-11-04 보(G)·보(B) 다시 넣음(사용자) — 통계 평가 표가 접합부 결함을 맞닿은 부재 줄(큰보·작은보·슬래브…)에 같이 세서
@@ -29462,9 +29462,11 @@ ${roundMobile ? '' : `<button type="button" class="icon-btn icon-btn-trash" titl
         const api = memoApi();
         const floorKey = currentMemoFloorKey();
         if (!api || !floorKey || !state.bgImage) return null;
-        const text = await promptDrawingMemoText();
+        const picked = await promptDrawingMemoText();
+        const text = picked && picked.text;
         if (text == null || !api.cleanText(text)) return null;
-        const memo = api.createMemo({ x: imgX, y: imgY, text, by: memoAuthorName(), byUid: (sketchMe().uid || '') });
+        rememberDrawingMemoColor(picked.color);
+        const memo = api.createMemo({ x: imgX, y: imgY, text, color: picked.color, by: memoAuthorName(), byUid: (sketchMe().uid || '') });
         if (!memo) return null;
         api.addMemo(window.state, floorKey, memo);
         if (!readMemoShowPref()) setMemoShow(true);
@@ -29497,6 +29499,69 @@ ${roundMobile ? '' : `<button type="button" class="icon-btn icon-btn-trash" titl
         return () => { vv.removeEventListener('resize', fit); vv.removeEventListener('scroll', fit); };
     }
 
+    /**
+     * 2026-11-24 「주석 글자도 주석별로 따로 설정 — 색상」: 주석 창에 글자 색 줄.
+     * 「기본」 = 스타일 설정 「도면 주석 글자」 색(전체). 새 주석은 마지막에 고른 색으로 시작.
+     */
+    const DRAWING_MEMO_COLOR_PRESETS = [
+        ['#000000', '검정'], ['#dc2626', '빨강'], ['#2563eb', '파랑'],
+        ['#16a34a', '초록'], ['#ea580c', '주황'], ['#7c3aed', '보라']
+    ];
+    const DRAWING_MEMO_LAST_COLOR_KEY = 'bsa_drawing_memo_last_color_v1';
+    function normDrawingMemoColor(c) {
+        const api = memoApi();
+        if (api && typeof api.normColor === 'function') return api.normColor(c);
+        const t = String(c == null ? '' : c).trim().toLowerCase();
+        return /^#[0-9a-f]{6}$/.test(t) ? t : '';
+    }
+    function readLastDrawingMemoColor() {
+        try { return normDrawingMemoColor(localStorage.getItem(DRAWING_MEMO_LAST_COLOR_KEY)); } catch (_e) { return ''; }
+    }
+    function rememberDrawingMemoColor(c) {
+        try { localStorage.setItem(DRAWING_MEMO_LAST_COLOR_KEY, normDrawingMemoColor(c)); } catch (_e) { /* 기기 저장 실패해도 주석은 저장 */ }
+    }
+    function drawingMemoColorRowHtml() {
+        const sw = (c, label) => `<button type="button" data-mc="${c}" title="${label}" aria-label="글자 색 ${label}" style="width:30px;height:30px;border-radius:50%;border:2px solid #fff;box-shadow:0 0 0 1px #cbd5e1;background:${c};cursor:pointer;padding:0;flex:none;"></button>`;
+        return `<div data-mc-row style="display:flex;align-items:center;gap:6px;flex-wrap:wrap;margin-top:10px;">
+                <span style="font-size:0.85rem;color:#374151;margin-right:2px;">글자 색</span>
+                <button type="button" data-mc="" title="스타일 설정의 「도면 주석 글자」 색" style="height:30px;border-radius:15px;border:1px solid #cbd5e1;background:#fff;color:#374151;padding:0 10px;cursor:pointer;font-size:0.8rem;flex:none;">기본</button>
+                ${DRAWING_MEMO_COLOR_PRESETS.map(([c, l]) => sw(c, l)).join('')}
+                <label title="다른 색 고르기" style="display:inline-flex;align-items:center;gap:4px;font-size:0.8rem;color:#374151;cursor:pointer;">
+                    <input type="color" data-mc-custom value="#000000" style="width:34px;height:30px;padding:0;border:1px solid #cbd5e1;border-radius:6px;background:#fff;cursor:pointer;"> 다른 색</label>
+            </div>`;
+    }
+    /** 색 줄을 묶고 지금 고른 색을 돌려주는 함수를 준다(빈 값 = 기본) */
+    function bindDrawingMemoColorRow(root, initial, onChange) {
+        let cur = normDrawingMemoColor(initial);
+        const row = root.querySelector('[data-mc-row]');
+        const custom = row && row.querySelector('[data-mc-custom]');
+        const paint = () => {
+            if (!row) return;
+            row.querySelectorAll('[data-mc]').forEach((b) => {
+                const on = normDrawingMemoColor(b.dataset.mc) === cur;
+                b.setAttribute('aria-pressed', on ? 'true' : 'false');
+                b.style.boxShadow = on ? '0 0 0 3px #2563eb' : '0 0 0 1px #cbd5e1';
+            });
+            const isPreset = !cur || DRAWING_MEMO_COLOR_PRESETS.some(([c]) => c === cur);
+            if (custom) {
+                if (cur) custom.value = cur;
+                custom.style.boxShadow = isPreset ? 'none' : '0 0 0 3px #2563eb';
+            }
+            if (typeof onChange === 'function') onChange(cur);
+        };
+        if (row) {
+            row.addEventListener('click', (e) => {
+                const b = e.target.closest && e.target.closest('[data-mc]');
+                if (!b) return;
+                cur = normDrawingMemoColor(b.dataset.mc);
+                paint();
+            });
+            if (custom) custom.addEventListener('input', () => { cur = normDrawingMemoColor(custom.value); paint(); });
+        }
+        paint();
+        return () => cur;
+    }
+
     function promptDrawingMemoText(initial) {
         return new Promise((resolve) => {
             const old = document.getElementById('drawingMemoNewOverlay');
@@ -29514,6 +29579,7 @@ ${roundMobile ? '' : `<button type="button" class="icon-btn icon-btn-trash" titl
                     <div style="padding:12px 14px;flex:1;overflow:auto;">
                         <div style="font-size:0.85rem;color:#6b7280;margin-bottom:6px;">도면에 남길 주석을 적어 주세요. 줄을 바꾸면 도면에도 여러 줄로 보입니다. (결함이 아니며 조사표·번호에 들어가지 않습니다)</div>
                         <textarea data-mn-text rows="5" maxlength="300" placeholder="예) 천장 점검구 열림&#10;다음에 다시 확인" style="width:100%;box-sizing:border-box;font-size:1.2rem;line-height:1.5;padding:10px;border:1px solid #cbd5e1;border-radius:10px;resize:vertical;min-height:7em;font-family:inherit;"></textarea>
+                        ${drawingMemoColorRowHtml()}
                     </div>
                     <div class="dm-foot" style="display:flex;gap:8px;justify-content:flex-end;padding:10px 14px;border-top:1px solid #e5e7eb;">
                         <button type="button" class="btn btn-outline btn-sm" data-mn="cancel">취소</button>
@@ -29523,6 +29589,7 @@ ${roundMobile ? '' : `<button type="button" class="icon-btn icon-btn-trash" titl
             document.body.appendChild(ov);
             const ta = ov.querySelector('[data-mn-text]');
             ta.value = initial ? String(initial) : '';
+            const getColor = bindDrawingMemoColorRow(ov, readLastDrawingMemoColor(), (c) => { ta.style.color = c || getDrawingMemoTextColor(); });
             const unbindVv = bindMemoDialogToVisualViewport(ov);
             let done = false;
             const finish = (v) => {
@@ -29531,7 +29598,8 @@ ${roundMobile ? '' : `<button type="button" class="icon-btn icon-btn-trash" titl
                 unbindVv();
                 document.removeEventListener('keydown', onKey, true);
                 ov.remove();
-                resolve(v);
+                // 2026-11-24 글자 색도 함께 돌려준다 { text, color } (취소면 null)
+                resolve(v == null ? null : { text: v, color: getColor() });
             };
             const onKey = (e) => {
                 if (e.key === 'Escape') { e.preventDefault(); e.stopPropagation(); finish(null); }
@@ -29579,6 +29647,7 @@ ${roundMobile ? '' : `<button type="button" class="icon-btn icon-btn-trash" titl
                 <div style="padding:12px 14px;flex:1;overflow:auto;">
                     <textarea data-mv-text maxlength="${api.MAX_TEXT || 300}" rows="6"
                         style="width:100%;box-sizing:border-box;font-size:1.2rem;line-height:1.5;padding:10px;border:1px solid #cbd5e1;border-radius:10px;resize:vertical;min-height:9em;font-family:inherit;">${esc(memo.text)}</textarea>
+                    ${drawingMemoColorRowHtml()}
                     <div style="color:#6b7280;font-size:0.78rem;margin-top:4px;">고친 뒤 「저장」 · 다른 기기에도 반영됩니다</div>
                 </div>
                 <div class="dm-foot" style="display:flex;gap:8px;padding:10px 14px;border-top:1px solid #e5e7eb;">
@@ -29589,6 +29658,7 @@ ${roundMobile ? '' : `<button type="button" class="icon-btn icon-btn-trash" titl
             </div>`;
         document.body.appendChild(ov);
         const ta = ov.querySelector('[data-mv-text]');
+        const getColor = bindDrawingMemoColorRow(ov, memo.color, (c) => { ta.style.color = c || getDrawingMemoTextColor(); });
         const unbindVv = bindMemoDialogToVisualViewport(ov);
         return new Promise((resolve) => {
             let done = false;
@@ -29606,7 +29676,9 @@ ${roundMobile ? '' : `<button type="button" class="icon-btn icon-btn-trash" titl
                     window.showToast?.('빈 주석은 저장하지 않습니다. 지우려면 「지우기」를 누르세요.', 'info', 2500);
                     return;
                 }
-                if (api.updateMemo(window.state, floorKey, memoId, { text })) {
+                const color = getColor();
+                if (api.updateMemo(window.state, floorKey, memoId, { text, color })) {
+                    if (color) rememberDrawingMemoColor(color);
                     commitMemoChange(floorKey);
                     window.showToast?.('주석을 저장했습니다', 'success', 1500);
                 }
@@ -29769,8 +29841,10 @@ ${roundMobile ? '' : `<button type="button" class="icon-btn icon-btn-trash" titl
         const sz = getStyleSize('defectStructural');
         return getPinBoxFontSize((sz && sz.pin) || 1);
     }
-    function getDrawingMemoTextColor() {
-        return getStyleColor('drawingMemo') || '#000000';
+    /** memo를 주면 그 주석 색(2026-11-24 주석별), 없으면 스타일 설정 「도면 주석 글자」 색 */
+    function getDrawingMemoTextColor(memo) {
+        const own = memo ? normDrawingMemoColor(memo.color) : '';
+        return own || getStyleColor('drawingMemo') || '#000000';
     }
     function drawingMemoOutlineWidth(fontPx) {
         return Math.max(1.1, Math.min(2.8, fontPx * 0.2));   // drawOutlinedPinText와 같은 식
@@ -29820,7 +29894,7 @@ ${roundMobile ? '' : `<button type="button" class="icon-btn icon-btn-trash" titl
                 el.setAttribute('aria-label', `도면 주석: ${m.text}`);
             }
             el.style.fontSize = `${memoFontPx.toFixed(2)}px`;
-            el.style.color = memoColor;
+            el.style.color = getDrawingMemoTextColor(m) || memoColor;
             el.style.textShadow = memoShadow;
             keep.add(m.id);
             if (memoChipDrag && memoChipDrag.id === m.id && !memoChipDrag.multi) return;   // 끄는 중엔 손가락을 따라감
@@ -29847,13 +29921,12 @@ ${roundMobile ? '' : `<button type="button" class="icon-btn icon-btn-trash" titl
         if (!list.length) return 0;
         // 마킹 번호 글자와 같은 크기·글꼴·흰 외곽선, 배경 없음. 색은 스타일 설정 「도면 메모 글자」
         const fs = getDrawingMemoFontSizeImg();
-        const color = getDrawingMemoTextColor();
         ctx.save();
         // 2026-10-16 자르지 않고 전체, 줄바꿈은 여러 줄(줄 간격 = 글자 크기 × 1.15, 화면 CSS line-height와 같음)
         list.forEach((m) => {
             String(m.text == null ? '' : m.text).replace(/\r\n?/g, '\n').split('\n').forEach((line, i) => {
                 if (!line) return;
-                drawOutlinedPinText(ctx, line, m.x, m.y + i * fs * 1.15, color, `bold ${fs}px ${DRAWING_MEMO_FONT_FAMILY}`, '#ffffff',
+                drawOutlinedPinText(ctx, line, m.x, m.y + i * fs * 1.15, getDrawingMemoTextColor(m), `bold ${fs}px ${DRAWING_MEMO_FONT_FAMILY}`, '#ffffff',
                     { textAlign: 'left', textBaseline: 'top' });
             });
         });
@@ -36720,7 +36793,7 @@ ${roundMobile ? '' : `<button type="button" class="icon-btn icon-btn-trash" titl
         }
     }
 
-// @@app-part 09-settings-input-camera.js sha=c851b3099224 — 원본은 app/09-settings-input-camera.js (여기 말고 거기서 고칠 것)
+// @@app-part 09-settings-input-camera.js sha=0c49acd8ebac — 원본은 app/09-settings-input-camera.js (여기 말고 거기서 고칠 것)
     // --- 카테고리별 핀/박스 색상 설정 모달 ---
     // 결함 색상은 getDefectColor()가 쓰는 등급·상태 키와 맞춰야 도면에 바로 반영됨
     const STYLE_COLOR_FIELDS = [
@@ -39355,6 +39428,18 @@ ${roundMobile ? '' : `<button type="button" class="icon-btn icon-btn-trash" titl
                 syncLiveMarkBoxAboveTarget(markTargetImgX, markTargetImgY);
             }
             markingHasMoved = false;
+            // 2026-11-24 첫 마킹: 박스가 다른 마킹과 겹치면 가까운 빈 자리로(화살표 끝은 찍은 그대로). 마킹 추가(묶음)는 공유 박스라 그대로
+            if (!getActiveMarkingGroup()?.groupId && typeof placeNewMarkingBoxAvoidingOverlap === 'function') {
+                const liveMeta = getLiveMarkPinPreviewMeta();
+                if (!liveMeta.fromGroup) {
+                    const placed = placeNewMarkingBoxAvoidingOverlap(liveBoxImgX, liveBoxImgY,
+                        [{ x: markTargetImgX, y: markTargetImgY }], liveMeta.label, liveMeta.scale);
+                    if (placed) {
+                        liveBoxImgX = placed.x;
+                        liveBoxImgY = placed.y;
+                    }
+                }
+            }
             if (window._pendingMapRegisterDefectId) {
                 commitMapRegisterFromMarking(liveBoxImgX, liveBoxImgY, markTargetImgX, markTargetImgY);
                 setDrawMode('PAN');
@@ -40951,8 +41036,13 @@ ${roundMobile ? '' : `<button type="button" class="icon-btn icon-btn-trash" titl
                     areaPoints: areaRect.areaPoints || null
                 };
                 const useGroupBox = !!(tmpl && tmpl.groupId && Number.isFinite(tmpl.boxX) && Number.isFinite(tmpl.boxY));
-                const boxXUse = useGroupBox ? tmpl.boxX : boxPos.boxX;
-                const boxYUse = useGroupBox ? tmpl.boxY : boxPos.boxY;
+                // 2026-11-24 첫 영역 마킹: 박스가 다른 마킹과 겹치면 가까운 빈 자리로(영역은 그린 그대로)
+                const areaPlaced = (!useGroupBox && typeof placeNewMarkingBoxAvoidingOverlap === 'function')
+                    ? placeNewMarkingBoxAvoidingOverlap(boxPos.boxX, boxPos.boxY,
+                        [{ rect: { x1: ax1, y1: ay1, x2: ax2, y2: ay2 } }], areaLabel, areaScale)
+                    : null;
+                const boxXUse = useGroupBox ? tmpl.boxX : (areaPlaced ? areaPlaced.x : boxPos.boxX);
+                const boxYUse = useGroupBox ? tmpl.boxY : (areaPlaced ? areaPlaced.y : boxPos.boxY);
                 const attach = getAreaCenterBorderAttachDefect(boxXUse, boxYUse, {
                     areaX1: ax1, areaY1: ay1, areaX2: ax2, areaY2: ay2,
                     areaShape: window._pendingAreaRect.areaShape,
@@ -43589,7 +43679,7 @@ ${roundMobile ? '' : `<button type="button" class="icon-btn icon-btn-trash" titl
         });
     }
 
-// @@app-part 10-marking.js sha=8b448514048c — 원본은 app/10-marking.js (여기 말고 거기서 고칠 것)
+// @@app-part 10-marking.js sha=acd3d45b1596 — 원본은 app/10-marking.js (여기 말고 거기서 고칠 것)
     // --- 9. BUTTON CONTROLS & LISTENERS ---
 
     // Main Navigation Tabs Click Listener
@@ -45982,6 +46072,38 @@ ${roundMobile ? '' : `<button type="button" class="icon-btn icon-btn-trash" titl
         const res = movableCount ? L.layoutBoxes(items, opts) : { moves: {}, before: 0, after: 0 };
         return Object.assign({ membersById, movableCount, manualSkipped, total: items.length }, res);
     }
+
+    /**
+     * 2026-11-24 새 마킹을 처음 찍을 때: NO. 박스가 이 층 다른 마킹(박스·점·지시선)과 겹치면
+     * 가까운 겹치지 않는 자리로 박스만 옮긴다. 마킹 점(화살표 끝)·영역은 찍은 그대로.
+     * targets: [{x,y}] 또는 [{rect}]. 옮길 필요 없거나 못 찾으면 null.
+     */
+    function placeNewMarkingBoxAvoidingOverlap(boxX, boxY, targets, label, scale) {
+        const L = boxAutoLayoutLib();
+        if (!L || typeof L.placeNewBox !== 'function' || !state.ctx) return null;
+        if (!Number.isFinite(Number(boxX)) || !Number.isFinite(Number(boxY))) return null;
+        try {
+            const defects = filterMapPlacedDefects(getCurrentFloorDefects());
+            if (!defects.length) return null;
+            const { items } = buildBoxAutoLayoutItems(defects, 'all');
+            if (!items.length) return null;
+            const dims = getFloorPlanDisplayDims();
+            const box = measurePinBoxDimensions(state.ctx, label || 'NO.01', scale || 1, 1.0);
+            const item = {
+                id: '__new_marking__',
+                cx: Number(boxX),
+                cy: Number(boxY),
+                ext: L.boxExtent(box.w, box.h, state.rotationAngle || 0, null),
+                targets: targets || []
+            };
+            const r = L.placeNewBox(items, item, { bounds: { w: dims.w, h: dims.h }, obstacles: boxAutoLayoutObstacles() });
+            return (r && r.moved) ? r : null;
+        } catch (err) {
+            console.warn('[new-marking-place]', err);
+            return null;
+        }
+    }
+    window.placeNewMarkingBoxAvoidingOverlap = placeNewMarkingBoxAvoidingOverlap;
 
     function applyMarkingBoxAutoLayout(plan, mode) {
         const ids = Object.keys((plan && plan.moves) || {});

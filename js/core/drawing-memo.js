@@ -15,6 +15,16 @@
         return String(s == null ? '' : s).replace(/\r\n?/g, '\n').trim().slice(0, MAX_TEXT);
     }
 
+    /**
+     * 2026-11-24 「주석 글자도 주석별로 따로 설정 — 색상」: 주석마다 글자 색(#rrggbb).
+     * 빈 값 = 스타일 설정 「도면 주석 글자」 색(전체 기본)을 따른다. 잘못된 값도 빈 값으로.
+     */
+    function normColor(c) {
+        var t = String(c == null ? '' : c).trim().toLowerCase();
+        if (/^#[0-9a-f]{3}$/.test(t)) t = '#' + t[1] + t[1] + t[2] + t[2] + t[3] + t[3];
+        return /^#[0-9a-f]{6}$/.test(t) ? t : '';
+    }
+
     function newMemoId(now) {
         return 'memo_' + (Number(now) || Date.now()) + '_' + Math.random().toString(36).slice(2, 8);
     }
@@ -24,7 +34,7 @@
         var now = Number(o.now) || Date.now();
         var text = cleanText(o.text);
         if (!text) return null;
-        return {
+        var memo = {
             id: o.id || newMemoId(now),
             x: Math.round(Number(o.x) || 0),
             y: Math.round(Number(o.y) || 0),
@@ -34,6 +44,9 @@
             createdAt: now,
             updatedAt: now
         };
+        var color = normColor(o.color);
+        if (color) memo.color = color;
+        return memo;
     }
 
     function ensureMaps(st) {
@@ -56,7 +69,7 @@
         return memo;
     }
 
-    /** patch: { text?, x?, y? } — 바뀐 게 있으면 updatedAt을 올리고 메모를 돌려준다 */
+    /** patch: { text?, x?, y?, color? (빈 값 = 기본 색으로 되돌림) } — 바뀐 게 있으면 updatedAt을 올리고 메모를 돌려준다 */
     function updateMemo(st, floorKey, id, patch, now) {
         var list = (st && st.drawingMemos && st.drawingMemos[floorKey]) || [];
         var m = list.find(function (r) { return r && r.id === id; });
@@ -65,6 +78,13 @@
         if (patch.text != null) {
             var t = cleanText(patch.text);
             if (t && t !== m.text) { m.text = t; changed = true; }
+        }
+        if (patch.color !== undefined) {
+            var c = normColor(patch.color);
+            if (c !== normColor(m.color)) {
+                if (c) m.color = c; else delete m.color;
+                changed = true;
+            }
         }
         ['x', 'y'].forEach(function (k) {
             if (patch[k] == null) return;
@@ -98,6 +118,7 @@
             items: listFor(st, floorKey).map(function (m) {
                 var o = { id: m.id, x: m.x, y: m.y, text: m.text, by: m.by || '', createdAt: m.createdAt || 0, updatedAt: m.updatedAt || 0 };
                 if (m.byUid) o.byUid = m.byUid;   // 2026-10-23 계정별 저장
+                if (normColor(m.color)) o.color = normColor(m.color);   // 2026-11-24 주석별 글자 색
                 return o;
             }),
             deletedIds: ((st && st.deletedMemoIds) || {})[floorKey] || [],
@@ -151,6 +172,7 @@
     var api = {
         MAX_TEXT: MAX_TEXT,
         cleanText: cleanText,
+        normColor: normColor,
         createMemo: createMemo,
         ensureMaps: ensureMaps,
         listFor: listFor,
