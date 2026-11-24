@@ -1532,15 +1532,20 @@
                 currentDefects = drawingAlignPreviewList(currentDefects);
             }
             _mapHighlightUnfilled = true;
-            _mapUnfilledGroupIds = new Set();
+            // 묶음(화살표 추가·결함 통합)은 묶음 전체로 판정 — 화살표만 늘린 위치는 칸이 비어 있어도 첫 마킹 것을 쓴다
+            _mapGroupFill = new Map();
             currentDefects.forEach((d) => {
-                if (d && d.groupId && !d.surveyExtra && isDefectUnfilled(d)) _mapUnfilledGroupIds.add(d.groupId);
+                if (!d || !d.groupId) return;
+                const g = _mapGroupFill.get(d.groupId) || { comp: false, type: false };
+                if (String(d.component || '').trim()) g.comp = true;
+                if (String(d.defectType || '').trim()) g.type = true;
+                _mapGroupFill.set(d.groupId, g);
             });
             try {
                 renderDefectsGrouped(ctx, currentDefects, drawPin);
             } finally {
                 _mapHighlightUnfilled = false;
-                _mapUnfilledGroupIds = null;
+                _mapGroupFill = null;
             }
             drawMemberGbNeededMarkers(ctx, currentDefects);
 
@@ -2685,10 +2690,11 @@
     // 보고서·한글·PDF·DXF 출력은 paintMapCanvas 밖에서 그리므로 원래 색 그대로.
     const UNFILLED_PIN_COLOR = '#c026d3';
     let _mapHighlightUnfilled = false;
-    let _mapUnfilledGroupIds = null; // 묶음 마킹: 묶음 안에 하나라도 비면 대표 핀도 보라색
+    let _mapGroupFill = null; // 묶음 마킹: groupId → { comp, type } (묶음 안 누구라도 채웠으면 true)
     function isDefectUnfilled(defect) {
         if (!defect) return false;
-        if (defect.groupId && _mapUnfilledGroupIds && _mapUnfilledGroupIds.has(defect.groupId)) return true;
+        const g = (defect.groupId && _mapGroupFill) ? _mapGroupFill.get(defect.groupId) : null;
+        if (g) return !(g.comp && g.type);
         // 부재명·결함내용 중 하나라도 비면 미입력
         const noComponent = !String(defect.component || '').trim();
         const noType = !String(defect.defectType || '').trim();
