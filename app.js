@@ -32075,7 +32075,7 @@ ${roundMobile ? '' : `<button type="button" class="icon-btn icon-btn-trash" titl
         refreshDefectQuickPickBar();
     }
 
-// @@app-part 08-defect-presets.js sha=931db81f7c11 — 원본은 app/08-defect-presets.js (여기 말고 거기서 고칠 것)
+// @@app-part 08-defect-presets.js sha=6df431e5433a — 원본은 app/08-defect-presets.js (여기 말고 거기서 고칠 것)
     // --- Dynamic Defect Type Presets & Custom Adding ---
     const STEEL_MEMBER_DEFECTS = [
         '상태양호',
@@ -33667,8 +33667,8 @@ ${roundMobile ? '' : `<button type="button" class="icon-btn icon-btn-trash" titl
         const list = document.getElementById('surveySizeMeasureList');
         document.getElementById('btnSurveySizeAdd')?.addEventListener('click', () => {
             const rows = readCrackMeasureRowsFromDom(list);
-            // 새 행은 바로 윗행의 x · / 를 따른다(2026-11-24)
-            rows.push({ width: '', length: '', count: '', join: rows.length ? rows[rows.length - 1].join : '/' });
+            // 새 행은 늘 / 로 시작(윗행이 x여도). 기존 x 행은 그대로 x(2026-11-24)
+            rows.push({ width: '', length: '', count: '', join: '/' });
             renderCrackMeasureRows(rows, { list, onChange: surveySizePreviewUpdate });
             surveySizePreviewUpdate();
             const last = list.querySelector('.defect-crack-measure-row:last-child [data-crack-w]');
@@ -33715,8 +33715,8 @@ ${roundMobile ? '' : `<button type="button" class="icon-btn icon-btn-trash" titl
             addBtn.addEventListener('click', () => {
                 if (isDefectBulkEditMode()) markDefectBulkFieldChanged('crackMeasures');
                 const rows = readCrackMeasureRowsFromDom();
-                // 새 행은 바로 윗행의 x · / 를 따른다(2026-11-24)
-                rows.push({ width: '', length: '', count: '', join: rows.length ? rows[rows.length - 1].join : '/' });
+                // 새 행은 늘 / 로 시작(윗행이 x여도). 기존 x 행은 그대로 x(2026-11-24)
+                rows.push({ width: '', length: '', count: '', join: '/' });
                 renderCrackMeasureRows(rows);
                 if (typeof scheduleDefectAutoApply === 'function') scheduleDefectAutoApply();
             });
