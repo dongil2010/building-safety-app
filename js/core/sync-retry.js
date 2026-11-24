@@ -20,12 +20,22 @@
         'storage/cannot-slice-blob', 'storage/server-file-wrong-size', 'storage/invalid-url', 'storage/no-default-bucket',
         'missing-local-blob', 'oversized'
     ];
-    var QUOTA_CODES = ['resource-exhausted', 'storage/quota-exceeded', 'storage/retry-limit-exceeded'];
+    var QUOTA_CODES = ['resource-exhausted', 'storage/quota-exceeded'];
     // 2026-11-07 신호가 약해 응답이 없어 끊은 것 — 사진·데이터 문제가 아니므로 「멈춤」까지의 실패 횟수에 세지 않는다
-    var NETWORK_STALL_CODES = ['upload-stalled', 'write-timeout'];
+    // 2026-11-24 storage/retry-limit-exceeded(Storage SDK가 통신이 안 돼 재시도를 포기한 것)·unavailable·deadline-exceeded도
+    //   신호 문제다. 예전엔 retry-limit-exceeded를 「한도」로 세어, 현장에서 신호가 약하면 사진이 5번 만에 멈추고
+    //   인터넷이 돌아와도 자동으로 안 올라갔다(찍은 기기에서 앱을 다시 열거나 「지금 다시 올리기」를 눌러야 올라감).
+    var NETWORK_STALL_CODES = ['upload-stalled', 'write-timeout', 'storage/retry-limit-exceeded'];
+    // 통신 오류로 보는 것(실패로는 센다) — 인터넷이 다시 연결되면 clearNetworkBackoff가 대기·멈춤을 푼다
+    var NETWORK_CODES = NETWORK_STALL_CODES.concat(['unavailable', 'deadline-exceeded']);
 
     function codeOf(err) { return String((err && err.code) || '').toLowerCase(); }
     function msgOf(err) { return String((err && err.message) || (typeof err === 'string' ? err : '') || ''); }
+    function isNetworkError(err) {
+        if (!err) return false;
+        if (NETWORK_CODES.indexOf(codeOf(err)) >= 0) return true;
+        return /Failed to fetch|NetworkError|network error|ERR_INTERNET_DISCONNECTED|ERR_NETWORK_CHANGED|client is offline/i.test(msgOf(err));
+    }
 
     function classify(err) {
         if (!err) return 'transient';
@@ -81,6 +91,8 @@
                 mem.kind = kind;
                 mem.reason = String(reason || msgOf(err) || kind).slice(0, 200);
                 mem.at = now();
+                // 2026-11-24 신호 문제로 멈춘 것은 인터넷이 다시 연결되면(clearNetworkBackoff) 저절로 풀린다
+                if (kind === 'transient' && isNetworkError(err)) mem.kind = 'network';
                 if (kind === 'permanent' || mem.fails >= max) mem.parked = true;
                 var delay = mem.parked ? 0 : backoffMs(mem.fails - 1, {
                     baseMs: o.baseMs, capMs: o.capMs, random: o.random
@@ -96,6 +108,18 @@
             },
             /** 「다시 시도」 버튼 — 멈춤을 풀고 처음부터 센다 */
             unpark: function () { mem = { fails: 0, parked: false, reason: '', kind: '', at: 0, nextAt: 0 }; save(); },
+            /**
+             * 2026-11-24 인터넷이 다시 연결됐다 — 통신 실패로 생긴 대기·멈춤은 의미가 없으니 푼다.
+             * 영구 오류(권한 등)·한도(quota)는 그대로 둔다. 반환: 풀었으면 true
+             */
+            clearNetworkBackoff: function () {
+                load();
+                if (!mem.fails && !mem.parked) return false;
+                if (mem.kind === 'permanent' || mem.kind === 'quota') return false;
+                mem = { fails: 0, parked: false, reason: '', kind: '', at: 0, nextAt: 0 };
+                save();
+                return true;
+            },
             /** 자동 트리거(온라인·포커스·시작)가 지금 돌려도 되는지 — 멈췄거나 백오프 중이면 false */
             autoAllowed: function () { load(); return !mem.parked && now() >= (mem.nextAt || 0); }
         };
@@ -140,6 +164,19 @@
                 return { parked: r.parked, kind: kind, n: r.n };
             },
             ok: function (id) { load(); if (map[id]) { delete map[id]; save(); } },
+            /** 2026-11-24 인터넷 복귀 — 영구 오류·한도가 아닌 실패 기록은 지워 바로 다시 올린다. 반환: 푼 개수 */
+            clearNetworkBackoff: function () {
+                load();
+                var n = 0;
+                Object.keys(map).forEach(function (id) {
+                    var r = map[id];
+                    if (!r || r.kind === 'permanent' || r.kind === 'quota') return;
+                    delete map[id];
+                    n++;
+                });
+                if (n) save();
+                return n;
+            },
             parked: function () {
                 load();
                 return Object.keys(map).filter(function (id) { return map[id] && map[id].parked; })
@@ -161,7 +198,7 @@
         });
     }
 
-    var api = { classify: classify, backoffMs: backoffMs, createGate: createGate, createItemTracker: createItemTracker, tryCrossTabLock: tryCrossTabLock };
+    var api = { classify: classify, isNetworkError: isNetworkError, backoffMs: backoffMs, createGate: createGate, createItemTracker: createItemTracker, tryCrossTabLock: tryCrossTabLock };
     if (typeof module !== 'undefined' && module.exports) module.exports = api;
     if (root) { root.BSA = root.BSA || {}; root.BSA.syncRetry = api; }
 })(typeof window !== 'undefined' ? window : (typeof globalThis !== 'undefined' ? globalThis : this));

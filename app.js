@@ -1,5 +1,5 @@
 // @@app-parts 자동 생성 파일 — 여기를 고치지 말고 app/ 조각을 고친 뒤 `node scripts/app-parts.js join` (CLAUDE.md 「app.js 조각」)
-// @@app-part 01-base.js sha=bf7d5d4c5de2 — 원본은 app/01-base.js (여기 말고 거기서 고칠 것)
+// @@app-part 01-base.js sha=aae1f7721e39 — 원본은 app/01-base.js (여기 말고 거기서 고칠 것)
 /* ==========================================================================
    스마트 건축물 안전점검 현장점검 시스템 — UI 부트스트랩
    전역 상태·IndexedDB·이미지 헬퍼: js/core/state.js
@@ -1300,9 +1300,14 @@ document.addEventListener('DOMContentLoaded', () => {
         // 2026-10-16 오프라인 작업 자동 올리기 + 확인 + 비울지 묻기
         // 2026-10-19 오래된 캐시 정리는 여기서 하지 않는다 — 연결 순간 정리가 올리기보다 먼저 돌아 안 올라간 사진 사본을 지울 수 있었다.
         // 올리기·서버 확인이 끝난 뒤 runOfflineReturnSync가 정리한다(정리 쪽에도 보호 규칙: js/core/cache-purge-guard.js).
+        // 2026-11-24 끊겨 있던 동안 쌓인 통신 실패 대기·사진 멈춤을 먼저 푼다 — 안 풀면 대기 중이라며 아무것도 안 올렸다
+        try { if (typeof window.bsaClearNetworkBackoff === 'function') window.bsaClearNetworkBackoff(); } catch (_e) { /* ignore */ }
         setTimeout(() => { if (typeof window.runOfflineReturnSync === 'function') window.runOfflineReturnSync('online'); }, 4000);
+        setTimeout(() => { if (typeof window.bsaKickPendingUploads === 'function') window.bsaKickPendingUploads('online'); }, 8000);
         setTimeout(() => { if (window.bsaOfflineExpiry) window.bsaOfflineExpiry.run('online'); }, 60000);
     });
+    // 2026-11-24 켜 둔 앱에서 남은 사진·층을 몇 분마다 다시 올린다(할 일이 없으면 아무것도 안 함)
+    setInterval(() => { if (typeof window.bsaKickPendingUploads === 'function') window.bsaKickPendingUploads('timer'); }, 3 * 60 * 1000);
     // 2026-10-16 오프라인을 겪었다는 표시 — 인터넷 복귀 후 올리기·확인·「비울까요?」를 이때만 한다
     const markOfflineWorked = () => {
         try { localStorage.setItem('bsa_offline_worked_v1', '1'); } catch (_e) { /* ignore */ }
@@ -1326,11 +1331,13 @@ document.addEventListener('DOMContentLoaded', () => {
         if (navigator.onLine && typeof reconnectFirestoreSync === 'function') {
             reconnectFirestoreSync('visible');
         }
+        if (typeof window.bsaKickPendingUploads === 'function') window.bsaKickPendingUploads('visible');
     });
     window.addEventListener('focus', () => {
         if (navigator.onLine && typeof reconnectFirestoreSync === 'function') {
             reconnectFirestoreSync('focus');
         }
+        if (typeof window.bsaKickPendingUploads === 'function') window.bsaKickPendingUploads('focus');
     });
 
     // --- 4. PERSISTENCE ENGINE (LOCAL STORAGE + INDEXEDDB) ---
@@ -66140,7 +66147,7 @@ ${roundMobile ? '' : `<button type="button" class="icon-btn icon-btn-trash" titl
         btnDownloadImportTemplate.addEventListener('click', window.downloadImportDefectExcelTemplate);
     }
 
-// @@app-part 15-firebase-sync.js sha=a500c8ee00cd — 원본은 app/15-firebase-sync.js (여기 말고 거기서 고칠 것)
+// @@app-part 15-firebase-sync.js sha=1b891603e023 — 원본은 app/15-firebase-sync.js (여기 말고 거기서 고칠 것)
     // ==========================================================================
     // 🌐 FIREBASE REALTIME SYNC ENGINE (구글 파이어베이스 실시간 1초 동기화)
     // ==========================================================================
@@ -66330,6 +66337,48 @@ ${roundMobile ? '' : `<button type="button" class="icon-btn icon-btn-trash" titl
         // 손글씨·주석 메모(계정별 문서)도 같이 다시 올린다
         try { if (typeof window.bsaQueueAndFlushMemos === 'function') window.bsaQueueAndFlushMemos('manual'); } catch (_e) { /* ignore */ }
         if (typeof scheduleSyncProgressRender === 'function') scheduleSyncProgressRender();
+    };
+    /**
+     * 2026-11-24 인터넷이 다시 연결됨 — 통신 실패로 걸린 대기(최대 10분)·사진 멈춤을 푼다.
+     * 예전엔 대기 중에 온라인이 돼도 「아직 대기 시간」이라며 아무것도 안 해서, 사진이 찍은 기기에서 앱을 다시 열 때까지 안 올라갔다.
+     * 권한·한도·기기에 원본 없음 같은 진짜 오류는 그대로 둔다. 기기 데이터는 건드리지 않는다.
+     */
+    window.bsaClearNetworkBackoff = function () {
+        let changed = false;
+        const g = syncGate(); if (g && typeof g.clearNetworkBackoff === 'function' && g.clearNetworkBackoff()) changed = true;
+        const t = photoRetryTracker(); if (t && typeof t.clearNetworkBackoff === 'function' && t.clearNetworkBackoff()) changed = true;
+        if (changed) {
+            _syncRetryFailCount = 0;
+            _photoSyncUploadFailCount.clear();
+            clearSyncErrorRetryTimer();
+            console.info('[동기화] 인터넷 복귀 — 통신 실패 대기를 풀고 바로 다시 올립니다');
+        }
+        return changed;
+    };
+    /**
+     * 2026-11-24 남은 것 올리기 깨우기 — 앱으로 돌아올 때·몇 분마다.
+     * 예전엔 층은 올라가고 사진만 남으면 앱 시작·온라인 복귀·수동 버튼 때만 다시 올려, 켜 둔 앱에서는 한참 안 올라갔다.
+     * 일지(기기에서 한 변경 기록)에 남은 사진·층이 있을 때만 움직이므로 할 일이 없으면 서버를 읽지 않는다.
+     */
+    let _kickPendingAt = 0;
+    window.bsaKickPendingUploads = function (reason) {
+        if (!db || !window.state || !window.state.companyId || navigator.onLine === false) return;
+        if (isSyncParked()) return;
+        const now = Date.now();
+        if (reason !== 'online' && now - _kickPendingAt < 30000) return;
+        _kickPendingAt = now;
+        const g = syncGate();
+        if (g && !g.autoAllowed()) return;
+        if (_dirtyFloorKeys.size && !_syncRetryTimer && !_syncInFlight && typeof scheduleSyncToFirebase === 'function') {
+            scheduleSyncToFirebase({ skipMarkCurrent: true });
+        }
+        const j = typeof syncJournal === 'function' ? syncJournal() : null;
+        if (!j || _photoDrain) return;
+        let hasPhoto = false;
+        try { hasPhoto = j.pendingEntries().some((e) => e.k === 'photo' && !isPhotoMarkedOnStorage(e.id)); } catch (_e) { hasPhoto = false; }
+        if (!hasPhoto) return;
+        runPhotoPhaseWithinBudget([], async () => { await uploadPendingJournalPhotos(); return new Set(); })
+            .catch((e) => console.warn('[사진] 남은 사진 올리기 실패(' + reason + ')', e));
     };
     function onSyncParked(r) {
         console.warn('[동기화] 자동 올리기를 멈춤:', r);

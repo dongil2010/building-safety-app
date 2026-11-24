@@ -1299,9 +1299,14 @@ document.addEventListener('DOMContentLoaded', () => {
         // 2026-10-16 오프라인 작업 자동 올리기 + 확인 + 비울지 묻기
         // 2026-10-19 오래된 캐시 정리는 여기서 하지 않는다 — 연결 순간 정리가 올리기보다 먼저 돌아 안 올라간 사진 사본을 지울 수 있었다.
         // 올리기·서버 확인이 끝난 뒤 runOfflineReturnSync가 정리한다(정리 쪽에도 보호 규칙: js/core/cache-purge-guard.js).
+        // 2026-11-24 끊겨 있던 동안 쌓인 통신 실패 대기·사진 멈춤을 먼저 푼다 — 안 풀면 대기 중이라며 아무것도 안 올렸다
+        try { if (typeof window.bsaClearNetworkBackoff === 'function') window.bsaClearNetworkBackoff(); } catch (_e) { /* ignore */ }
         setTimeout(() => { if (typeof window.runOfflineReturnSync === 'function') window.runOfflineReturnSync('online'); }, 4000);
+        setTimeout(() => { if (typeof window.bsaKickPendingUploads === 'function') window.bsaKickPendingUploads('online'); }, 8000);
         setTimeout(() => { if (window.bsaOfflineExpiry) window.bsaOfflineExpiry.run('online'); }, 60000);
     });
+    // 2026-11-24 켜 둔 앱에서 남은 사진·층을 몇 분마다 다시 올린다(할 일이 없으면 아무것도 안 함)
+    setInterval(() => { if (typeof window.bsaKickPendingUploads === 'function') window.bsaKickPendingUploads('timer'); }, 3 * 60 * 1000);
     // 2026-10-16 오프라인을 겪었다는 표시 — 인터넷 복귀 후 올리기·확인·「비울까요?」를 이때만 한다
     const markOfflineWorked = () => {
         try { localStorage.setItem('bsa_offline_worked_v1', '1'); } catch (_e) { /* ignore */ }
@@ -1325,11 +1330,13 @@ document.addEventListener('DOMContentLoaded', () => {
         if (navigator.onLine && typeof reconnectFirestoreSync === 'function') {
             reconnectFirestoreSync('visible');
         }
+        if (typeof window.bsaKickPendingUploads === 'function') window.bsaKickPendingUploads('visible');
     });
     window.addEventListener('focus', () => {
         if (navigator.onLine && typeof reconnectFirestoreSync === 'function') {
             reconnectFirestoreSync('focus');
         }
+        if (typeof window.bsaKickPendingUploads === 'function') window.bsaKickPendingUploads('focus');
     });
 
     // --- 4. PERSISTENCE ENGINE (LOCAL STORAGE + INDEXEDDB) ---

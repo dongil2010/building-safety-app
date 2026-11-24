@@ -121,6 +121,40 @@ assert.strictEqual(s.gate.state().fails, 0);
     assert.ok(t2.shouldTry('a') && t2.shouldTry('b'));
 }
 
+// 2026-11-24 인터넷 복귀: 통신 실패로 멈춘 사진·대기는 풀고, 진짜 오류(권한·원본 없음·한도)는 그대로
+{
+    assert.notStrictEqual(R.classify({ code: 'storage/retry-limit-exceeded' }), 'quota', '약한 신호는 한도가 아님');
+    assert.ok(R.isNetworkError({ code: 'storage/retry-limit-exceeded' }));
+    assert.ok(R.isNetworkError(new TypeError('Failed to fetch')));
+    assert.ok(!R.isNetworkError({ code: 'permission-denied' }));
+    const st = memStorage();
+    const t = R.createItemTracker({ storage: st, storageKey: 'p', maxAttempts: 5, baseMs: 0 });
+    for (let i = 0; i < 20; i++) assert.ok(!t.fail('weak', { code: 'storage/retry-limit-exceeded' }).parked, '약한 신호로는 사진이 멈추지 않음');
+    for (let i = 0; i < 5; i++) t.fail('net', { code: 'unavailable' });
+    t.fail('perm', { code: 'storage/unauthorized' });
+    t.fail('miss', { code: 'missing-local-blob' });
+    t.fail('q', { code: 'storage/quota-exceeded' });
+    assert.ok(!t.shouldTry('net'));
+    assert.strictEqual(t.clearNetworkBackoff(), 1);
+    assert.ok(t.shouldTry('net'), '인터넷 복귀 → 다시 올림');
+    assert.ok(!t.shouldTry('perm') && !t.shouldTry('miss'), '영구 오류는 그대로 멈춤');
+    let now = 0;
+    const g = R.createGate({ storage: st, storageKey: 'g2', maxAttempts: 6, baseMs: 3500, capMs: 600000, now: () => now, random: () => 1 });
+    g.fail({ code: 'unavailable' }); g.fail({ code: 'unavailable' });
+    assert.ok(!g.autoAllowed(), '백오프 중');
+    assert.ok(g.clearNetworkBackoff());
+    assert.ok(g.autoAllowed(), '인터넷 복귀 → 바로 다시');
+    for (let i = 0; i < 6; i++) g.fail({ code: 'unavailable' });
+    assert.ok(g.isParked());
+    assert.ok(g.clearNetworkBackoff() && !g.isParked(), '통신 실패로 멈춘 것도 풀림');
+    g.fail({ code: 'permission-denied' });
+    assert.ok(!g.clearNetworkBackoff() && g.isParked(), '권한 오류는 그대로');
+    const app = fs.readFileSync(path.join(root, 'app.js'), 'utf8');
+    const on = app.slice(app.indexOf("window.addEventListener('online', () => {\n        updateOfflineBadge();"));
+    assert.ok(on.indexOf('bsaClearNetworkBackoff') > 0 && on.indexOf('bsaClearNetworkBackoff') < on.indexOf("runOfflineReturnSync('online')"), '온라인 복귀 때 대기 먼저 풂');
+    assert.ok(/bsaKickPendingUploads\('visible'\)/.test(app) && /bsaKickPendingUploads\('timer'\)/.test(app), '앱 복귀·주기적으로 남은 사진 올림');
+}
+
 // 탭 사이 잠금: 하나만 잡힘
 (async () => {
     const held = new Set();

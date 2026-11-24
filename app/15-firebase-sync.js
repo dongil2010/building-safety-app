@@ -189,6 +189,48 @@
         try { if (typeof window.bsaQueueAndFlushMemos === 'function') window.bsaQueueAndFlushMemos('manual'); } catch (_e) { /* ignore */ }
         if (typeof scheduleSyncProgressRender === 'function') scheduleSyncProgressRender();
     };
+    /**
+     * 2026-11-24 인터넷이 다시 연결됨 — 통신 실패로 걸린 대기(최대 10분)·사진 멈춤을 푼다.
+     * 예전엔 대기 중에 온라인이 돼도 「아직 대기 시간」이라며 아무것도 안 해서, 사진이 찍은 기기에서 앱을 다시 열 때까지 안 올라갔다.
+     * 권한·한도·기기에 원본 없음 같은 진짜 오류는 그대로 둔다. 기기 데이터는 건드리지 않는다.
+     */
+    window.bsaClearNetworkBackoff = function () {
+        let changed = false;
+        const g = syncGate(); if (g && typeof g.clearNetworkBackoff === 'function' && g.clearNetworkBackoff()) changed = true;
+        const t = photoRetryTracker(); if (t && typeof t.clearNetworkBackoff === 'function' && t.clearNetworkBackoff()) changed = true;
+        if (changed) {
+            _syncRetryFailCount = 0;
+            _photoSyncUploadFailCount.clear();
+            clearSyncErrorRetryTimer();
+            console.info('[동기화] 인터넷 복귀 — 통신 실패 대기를 풀고 바로 다시 올립니다');
+        }
+        return changed;
+    };
+    /**
+     * 2026-11-24 남은 것 올리기 깨우기 — 앱으로 돌아올 때·몇 분마다.
+     * 예전엔 층은 올라가고 사진만 남으면 앱 시작·온라인 복귀·수동 버튼 때만 다시 올려, 켜 둔 앱에서는 한참 안 올라갔다.
+     * 일지(기기에서 한 변경 기록)에 남은 사진·층이 있을 때만 움직이므로 할 일이 없으면 서버를 읽지 않는다.
+     */
+    let _kickPendingAt = 0;
+    window.bsaKickPendingUploads = function (reason) {
+        if (!db || !window.state || !window.state.companyId || navigator.onLine === false) return;
+        if (isSyncParked()) return;
+        const now = Date.now();
+        if (reason !== 'online' && now - _kickPendingAt < 30000) return;
+        _kickPendingAt = now;
+        const g = syncGate();
+        if (g && !g.autoAllowed()) return;
+        if (_dirtyFloorKeys.size && !_syncRetryTimer && !_syncInFlight && typeof scheduleSyncToFirebase === 'function') {
+            scheduleSyncToFirebase({ skipMarkCurrent: true });
+        }
+        const j = typeof syncJournal === 'function' ? syncJournal() : null;
+        if (!j || _photoDrain) return;
+        let hasPhoto = false;
+        try { hasPhoto = j.pendingEntries().some((e) => e.k === 'photo' && !isPhotoMarkedOnStorage(e.id)); } catch (_e) { hasPhoto = false; }
+        if (!hasPhoto) return;
+        runPhotoPhaseWithinBudget([], async () => { await uploadPendingJournalPhotos(); return new Set(); })
+            .catch((e) => console.warn('[사진] 남은 사진 올리기 실패(' + reason + ')', e));
+    };
     function onSyncParked(r) {
         console.warn('[동기화] 자동 올리기를 멈춤:', r);
         if (typeof window.showToast === 'function') {
