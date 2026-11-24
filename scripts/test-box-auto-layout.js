@@ -107,6 +107,32 @@ assert.ok(L.segHitsRect({ x: 0, y: 5 }, { x: 20, y: 5 }, { x1: 5, y1: 0, x2: 15,
     assert.ok(Math.abs((one.x - ext.l - 1500) - (1100 - (one.y + ext.b))) < 1e-6, '지시선 45° ' + JSON.stringify(one));
 }
 
+// 2026-11-24 새 마킹 첫 자리: 다른 박스와 겹치면 새 박스만 옮김(다른 박스·마킹 점은 그대로)
+{
+    const others = [mk('o1', 500, 500), mk('o2', 900, 500)];
+    const othersSnap = JSON.stringify(others);
+    // 겹치지 않는 자리 → 그대로
+    const free = L.placeNewBox(others, mk('new', 1400, 900), { bounds: { w: 2000, h: 1500 } });
+    assert.ok(free && !free.moved && free.x === 1405 && free.y === 865, '안 겹치면 그대로 ' + JSON.stringify(free));
+    // o1 박스 바로 옆에 찍음 → 박스가 겹치니 옮긴다
+    const item = mk('new', 515, 505);
+    const r = L.placeNewBox(others, item, { bounds: { w: 2000, h: 1500 } });
+    assert.ok(r && r.moved && r.before > 0 && r.after === 0, '겹침 없는 자리로 ' + JSON.stringify(r));
+    assert.strictEqual(JSON.stringify(others), othersSnap, '다른 마킹 입력 안 바꿈');
+    assert.deepStrictEqual(item.targets, [{ x: 515, y: 505 }], '화살표 끝(찍은 점) 그대로');
+    const placedAll = others.map((o) => Object.assign({}, o, { movable: false }))
+        .concat([Object.assign({}, item, { cx: r.x, cy: r.y, movable: false })]);
+    const c2 = L.conflictsAtCurrent(placedAll, { bounds: { w: 2000, h: 1500 } });
+    assert.ok(!c2.o1 && !c2.o2 && !c2.new, '옮긴 뒤 아무 충돌 없음 ' + JSON.stringify(c2));
+    assert.ok(Math.hypot(r.x - 515, r.y - 505) < 300, '가까운 자리 ' + JSON.stringify(r));
+    // 같은 입력 같은 결과
+    assert.deepStrictEqual(L.placeNewBox(others, mk('new', 515, 505), { bounds: { w: 2000, h: 1500 } }), r);
+    // 영역 마킹 박스
+    const ar = L.placeNewBox(others, { id: 'na', cx: 505, cy: 470, ext, targets: [{ rect: { x1: 470, y1: 480, x2: 540, y2: 520 } }] }, { bounds: { w: 2000, h: 1500 } });
+    assert.ok(ar && ar.moved && ar.after < ar.before, '영역 박스도 비켜 감');
+    assert.strictEqual(L.placeNewBox(others, null, {}), null);
+}
+
 // 앱 연결
 const app = read('app.js');
 const idx = read('index.html');
@@ -124,4 +150,12 @@ assert.ok(apply.includes('touchDefectPositionUpdatedAt(m)'), '동기화 위치 �
 const dragEnd = app.slice(app.indexOf('박스를 직접 끌어 옮김'), app.indexOf('박스를 직접 끌어 옮김') + 600);
 assert.ok(dragEnd.includes('activeDragPin.boxManual = true;'), '직접 옮기면 표시');
 assert.ok(/'boxManual'/.test(read('js/core/sync-merge.js')), '표시도 위치와 함께 동기화');
+const placeFn = app.slice(app.indexOf('function placeNewMarkingBoxAvoidingOverlap('), app.indexOf('window.placeNewMarkingBoxAvoidingOverlap ='));
+assert.ok(placeFn.includes('L.placeNewBox(items, item,') && placeFn.includes("buildBoxAutoLayoutItems(defects, 'all')"), '새 마킹: 이 층 박스 전부를 고정으로');
+assert.ok(!/.target[XY]s*=/.test(placeFn), '새 마킹: 화살표 끝 안 바꿈');
+const relIdx = app.indexOf('2026-11-24 첫 마킹: 박스가 다른 마킹과 겹치면');
+assert.ok(relIdx > 0, '점 마킹 손 뗄 때 연결');
+const rel = app.slice(relIdx, relIdx + 2000);
+assert.ok(rel.includes('!getActiveMarkingGroup()?.groupId') && rel.includes('liveBoxImgX = placed.x;') && rel.indexOf('placeNewMarkingBoxAvoidingOverlap') < rel.indexOf('openAddDefectModal(liveBoxImgX'), '묶음 제외, 창 열기 전에 박스만 옮김');
+assert.ok(app.includes('2026-11-24 첫 영역 마킹') && app.includes('areaPlaced ? areaPlaced.x : boxPos.boxX'), '영역 마킹 연결');
 console.log('test-box-auto-layout: ok');

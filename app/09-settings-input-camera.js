@@ -2633,6 +2633,18 @@
                 syncLiveMarkBoxAboveTarget(markTargetImgX, markTargetImgY);
             }
             markingHasMoved = false;
+            // 2026-11-24 첫 마킹: 박스가 다른 마킹과 겹치면 가까운 빈 자리로(화살표 끝은 찍은 그대로). 마킹 추가(묶음)는 공유 박스라 그대로
+            if (!getActiveMarkingGroup()?.groupId && typeof placeNewMarkingBoxAvoidingOverlap === 'function') {
+                const liveMeta = getLiveMarkPinPreviewMeta();
+                if (!liveMeta.fromGroup) {
+                    const placed = placeNewMarkingBoxAvoidingOverlap(liveBoxImgX, liveBoxImgY,
+                        [{ x: markTargetImgX, y: markTargetImgY }], liveMeta.label, liveMeta.scale);
+                    if (placed) {
+                        liveBoxImgX = placed.x;
+                        liveBoxImgY = placed.y;
+                    }
+                }
+            }
             if (window._pendingMapRegisterDefectId) {
                 commitMapRegisterFromMarking(liveBoxImgX, liveBoxImgY, markTargetImgX, markTargetImgY);
                 setDrawMode('PAN');
@@ -4229,8 +4241,13 @@
                     areaPoints: areaRect.areaPoints || null
                 };
                 const useGroupBox = !!(tmpl && tmpl.groupId && Number.isFinite(tmpl.boxX) && Number.isFinite(tmpl.boxY));
-                const boxXUse = useGroupBox ? tmpl.boxX : boxPos.boxX;
-                const boxYUse = useGroupBox ? tmpl.boxY : boxPos.boxY;
+                // 2026-11-24 첫 영역 마킹: 박스가 다른 마킹과 겹치면 가까운 빈 자리로(영역은 그린 그대로)
+                const areaPlaced = (!useGroupBox && typeof placeNewMarkingBoxAvoidingOverlap === 'function')
+                    ? placeNewMarkingBoxAvoidingOverlap(boxPos.boxX, boxPos.boxY,
+                        [{ rect: { x1: ax1, y1: ay1, x2: ax2, y2: ay2 } }], areaLabel, areaScale)
+                    : null;
+                const boxXUse = useGroupBox ? tmpl.boxX : (areaPlaced ? areaPlaced.x : boxPos.boxX);
+                const boxYUse = useGroupBox ? tmpl.boxY : (areaPlaced ? areaPlaced.y : boxPos.boxY);
                 const attach = getAreaCenterBorderAttachDefect(boxXUse, boxYUse, {
                     areaX1: ax1, areaY1: ay1, areaX2: ax2, areaY2: ay2,
                     areaShape: window._pendingAreaRect.areaShape,

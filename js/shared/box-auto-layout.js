@@ -434,6 +434,32 @@
         return { moves, before, after, cost, unit: P.unit };
     }
 
+    /**
+     * 2026-11-24 「첫 마킹 찍을 때 다른 마킹이랑 안 겹치게」 — 새 박스 하나만 옮긴다.
+     * fixedItems(이미 있는 박스들)는 절대 안 움직이고, 마킹 점(화살표 끝)·영역도 그대로.
+     * 지금 자리(item.cx, cy)에 충돌이 없으면 그대로 두고, 있으면 layoutBoxes와 같은 후보(45° 대각선 → 360°)에서
+     * 가장 가까운 덜 겹치는 자리를 고른다.
+     * 결과: { x, y, moved, before(새 박스 충돌 수), after }
+     */
+    function placeNewBox(fixedItems, item, opts) {
+        if (!item || !Number.isFinite(num(item.cx, NaN)) || !Number.isFinite(num(item.cy, NaN))) return null;
+        const id = item.id != null ? String(item.id) : '__new_box__';
+        const all = (fixedItems || []).filter((it) => it && String(it.id) !== id)
+            .map((it) => Object.assign({}, it, { movable: false }))
+            .concat([Object.assign({}, item, { id, movable: true })]);
+        const o = Object.assign({}, opts || {}, { fresh: false });
+        const conf = conflictsAtCurrent(all, o);
+        const before = conf[id] || 0;
+        const stay = { x: Number(item.cx), y: Number(item.cy), moved: false, before, after: before };
+        if (!before) return stay;
+        const res = layoutBoxes(all, o);
+        const mv = res.moves[id];
+        if (!mv) return stay;
+        const after = conflictsAtCurrent(all.map((it) => (it.id === id ? Object.assign({}, it, { cx: mv.x, cy: mv.y }) : it)), o)[id] || 0;
+        if (after >= before) return stay;
+        return { x: mv.x, y: mv.y, moved: true, before, after };
+    }
+
     /** 가운데 기준 박스 끝 거리(회전 반영). 박스는 화면 기준 수평으로 그려지고(역회전), 「중요」는 화면 왼쪽 위 모서리 */
     function boxExtent(w, h, rotationDeg, badge) {
         const bw = badge ? Math.max(0, num(badge.w, 0)) : 0;
@@ -450,7 +476,7 @@
         return { l: -Math.min.apply(null, xs), t: -Math.min.apply(null, ys), r: Math.max.apply(null, xs), b: Math.max.apply(null, ys) };
     }
 
-    const api = { layoutBoxes, conflictsAtCurrent, boxExtent, segCross, segHitsRect, WEIGHTS: W, HARD };
+    const api = { layoutBoxes, placeNewBox, conflictsAtCurrent, boxExtent, segCross, segHitsRect, WEIGHTS: W, HARD };
     root.BSA = root.BSA || {};
     root.BSA.boxAutoLayout = api;
     if (typeof module !== 'undefined' && module.exports) module.exports = api;

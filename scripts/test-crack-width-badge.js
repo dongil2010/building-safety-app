@@ -153,6 +153,17 @@ function testNoSavedMutation() {
     assert.strictEqual(api.formatBadgeText(crack({ crackMeasures: [{ width: '0.4', length: '2', join: '/' }, { width: '0.3', length: '0.5', join: 'x' }], size: '0.4/2, 0.3x0.5' })), '0.4', '폭 행은 그대로');
     assert.strictEqual(api.formatBadgeText(crack({ crackMeasures: [{ width: '0.3', length: '1.5', join: '/' }], size: '0.3/1.5' })), '0.3');
 })();
+// 2026-11-24 「이격도 균열폭 보이게」 — 이격(이격폭)도 배지에 나온다
+(function testGapShown() {
+    assert.ok(api.isCrackDefect({ defectType: '이격' }));
+    assert.ok(api.isCrackDefect({ defectType: '이격/파손' }));
+    assert.strictEqual(api.formatBadgeText({ defectType: '이격', crackWidth: '5' }), '5.0', '이격폭');
+    assert.strictEqual(api.formatBadgeText({ defectType: '이격/흔들림', crackMeasures: [{ width: '2', length: '1.5', join: '/' }] }), '2.0', '측정 행');
+    assert.strictEqual(api.formatBadgeText({ defectType: '이격', size: '이격 3mm' }), '3.0', '규모 글자의 이격 값');
+    assert.strictEqual(api.formatBadgeText({ defectType: '이격', crackWidth: '0.2' }), '', '0.3 미만은 균열과 같이 안 보임');
+    assert.strictEqual(api.formatBadgeText({ defectType: '이격', crackWidth: '' }), '', '값 없으면 없음');
+    assert.strictEqual(api.formatBadgeText({ defectType: '누수', crackWidth: '0.5' }), '', '균열·이격 아니면 여전히 없음');
+})();
 testParseAndBoundary();
 testFormatUnits();
 testTogglePref();

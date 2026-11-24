@@ -2392,6 +2392,38 @@
         return Object.assign({ membersById, movableCount, manualSkipped, total: items.length }, res);
     }
 
+    /**
+     * 2026-11-24 새 마킹을 처음 찍을 때: NO. 박스가 이 층 다른 마킹(박스·점·지시선)과 겹치면
+     * 가까운 겹치지 않는 자리로 박스만 옮긴다. 마킹 점(화살표 끝)·영역은 찍은 그대로.
+     * targets: [{x,y}] 또는 [{rect}]. 옮길 필요 없거나 못 찾으면 null.
+     */
+    function placeNewMarkingBoxAvoidingOverlap(boxX, boxY, targets, label, scale) {
+        const L = boxAutoLayoutLib();
+        if (!L || typeof L.placeNewBox !== 'function' || !state.ctx) return null;
+        if (!Number.isFinite(Number(boxX)) || !Number.isFinite(Number(boxY))) return null;
+        try {
+            const defects = filterMapPlacedDefects(getCurrentFloorDefects());
+            if (!defects.length) return null;
+            const { items } = buildBoxAutoLayoutItems(defects, 'all');
+            if (!items.length) return null;
+            const dims = getFloorPlanDisplayDims();
+            const box = measurePinBoxDimensions(state.ctx, label || 'NO.01', scale || 1, 1.0);
+            const item = {
+                id: '__new_marking__',
+                cx: Number(boxX),
+                cy: Number(boxY),
+                ext: L.boxExtent(box.w, box.h, state.rotationAngle || 0, null),
+                targets: targets || []
+            };
+            const r = L.placeNewBox(items, item, { bounds: { w: dims.w, h: dims.h }, obstacles: boxAutoLayoutObstacles() });
+            return (r && r.moved) ? r : null;
+        } catch (err) {
+            console.warn('[new-marking-place]', err);
+            return null;
+        }
+    }
+    window.placeNewMarkingBoxAvoidingOverlap = placeNewMarkingBoxAvoidingOverlap;
+
     function applyMarkingBoxAutoLayout(plan, mode) {
         const ids = Object.keys((plan && plan.moves) || {});
         if (!ids.length) return 0;
