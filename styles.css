@@ -1238,9 +1238,9 @@ html.layout-desktop #tab-ndt .ndt-top-canvas-tools {
 }
 
 .map-sel-popup-type.map-sel-popup-type-empty {
-    color: #94a3b8;
+    color: #c026d3;
     font-size: 0.65rem;
-    font-weight: 500;
+    font-weight: 700;
 }
 
 .map-sel-popup-measure {

@@ -1531,7 +1531,17 @@
             if (window.drawingAlignState && typeof drawingAlignPreviewList === 'function') {
                 currentDefects = drawingAlignPreviewList(currentDefects);
             }
-            renderDefectsGrouped(ctx, currentDefects, drawPin);
+            _mapHighlightUnfilled = true;
+            _mapUnfilledGroupIds = new Set();
+            currentDefects.forEach((d) => {
+                if (d && d.groupId && !d.surveyExtra && isDefectUnfilled(d)) _mapUnfilledGroupIds.add(d.groupId);
+            });
+            try {
+                renderDefectsGrouped(ctx, currentDefects, drawPin);
+            } finally {
+                _mapHighlightUnfilled = false;
+                _mapUnfilledGroupIds = null;
+            }
             drawMemberGbNeededMarkers(ctx, currentDefects);
 
             if (typeof drawLocationMapLegend === 'function') {
@@ -2665,7 +2675,21 @@
 
     // 2026-11-21 위치도 범례 설정 「결함 핀 모두 빨강 한 색으로」 — 화면·한글·벡터 PDF·DXF·SVG 가 모두 이 함수로 색을 얻는다
     const MONO_PIN_COLOR = '#ff0000';
+    // 2026-11-24 부재명·결함내용 미입력 마킹 — 층별 도면 화면에서만 보라색으로 튀게 해서 입력할 곳을 찾기 쉽게.
+    // 보고서·한글·PDF·DXF 출력은 paintMapCanvas 밖에서 그리므로 원래 색 그대로.
+    const UNFILLED_PIN_COLOR = '#c026d3';
+    let _mapHighlightUnfilled = false;
+    let _mapUnfilledGroupIds = null; // 묶음 마킹: 묶음 안에 하나라도 비면 대표 핀도 보라색
+    function isDefectUnfilled(defect) {
+        if (!defect) return false;
+        if (defect.groupId && _mapUnfilledGroupIds && _mapUnfilledGroupIds.has(defect.groupId)) return true;
+        // 부재명·결함내용 중 하나라도 비면 미입력
+        const noComponent = !String(defect.component || '').trim();
+        const noType = !String(defect.defectType || '').trim();
+        return noComponent || noType;
+    }
     function getDefectColor(defect) {
+        if (typeof _mapHighlightUnfilled !== 'undefined' && _mapHighlightUnfilled && isDefectUnfilled(defect)) return UNFILLED_PIN_COLOR;
         if (typeof window.isLocationMapMonoPin === 'function' && window.isLocationMapMonoPin()) return MONO_PIN_COLOR;
         if (defect.isPriorityManage) return isDefectRepaired(defect) ? PRIORITY_REPAIRED_COLOR : getStyleColor('priorityManage');
         const isGood = isGoodDefectType(defect.defectType);
