@@ -2386,8 +2386,10 @@
         if (c && c.img === img && c.w === dims.w && c.h === dims.h) return c.ink;
         let ink = null;
         try {
-            const k = Math.min(1, 1024 / Math.max(dims.w, dims.h));
+            // 긴 변 최대 2560으로 그려 2×2를 「가장 진한 값」으로 묶음 → 가는 벽 선이 줄이며 사라지지 않게(지도는 최대 1280)
+            const k = Math.min(1, 2560 / Math.max(dims.w, dims.h));
             const cw = Math.max(1, Math.round(dims.w * k)); const ch = Math.max(1, Math.round(dims.h * k));
+            const pool = Math.max(cw, ch) > 1280 ? 2 : 1;
             const cv = document.createElement('canvas');
             cv.width = cw; cv.height = ch;
             const cx = cv.getContext('2d', { willReadFrequently: true });
@@ -2395,7 +2397,7 @@
             cx.fillRect(0, 0, cw, ch);
             cx.imageSmoothingEnabled = true;
             cx.drawImage(img, 0, 0, cw, ch);
-            ink = L.buildInkMap(cx.getImageData(0, 0, cw, ch).data, cw, ch, dims.w, dims.h);
+            ink = L.buildInkMap(cx.getImageData(0, 0, cw, ch).data, cw, ch, dims.w, dims.h, { pool });
         } catch (err) {
             console.warn('[box-auto-layout] 도면 잉크 지도 실패 — 박스끼리만 피함', err);
             ink = null;
@@ -2419,7 +2421,10 @@
         const opts = { bounds: { w: dims.w, h: dims.h }, obstacles: boxAutoLayoutObstacles(), fresh: mode === 'all', ink: boxAutoLayoutInkMap() };
         if (mode !== 'all') {
             const conf = L.conflictsAtCurrent(items, opts);
-            items.forEach((it) => { if (!conf[it.id]) it.movable = false; });
+            // 도면 선·글자 위에 올라간 박스도 「겹친 박스」로 본다(직접 옮긴 박스는 여전히 제외)
+            const inkNow = (opts.ink && typeof L.inkAtCurrent === 'function') ? L.inkAtCurrent(items, opts) : {};
+            const inkOn = Number(L.INK_ON) || 0.02;
+            items.forEach((it) => { if (!conf[it.id] && !((inkNow[it.id] || 0) > inkOn)) it.movable = false; });
         }
         const movableCount = items.filter((it) => it.movable).length;
         const manualSkipped = mode !== 'all' ? items.filter((it) => it.manual).length : 0;
@@ -2491,7 +2496,7 @@
             return;
         }
         const pick = await window.appChoose('NO. 박스를 지시선이 45° 대각선에 가깝게, 마킹 점·다른 박스와 겹치지 않고 지시선끼리 엇갈리지 않는 자리로 옮깁니다(도면 선·글자 위보다 빈 곳 우선).\n마킹 점(화살표 끝)·영역은 움직이지 않습니다.', [
-            { label: '겹친 박스만', detail: '직접 끌어 옮긴 박스는 그대로 둡니다' },
+            { label: '겹친 박스만', detail: '겹치거나 도면 선·글자 위에 있는 박스만 — 직접 끌어 옮긴 박스는 그대로 둡니다' },
             { label: '모든 박스', detail: '직접 옮긴 박스도 포함해 이 층 박스를 모두 45° 자리로 다시 놓습니다' }
         ], { title: '박스 자동 정리', okText: '정리', defaultIndex: 0 });
         if (pick == null) return;
@@ -2509,7 +2514,8 @@
             window.showToast?.('더 나은 자리를 찾지 못했습니다.', 'info', 2500);
             return;
         }
-        window.showToast?.(`박스 ${n}개를 옮겼습니다(겹침 ${plan.before} → ${plan.after}). 되돌리기로 한 번에 취소할 수 있습니다.`, 'success', 5000);
+        const inkMsg = (plan.inkBefore || plan.inkAfter) ? `, 도면 위 박스 ${plan.inkBefore} → ${plan.inkAfter}` : '';
+        window.showToast?.(`박스 ${n}개를 옮겼습니다(겹침 ${plan.before} → ${plan.after}${inkMsg}). 되돌리기로 한 번에 취소할 수 있습니다.`, 'success', 5000);
     }
     window.runMarkingBoxAutoLayout = runMarkingBoxAutoLayout;
     window.planMarkingBoxAutoLayout = planMarkingBoxAutoLayout;

@@ -193,6 +193,29 @@ assert.ok(L.segHitsRect({ x: 0, y: 5 }, { x: 20, y: 5 }, { x1: 5, y1: 0, x2: 15,
     assert.ok(msInk < 3000, `잉크 포함 빠름 ${msInk}ms`);
 }
 
+// 2026-11-24 현장 제보: 가는 이중 벽선(줄이면 옅은 회색 1px) 위에 박스 — 「겹친 박스만」에서도 비켜야 함
+{
+    const IW = 6000; const IH = 4000; const pw = 2560; const ph = Math.round(IH * pw / IW); // 앱처럼 긴 변 2560
+    const k = pw / IW;
+    const px = new Uint8ClampedArray(pw * ph * 4).fill(255);
+    const vline = (ix, lum) => { const x = Math.round(ix * k); for (let y = 0; y < ph; y++) { const q = (y * pw + x) * 4; px[q] = px[q + 1] = px[q + 2] = lum; } };
+    vline(3000, 185); vline(3020, 185); // 이중 벽선, 줄여서 옅어짐
+    const ink = L.buildInkMap(px, pw, ph, IW, IH, { pool: 2 });
+    assert.ok(ink.cw === pw / 2, '2×2 묶음');
+    const e2 = { l: 110, t: 40, r: 110, b: 40 }; // 크게 키운 박스
+    const onWall = { id: 'w15', cx: 3000, cy: 1000, ext: e2, targets: [{ x: 3300, y: 1300 }], movable: true };
+    const cur = L.inkAtCurrent([onWall], { ink });
+    assert.ok(cur.w15 > L.INK_ON, '벽선 지나는 박스 = 도면 위 ' + cur.w15);
+    assert.deepStrictEqual(L.conflictsAtCurrent([onWall], { bounds: { w: IW, h: IH }, ink }), { w15: 0 }, '충돌은 아님');
+    const r = L.layoutBoxes([onWall], { bounds: { w: IW, h: IH }, ink });
+    assert.ok(r.moves.w15, '옮김');
+    const m = r.moves.w15;
+    assert.ok(m.x - e2.l > 3025 || m.x + e2.r < 2995, '벽선 밖으로 ' + JSON.stringify(m));
+    assert.ok(r.inkBefore === 1 && r.inkAfter === 0, `도면 위 박스 ${r.inkBefore}→${r.inkAfter}`);
+    // 잉크 없는 곳 박스는 안 옮김
+    assert.ok(L.inkAtCurrent([Object.assign({}, onWall, { cx: 1000 })], { ink }).w15 < L.INK_ON);
+}
+
 // 앱 연결
 const app = read('app.js');
 const idx = read('index.html');
@@ -221,4 +244,6 @@ assert.ok(app.includes('2026-11-24 첫 영역 마킹') && app.includes('areaPlac
 assert.ok(app.includes('function boxAutoLayoutInkMap()') && app.includes('L.buildInkMap(cx.getImageData('), '앱: 도면 잉크 지도');
 assert.ok(app.includes("fresh: mode === 'all', ink: boxAutoLayoutInkMap()"), '박스 정리에 잉크 넘김');
 assert.ok(placeFn.includes('ink: boxAutoLayoutInkMap()'), '새 마킹 자리에도 잉크');
+assert.ok(app.includes('{ pool })') && app.includes('2560 / Math.max(dims.w, dims.h)'), '가는 선 안 사라지게 크게 그려 묶음');
+assert.ok(app.includes('L.inkAtCurrent(items, opts)') && app.includes("!((inkNow[it.id] || 0) > inkOn)"), '겹친 박스만: 도면 위 박스도 옮김');
 console.log('test-box-auto-layout: ok');

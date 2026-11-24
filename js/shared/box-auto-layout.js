@@ -38,7 +38,7 @@
         outside: 2000,    // 도면 밖
         obstacle: 600,    // 범례 등 가림
         area: 40,         // 다른 영역 마킹 위에 올라감(약하게)
-        ink: 220,         // 2026-11-24 도면 선·글자 위에 올라감(박스 안 잉크 비율 0~1 당) — 빈 곳 우선, 「충돌」은 아님
+        ink: 160,         // 2026-11-24 도면 선·글자 위에 올라감(√잉크 비율 — 선 한 줄만 지나도 꽤 큼) — 빈 곳 우선, 「충돌」은 아님
         move: 0.25,       // 지금 자리에서 옮긴 거리(단위당)
         stay: 3           // 지금 자리 그대로 두면 덜어 줌(충돌 없는 박스가 괜히 안 움직이게)
     };
@@ -273,7 +273,8 @@
         }
         P.obstacles.forEach((r) => { if (overlapArea(box, r) > 0) { cost += W.obstacle; hard += 1; } });
         // 도면 선·글자 위면 숫자가 안 보임 → 박스(+약간 여백) 안 잉크 비율만큼(약하게, 충돌 아님)
-        if (P.ink) cost += W.ink * inkDensity(P.ink, rectOf(x, y, it.ext, 0.1 * u));
+        // √: 숫자를 가로지르는 선 한 줄(넓이로는 몇 %)도 글자를 가리니 작은 비율에 민감하게
+        if (P.ink) cost += W.ink * Math.sqrt(inkDensity(P.ink, rectOf(x, y, it.ext, 0.1 * u)));
         const nb = P.neighbors[i];
         for (let k = 0; k < nb.length; k++) {
             const j = nb[k];
@@ -397,10 +398,17 @@
             if (r.k >= 0) setPos(i, cands[i][r.k]);
             placed[i] = true;
         });
+        // 다시 볼 필요 없는 박스 건너뜀: 내 비용은 나·이웃 자리로만 정해지니, 지난번 본 뒤로 아무도 안 움직였으면
+        // 다시 봐도 같은 결론(결과는 똑같고 빠르기만 함 — 잉크 비용으로 패스가 늘어도 수백 개 OK)
+        let tick = 0;
+        const movedAt = P.list.map(() => 0);
         const improve = () => {
+            const seenAt = P.list.map(() => -1);
             for (let pass = 0; pass < passes; pass++) {
                 let changed = 0;
                 movers.forEach((i) => {
+                    if (seenAt[i] >= 0 && movedAt[i] <= seenAt[i] && !P.neighbors[i].some((j) => movedAt[j] > seenAt[i])) return;
+                    seenAt[i] = tick;
                     const it = P.list[i];
                     const atStart = Math.abs(pos[i].x - it.cx0) < 1e-6 && Math.abs(pos[i].y - it.cy0) < 1e-6;
                     const cur = costAt(P, i, pos[i].x, pos[i].y, pos, allPlaced) - (atStart ? stay : 0);
@@ -409,6 +417,8 @@
                         const c = cands[i][r.k];
                         if (Math.abs(c.x - pos[i].x) > 1e-6 || Math.abs(c.y - pos[i].y) > 1e-6) {
                             setPos(i, c);
+                            tick += 1;
+                            movedAt[i] = tick;
                             changed += 1;
                         }
                     }
@@ -437,7 +447,11 @@
         });
         let cost = 0;
         for (let i = 0; i < n; i++) cost += costAt(P, i, pos[i].x, pos[i].y, pos, allPlaced);
-        return { moves, before, after, cost, unit: P.unit };
+        // 도면(잉크) 위 박스 수 — 옮길 수 있던 박스만
+        const onInk = (x, y, it) => (P.ink && inkDensity(P.ink, rectOf(x, y, it.ext, 0.1 * P.unit)) > INK_ON ? 1 : 0);
+        let inkBefore = 0; let inkAfter = 0;
+        movers.forEach((i) => { const it = P.list[i]; inkBefore += onInk(it.cx0, it.cy0, it); inkAfter += onInk(pos[i].x, pos[i].y, it); });
+        return { moves, before, after, cost, unit: P.unit, inkBefore, inkAfter };
     }
 
     /**
@@ -473,11 +487,13 @@
      * 바탕이 누런 스캔이어도 되게, 밝기 중앙값(=바탕)보다 충분히 어두운 것만 잉크로 본다.
      * 줄이면서 가는 선이 옅은 회색이 되므로 옅은 것도 조금은 센다.
      */
-    function buildInkMap(rgba, cw, ch, imgW, imgH) {
-        cw = Math.floor(num(cw, 0)); ch = Math.floor(num(ch, 0));
+    function buildInkMap(rgba, pw, ph, imgW, imgH, o) {
+        pw = Math.floor(num(pw, 0)); ph = Math.floor(num(ph, 0));
         const iw = num(imgW, 0); const ih = num(imgH, 0);
-        if (!rgba || cw <= 0 || ch <= 0 || iw <= 0 || ih <= 0 || rgba.length < cw * ch * 4) return null;
-        const n = cw * ch;
+        if (!rgba || pw <= 0 || ph <= 0 || iw <= 0 || ih <= 0 || rgba.length < pw * ph * 4) return null;
+        // pool: 픽셀 pool×pool을 칸 하나로 — 칸 값은 그 안 **가장 진한** 픽셀(가는 선이 줄이며 사라지지 않게)
+        const pool = Math.max(1, Math.floor(num(o && o.pool, 1)));
+        const n = pw * ph;
         const lum = new Uint8Array(n);
         const hist = new Uint32Array(256);
         for (let p = 0, q = 0; p < n; p++, q += 4) {
@@ -488,20 +504,38 @@
         }
         let acc = 0; let med = 255;
         for (let v = 0; v < 256; v++) { acc += hist[v]; if (acc * 2 >= n) { med = v; break; } }
-        const hi = Math.min(235, med - 15); // 이보다 밝으면 바탕
-        const span = Math.max(40, hi - 60); // hi-span 이하면 완전 잉크
+        const hi = Math.min(240, med - 12); // 이보다 밝으면 바탕
+        const span = 80; // hi-span 이하면 완전 잉크(줄이며 옅어진 가는 선도 거의 잉크로)
+        const cw = Math.ceil(pw / pool); const ch = Math.ceil(ph / pool);
         const W1 = cw + 1;
         const I = new Float64Array(W1 * (ch + 1));
         for (let y = 0; y < ch; y++) {
             let row = 0;
+            const py1 = y * pool; const py2 = Math.min(ph, py1 + pool);
             for (let x = 0; x < cw; x++) {
-                const d = (hi - lum[y * cw + x]) / span;
+                const px1 = x * pool; const px2 = Math.min(pw, px1 + pool);
+                let mn = 255;
+                for (let py = py1; py < py2; py++) {
+                    const rowOff = py * pw;
+                    for (let px = px1; px < px2; px++) { const l = lum[rowOff + px]; if (l < mn) mn = l; }
+                }
+                const d = (hi - mn) / span;
                 row += d <= 0 ? 0 : (d >= 1 ? 1 : d);
                 I[(y + 1) * W1 + x + 1] = I[y * W1 + x + 1] + row;
             }
         }
-        return { cw, ch, sx: cw / iw, sy: ch / ih, I };
+        // 칸 크기는 픽셀 pool개 기준(마지막 칸이 덜 차도 무시할 만함)
+        return { cw, ch, sx: pw / pool / iw, sy: ph / pool / ih, I };
     }
+
+    /** 지금 자리에서 박스(+약간 여백) 안 잉크 비율 — 「겹친 박스만」에서 도면 위 박스도 고르게. { id: 0~1 } */
+    function inkAtCurrent(items, opts) {
+        const P = prepare(items, opts);
+        const out = {};
+        P.list.forEach((it) => { out[it.id] = P.ink ? inkDensity(P.ink, rectOf(it.cx0, it.cy0, it.ext, 0.1 * P.unit)) : 0; });
+        return out;
+    }
+    const INK_ON = 0.02; // 박스가 「도면 위」라고 보는 잉크 비율(선 한 줄 정도)
 
     /** 이미지 좌표 사각형 안 잉크 평균(0~1). 칸 일부 걸침도 넓이 비율대로(적분 이미지를 쌍선형으로 읽음) */
     function inkDensity(ink, r) {
@@ -538,7 +572,7 @@
         return { l: -Math.min.apply(null, xs), t: -Math.min.apply(null, ys), r: Math.max.apply(null, xs), b: Math.max.apply(null, ys) };
     }
 
-    const api = { layoutBoxes, placeNewBox, conflictsAtCurrent, boxExtent, segCross, segHitsRect, buildInkMap, inkDensity, WEIGHTS: W, HARD };
+    const api = { layoutBoxes, placeNewBox, conflictsAtCurrent, boxExtent, segCross, segHitsRect, buildInkMap, inkDensity, inkAtCurrent, INK_ON, WEIGHTS: W, HARD };
     root.BSA = root.BSA || {};
     root.BSA.boxAutoLayout = api;
     if (typeof module !== 'undefined' && module.exports) module.exports = api;
