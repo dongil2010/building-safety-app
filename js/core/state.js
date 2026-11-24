@@ -335,8 +335,12 @@ function pdfBytesFromDataUrl(pdfDataUrl) {
 }
 
 async function acquirePdfPageFromDataUrl(pdfDataUrl, cacheKey) {
+    // 2026-11-24 같은 층이라도 PDF가 바뀌었으면(도면 교체·동기화) 옛 쪽을 돌려주지 않는다 — 길이 + 끝 48자로 확인
+    const sig = String(pdfDataUrl || '').length + ':' + String(pdfDataUrl || '').slice(-48);
     if (cacheKey && _pdfPageCache.has(cacheKey)) {
-        return _pdfPageCache.get(cacheKey);
+        const hit = _pdfPageCache.get(cacheKey);
+        if (!hit.sig || hit.sig === sig) return hit;
+        _pdfPageCache.delete(cacheKey);
     }
     if (typeof pdfjsLib === 'undefined') {
         throw new Error('PDF 렌더링 라이브러리를 불러오지 못했습니다.');
@@ -346,7 +350,7 @@ async function acquirePdfPageFromDataUrl(pdfDataUrl, cacheKey) {
     const pdf = await pdfjsLib.getDocument({ data: bytes, verbosity: 0 }).promise;
     const page = await pdf.getPage(1);
     const baseViewport = page.getViewport({ scale: 1 });
-    const entry = { pdf, page, baseViewport };
+    const entry = { pdf, page, baseViewport, sig };
     if (cacheKey) {
         if (_pdfPageCache.size >= PDF_PAGE_CACHE_MAX) {
             const oldest = _pdfPageCache.keys().next().value;

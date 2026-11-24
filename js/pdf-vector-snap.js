@@ -390,11 +390,19 @@
   async function ensureGeometry(pdfDataUrl, bldgId, floorCode, refDim) {
     if (!pdfDataUrl || !bldgId || !floorCode || typeof pdfjsLib === 'undefined') return false;
     const key = bldgId + '_' + floorCode;
+    // 2026-11-24 「뭘 보고 이렇게 잡는건지」 — 층 도면을 바꾼 뒤(도면 편집기 저장·DXF 다시 올리기·다른 기기 동기화)에도
+    // 층 번호로만 캐시를 찾아 옛 PDF의 선을 계속 써서, 행·열 자동 잡기 선이 새 도면보다 3% 커지고 밀렸다.
+    // 어느 PDF로 만든 자료인지(sig) 기억해 두고, PDF가 바뀌었으면 다시 뽑는다.
+    const sig = pdfSigOf(pdfDataUrl);
     const existing = cache.get(key);
-    if (existing && existing.status === 'ready') return true;
-    if (existing && existing.status === 'pending') return existing.promise;
+    if (existing && existing.sig === sig) {
+      if (existing.status === 'ready') return true;
+      if (existing.status === 'pending') return existing.promise;
+    } else if (existing && typeof window.invalidatePdfPageCache === 'function') {
+      window.invalidatePdfPageCache(key);
+    }
 
-    const entry = { status: 'pending' };
+    const entry = { status: 'pending', sig };
     const task = (async () => {
       try {
         const dim = refDim || window.FLOOR_DRAWING_PDF_PREVIEW_DIM || 4000;
@@ -419,7 +427,7 @@
         entry.w = geo.w;
         entry.h = geo.h;
         entry.status = 'ready';
-        return true;
+        return cache.get(key) === entry; // 그 사이 도면이 또 바뀌었으면 이 결과는 버려진 것
       } catch (e) {
         console.warn('CAD 벡터 스냅 geometry 추출 실패:', e);
         entry.status = 'error';
@@ -429,6 +437,12 @@
     entry.promise = task;
     cache.set(key, entry);
     return task;
+  }
+
+  /** 어느 PDF로 만든 자료인지 — 길이 + 끝 48자(dxf-view.js sigOf와 같은 규칙) */
+  function pdfSigOf(pdfDataUrl) {
+    const s = String(pdfDataUrl || '');
+    return s.length + ':' + s.slice(-48);
   }
 
   function isReady(bldgId, floorCode) {
