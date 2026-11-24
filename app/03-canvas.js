@@ -489,12 +489,13 @@
     }
     window.unretireNewFloorDrawingContent = unretireNewFloorDrawingContent;
 
-    async function invalidateFloorDrawingBeforeReplace(bldg, floorCode) {
+    async function invalidateFloorDrawingBeforeReplace(bldg, floorCode, opts) {
         if (!bldg || !bldg.id || !floorCode) return;
         const bldgId = bldg.id;
         const floorKey = `${bldgId}_${floorCode}`;
         // 2026-11-12 지우기 전에 옛 도면 그림을 보관 — 바꾼 뒤 「마킹 맞추기」에서 새 도면 위에 겹쳐 기준점을 찍는다(실패해도 교체는 계속)
-        if (typeof window.captureFloorDrawingForAlign === 'function') {
+        // 2026-11-24 도면 편집기로 고친 도면은 크기·위치가 그대로라 맞출 필요가 없다(skipAlignCapture)
+        if (!(opts && opts.skipAlignCapture) && typeof window.captureFloorDrawingForAlign === 'function') {
             await window.captureFloorDrawingForAlign(bldg, floorCode);
         }
         // 2026-11-17 옛 도면 내용의 지문을 남긴다 — 늦게 끝난 옛 저장·동기화 병합·서버의 옛 사본이 옛 도면을

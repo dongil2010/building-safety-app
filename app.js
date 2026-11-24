@@ -6015,7 +6015,7 @@ document.addEventListener('DOMContentLoaded', () => {
         }
     }
 
-// @@app-part 02-buildings.js sha=ca30679ed2c4 — 원본은 app/02-buildings.js (여기 말고 거기서 고칠 것)
+// @@app-part 02-buildings.js sha=1146f039dfc0 — 원본은 app/02-buildings.js (여기 말고 거기서 고칠 것)
     // --- 5. TAB MANAGER (진입 로직은 js/tabs/*.js) ---
     // ---- 마지막 작업 위치 기억·복원 (js/core/last-location.js, 2026-10-28) ----
     // 로그인 직후 복원 시도가 끝나기 전에는 기록·삭제를 하지 않는다(부팅 중 switchTab('tab-home')이 기록을 지우지 않게).
@@ -10477,6 +10477,106 @@ ${roundMobile ? '' : `<button type="button" class="icon-btn icon-btn-trash" titl
         });
     }
 
+    // --- 도면 편집기 연결 (2026-11-24, js/shared/drawing-editor.js) ---
+    // 편집기는 지금 층 도면 그림 위에 벽·문·창·기둥·집기를 그리고 기존 선을 흰색으로 지운 뒤, 같은 좌표 기준 크기
+    // (마킹 좌표계 = floorPlanRef, 보통 긴 변 4000)의 정수배 그림으로 내보낸다. 저장은 「파일로 교체」와 같은 길을
+    // 타되 크기·위치가 그대로라 마킹 맞추기 보관·회전 초기화는 하지 않는다 → 마킹은 그 자리에 그대로 남는다.
+    function drawingEditorTargetBuilding() {
+        const id = window.state.currentBuildingId;
+        if (!id) return null;
+        return (window.state.buildings || []).find((b) => b && b.id === id) || window.state.currentBuilding || null;
+    }
+
+    /** 편집할 바탕 그림: 가장 선명한 티어(8000 → 4000 → 지금 화면 그림)와 마킹 좌표 기준 크기 */
+    async function loadFloorDrawingForEditor() {
+        const bldg = drawingEditorTargetBuilding();
+        const fc = window.state.currentFloor;
+        if (!bldg || !fc) throw new Error('먼저 건물과 층을 열어 주세요.');
+        const ref = (typeof getFloorPlanDisplayDims === 'function') ? getFloorPlanDisplayDims() : null;
+        if (!ref || !(ref.w > 1) || !(ref.h > 1) || !window.state.bgImage) throw new Error('이 층 도면이 아직 열리지 않았습니다.');
+        const candidates = [];
+        const memTiers = bldg.floorDrawingTiers && bldg.floorDrawingTiers[fc];
+        const tryTier = async (dim) => {
+            let url = memTiers && (memTiers[String(dim)] || memTiers[dim]);
+            if (!isUsableRasterDrawingUrl(url)) {
+                try { url = await idbGetFloorDrawingTier(bldg.id, fc, dim); } catch (_e) { url = null; }
+            }
+            if (!isUsableRasterDrawingUrl(url) && navigator.onLine !== false
+                && typeof fetchAndCacheCloudFloorDrawingTier === 'function') {
+                try { url = await fetchAndCacheCloudFloorDrawingTier(bldg, fc, dim); } catch (_e) { url = null; }
+            }
+            if (isUsableRasterDrawingUrl(url)) candidates.push(url);
+        };
+        await tryTier(8000);
+        await tryTier(4000);
+        if (isUsableRasterDrawingUrl(bldg.floorDrawings && bldg.floorDrawings[fc])) candidates.push(bldg.floorDrawings[fc]);
+        const bgSrc = window.state.bgImage && (window.state.bgImage.currentSrc || window.state.bgImage.src);
+        if (bgSrc) candidates.push(bgSrc);
+        const floorLabel = ((bldg.floorsList || []).find((f) => f && f.floorCode === fc) || {}).floorLabel
+            || (typeof window.getFloorLabelFromCode === 'function' ? window.getFloorLabelFromCode(fc) : fc);
+        return {
+            buildingId: bldg.id,
+            buildingName: bldg.name || '',
+            floorCode: fc,
+            floorLabel,
+            refW: Math.round(ref.w),
+            refH: Math.round(ref.h),
+            candidates,
+            hasPdf: !!(typeof window.getFloorPdfDataUrl === 'function' && window.getFloorPdfDataUrl(bldg, fc)),
+            markingCount: ((window.state.defects && window.state.defects[`${bldg.id}_${fc}`]) || []).length
+        };
+    }
+
+    /** 편집기가 만든 그림(dataURL)으로 그 층 도면을 바꾼다 — 「파일로 교체」 저장과 같은 단계 */
+    async function replaceFloorDrawingFromEditor(buildingId, floorCode, dataUrl) {
+        const bldg = (window.state.buildings || []).find((b) => b && b.id === buildingId)
+            || (window.state.currentBuilding && window.state.currentBuilding.id === buildingId ? window.state.currentBuilding : null);
+        if (!bldg || !floorCode || !dataUrl) throw new Error('저장할 건물·층을 찾지 못했습니다.');
+        if (!bldg.floorDrawings) bldg.floorDrawings = {};
+        const sourceDataUrl = await window.resizeDataUrlToMaxDim(dataUrl, 16000);
+        const tiers = await window.buildFloorDrawingTiersFromDataUrl(sourceDataUrl);
+        const prepared = {
+            rasterDataUrl: (tiers && tiers['4000']) || await window.resizeDataUrlToMaxDim(sourceDataUrl, 4000),
+            sourceDataUrl,
+            tiers,
+            pdfDataUrl: null,
+            isPdf: false
+        };
+        await invalidateFloorDrawingBeforeReplace(bldg, floorCode, { skipAlignCapture: true });
+        if (typeof window.unretireNewFloorDrawingContent === 'function') {
+            window.unretireNewFloorDrawingContent(bldg.id, floorCode, prepared);
+        }
+        bldg.floorDrawings[floorCode] = prepared.rasterDataUrl;
+        const rasterUploaded = await uploadFloorDrawing(bldg.id, floorCode, prepared.rasterDataUrl);
+        if (!bldg.floorDrawingTiers) bldg.floorDrawingTiers = {};
+        bldg.floorDrawingTiers[floorCode] = (tiers && Object.keys(tiers).length) ? tiers : { '4000': prepared.rasterDataUrl };
+        clearFloorTierPersistedFlags(bldg.id, floorCode);
+        await uploadFloorDrawingTiers(bldg.id, floorCode, bldg.floorDrawingTiers[floorCode]);
+        cacheFloorDrawingSourceToDevice(bldg, floorCode, sourceDataUrl);
+        // 그림 도면이 됐다 — 옛 PDF가 남으면 그 층 핀이 옛 PDF 기준으로 어긋난다
+        await markFloorPdfRemoved(bldg, floorCode);
+        if (rasterUploaded) stampFloorDrawingUpdated(bldg, floorCode);
+        bumpDrawingEpoch(bldg, floorCode);
+        bldg._drawingReplaceGuard = bldg._drawingReplaceGuard || {};
+        bldg._drawingReplaceGuard[floorCode] = Date.now() + 120000;
+        await persistFloorDrawingAssetsForFloor(bldg, floorCode);
+        mirrorFloorDrawingToLiveBuildings(bldg, floorCode);
+        syncBuildingDrawingFloorCodes(bldg);
+        if (typeof invalidateCloudDrawingFloorCodesCache === 'function') invalidateCloudDrawingFloorCodesCache(bldg);
+        saveStateToLocalStorage();
+        if (typeof syncStateToFirebase === 'function') syncStateToFirebase();
+        if (window.state.currentBuildingId === bldg.id && window.state.currentFloor === floorCode
+            && typeof loadFloorDrawing === 'function') {
+            loadFloorDrawing(floorCode, { forceClear: true });
+        }
+        return { uploaded: !!rasterUploaded };
+    }
+    window.BSA = window.BSA || {};
+    window.BSA.drawingEditorBridge = {
+        load: loadFloorDrawingForEditor,
+        save: replaceFloorDrawingFromEditor
+    };
+
     // Save Edit Building & Merge New Drawings Action
     const btnSaveEditBuilding = document.getElementById('btnSaveEditBuilding');
     if (btnSaveEditBuilding) {
@@ -10885,7 +10985,7 @@ ${roundMobile ? '' : `<button type="button" class="icon-btn icon-btn-trash" titl
         });
     }
 
-// @@app-part 03-canvas.js sha=49ca8ce387ae — 원본은 app/03-canvas.js (여기 말고 거기서 고칠 것)
+// @@app-part 03-canvas.js sha=04c82f3eef8d — 원본은 app/03-canvas.js (여기 말고 거기서 고칠 것)
     // --- 8. DRAWING CANVAS ENGINE (PAN/ZOOM/ROTATE & PINS) ---
 
     function setupCanvas() {
@@ -11376,12 +11476,13 @@ ${roundMobile ? '' : `<button type="button" class="icon-btn icon-btn-trash" titl
     }
     window.unretireNewFloorDrawingContent = unretireNewFloorDrawingContent;
 
-    async function invalidateFloorDrawingBeforeReplace(bldg, floorCode) {
+    async function invalidateFloorDrawingBeforeReplace(bldg, floorCode, opts) {
         if (!bldg || !bldg.id || !floorCode) return;
         const bldgId = bldg.id;
         const floorKey = `${bldgId}_${floorCode}`;
         // 2026-11-12 지우기 전에 옛 도면 그림을 보관 — 바꾼 뒤 「마킹 맞추기」에서 새 도면 위에 겹쳐 기준점을 찍는다(실패해도 교체는 계속)
-        if (typeof window.captureFloorDrawingForAlign === 'function') {
+        // 2026-11-24 도면 편집기로 고친 도면은 크기·위치가 그대로라 맞출 필요가 없다(skipAlignCapture)
+        if (!(opts && opts.skipAlignCapture) && typeof window.captureFloorDrawingForAlign === 'function') {
             await window.captureFloorDrawingForAlign(bldg, floorCode);
         }
         // 2026-11-17 옛 도면 내용의 지문을 남긴다 — 늦게 끝난 옛 저장·동기화 병합·서버의 옛 사본이 옛 도면을
