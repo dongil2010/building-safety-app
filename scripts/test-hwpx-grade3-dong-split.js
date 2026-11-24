@@ -19,7 +19,7 @@ assert.ok(/const splitMapsByDong = !!\(dongParts && dongParts\.length > 1\)/.tes
 // 한 표에 두 동 사진이 섞이지 않음
 assert.ok(/const slot2 = \(decoded\[i \+ 1\] && \(!splitAlbumByDong \|\| decoded\[i \+ 1\]\.dongPart === slot1\.dongPart\)\)/.test(g3));
 // 소제목
-assert.ok(g3.includes('`${dl} 결함사진`') && g3.includes('`${dl} 상태조사위치도`'), 'dong headings');
+assert.ok(g3.includes('`${dl} 결함사진`') && g3.includes('`${dl} 상태조사 위치도`'), 'dong headings');
 // 1·2종 출력은 손대지 않음
 assert.ok(!g12.includes('splitAlbumByDong'), '1·2종 unchanged');
 
@@ -66,8 +66,8 @@ assert.ok(!g12.includes('HWPX_FIG_RESET'), '1·2종 unchanged');
     const fe = app.indexOf('\n    }\n', fs0);
     const fn = new Function('HWPX_HP_NS', 'HWPX_FIG_MARK', 'HWPX_FIG_RESET', 'hwpxFigureChapterNo',
         app.slice(fs0, fe + 6) + '\nreturn numberHwpxFigureCaptions;')(ns, '␟', '␞', () => 5);
-    const ts = ['␟␞A동 1층 상태조사위치도', '␟A동 2층 상태조사위치도', '␟␞B동 1층 상태조사위치도'].map((x) => ({ textContent: x }));
+    const ts = ['␟␞A동 1층 상태조사 위치도', '␟A동 2층 상태조사 위치도', '␟␞B동 1층 상태조사 위치도'].map((x) => ({ textContent: x }));
     fn({ getElementsByTagNameNS: () => ts }, '', { grade3: true });
-    assert.deepStrictEqual(ts.map((x) => x.textContent), ['[도면 5-1] A동 1층 상태조사위치도', '[도면 5-2] A동 2층 상태조사위치도', '[도면 5-1] B동 1층 상태조사위치도']);
+    assert.deepStrictEqual(ts.map((x) => x.textContent), ['[도면 5-1] A동 1층 상태조사 위치도', '[도면 5-2] A동 2층 상태조사 위치도', '[도면 5-1] B동 1층 상태조사 위치도']);
 }
 console.log('test-hwpx-grade3-dong-split: ok');

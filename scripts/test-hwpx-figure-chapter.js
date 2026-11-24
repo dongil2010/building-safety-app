@@ -50,9 +50,9 @@ assert.strictEqual(ctx.chapter('정기안전점검', { grade3: false }), 6, '1·
 
 const makeDoc = () => {
     const nodes = [
-        { textContent: `${MARK}지하1층 상태조사위치도` },
+        { textContent: `${MARK}지하1층 상태조사 위치도` },
         { textContent: '표 제목(표시 없음)' },
-        { textContent: `${MARK}지상1층 상태조사위치도` }
+        { textContent: `${MARK}지상1층 상태조사 위치도` }
     ];
     return { nodes, getElementsByTagNameNS: () => nodes };
 };
@@ -61,13 +61,13 @@ const makeDoc = () => {
     const doc = makeDoc();
     assert.strictEqual(ctx.number(doc, '정기안전점검'), 2);
     assert.deepStrictEqual(doc.nodes.map((n) => n.textContent),
-        ['[도면 6-1] 지하1층 상태조사위치도', '표 제목(표시 없음)', '[도면 6-2] 지상1층 상태조사위치도']);
+        ['[도면 6-1] 지하1층 상태조사 위치도', '표 제목(표시 없음)', '[도면 6-2] 지상1층 상태조사 위치도']);
 }
 {
     const doc = makeDoc();
     ctx.number(doc, '정밀안전점검');
     assert.deepStrictEqual(doc.nodes.map((n) => n.textContent),
-        ['[도면 7-1] 지하1층 상태조사위치도', '표 제목(표시 없음)', '[도면 7-2] 지상1층 상태조사위치도']);
+        ['[도면 7-1] 지하1층 상태조사 위치도', '표 제목(표시 없음)', '[도면 7-2] 지상1층 상태조사 위치도']);
 }
 
 ['정기안전점검', '정밀안전점검'].forEach((type) => {
@@ -75,15 +75,15 @@ const makeDoc = () => {
     const nodes = [
         { textContent: `${MARK}A동 지하1층 비파괴 장비조사 위치도` },
         { textContent: '표 제목(표시 없음)' },
-        { textContent: `${MARK}지하1층 상태조사위치도` },
-        { textContent: `${MARK}지상1층 상태조사위치도` },
-        { textContent: `${MARK}지상2층 상태조사위치도` }
+        { textContent: `${MARK}지하1층 상태조사 위치도` },
+        { textContent: `${MARK}지상1층 상태조사 위치도` },
+        { textContent: `${MARK}지상2층 상태조사 위치도` }
     ];
     const doc = { getElementsByTagNameNS: () => nodes };
     assert.strictEqual(ctx.number(doc, type, { grade3: true }), 4);
     assert.deepStrictEqual(nodes.map((n) => n.textContent), [
         '[도면 5-1] A동 지하1층 비파괴 장비조사 위치도', '표 제목(표시 없음)',
-        '[도면 5-2] 지하1층 상태조사위치도', '[도면 5-3] 지상1층 상태조사위치도', '[도면 5-4] 지상2층 상태조사위치도'
+        '[도면 5-2] 지하1층 상태조사 위치도', '[도면 5-3] 지상1층 상태조사 위치도', '[도면 5-4] 지상2층 상태조사 위치도'
     ], type);
 });
 
@@ -98,7 +98,7 @@ assert.strictEqual((g3Body.match(/numberHwpxFigureCaptions\(/g) || []).length, 1
 assert.strictEqual((g12Body.match(/numberHwpxFigureCaptions\(xmlDoc, bldg\.inspectionType\);/g) || []).length, 1, '1·2종은 그대로 6/7');
 assert.ok(!/grade3: true/.test(g12Body.slice(0, g12Body.indexOf('numberHwpxFigureCaptions(') + 80)));
 assert.ok(!/numberHwpxFigureCaptions\(xmlDoc\)/.test(app), '점검 종류 없이 부르면 정기점검도 7로 나간다');
-assert.strictEqual((app.match(/getFloorLabel\(floorCode\)\} 상태조사위치도/g) || []).length, 2);
-assert.ok(!/getFloorLabel\(floorCode\)\} 결함위치도/.test(app), '한글 위치도 캡션은 상태조사위치도');
+assert.strictEqual((app.match(/getFloorLabel\(floorCode\)\} 상태조사 위치도/g) || []).length, 2);
+assert.ok(!/getFloorLabel\(floorCode\)\} 결함위치도/.test(app), '한글 위치도 캡션은 상태조사 위치도');
 
 console.log('test-hwpx-figure-chapter: ok');

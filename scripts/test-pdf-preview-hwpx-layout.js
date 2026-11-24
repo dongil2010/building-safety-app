@@ -20,7 +20,7 @@ assert.ok(hwpxStart > 0 && hwpxEnd > hwpxStart);
 const shared = ['function paginateSurveyDefects(', 'function formatSurveyReportNo(', 'function getReportSurveyRowValues(']
     .map((h) => extractFunction(app, h)).join('\n');
 const FP = {
-    "hwpxExport": "ccac81f4fbcbc7bd", // 2026-11-21 3종 점검내용 -nEA 를 측정값에 붙임(보(G) 경사균열 / 0.2/0.5-2EA) — 일부러 바꿈
+    "hwpxExport": "91f1699f47e429e4", // 2026-11-24 위치도 캡션 「상태조사위치도」→「상태조사 위치도」 띄어쓰기 — 일부러 바꿈
     "sharedRows": "0ce605cc38dd62c3", // 2026-11-11 번호 칸: 직접 준 하위번호(noManual, NO.74-2)는 꼬리 유지 — 일부러 바꿈
     "hwpx-survey-row-fit.js": "3d22dcdf170a4bc4",
     "hwpx-font-8pt.js": "792b4169159c5676",
@@ -113,7 +113,7 @@ assert.ok(/reportHwpxWrapCell\(v, w, spec\.vertsize, isGrade3\)/.test(tableFn), 
 const prev = extractFunction(app, 'window.openReportPreviewModalFunc = async function(');
 assert.ok(/reportHwpxPageOpen\(`data-role="survey-page"/.test(prev));
 assert.ok(/reportHwpxPageOpen\(`data-role="location-map-page"/.test(prev));
-assert.ok(/\[도면 \$\{hwpxFigChapter\}-\$\{hwpxFigNo\}\] \$\{reportHwpxFloorLabel\(bldg, floorCode\)\} 상태조사위치도/.test(prev));
+assert.ok(/\[도면 \$\{hwpxFigChapter\}-\$\{hwpxFigNo\}\] \$\{reportHwpxFloorLabel\(bldg, floorCode\)\} 상태조사 위치도/.test(prev));
 assert.ok(/hwpxFigureChapterNo\(bldg\.inspectionType, \{ grade3: isGrade3Building\(bldg\) \}\)/.test(prev), '3종 5, 정기 6, 정밀 7');
 assert.ok(/\$\{hwpxSurveyTitleNo\}\) \$\{hwpxTitleFloor\} 상태조사표/.test(prev) && /\$\{hwpxSurveyTitleNo\}\) \$\{hwpxTitleFloor\}`/.test(prev), '한글과 같은 제목');
 

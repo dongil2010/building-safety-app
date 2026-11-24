@@ -259,11 +259,11 @@
                 // --- 3. 결함 위치도 (A4 세로 222mm 딱 맞게 렌더링) ---
                 const drawingDataUrl = renderFloorPlanCanvasDataUrl(floorCode);
 
-                // 한글 위치도와 같게: 그림 칸 + 캡션 칸 「[도면 N-M] 층 상태조사위치도」(번호는 위치도 쪽 순서)
+                // 한글 위치도와 같게: 그림 칸 + 캡션 칸 「[도면 N-M] 층 상태조사 위치도」(번호는 위치도 쪽 순서)
                 hwpxFigNo++;
                 const mapEmptyHtml = `<div style="color:#64748b; font-weight:700; font-size:10pt; text-align:center;">📍 ${escapeReportHtml(floorDisplayLabel)} 등록된 평면도 도면이 없습니다.<br><span style="font-size:8pt; font-weight:500;">(층별 도면 점검 탭에서 평면도 이미지를 등록하시면 결함 위치도가 자동으로 완성됩니다)</span></div>`;
                 reportPagesHtml += reportHwpxPageOpen(`data-role="location-map-page" data-floor="${escapeReportHtml(floorCode)}"`, reportTitleHeader)
-                    + buildReportHwpxMapHtml(drawingDataUrl, `[도면 ${hwpxFigChapter}-${hwpxFigNo}] ${reportHwpxFloorLabel(bldg, floorCode)} 상태조사위치도`, mapEmptyHtml)
+                    + buildReportHwpxMapHtml(drawingDataUrl, `[도면 ${hwpxFigChapter}-${hwpxFigNo}] ${reportHwpxFloorLabel(bldg, floorCode)} 상태조사 위치도`, mapEmptyHtml)
                     + reportHwpxPageClose(compName);
 
                 // --- 비파괴 및 변위/기울기 보고서 섹션 번호 관리 ---
@@ -2011,7 +2011,7 @@
             const tbl = p.getElementsByTagNameNS(HWPX_HP_NS, 'tbl')[0];
             if (!tbl || tbl.getAttribute('rowCnt') !== '2' || !tbl.getElementsByTagNameNS(HWPX_HP_NS, 'pic').length) return false;
             return Array.from(tbl.getElementsByTagNameNS(HWPX_HP_NS, 't'))
-                .some((t) => (t.textContent || '').indexOf(HWPX_FIG_MARK) === 0 && /상태조사위치도/.test(t.textContent));
+                .some((t) => (t.textContent || '').indexOf(HWPX_FIG_MARK) === 0 && /상태조사 ?위치도/.test(t.textContent));
         });
         const appendCrackGaugeLocationMaps = async () => {
             if (!mapFloors.length) return;
@@ -3760,7 +3760,7 @@
 
                         const captionTc = locationMapTbl.getElementsByTagNameNS(HP_NS, 'tc')[1];
                         const captionT = captionTc.getElementsByTagNameNS(HP_NS, 't')[0];
-                        if (captionT) captionT.textContent = `${HWPX_FIG_MARK}${getFloorLabel(floorCode)} 상태조사위치도`;
+                        if (captionT) captionT.textContent = `${HWPX_FIG_MARK}${getFloorLabel(floorCode)} 상태조사 위치도`;
                         return true;
                     }
                     if (!(opts && opts.silent)) {
@@ -5716,7 +5716,7 @@
             // 모든 층의 상태조사표/사진첩이 다 채워지고 표본 잔여 정리까지 끝난 뒤, 떼어뒀던 위치도
             // "틀" 문단을 층 수만큼 복제해 문서 맨 뒤에 순서대로 붙이고 채운다.
             if (grade3LocMapStampPara) {
-                // 2026-10-30 여러 동: 위치도도 동마다 「A동 상태조사위치도」 소제목(새 쪽)으로 나눈다
+                // 2026-10-30 여러 동: 위치도도 동마다 「A동 상태조사 위치도」 소제목(새 쪽)으로 나눈다
                 const splitMapsByDong = !!(dongParts && dongParts.length > 1);
                 let mapDong;
                 for (let i = 0; i < floorsData.length; i++) {
@@ -5732,7 +5732,7 @@
                         mapDong = floorsData[i].dongPart;
                         const dl = mapDong && mapDong.dongLabel;
                         if (dl && ndtAlbumSubHeadingStamp) {
-                            dongHead = makeHwpxTextParaFromStamp(ndtAlbumSubHeadingStamp, `${dl} 상태조사위치도`, HP_NS, true);
+                            dongHead = makeHwpxTextParaFromStamp(ndtAlbumSubHeadingStamp, `${dl} 상태조사 위치도`, HP_NS, true);
                             if (dongHead) sec.appendChild(dongHead);
                         }
                     }
@@ -6636,7 +6636,7 @@
 
                         const captionTc = locationMapTbl.getElementsByTagNameNS(HP_NS, 'tc')[1];
                         const captionT = captionTc.getElementsByTagNameNS(HP_NS, 't')[0];
-                        if (captionT) captionT.textContent = `${HWPX_FIG_MARK}${getFloorLabel(floorCode)} 상태조사위치도`;
+                        if (captionT) captionT.textContent = `${HWPX_FIG_MARK}${getFloorLabel(floorCode)} 상태조사 위치도`;
                         return true;
                     }
                     if (!(opts && opts.silent)) {

@@ -22,7 +22,7 @@ assert.ok(/pinDefects/.test(extractFunction(app, 'function renderNdtPrintCropCan
 
 const sec = extractFunction(app, 'async function appendHwpxCrackMonitorSectionEnd(');
 assert.ok(/renderNdtFloorPlanCanvasDataUrlAsync\(floorCode, '균열모니터'\)/.test(sec), '균열모니터 위치도를 그린다');
-assert.ok(/상태조사위치도/.test(sec), '결함 위치도 표를 틀로');
+assert.ok(sec.includes('/상태조사 ?위치도/'), '결함 위치도 표를 틀로(옛 문서의 붙여쓴 캡션도)');
 assert.ok(/균열게이지 위치도`/.test(sec) && /\$\{HWPX_FIG_MARK\}\$\{owner\.label\(floorCode\)\} 균열게이지 위치도/.test(sec), '캡션 [도면 N-M] 층 균열게이지 위치도');
 const callAt = sec.indexOf('await appendCrackGaugeLocationMaps()');
 assert.ok(callAt > sec.indexOf('sec.appendChild(dataPara)'), '측정표 뒤');

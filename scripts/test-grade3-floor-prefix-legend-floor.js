@@ -45,5 +45,5 @@ assert.ok(/buildVectorLegendDrawPlan\(measureCtx, imgW, imgH, floorCode\)/.test(
 const legendFn = extractFunction(app, 'function drawLocationMapLegend(');
 assert.ok(/if \(interactive && !\(legendOpts && legendOpts\.box\)/.test(legendFn));
 // 3종 위치도 캡션은 그 도면(외부 입면은 입면마다) 이름
-assert.ok(/captionT\.textContent = `\$\{HWPX_FIG_MARK\}\$\{getFloorLabel\(floorCode\)\} 상태조사위치도`/.test(app));
+assert.ok(/captionT\.textContent = `\$\{HWPX_FIG_MARK\}\$\{getFloorLabel\(floorCode\)\} 상태조사 위치도`/.test(app));
 console.log('test-grade3-floor-prefix-legend-floor: ok');
