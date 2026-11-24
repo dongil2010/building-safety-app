@@ -1412,7 +1412,8 @@
                     <input type="text" data-crack-w inputmode="decimal" placeholder="직접입력" autocomplete="off" value="${String(m.width || '').replace(/"/g, '&quot;')}">
                     <span class="defect-measure-unit" data-crack-w-unit>${m.join === 'x' ? 'm' : 'mm'}</span>
                 </label>
-                <button type="button" class="defect-measure-join-toggle" tabindex="-1" data-crack-join="${m.join}" title="${m.join === 'x' ? 'x 모드(폭·길이 모두 m) — 누르면 / 로 전환' : '/ 모드(폭 mm · 길이 m) — 누르면 x 로 전환'}">${m.join}</button>
+                <!-- 2026-11-24 읽는 쪽은 dataset.join(data-join) — data-crack-join만 있으면 x로 불러온 행이 추가·저장 때 / 로 풀렸다 -->
+                <button type="button" class="defect-measure-join-toggle" tabindex="-1" data-crack-join="${m.join}" data-join="${m.join}" title="${m.join === 'x' ? 'x 모드(폭·길이 모두 m) — 누르면 / 로 전환' : '/ 모드(폭 mm · 길이 m) — 누르면 x 로 전환'}">${m.join}</button>
                 <label class="defect-measure-btn">
                     <span class="defect-measure-name">길이</span>
                     <input type="text" data-crack-l inputmode="decimal" placeholder="직접입력" autocomplete="off" value="${String(m.length || '').replace(/"/g, '&quot;')}">
@@ -1589,7 +1590,8 @@
         const list = document.getElementById('surveySizeMeasureList');
         document.getElementById('btnSurveySizeAdd')?.addEventListener('click', () => {
             const rows = readCrackMeasureRowsFromDom(list);
-            rows.push({ width: '', length: '', count: '', join: '/' });
+            // 새 행은 바로 윗행의 x · / 를 따른다(2026-11-24)
+            rows.push({ width: '', length: '', count: '', join: rows.length ? rows[rows.length - 1].join : '/' });
             renderCrackMeasureRows(rows, { list, onChange: surveySizePreviewUpdate });
             surveySizePreviewUpdate();
             const last = list.querySelector('.defect-crack-measure-row:last-child [data-crack-w]');
@@ -1636,7 +1638,8 @@
             addBtn.addEventListener('click', () => {
                 if (isDefectBulkEditMode()) markDefectBulkFieldChanged('crackMeasures');
                 const rows = readCrackMeasureRowsFromDom();
-                rows.push({ width: '', length: '', count: '', join: '/' });
+                // 새 행은 바로 윗행의 x · / 를 따른다(2026-11-24)
+                rows.push({ width: '', length: '', count: '', join: rows.length ? rows[rows.length - 1].join : '/' });
                 renderCrackMeasureRows(rows);
                 if (typeof scheduleDefectAutoApply === 'function') scheduleDefectAutoApply();
             });
