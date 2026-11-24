@@ -409,7 +409,9 @@
         if (!task || typeof task.on !== 'function') return Promise.resolve(task);
         const stallMs = (opts && opts.stallMs) || UPLOAD_STALL_MS;
         const checkMs = (opts && opts.checkMs) || UPLOAD_STALL_CHECK_MS;
-        const isHidden = () => typeof document !== 'undefined' && document.visibilityState === 'hidden';
+        // 2026-11-24 충전 중 백그라운드 올리기(전경 서비스)가 붙들고 있으면 화면이 꺼져도 실제로 전송 중이니 멈춤 검사를 한다
+        const isHidden = () => typeof document !== 'undefined' && document.visibilityState === 'hidden'
+            && !(typeof window !== 'undefined' && window.__bsaBgUploadActive);
         return new Promise(function (resolve, reject) {
             let lastProgressAt = Date.now();
             let bytes = 0;

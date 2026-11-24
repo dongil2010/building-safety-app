@@ -31,6 +31,7 @@ public class MainActivity extends BridgeActivity {
         registerPlugin(GallerySaverPlugin.class);
         registerPlugin(PhotoRelayPlugin.class);
         registerPlugin(BsaCameraPlugin.class);
+        registerPlugin(BackgroundUploadPlugin.class);
         super.onCreate(savedInstanceState);
         enterFullscreen();
         try {

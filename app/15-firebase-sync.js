@@ -231,6 +231,49 @@
         runPhotoPhaseWithinBudget([], async () => { await uploadPendingJournalPhotos(); return new Set(); })
             .catch((e) => console.warn('[사진] 남은 사진 올리기 실패(' + reason + ')', e));
     };
+    /**
+     * 2026-11-24 충전 중 백그라운드 올리기 — 남은 양을 안드로이드 앱(BsaBackgroundUpload)에 알린다.
+     * 남은 게 있고 충전 중이면 앱이 전경 서비스로 프로세스·CPU를 붙들어, 앱이 뒤에 있거나 화면이 꺼져도
+     * 이 웹의 올리기(위 bsaKickPendingUploads·동기화)가 계속 돈다. 0건이면 서비스를 내린다. 브라우저에서는 아무것도 안 함.
+     */
+    let _bgUploadLastSent = -1;
+    let _bgUploadLastAt = 0;
+    function countPendingUploadsForBackground() {
+        let n = _dirtyFloorKeys.size;
+        try {
+            const j = typeof syncJournal === 'function' ? syncJournal() : null;
+            const t = photoRetryTracker();
+            if (j) {
+                // 멈춘 사진(권한·원본 없음 등)은 사람이 풀어야 하니 빼고 센다
+                const parked = new Set(t ? t.parked().map((p) => p.id) : []);
+                n += j.pendingEntries().filter((e) => e.k === 'photo' && !isPhotoMarkedOnStorage(e.id) && !parked.has(e.id)).length;
+            }
+        } catch (_e) { /* 셈 실패 — 층 수만 */ }
+        if (isSyncParked()) n = 0;   // 멈춘 올리기는 사람이 풀어야 한다 — 뒤에서 붙들고 있어도 소용없음
+        return n;
+    }
+    window.bsaReportBackgroundUpload = function (force) {
+        const cap = window.Capacitor;
+        // 옛 APK에는 이 기능이 없다 — 있을 때만(새 APK)
+        if (!cap || (typeof cap.isPluginAvailable === 'function' && !cap.isPluginAvailable('BsaBackgroundUpload'))) return;
+        const plugin = cap.Plugins && cap.Plugins.BsaBackgroundUpload;
+        if (!plugin || typeof plugin.setPending !== 'function') return;
+        let n = 0;
+        if (db && window.state && window.state.companyId) n = countPendingUploadsForBackground();
+        const now = Date.now();
+        if (!force && n === _bgUploadLastSent && now - _bgUploadLastAt < 60000) return;
+        _bgUploadLastSent = n;
+        _bgUploadLastAt = now;
+        Promise.resolve(plugin.setPending({ count: n }))
+            .then((r) => { window.__bsaBgUploadActive = !!(r && r.running); })
+            .catch((e) => console.warn('[백그라운드 올리기] 알리기 실패', e));
+    };
+    setInterval(() => { try { window.bsaReportBackgroundUpload(false); } catch (_e) { /* ignore */ } }, 15000);
+    document.addEventListener('visibilitychange', () => {
+        // 뒤로 가는 순간(아직 앞으로 쳐 주는 동안) 남은 양을 알려 서비스가 뜰 수 있게
+        try { window.bsaReportBackgroundUpload(true); } catch (_e) { /* ignore */ }
+        if (document.visibilityState === 'hidden' && typeof window.bsaKickPendingUploads === 'function') window.bsaKickPendingUploads('hidden');
+    });
     function onSyncParked(r) {
         console.warn('[동기화] 자동 올리기를 멈춤:', r);
         if (typeof window.showToast === 'function') {

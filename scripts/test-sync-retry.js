@@ -171,6 +171,14 @@ assert.strictEqual(s.gate.state().fails, 0);
     assert.ok(load.indexOf('window._photoCache[pid]') < load.indexOf('_nonExistentPhotoIds.has(pid)'), '캐시에 주소가 있으면 「없음」 표시보다 먼저');
     const seed = app.slice(app.indexOf('function seedPhotoCacheFromUrlMap('), app.indexOf('function mergeFloorBundleIntoState('));
     assert.ok(seed.includes('_nonExistentPhotoIds.delete(pid)'), '서버 층 묶음에 주소가 오면 「없음」 해제');
+    // 2026-11-24 충전 중 백그라운드 올리기: 네이티브 연결
+    const man = fs.readFileSync(path.join(root, 'android', 'app', 'src', 'main', 'AndroidManifest.xml'), 'utf8');
+    assert.ok(/\.UploadKeepAliveService"[\s\S]{0,80}foregroundServiceType="dataSync"/.test(man), '전경 서비스(dataSync) 등록');
+    assert.ok(man.includes('android.permission.WAKE_LOCK'), 'WAKE_LOCK 권한');
+    const main = fs.readFileSync(path.join(root, 'android', 'app', 'src', 'main', 'java', 'kr', 'buildingsafety', 'inspection', 'MainActivity.java'), 'utf8');
+    assert.ok(main.includes('registerPlugin(BackgroundUploadPlugin.class)'), '플러그인 등록');
+    const bg = app.slice(app.indexOf('window.bsaReportBackgroundUpload = function'));
+    assert.ok(bg.indexOf("isPluginAvailable('BsaBackgroundUpload')") > 0 && bg.indexOf("isPluginAvailable('BsaBackgroundUpload')") < bg.indexOf('setPending('), '옛 APK에서는 부르지 않음');
 }
 
 // 탭 사이 잠금: 하나만 잡힘
