@@ -57,8 +57,8 @@ assert.deepStrictEqual(numbering([['A', 2], ['A', 1], ['B', 1], ['B', 2]], false
 assert.ok(/const splitPriorityByDong = !!\(dongParts && dongParts\.length > 1\)/.test(g3));
 assert.ok(g3.includes('`${dl} 중점관리 항목`'), 'priority dong heading');
 assert.ok(!g12.includes('photoNoByDong') && !g12.includes('splitPriorityByDong'), '1·2종 unchanged');
-// 2026-10-30 위치도 도면 번호도 동마다 1부터
-assert.ok(g3.includes('HWPX_FIG_MARK + HWPX_FIG_RESET + capT.textContent'), 'fig reset per dong');
+// 2026-11-24 위치도 도면 번호는 여러 동이어도 문서 전체로 이어 매긴다(동마다 [도면 5-1] 반복 금지)
+assert.ok(!g3.includes('HWPX_FIG_MARK + HWPX_FIG_RESET + capT.textContent'), 'fig numbers continue across dongs');
 assert.ok(!g12.includes('HWPX_FIG_RESET'), '1·2종 unchanged');
 {
     const ns = 'http://www.hancom.co.kr/hwpml/2011/paragraph';

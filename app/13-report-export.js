@@ -5726,9 +5726,7 @@
                     const mapCodes = locationMapCodesForPage(floorsData[i], floorCode);
                     let mapSeq = 0;
                     let dongHead = null;
-                    let resetFigNo = false;
                     if (splitMapsByDong && floorsData[i].dongPart !== mapDong && mapCodes.length) {
-                        resetFigNo = true;
                         mapDong = floorsData[i].dongPart;
                         const dl = mapDong && mapDong.dongLabel;
                         if (dl && ndtAlbumSubHeadingStamp) {
@@ -5750,13 +5748,8 @@
                         );
                         // 도면이 없는 면은 빈 틀을 남기지 않는다
                         if (!ok && clonedPara.parentNode) clonedPara.parentNode.removeChild(clonedPara);
-                        // 2026-10-30 여러 동: 동마다 도면 번호를 [도면 5-1]부터 다시
-                        if (ok && resetFigNo) {
-                            const capT = Array.from(locationMapTbl.getElementsByTagNameNS(HP_NS, 't'))
-                                .find((t) => (t.textContent || '').indexOf(HWPX_FIG_MARK) === 0);
-                            if (capT) capT.textContent = HWPX_FIG_MARK + HWPX_FIG_RESET + capT.textContent.slice(HWPX_FIG_MARK.length);
-                            resetFigNo = false;
-                        }
+                        // 2026-11-24 여러 동이어도 도면 번호는 문서 전체로 이어 매긴다([도면 5-1] 반복 금지, 사용자 지정).
+                        // 사진 번호는 비고와 맞춰야 해서 지금처럼 동마다 1부터.
                     }
                 }
             }

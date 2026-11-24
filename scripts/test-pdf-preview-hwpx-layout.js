@@ -20,7 +20,7 @@ assert.ok(hwpxStart > 0 && hwpxEnd > hwpxStart);
 const shared = ['function paginateSurveyDefects(', 'function formatSurveyReportNo(', 'function getReportSurveyRowValues(']
     .map((h) => extractFunction(app, h)).join('\n');
 const FP = {
-    "hwpxExport": "91f1699f47e429e4", // 2026-11-24 위치도 캡션 「상태조사위치도」→「상태조사 위치도」 띄어쓰기 — 일부러 바꿈
+    "hwpxExport": "1e5794ee3c809bdc", // 2026-11-24 3종 여러 동: 위치도 도면 번호를 동마다 1부터 다시 매기지 않고 이어 매김 — 일부러 바꿈
     "sharedRows": "0ce605cc38dd62c3", // 2026-11-11 번호 칸: 직접 준 하위번호(noManual, NO.74-2)는 꼬리 유지 — 일부러 바꿈
     "hwpx-survey-row-fit.js": "3d22dcdf170a4bc4",
     "hwpx-font-8pt.js": "792b4169159c5676",
