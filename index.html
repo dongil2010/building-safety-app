@@ -4,6 +4,60 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover" id="viewportMeta">
     <script>
+    /*
+     * 앱 파일(js/*, app.js) 하나라도 못 받으면 다시 연다. (2026-11-24)
+     * 연결이 잠깐 끊기거나 배포 도중이면 sync-merge.js 같은 파일 하나만 503/404로 빠지고 화면은 뜬다.
+     * 그러면 「올리기 실패 — Cannot read properties of undefined (reading 'isLightweightCloudPhotoRef')」
+     * 처럼 그 파일을 쓰는 곳마다 계속 실패한다. 처음 여는 중에만 보고, 2분에 2번까지만 다시 연다.
+     * 그래도 안 되면 위에 안내 띠를 띄운다. 이 코드는 파일로 빼지 않는다(그 파일도 못 받을 수 있음).
+     */
+    (function () {
+        var KEY = 'bsa_script_reload_tries';
+        var failed = [];
+        function readTries() {
+            try {
+                var t = JSON.parse(sessionStorage.getItem(KEY) || '[]');
+                var now = Date.now();
+                return Array.isArray(t) ? t.filter(function (x) { return now - x < 120000; }) : [];
+            } catch (e) { return []; }
+        }
+        window.addEventListener('error', function (ev) {
+            var el = ev && ev.target;
+            if (!el || el.tagName !== 'SCRIPT' || !el.src) return;
+            if (document.readyState !== 'loading') return;
+            var u;
+            try { u = new URL(el.src, location.href); } catch (e) { return; }
+            if (u.origin !== location.origin) return;
+            failed.push(u.pathname.split('/').pop());
+            try { console.error('[앱 파일 못 받음]', u.pathname); } catch (e) {}
+            if (window.__bsaScriptReloading) return;
+            var tries = readTries();
+            if (tries.length >= 2 || navigator.onLine === false) return;
+            tries.push(Date.now());
+            try { sessionStorage.setItem(KEY, JSON.stringify(tries)); } catch (e) { return; }
+            window.__bsaScriptReloading = true;
+            // 바로 다시 열면 끊긴 연결이 아직 안 돌아와 있다 — 잠깐 쉬었다 연다.
+            setTimeout(function () { location.reload(); }, 1500 * tries.length);
+        }, true);
+        document.addEventListener('DOMContentLoaded', function () {
+            if (!failed.length || window.__bsaScriptReloading) return;
+            var bar = document.createElement('div');
+            bar.id = 'bsaScriptLoadFailBar';
+            bar.style.cssText = 'position:fixed;top:0;left:0;right:0;z-index:2147483647;background:#b91c1c;color:#fff;'
+                + 'padding:10px 14px;font:600 14px/1.4 sans-serif;display:flex;gap:10px;align-items:center;flex-wrap:wrap';
+            bar.textContent = '앱 파일 일부를 받지 못했습니다(' + failed.join(', ') + '). 인터넷 연결을 확인한 뒤 새로고침해 주세요. 그 전에는 서버 올리기가 실패할 수 있습니다.';
+            var btn = document.createElement('button');
+            btn.type = 'button';
+            btn.textContent = '새로고침';
+            btn.style.cssText = 'background:#fff;color:#b91c1c;border:0;border-radius:6px;padding:6px 12px;font-weight:700';
+            btn.onclick = function () {
+                try { sessionStorage.removeItem(KEY); } catch (e) {}
+                location.reload();
+            };
+            bar.appendChild(btn);
+            document.body.appendChild(bar);
+        });
+    })();
     (function () {
         var ua = navigator.userAgent || '';
         var tablet = /iPad|Tablet|PlayBook|Silk/i.test(ua)
