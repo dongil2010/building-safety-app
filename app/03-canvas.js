@@ -1568,7 +1568,13 @@
             });
             }
 
-            drawPendingDefectPreview(ctx, currentDefects);
+            // 새 마킹 입력 중 미리보기 핀도 부재명·결함내용이 비면 보라색
+            _mapHighlightUnfilled = true;
+            try {
+                drawPendingDefectPreview(ctx, currentDefects);
+            } finally {
+                _mapHighlightUnfilled = false;
+            }
 
             if (isAreaDrag) {
             drawAreaRect(ctx, {

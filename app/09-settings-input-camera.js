@@ -1398,6 +1398,8 @@
         const arrowOctant = ((parseInt(document.getElementById('defectArrowOctant')?.value || '0', 10) % 8) + 8) % 8;
         const grp = getActiveMarkingGroup();
         const pinNo = (grp && grp.groupNo) ? grp.groupNo : no;
+        // 미입력 보라색 판정용 — 입력창의 부재명
+        const pendingComp = getDefectComboValue(document.getElementById('defectComponent'), document.getElementById('defectComponentInput')) || '';
 
         if (window._pendingAreaRect) {
             const r = window._pendingAreaRect;
@@ -1411,6 +1413,7 @@
             no: pinNo,
             groupNo: pinNo,
             category,
+            component: pendingComp,
             defectType: getDefectComboValue(document.getElementById('defectType'), document.getElementById('defectTypeInput')) || '',
             x: pending.x,
             y: pending.y,
@@ -1428,6 +1431,7 @@
             no: pinNo,
             groupNo: pinNo,
             category,
+            component: pendingComp,
             defectType: getDefectComboValue(document.getElementById('defectType'), document.getElementById('defectTypeInput')) || '',
             x: pending.x,
             y: pending.y,

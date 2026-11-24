@@ -11026,7 +11026,7 @@ ${roundMobile ? '' : `<button type="button" class="icon-btn icon-btn-trash" titl
         });
     }
 
-// @@app-part 03-canvas.js sha=2085a2e624e1 — 원본은 app/03-canvas.js (여기 말고 거기서 고칠 것)
+// @@app-part 03-canvas.js sha=da0e85e0e2fc — 원본은 app/03-canvas.js (여기 말고 거기서 고칠 것)
     // --- 8. DRAWING CANVAS ENGINE (PAN/ZOOM/ROTATE & PINS) ---
 
     function setupCanvas() {
@@ -12596,7 +12596,13 @@ ${roundMobile ? '' : `<button type="button" class="icon-btn icon-btn-trash" titl
             });
             }
 
-            drawPendingDefectPreview(ctx, currentDefects);
+            // 새 마킹 입력 중 미리보기 핀도 부재명·결함내용이 비면 보라색
+            _mapHighlightUnfilled = true;
+            try {
+                drawPendingDefectPreview(ctx, currentDefects);
+            } finally {
+                _mapHighlightUnfilled = false;
+            }
 
             if (isAreaDrag) {
             drawAreaRect(ctx, {
@@ -36968,7 +36974,7 @@ ${roundMobile ? '' : `<button type="button" class="icon-btn icon-btn-trash" titl
         }
     }
 
-// @@app-part 09-settings-input-camera.js sha=0c49acd8ebac — 원본은 app/09-settings-input-camera.js (여기 말고 거기서 고칠 것)
+// @@app-part 09-settings-input-camera.js sha=bd5c22535dd4 — 원본은 app/09-settings-input-camera.js (여기 말고 거기서 고칠 것)
     // --- 카테고리별 핀/박스 색상 설정 모달 ---
     // 결함 색상은 getDefectColor()가 쓰는 등급·상태 키와 맞춰야 도면에 바로 반영됨
     const STYLE_COLOR_FIELDS = [
@@ -38368,6 +38374,8 @@ ${roundMobile ? '' : `<button type="button" class="icon-btn icon-btn-trash" titl
         const arrowOctant = ((parseInt(document.getElementById('defectArrowOctant')?.value || '0', 10) % 8) + 8) % 8;
         const grp = getActiveMarkingGroup();
         const pinNo = (grp && grp.groupNo) ? grp.groupNo : no;
+        // 미입력 보라색 판정용 — 입력창의 부재명
+        const pendingComp = getDefectComboValue(document.getElementById('defectComponent'), document.getElementById('defectComponentInput')) || '';
 
         if (window._pendingAreaRect) {
             const r = window._pendingAreaRect;
@@ -38381,6 +38389,7 @@ ${roundMobile ? '' : `<button type="button" class="icon-btn icon-btn-trash" titl
             no: pinNo,
             groupNo: pinNo,
             category,
+            component: pendingComp,
             defectType: getDefectComboValue(document.getElementById('defectType'), document.getElementById('defectTypeInput')) || '',
             x: pending.x,
             y: pending.y,
@@ -38398,6 +38407,7 @@ ${roundMobile ? '' : `<button type="button" class="icon-btn icon-btn-trash" titl
             no: pinNo,
             groupNo: pinNo,
             category,
+            component: pendingComp,
             defectType: getDefectComboValue(document.getElementById('defectType'), document.getElementById('defectTypeInput')) || '',
             x: pending.x,
             y: pending.y,
