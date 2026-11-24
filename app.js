@@ -11033,7 +11033,7 @@ ${roundMobile ? '' : `<button type="button" class="icon-btn icon-btn-trash" titl
         });
     }
 
-// @@app-part 03-canvas.js sha=ed100a9d2466 — 원본은 app/03-canvas.js (여기 말고 거기서 고칠 것)
+// @@app-part 03-canvas.js sha=7fcd4af90a85 — 원본은 app/03-canvas.js (여기 말고 거기서 고칠 것)
     // --- 8. DRAWING CANVAS ENGINE (PAN/ZOOM/ROTATE & PINS) ---
 
     function setupCanvas() {
@@ -13882,7 +13882,11 @@ ${roundMobile ? '' : `<button type="button" class="icon-btn icon-btn-trash" titl
                 _mapStyleRenderContext.buildingId,
                 _mapStyleRenderContext.floorCode
             )];
-            if (saved && saved.styleSizes) return saved.styleSizes;
+            // 2026-11-24 화면(applyFloorMapStyleSettings)과 같게: 전체 기본값 위에 그 층 값을 덮는다
+            // (층 저장에 빠진 키가 기본 100%로 떨어져 출력 위치도만 크기가 달라지던 것)
+            if (saved && saved.styleSizes) {
+                return mergeStyleSizesSubset(cloneStyleSizesMap(state._globalStyleSizesFallback), saved.styleSizes);
+            }
         }
         return state.styleSizes;
     }
@@ -13898,9 +13902,20 @@ ${roundMobile ? '' : `<button type="button" class="icon-btn icon-btn-trash" titl
         return state.defectLeaderLineScale;
     }
 
-    function getStyleSize(key) {
+    // 2026-11-24 「마킹 크기가 지맘대로 제각각」: 결함 핀 크기가 구조체·비구조체·마감재 × 결함·양호 6칸에 따로 저장돼
+    // 칸마다 값이 어긋나면 같은 색으로 보이는 핀이 분류에 따라 크기가 달랐다(핀 색은 분류가 아니라 등급 기준이라 구분도 안 됨).
+    // 결함 핀은 모두 구조체 칸 크기 하나를 쓴다(위 「핀 크기」 일괄 슬라이더가 보여 주는 값).
+    const DEFECT_STYLE_SIZE_CANON_KEY = 'defectStructural';
+
+    function resolveStyleSizeKey(key) {
         // 강도·탄산화 핀/화살표/선 굵기는 항상 동일 (강도 설정을 공유)
-        const sizeKey = (key === 'ndtCarbonation') ? 'ndtStrength' : key;
+        if (key === 'ndtCarbonation') return 'ndtStrength';
+        if (DEFECT_STYLE_SIZE_KEYS.includes(key)) return DEFECT_STYLE_SIZE_CANON_KEY;
+        return key;
+    }
+
+    function getStyleSize(key) {
+        const sizeKey = resolveStyleSizeKey(key);
         const sizesSource = getActiveStyleSizesSource();
         const custom = sizesSource && sizesSource[sizeKey];
         const def = DEFAULT_STYLE_SIZES[sizeKey] || DEFAULT_STYLE_SIZES[key] || { pin: 1.0, arrow: 1.0, leader: 1.0 };
@@ -13921,12 +13936,12 @@ ${roundMobile ? '' : `<button type="button" class="icon-btn icon-btn-trash" titl
         };
     }
 
-    /** 스타일 크기 저장 — 강도/탄산화는 서로 동기화 */
+    /** 스타일 크기 저장 — 강도/탄산화는 서로 동기화, 결함 핀 6칸도 서로 동기화 */
     function setStyleSizeFields(key, patch) {
         if (!state.styleSizes) state.styleSizes = {};
         const keys = (key === 'ndtStrength' || key === 'ndtCarbonation')
             ? ['ndtStrength', 'ndtCarbonation']
-            : [key];
+            : (DEFECT_STYLE_SIZE_KEYS.includes(key) ? DEFECT_STYLE_SIZE_KEYS.slice() : [key]);
         keys.forEach((k) => {
             if (!state.styleSizes[k]) state.styleSizes[k] = {};
             Object.keys(patch || {}).forEach((field) => {
@@ -37010,7 +37025,7 @@ ${roundMobile ? '' : `<button type="button" class="icon-btn icon-btn-trash" titl
         }
     }
 
-// @@app-part 09-settings-input-camera.js sha=bd5c22535dd4 — 원본은 app/09-settings-input-camera.js (여기 말고 거기서 고칠 것)
+// @@app-part 09-settings-input-camera.js sha=d83acf76e9c7 — 원본은 app/09-settings-input-camera.js (여기 말고 거기서 고칠 것)
     // --- 카테고리별 핀/박스 색상 설정 모달 ---
     // 결함 색상은 getDefectColor()가 쓰는 등급·상태 키와 맞춰야 도면에 바로 반영됨
     const STYLE_COLOR_FIELDS = [
@@ -37114,6 +37129,21 @@ ${roundMobile ? '' : `<button type="button" class="icon-btn icon-btn-trash" titl
             if (shapeInput) shapeInput.value = sh.shape;
             if (fillInput) fillInput.checked = sh.fill;
             if (numFmtInput) numFmtInput.value = sh.numberFormat;
+        });
+    }
+
+    /** 결함 핀 6칸(구조체·비구조체·마감재 × 결함·양호)은 크기 하나를 같이 쓴다 — 한 칸을 움직이면 나머지 칸 표시도 맞춤 */
+    function syncDefectSizeControlsUi() {
+        const sz = getStyleSize(DEFECT_STYLE_SIZE_KEYS[0]);
+        DEFECT_STYLE_SIZE_FIELDS.forEach(([suffix]) => {
+            const pinInput = document.getElementById(`stylePinSize${suffix}`);
+            const pinLabel = document.getElementById(`stylePinSize${suffix}Label`);
+            const arrowInput = document.getElementById(`styleArrowSize${suffix}`);
+            const arrowLabel = document.getElementById(`styleArrowSize${suffix}Label`);
+            if (pinInput) pinInput.value = sz.pin;
+            if (pinLabel) pinLabel.textContent = `${Math.round(sz.pin * 100)}%`;
+            if (arrowInput) arrowInput.value = sz.arrow;
+            if (arrowLabel) arrowLabel.textContent = `${Math.round(sz.arrow * 100)}%`;
         });
     }
 
@@ -37451,6 +37481,7 @@ ${roundMobile ? '' : `<button type="button" class="icon-btn icon-btn-trash" titl
                     setStyleSizeFields(key, { pin: v });
                     if (pinLabel) pinLabel.textContent = `${Math.round(v * 100)}%`;
                     if (key === 'ndtStrength' || key === 'ndtCarbonation') syncNdtStrengthCarbSizeControlsUi();
+                    if (DEFECT_STYLE_SIZE_KEYS.includes(key)) syncDefectSizeControlsUi();
                     if (typeof window.syncBulkStyleSlidersUi === 'function') window.syncBulkStyleSlidersUi();
                     refreshAllStyleColoredCanvases();
                 });
@@ -37461,6 +37492,7 @@ ${roundMobile ? '' : `<button type="button" class="icon-btn icon-btn-trash" titl
                     setStyleSizeFields(key, { arrow: v });
                     if (arrowLabel) arrowLabel.textContent = `${Math.round(v * 100)}%`;
                     if (key === 'ndtStrength' || key === 'ndtCarbonation') syncNdtStrengthCarbSizeControlsUi();
+                    if (DEFECT_STYLE_SIZE_KEYS.includes(key)) syncDefectSizeControlsUi();
                     if (typeof window.syncBulkStyleSlidersUi === 'function') window.syncBulkStyleSlidersUi();
                     refreshAllStyleColoredCanvases();
                 });
@@ -37471,6 +37503,7 @@ ${roundMobile ? '' : `<button type="button" class="icon-btn icon-btn-trash" titl
                     setStyleSizeFields(key, { leader: v });
                     if (leaderLabel) leaderLabel.textContent = `${Math.round(v * 100)}%`;
                     if (key === 'ndtStrength' || key === 'ndtCarbonation') syncNdtStrengthCarbSizeControlsUi();
+                    if (DEFECT_STYLE_SIZE_KEYS.includes(key)) syncDefectSizeControlsUi();
                     if (typeof window.syncBulkStyleSlidersUi === 'function') window.syncBulkStyleSlidersUi();
                     refreshAllStyleColoredCanvases();
                 });
