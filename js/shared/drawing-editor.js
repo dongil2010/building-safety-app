@@ -273,14 +273,16 @@
             info: info,
             img: img,
             unit: long / 100,
-            lw: Math.max(1.2, long / 2000),
+            // 선 굵기 단위: 긴 변 4000 기준 1px. 예전 기본(2px)은 원래 도면 선보다 굵어 보였다(2026-11-24)
+            lwUnit: long / 4000,
+            lw: Math.max(0.5, long / 4000),
             objs: [],
             undo: [],
             redo: [],
             tool: 'select',
             sel: -1,
             view: { scale: 1, ox: 0, oy: 0 },
-            ortho: true,
+            angleStep: 15, // 끌어 그릴 때 각도 붙이기(0 = 자유). Shift를 누르면 반대로
             eraserSize: Math.max(4, long / 250),
             wallTh: Math.max(6, long / 250),
             wallFill: 'white',
@@ -313,6 +315,7 @@
             '#bsaDrawingEditor .bde-opt{display:flex;align-items:center;gap:4px;font-size:12px;color:#cbd5e1;white-space:nowrap;}',
             '#bsaDrawingEditor .bde-opt input[type=range]{width:80px;}',
             '#bsaDrawingEditor .bde-opt select{font-size:12px;border-radius:5px;padding:2px;}',
+            '#bsaDrawingEditor .bde-opt .bde-val{min-width:26px;font-variant-numeric:tabular-nums;color:#f8fafc;}',
             '#bsaDrawingEditor .bde-body{flex:1;min-height:0;display:flex;}',
             '#bsaDrawingEditor .bde-side{width:176px;flex:none;overflow-y:auto;background:#fff;border-right:1px solid #cbd5e1;padding:6px;}',
             '#bsaDrawingEditor .bde-gt{font-size:11px;font-weight:700;color:#64748b;margin:8px 2px 4px;}',
@@ -369,9 +372,10 @@
             '  <button type="button" class="bde-b" data-act="undo" title="되돌리기 (Ctrl+Z)">↶ 되돌리기</button>' +
             '  <button type="button" class="bde-b" data-act="redo" title="다시 하기 (Ctrl+Y)">↷</button>' +
             '  <button type="button" class="bde-b" data-act="fit" title="화면에 맞추기">맞춤</button>' +
-            '  <label class="bde-opt" title="벽체·선을 가로·세로(45°)로 반듯하게. Shift를 누르면 반대로"><input type="checkbox" data-opt="ortho" checked> 직각</label>' +
+            '  <label class="bde-opt" title="벽체·선을 끌 때 이 각도 단위로 붙입니다(자유 = 아무 각도). Shift를 누르면 반대로. 그린 뒤 속성 칸에서 각도를 숫자로 바꿀 수 있습니다">각도 <select data-opt="angleStep"><option value="0">자유</option><option value="15">15°</option><option value="45">45°</option><option value="90">90°</option></select></label>' +
             '  <label class="bde-opt" title="지우개 굵기">지우개 <input type="range" data-opt="eraser" min="1" max="60"></label>' +
-            '  <label class="bde-opt" title="새로 그릴 벽체 두께(문 아래 벽 뚫기 폭도 이 값)">벽 두께 <input type="range" data-opt="wallTh" min="1" max="40"></label>' +
+            '  <label class="bde-opt" title="벽체 두께 — 벽을 골라 두었으면 그 벽도 바뀝니다(문 아래 벽 뚫기 폭도 이 값)">벽 두께 <input type="range" data-opt="wallTh" min="1" max="40"><span class="bde-val" data-val="wallTh"></span></label>' +
+            '  <label class="bde-opt" title="선 굵기(벽 테두리·선·샘플) — 고른 개체가 있으면 그것도 바뀝니다">선 굵기 <input type="range" data-opt="lw" min="1" max="16"><span class="bde-val" data-val="lw"></span></label>' +
             '  <label class="bde-opt">벽 속 <select data-opt="wallFill"><option value="white">비움</option><option value="hatch">빗금</option><option value="solid">채움</option></select></label>' +
             '  <span class="bde-sp"></span>' +
             '  <button type="button" class="bde-b bde-save" data-act="save">저장 (점검 도면에 반영)</button>' +
@@ -716,11 +720,12 @@
         return best || p;
     }
     function orthoPoint(a, p, shift) {
-        var on = S.ortho !== !!shift;
-        if (!on) return p;
+        var deg = S.angleStep || 0;
+        if (shift) deg = deg ? 0 : 45; // Shift: 붙이기 켜짐 ↔ 끔
+        if (!deg) return p;
         var dx = p.x - a.x, dy = p.y - a.y;
         var ang = Math.atan2(dy, dx);
-        var step = Math.PI / 4;
+        var step = (deg * Math.PI) / 180;
         var sa = Math.round(ang / step) * step;
         var len = Math.hypot(dx, dy) * Math.cos(ang - sa);
         return { x: a.x + Math.cos(sa) * len, y: a.y + Math.sin(sa) * len };
@@ -928,6 +933,7 @@
                 var q = snapPoint(p, S.sel);
                 if (q === p) q = orthoPoint(other, p, e.shiftKey);
                 if (g.h === 'p1') { ob.x1 = q.x; ob.y1 = q.y; } else { ob.x2 = q.x; ob.y2 = q.y; }
+                renderProps();
             }
         } else if (g.kind === 'erase') {
             var last = g.preview.pts[g.preview.pts.length - 1];
@@ -941,6 +947,7 @@
             var q2 = snapPoint(p, -1);
             if (q2 === p) q2 = orthoPoint(g.start, p, e.shiftKey);
             g.preview.x2 = q2.x; g.preview.y2 = q2.y;
+            statusEl.textContent = '각도 ' + fmt(segAngle(g.preview)) + '° · 길이 ' + fmt(segLen(g.preview)) + ' (Shift: 각도 붙이기 ' + (S.angleStep ? '끔' : '켬') + ')';
         }
         requestDraw();
     }
@@ -969,6 +976,7 @@
             if (Math.hypot(pv.x2 - pv.x1, pv.y2 - pv.y1) > minLen) {
                 pushUndo();
                 S.objs.push(pv);
+                S.sel = S.objs.length - 1; // 바로 두께·각도·길이를 고칠 수 있게
             }
         }
         renderProps();
@@ -1000,6 +1008,19 @@
 
     // ---------- 선택 개체 속성 ----------
     function fmt(n) { return Math.round(n * 10) / 10; }
+    /** 선·벽 각도(도, 오른쪽 0°·위로 +) / 길이 / 시작점 기준으로 다시 놓기 */
+    function segAngle(o) {
+        var a = (-Math.atan2(o.y2 - o.y1, o.x2 - o.x1) * 180) / Math.PI;
+        if (a <= -179.95) a = 180; // -180 ~ 180 (오른쪽 아래로 15°면 -15°)
+        return Math.abs(a) < 0.05 ? 0 : a;
+    }
+    function segLen(o) { return Math.hypot(o.x2 - o.x1, o.y2 - o.y1); }
+    function setSeg(o, deg, len) {
+        var r = (-deg * Math.PI) / 180;
+        len = Math.max(1, len);
+        o.x2 = o.x1 + Math.cos(r) * len;
+        o.y2 = o.y1 + Math.sin(r) * len;
+    }
     function renderProps() {
         var o = S && S.objs[S.sel];
         if (!o) { propsEl.hidden = true; propsEl.innerHTML = ''; return; }
@@ -1013,8 +1034,12 @@
             if (SYMBOLS[o.k] && SYMBOLS[o.k].cut) {
                 h += '<div class="bde-row" title="문 아래쪽 기존 벽선을 문 폭만큼 흰색으로 지웁니다. 0이면 끔">벽 뚫기 <input type="number" data-p="cut" value="' + fmt(o.cut || 0) + '"></div>';
             }
-        } else if (o.t === 'wall') {
-            h += '<div class="bde-row">두께 <input type="number" data-p="th" value="' + fmt(o.th) + '"> 길이 ' + fmt(Math.hypot(o.x2 - o.x1, o.y2 - o.y1)) + '</div>';
+        } else if (o.t === 'wall' || o.t === 'line') {
+            if (o.t === 'wall') h += '<div class="bde-row">두께 <input type="number" step="1" min="0.5" data-p="th" value="' + fmt(o.th) + '"></div>';
+            h += '<div class="bde-row" title="시작점(첫 점)을 기준으로 돌리고 늘립니다. 각도는 오른쪽이 0°, 위로 갈수록 +">각도 <input type="number" step="1" data-p="ang" value="' + fmt(segAngle(o)) + '">° 길이 <input type="number" step="1" min="1" data-p="len" value="' + fmt(segLen(o)) + '"></div>';
+            h += '<div class="bde-row">' + (o.t === 'wall' ? '테두리 ' : '') + '굵기 <input type="number" step="0.5" min="0.1" data-p="lw" value="' + fmt(o.lw || S.lw) + '"> <button data-a="ang:0">─ 0°</button><button data-a="ang:90">│ 90°</button></div>';
+        }
+        if (o.t === 'wall') {
             h += '<div class="bde-row">벽 속 <button data-a="fill:white">비움</button><button data-a="fill:hatch">빗금</button><button data-a="fill:solid">채움</button></div>';
         } else if (o.t === 'text') {
             h += '<div class="bde-row"><input type="text" data-p="text" value="' + String(o.text).replace(/&/g, '&amp;').replace(/"/g, '&quot;').replace(/</g, '&lt;') + '"></div>';
@@ -1035,10 +1060,14 @@
         else {
             var v = parseFloat(el.value);
             if (!isFinite(v)) return;
+            if (key === 'ang' || key === 'len') { setSeg(o, key === 'ang' ? v : segAngle(o), key === 'len' ? v : segLen(o)); requestDraw(); return; }
             if (key === 'rot') v = ((v % 360) + 360) % 360;
             else if (key === 'cut') v = Math.max(0, v);
+            else if (key === 'lw') v = Math.max(0.1, v);
             else v = Math.max(0.5, v);
             o[key] = v;
+            if (key === 'th') { S.wallTh = v; syncOptInputs(); }
+            if (key === 'lw') { S.lw = v; syncOptInputs(); }
             if (o.t === 'sym' && (key === 'w' || key === 'h')) _lastSize[o.k] = [o.w, o.h];
         }
         requestDraw();
@@ -1077,6 +1106,10 @@
             if (o.t !== 'sym') return;
             pushUndo();
             o.flip = !o.flip;
+        } else if (a.indexOf('ang:') === 0) {
+            if (o.t !== 'wall' && o.t !== 'line') return;
+            pushUndo();
+            setSeg(o, Number(a.slice(4)), segLen(o));
         } else if (a.indexOf('fill:') === 0) {
             if (o.t !== 'wall') return;
             pushUndo();
@@ -1103,17 +1136,42 @@
         if (!S) return;
         var el = e.target;
         var k = el.getAttribute('data-opt');
-        if (k === 'ortho') S.ortho = el.checked;
+        var o = S.objs[S.sel];
+        if (k === 'angleStep') S.angleStep = Number(el.value) || 0;
         else if (k === 'eraser') S.eraserSize = (S.unit / 10) * Number(el.value);
-        else if (k === 'wallTh') S.wallTh = (S.unit / 20) * Number(el.value);
-        else if (k === 'wallFill') S.wallFill = el.value;
+        else if (k === 'wallTh') {
+            S.wallTh = (S.unit / 20) * Number(el.value);
+            // 벽을 골라 두었으면 그 벽 두께도 같이(예전엔 새로 그릴 벽에만 먹어서 「두께 조절이 안 된다」)
+            if (o && o.t === 'wall') { armOptUndo(); o.th = S.wallTh; renderProps(); }
+        } else if (k === 'lw') {
+            S.lw = (S.lwUnit / 2) * Number(el.value);
+            if (o && (o.t === 'wall' || o.t === 'line' || o.t === 'sym')) { armOptUndo(); o.lw = S.lw; renderProps(); }
+        } else if (k === 'wallFill') {
+            S.wallFill = el.value;
+            if (o && o.t === 'wall' && e.type === 'change') { pushUndo(); o.fill = S.wallFill; renderProps(); }
+        }
+        updateOptVals();
         requestDraw();
     }
+    var _optUndoArmed = false;
+    function armOptUndo() {
+        if (_optUndoArmed) return;
+        pushUndo();
+        _optUndoArmed = true;
+        setTimeout(function () { _optUndoArmed = false; }, 800);
+    }
+    function updateOptVals() {
+        var a = root.querySelector('[data-val="wallTh"]'), b = root.querySelector('[data-val="lw"]');
+        if (a) a.textContent = String(fmt(S.wallTh));
+        if (b) b.textContent = String(fmt(S.lw));
+    }
     function syncOptInputs() {
-        root.querySelector('[data-opt="ortho"]').checked = S.ortho;
+        root.querySelector('[data-opt="angleStep"]').value = String(S.angleStep || 0);
         root.querySelector('[data-opt="eraser"]').value = String(Math.round(S.eraserSize / (S.unit / 10)));
         root.querySelector('[data-opt="wallTh"]').value = String(Math.round(S.wallTh / (S.unit / 20)));
+        root.querySelector('[data-opt="lw"]').value = String(Math.round(S.lw / (S.lwUnit / 2)));
         root.querySelector('[data-opt="wallFill"]').value = S.wallFill;
+        updateOptVals();
     }
     function updateButtons() {
         var u = root.querySelector('[data-act="undo"]');
