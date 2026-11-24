@@ -237,6 +237,8 @@
                     flags: gi(head, 70, 0),
                     baseX: gn(head, 10, 0),
                     baseY: gn(head, 20, 0),
+                    // 블록 레코드 번호(330) — 다중 지시선(MULTILEADER)이 블록을 이 번호로 가리킨다(2026-11-24)
+                    recordHandle: String(gs(head, 330, '') || '').toUpperCase(),
                     entities: groupEntities(collectEntities(pairs, s, i))
                 };
                 if (name) blocks[String(name).toUpperCase()] = blk;
@@ -953,10 +955,25 @@
                     doMText(e, m, layer);
                     break;
                 case 'ATTDEF':
-                    stats.skipped.attdef++;
+                    // 2026-11-24 블록 안 「고정 속성」(70&2)은 블록에 박힌 글자라 캐드에 그대로 보인다(행·열 풍선 번호 등).
+                    // 고정이 아닌 속성은 블록을 넣을 때 ATTRIB로 따로 들어오므로 정의는 그리지 않는다.
+                    if (depth > 0 && (gi(e, 70, 0) & 2) && !(gi(e, 70, 0) & 1)) doText(e, m, layer, 74);
+                    else stats.skipped.attdef++;
                     break;
                 case 'INSERT':
                     doInsert(e, m, layer, depth);
+                    break;
+                case 'ACAD_TABLE': {
+                    // 2026-11-24 표: 그려진 모양이 익명 블록(*T…)에 들어 있다 — 블록처럼 넣는다
+                    var tb = gs(e, 2, '');
+                    var tblk = tb && blocks[String(tb).toUpperCase()];
+                    if (tblk) drawBlock(tblk, mul(ocsMatrix(e, m), tr(gn(e, 10, 0), gn(e, 20, 0))), layer, depth + 1);
+                    else stats.skipped.unsupported[type] = (stats.skipped.unsupported[type] || 0) + 1;
+                    break;
+                }
+                case 'MULTILEADER':
+                case 'MLEADER':
+                    doMultiLeader(e, m, layer, depth);
                     break;
                 case 'DIMENSION': {
                     var bn = gs(e, 2, '');
@@ -984,6 +1001,117 @@
             } finally {
                 blk._busy = false;
             }
+        }
+
+        // ---- 다중 지시선(MULTILEADER) — 풍선(블록+속성 글자)·글자·지시선 (2026-11-24) ----
+        var blocksByRecord = null, attdefByHandle = null;
+        function indexBlocks() {
+            if (blocksByRecord) return;
+            blocksByRecord = {}; attdefByHandle = {};
+            Object.keys(blocks).forEach(function (k) {
+                var b = blocks[k];
+                if (b.recordHandle) blocksByRecord[b.recordHandle] = b;
+                (b.entities || []).forEach(function (be) {
+                    if (be.type === 'ATTDEF') { var h = String(gs(be, 5, '') || '').toUpperCase(); if (h) attdefByHandle[h] = { e: be, blk: b }; }
+                });
+            });
+        }
+
+        /** 다중 지시선 짝들을 구역별로 나눠 읽는다(CONTEXT_DATA{ / LEADER{ / LEADER_LINE{ 의 같은 번호가 뜻이 다르다) */
+        function readMultiLeader(e) {
+            var ps = e.pairs;
+            var ctx = { leaders: [] }, top = { attrs: [] };
+            var where = 'top', leader = null, line = null, curAttr = null;
+            for (var i = 0; i < ps.length; i++) {
+                var c = ps[i][0], v = ps[i][1];
+                var vs = String(v);
+                if (c === 300 && /CONTEXT_DATA\{/i.test(vs)) { where = 'ctx'; continue; }
+                if (where === 'ctx' && c === 301) { where = 'top'; continue; }
+                if ((where === 'ctx') && c === 302 && /LEADER\{/i.test(vs)) { where = 'leader'; leader = { lines: [], last: null, dog: null, dogLen: 0 }; ctx.leaders.push(leader); continue; }
+                if (where === 'leader' && c === 303) { where = 'ctx'; leader = null; continue; }
+                if (where === 'leader' && c === 304 && /LEADER_LINE\{/i.test(vs)) { where = 'line'; line = []; leader.lines.push(line); continue; }
+                if (where === 'line' && c === 305) { where = 'leader'; line = null; continue; }
+                var f = parseFloat(v);
+                if (where === 'line') {
+                    if (c === 10) line.push([f, 0]);
+                    else if (c === 20 && line.length) line[line.length - 1][1] = f;
+                } else if (where === 'leader') {
+                    if (c === 10) leader.last = [f, 0];
+                    else if (c === 20 && leader.last) leader.last[1] = f;
+                    else if (c === 11) leader.dog = [f, 0];
+                    else if (c === 21 && leader.dog) leader.dog[1] = f;
+                    else if (c === 40) leader.dogLen = f;
+                    else if (c === 291) leader.hasDog = parseInt(v, 10) === 1;
+                } else if (where === 'ctx') {
+                    if (!(c in ctx)) ctx[c] = (c === 304 || c === 341) ? vs : f;
+                    else if (c === 304) ctx[c] += vs; // 긴 글자가 나뉜 경우
+                } else {
+                    if (c === 330) { curAttr = { handle: vs.toUpperCase(), text: '' }; top.attrs.push(curAttr); }
+                    else if (c === 302 && curAttr) { curAttr.text = vs; curAttr = null; }
+                    else if (!(c in top)) top[c] = (c === 344 || c === 342) ? vs : f;
+                }
+            }
+            return { ctx: ctx, top: top };
+        }
+
+        function doMultiLeader(e, m, layer, depth) {
+            indexBlocks();
+            var ml = readMultiLeader(e);
+            var C = ml.ctx, T = ml.top;
+            var drew = false;
+            // 지시선(170=0이면 안 보이는 선)
+            if (T[170] !== 0) {
+                var arrow = C[140] > 0 ? C[140] : 0;
+                C.leaders.forEach(function (ld) {
+                    ld.lines.forEach(function (ln) {
+                        if (!ln.length) return;
+                        var pts = [];
+                        ln.forEach(function (p) { pts.push(p[0], p[1]); });
+                        if (ld.last) pts.push(ld.last[0], ld.last[1]);
+                        if (ld.last && ld.dog && (ld.hasDog !== false) && ld.dogLen > 0 && T[291] !== 0) {
+                            pts.push(ld.last[0] + ld.dog[0] * ld.dogLen, ld.last[1] + ld.dog[1] * ld.dogLen);
+                        }
+                        if (pts.length >= 4) { addPoly(pts, m, false, layer); drew = true; }
+                        // 화살촉: 첫 점에 작은 세모
+                        if (arrow > 0 && pts.length >= 4) {
+                            var ax = pts[0], ay = pts[1], bx = pts[2] - ax, by = pts[3] - ay;
+                            var L = Math.hypot(bx, by);
+                            if (L > 1e-9) {
+                                bx /= L; by /= L;
+                                var hw = arrow / 6;
+                                addPoly([ax, ay, ax + bx * arrow - by * hw, ay + by * arrow + bx * hw, ax + bx * arrow + by * hw, ay + by * arrow - bx * hw],
+                                    m, true, layer, { fill: true, fillId: ++fillSeq });
+                            }
+                        }
+                    });
+                });
+            }
+            // 글자 내용
+            if (C[290] === 1 && C[304]) {
+                var rotRad = C[42] || 0;
+                var att = (C[171] >= 1 && C[171] <= 9) ? C[171] : 1;
+                doMText({ type: 'MTEXT', pairs: [[1, C[304]], [10, C[12] || 0], [20, C[22] || 0], [40, C[41] || 0], [71, att], [50, rotRad * 180 / Math.PI]] }, m, layer);
+                drew = true;
+            }
+            // 블록 내용(풍선) + 속성 값
+            var rec = String(C[341] || T[344] || '').toUpperCase();
+            var blk = (C[296] === 1 || T[344]) && rec ? blocksByRecord[rec] : null;
+            if (blk && depth + 1 <= maxDepth) {
+                var sx = C[16] || 1, sy = C[26] || sx;
+                var bm = mul(m, mul(tr(C[15] || 0, C[25] || 0), mul(rot(C[46] || 0), scl(sx, sy))));
+                drawBlock(blk, bm, layer, depth + 1);
+                var inBlk = mul(bm, tr(-blk.baseX, -blk.baseY));
+                T.attrs.forEach(function (a) {
+                    var def = attdefByHandle[a.handle];
+                    if (!def || !a.text) return;
+                    if (gi(def.e, 70, 0) & 1) return; // 숨김
+                    var pairs = def.e.pairs.filter(function (p) { return p[0] !== 1; }).concat([[1, a.text]]);
+                    var own = gs(def.e, 8, '0');
+                    doText({ type: 'ATTRIB', pairs: pairs }, inBlk, String(own) === '0' ? layer : own, 74);
+                });
+                drew = true;
+            }
+            if (!drew) stats.skipped.unsupported[e.type] = (stats.skipped.unsupported[e.type] || 0) + 1;
         }
 
         function doInsert(e, m, layer, depth) {
@@ -1018,6 +1146,8 @@
         for (var i = 0; i < (doc.entities || []).length; i++) emit(doc.entities[i], IDENT, null, 0);
 
         stats.vertices = vertexTotal;
+        // 올리기 화면이 「못 그린 객체」를 알려 줄 수 있게 마지막 결과를 남긴다(2026-11-24)
+        if (typeof api !== 'undefined' && api) api.lastStats = stats;
         var bounds = computeBounds(polylines, texts, stats, opts.trimOutliers !== false);
         var keptP = bounds.keep ? polylines.filter(function (p, idx) { return bounds.keep.p[idx]; }) : polylines;
         var keptT = bounds.keep ? texts.filter(function (t, idx) { return bounds.keep.t[idx]; }) : texts;

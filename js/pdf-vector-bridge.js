@@ -77,7 +77,23 @@
         err.bsaUserMessage = msg;
         throw err;
       }
+      const dxfName = file.name;
       file = await conv.dxfFileToPdfFile(file);
+      // 2026-11-24 DXF에서 못 그린 객체가 있으면 알린다(조용히 빠지면 도면에 왜 없는지 모른다)
+      try {
+        const st = window.BSA && window.BSA.dxfRead && window.BSA.dxfRead.lastStats;
+        const un = (st && st.skipped && st.skipped.unsupported) || {};
+        const KO = {
+          MULTILEADER: '다중 지시선', MLEADER: '다중 지시선', ACAD_PROXY_ENTITY: '프록시 객체(캐드 전용 프로그램 객체)',
+          IMAGE: '그림(이미지)', OLE2FRAME: 'OLE 개체', WIPEOUT: '가림 영역', REGION: '영역', '3DSOLID': '3D 솔리드',
+          BODY: '바디', MESH: '메시', ACAD_TABLE: '표', TOLERANCE: '공차', UNDERLAY: '참조 도면', PDFUNDERLAY: 'PDF 참조',
+          DWFUNDERLAY: 'DWF 참조', DGNUNDERLAY: 'DGN 참조', SHAPE: '모양(SHAPE)'
+        };
+        const parts = Object.keys(un).filter((k) => un[k] > 0).map((k) => `${KO[k] || k} ${un[k]}개`);
+        if (parts.length && typeof window.showToast === 'function') {
+          window.showToast(`「${dxfName}」에서 그리지 못한 객체: ${parts.join(', ')} — 캐드에서 분해(EXPLODE)한 뒤 다시 저장하면 들어옵니다.`, 'warning', 10000);
+        }
+      } catch (_e) { /* 알림만 못 할 뿐 */ }
     }
     const isPdf = !!file && (file.type === 'application/pdf' || /\.pdf$/i.test(file.name || ''));
     if (!isPdf) {
