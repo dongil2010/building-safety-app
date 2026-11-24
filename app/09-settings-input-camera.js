@@ -105,6 +105,21 @@
         });
     }
 
+    /** 결함 핀 6칸(구조체·비구조체·마감재 × 결함·양호)은 크기 하나를 같이 쓴다 — 한 칸을 움직이면 나머지 칸 표시도 맞춤 */
+    function syncDefectSizeControlsUi() {
+        const sz = getStyleSize(DEFECT_STYLE_SIZE_KEYS[0]);
+        DEFECT_STYLE_SIZE_FIELDS.forEach(([suffix]) => {
+            const pinInput = document.getElementById(`stylePinSize${suffix}`);
+            const pinLabel = document.getElementById(`stylePinSize${suffix}Label`);
+            const arrowInput = document.getElementById(`styleArrowSize${suffix}`);
+            const arrowLabel = document.getElementById(`styleArrowSize${suffix}Label`);
+            if (pinInput) pinInput.value = sz.pin;
+            if (pinLabel) pinLabel.textContent = `${Math.round(sz.pin * 100)}%`;
+            if (arrowInput) arrowInput.value = sz.arrow;
+            if (arrowLabel) arrowLabel.textContent = `${Math.round(sz.arrow * 100)}%`;
+        });
+    }
+
     function refreshAllStyleColoredCanvases() {
         if (typeof drawCanvas === 'function') drawCanvas();
         if (typeof drawNdtCanvas === 'function') drawNdtCanvas();
@@ -439,6 +454,7 @@
                     setStyleSizeFields(key, { pin: v });
                     if (pinLabel) pinLabel.textContent = `${Math.round(v * 100)}%`;
                     if (key === 'ndtStrength' || key === 'ndtCarbonation') syncNdtStrengthCarbSizeControlsUi();
+                    if (DEFECT_STYLE_SIZE_KEYS.includes(key)) syncDefectSizeControlsUi();
                     if (typeof window.syncBulkStyleSlidersUi === 'function') window.syncBulkStyleSlidersUi();
                     refreshAllStyleColoredCanvases();
                 });
@@ -449,6 +465,7 @@
                     setStyleSizeFields(key, { arrow: v });
                     if (arrowLabel) arrowLabel.textContent = `${Math.round(v * 100)}%`;
                     if (key === 'ndtStrength' || key === 'ndtCarbonation') syncNdtStrengthCarbSizeControlsUi();
+                    if (DEFECT_STYLE_SIZE_KEYS.includes(key)) syncDefectSizeControlsUi();
                     if (typeof window.syncBulkStyleSlidersUi === 'function') window.syncBulkStyleSlidersUi();
                     refreshAllStyleColoredCanvases();
                 });
@@ -459,6 +476,7 @@
                     setStyleSizeFields(key, { leader: v });
                     if (leaderLabel) leaderLabel.textContent = `${Math.round(v * 100)}%`;
                     if (key === 'ndtStrength' || key === 'ndtCarbonation') syncNdtStrengthCarbSizeControlsUi();
+                    if (DEFECT_STYLE_SIZE_KEYS.includes(key)) syncDefectSizeControlsUi();
                     if (typeof window.syncBulkStyleSlidersUi === 'function') window.syncBulkStyleSlidersUi();
                     refreshAllStyleColoredCanvases();
                 });
