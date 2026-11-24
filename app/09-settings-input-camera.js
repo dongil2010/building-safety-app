@@ -6271,13 +6271,44 @@
         // 헤더 '자동 적용' 뱃지는 제거됨 — 화살표 선택 UI가 그 자리를 씀
     }
 
-    function scheduleDefectAutoApply() {
+    /** 글자 칸(위치·내용·원인·메모 등)에 치는 중인가 — 체크박스·선택 같은 건 아니다 */
+    function isDefectTypingTarget(t) {
+        if (!t || !t.tagName) return false;
+        if (t.tagName === 'TEXTAREA') return true;
+        if (t.tagName !== 'INPUT') return false;
+        const type = String(t.getAttribute('type') || 'text').toLowerCase();
+        return type === 'text' || type === 'search' || type === 'tel' || type === 'number' || type === 'url' || type === 'email';
+    }
+
+    // 목록·조사표 다시 그리기는 저장과 다른 작업으로 떼어 낸다 — 한 번에 몰아 돌리면 그동안 키 입력이 멈춘다
+    let _defectAutoApplyUiTimer = null;
+    function scheduleDefectAutoApplyUiRefresh() {
+        if (_defectAutoApplyUiTimer) return;
+        _defectAutoApplyUiTimer = window.setTimeout(() => {
+            _defectAutoApplyUiTimer = null;
+            if (typeof renderDefectListPanel === 'function') renderDefectListPanel();
+            // 2026-11-13 조사표는 보고 있을 때만 다시 그린다(탭에 들어가면 다시 그림) — 타이핑마다 표 전체를 새로 만들어 느렸다
+            if (typeof renderSurveyTable === 'function' && state.currentTab === 'tab-survey') renderSurveyTable();
+        }, 0);
+    }
+
+    // 2026-11-24 「키보드로 입력할 때 렉이 심함」: 글자를 치다 0.18초만 멈춰도 매번 전체 자료 저장
+    // (모든 층 JSON → 기기 저장) + 결함 목록 전체 다시 만들기가 돌았다. 한글은 글자 사이 멈춤이
+    // 잦아 한 문장에 수십 번 — 폰에서는 그때마다 화면이 멈칫했다. 글자 칸은 손을 뗀 뒤(0.7초)에만
+    // 반영하고, 체크박스·버튼처럼 한 번 누르는 것은 지금처럼 바로(0.18초) 반영한다.
+    // 창을 닫거나 탭을 옮기면 flushDefectAutoApply / 저장 버튼이 기다리던 것을 즉시 반영한다.
+    const DEFECT_AUTO_APPLY_MS = 180;
+    const DEFECT_AUTO_APPLY_TYPING_MS = 700;
+
+    function scheduleDefectAutoApply(opts) {
         if (window._defectFormHydrating) return;
         if (!isDefectModalOpen()) return;
         // 결함 내용에 창 상부·문 측면 등이 있으면 개구부 결함 자동 체크(저장 전에 체크박스를 먼저 맞춘다)
         try { autoDetectOpeningFromDefectContent(); } catch (_e) { /* ignore */ }
+        const typing = !!(opts && opts.typing);
         window.clearTimeout(window._defectAutoApplyTimer);
         window._defectAutoApplyTimer = window.setTimeout(async () => {
+            window._defectAutoApplyTimer = null;
             if (window._defectFormHydrating || !isDefectModalOpen()) return;
             flashDefectAutosaveBadge('saving');
             const needHistory = !window._defectEditSessionHistoryPushed;
@@ -6292,11 +6323,9 @@
                 if (!isDefectBulkEditMode()) renderDefectMarkingTimeline(saved);
             }
             drawCanvas();
-            if (typeof renderDefectListPanel === 'function') renderDefectListPanel();
-            // 2026-11-13 조사표는 보고 있을 때만 다시 그린다(탭에 들어가면 다시 그림) — 타이핑마다 표 전체를 새로 만들어 느렸다
-            if (typeof renderSurveyTable === 'function' && state.currentTab === 'tab-survey') renderSurveyTable();
+            scheduleDefectAutoApplyUiRefresh();
             flashDefectAutosaveBadge('done');
-        }, 180);
+        }, typing ? DEFECT_AUTO_APPLY_TYPING_MS : DEFECT_AUTO_APPLY_MS);
     }
 
     function flushDefectAutoApply() {
@@ -6326,7 +6355,7 @@
             if (!e.target || e.target.closest?.('#defectArrowOctantGrid')) return;
             const bulkKey = defectFieldKeyFromTarget(e.target);
             if (bulkKey) markDefectBulkFieldChanged(bulkKey);
-            scheduleDefectAutoApply();
+            scheduleDefectAutoApply({ typing: isDefectTypingTarget(e.target) });
         });
         form.addEventListener('change', (e) => {
             const bulkKey = defectFieldKeyFromTarget(e.target);

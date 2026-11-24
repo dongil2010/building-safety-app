@@ -178,6 +178,6 @@ f = makeForm('개구부 상부 균열');
 f.ctx.run(); assert.strictEqual(f.chk.checked, true); assert.strictEqual(f.getPos(), '개구부 상부');
 
 // scheduleDefectAutoApply 가 자동 체크를 먼저 부른다
-assert.ok(/function scheduleDefectAutoApply\(\) \{[\s\S]{0,300}autoDetectOpeningFromDefectContent\(\)/.test(app));
+assert.ok(/function scheduleDefectAutoApply\(opts\) \{[\s\S]{0,300}autoDetectOpeningFromDefectContent\(\)/.test(app));
 
 console.log('test-opening-defect-pos OK');

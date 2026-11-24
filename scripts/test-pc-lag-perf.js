@@ -15,7 +15,22 @@ assert.ok(!/floorSnapshots\[/.test(app), '층 스냅샷을 만들지 않는다')
 assert.ok(!app.includes('captureFloorSnapshotNow('), '저장 때 스냅샷 없음');
 
 const auto = extractFunction(app, 'function scheduleDefectAutoApply(');
-assert.ok(/renderSurveyTable === 'function' && state\.currentTab === 'tab-survey'\) renderSurveyTable\(\)/.test(auto), '조사표는 보고 있을 때만');
+const autoUi = extractFunction(app, 'function scheduleDefectAutoApplyUiRefresh(');
+assert.ok(auto.includes('scheduleDefectAutoApplyUiRefresh()'), '자동 적용은 목록·조사표를 따로 그린다');
+assert.ok(/renderSurveyTable === 'function' && state\.currentTab === 'tab-survey'\) renderSurveyTable\(\)/.test(autoUi), '조사표는 보고 있을 때만');
+// 2026-11-24 「키보드 입력 렉」: 글자 칸은 손을 뗀 뒤에만(0.7초) 저장·목록 갱신 — 0.18초마다 전체 저장하지 않는다
+assert.ok(/typing \? DEFECT_AUTO_APPLY_TYPING_MS : DEFECT_AUTO_APPLY_MS/.test(auto), '타이핑은 긴 대기');
+assert.ok(/const DEFECT_AUTO_APPLY_TYPING_MS = (\d+);/.test(app) && Number(RegExp.$1) >= 500, '타이핑 대기 0.5초 이상');
+assert.ok(/scheduleDefectAutoApply\(\{ typing: isDefectTypingTarget\(e\.target\) \}\)/.test(app), '폼 input은 글자 칸이면 typing');
+{
+    const isT = new Function(extractFunction(app, 'function isDefectTypingTarget(') + '; return isDefectTypingTarget;')();
+    const el = (tagName, type) => ({ tagName, getAttribute: () => type });
+    assert.strictEqual(isT(el('INPUT', 'text')), true);
+    assert.strictEqual(isT(el('INPUT', null)), true);
+    assert.strictEqual(isT(el('TEXTAREA', null)), true);
+    assert.strictEqual(isT(el('INPUT', 'checkbox')), false);
+    assert.strictEqual(isT(el('SELECT', null)), false);
+}
 
 // renderDefectsGrouped: 그룹은 한 번 그리고, 순서·멤버는 예전과 같다
 const ctx = {
