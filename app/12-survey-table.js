@@ -1356,6 +1356,7 @@
             d.category, d.isProgress, d.isOpeningCrack, d.isLeak, d.isPriorityManage, d.location, d.component,
             d.defectType, d.cause, d.size, d.crackWidth, d.crackLength, d.itemCount, d.crackMeasures
         ]);
+        let changedAny = false;
         targetIds.forEach(id => {
             const defect = list.find(d => d.id === id);
             if (!defect) return;
@@ -1453,13 +1454,16 @@
             }
             // 2026-11-08 종류를 미장으로 바꿀 때만 구조체→비구조체(대부분 비구조체). 분류를 직접 구조체로 고른 것은 그대로 둔다.
             if (field === 'category' || field === 'defectType') defect.category = (window.bsaPlasterNonStructCategory ? window.bsaPlasterNonStructCategory(defect.category, defect.defectType, { force: field === 'defectType' }) : defect.category);
-            if (inlineSig(defect) !== sigBefore) touchDefectUpdatedAt(defect);
+            if (inlineSig(defect) !== sigBefore) { touchDefectUpdatedAt(defect); changedAny = true; }
             // 행·열: 부재가 바뀌면(거더 ↔ 그 밖) 위치 다시 계산 — 지금 보는 층만(선 데이터가 그 층 것)
             if (field === 'component' && key === `${state.currentBuildingId}_${state.currentFloor}` && typeof applyGridAutoLocationToDefect === 'function') {
                 try { applyGridAutoLocationToDefect(defect); } catch (gridErr) { console.warn('[grid-lines] inline', gridErr); }
             }
         });
 
+        // 2026-11-24 전체층 조사표에서 다른 층 행을 고치면 그 층을 올릴 목록에 넣는다.
+        // 저장은 지금 보는 층만 올릴 목록에 넣어서, 다른 층 수정이 서버에 안 올라갔다(능주고 73건).
+        if (changedAny && key && typeof markFloorKeyDirty === 'function') markFloorKeyDirty(key);
         saveStateToLocalStorage();
         if (typeof drawCanvas === 'function') drawCanvas();
         if (typeof renderDefectListPanel === 'function') renderDefectListPanel();
