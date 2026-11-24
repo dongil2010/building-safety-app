@@ -561,7 +561,14 @@
         c.fillRect(0, 0, S.info.refW, S.info.refH);
         c.imageSmoothingEnabled = true;
         c.imageSmoothingQuality = 'high';
-        c.drawImage(S.img, 0, 0, S.info.refW, S.info.refH);
+        // DXF 층은 바탕도 캐드 선으로(확대해도 선명) — 안 되면 그림
+        var DV = window.BSA && window.BSA.dxfView;
+        var vecDrawn = false;
+        if (S.dxf && DV && typeof DV.drawOnCanvas === 'function') {
+            try { vecDrawn = DV.drawOnCanvas(c, S.dxf.model, S.info.refW, S.info.refH, { requestRedraw: requestDraw }); } catch (_e) { vecDrawn = false; }
+            c.setTransform(dpr * v.scale, 0, 0, dpr * v.scale, dpr * v.ox, dpr * v.oy);
+        }
+        if (!vecDrawn) c.drawImage(S.img, 0, 0, S.info.refW, S.info.refH);
         S.objs.forEach(function (o) { drawObj(c, o, S.lw); });
         if (S.drag && S.drag.preview) drawObj(c, S.drag.preview, S.lw);
         drawOverlay(c);
@@ -1178,15 +1185,36 @@
         return url;
     }
 
+    /** DXF 층: 개체를 기록용 캔버스로 그려 캐드 선 자료를 고치고, 옛 좌표계 그대로 벡터 PDF를 다시 만든다 */
+    async function buildDxfPdfFile() {
+        var V = window.BSA && window.BSA.drawingEditVector;
+        var P = window.BSA && window.BSA.dxfToPdf;
+        if (!V || !P) throw new Error('DXF 편집 모듈이 없습니다. 새로고침(Ctrl+F5) 뒤 다시 해 주세요.');
+        var d = S.dxf, meta = d.meta;
+        var W = S.info.refW, H = S.info.refH;
+        var R = V.createRecorder(V.pxToPtMatrix(W, H, meta.pageW, meta.pageH));
+        S.objs.forEach(function (o) { drawObj(R.ctx, o, S.lw); });
+        var k = Math.sqrt((meta.pageW / W) * (meta.pageH / H));
+        var res = V.buildEditedFlat(d.model, meta, R.events, { baseLwPt: S.lw * k });
+        var out = await P.convertFlatToPdf(res.flat, { fit: meta, lineWidth: d.model.lw, src: meta.src, unit: meta.unit });
+        if (typeof console !== 'undefined' && console.info) console.info('[도면 편집] DXF 벡터 저장', res.stats, out.info);
+        return new File([out.bytes], d.pdfName, { type: 'application/pdf', lastModified: Date.now() });
+    }
+
     async function save() {
         if (!S || S.saving) return;
         var bridge = window.BSA && window.BSA.drawingEditorBridge;
         if (!bridge) return;
         if (!S.objs.length) { window.showToast && window.showToast('바뀐 것이 없습니다.', 'info'); return; }
-        var msg = '이 층(' + S.info.floorLabel + ') 점검 도면을 편집한 그림으로 바꿀까요?\n\n' +
-            '· 마킹 ' + S.info.markingCount + '개는 위치 그대로 남습니다.\n' +
-            '· 다른 기기·보고서에도 바뀐 도면이 쓰입니다.' +
-            (S.info.hasPdf ? '\n· 원래 PDF 도면은 그림 도면으로 바뀝니다(벡터 PDF 출력 대신 그림으로 나감).' : '');
+        var msg = S.dxf
+            ? ('이 층(' + S.info.floorLabel + ') DXF 도면을 고친 내용으로 바꿀까요?\n\n' +
+                '· 벡터 그대로 저장됩니다 — 지운 곳은 캐드 선이 잘리고, 그린 것은 캐드 선으로 들어갑니다.\n' +
+                '· 확대 선명도·DXF 출력(원래 캐드 좌표)도 그대로입니다.\n' +
+                '· 마킹 ' + S.info.markingCount + '개는 위치 그대로 남습니다.')
+            : ('이 층(' + S.info.floorLabel + ') 점검 도면을 편집한 그림으로 바꿀까요?\n\n' +
+                '· 마킹 ' + S.info.markingCount + '개는 위치 그대로 남습니다.\n' +
+                '· 다른 기기·보고서에도 바뀐 도면이 쓰입니다.' +
+                (S.info.hasPdf ? '\n· 원래 PDF 도면은 그림 도면으로 바뀝니다(벡터 PDF 출력 대신 그림으로 나감).' : ''));
         var ok = typeof window.appConfirm === 'function'
             ? await window.appConfirm(msg, { title: '도면 저장', okText: '저장' })
             : window.confirm(msg);
@@ -1196,8 +1224,8 @@
         busy.hidden = false;
         try {
             await new Promise(function (r) { setTimeout(r, 30); });
-            var url = exportDataUrl();
-            var res = await bridge.save(S.info.buildingId, S.info.floorCode, url);
+            var payload = S.dxf ? { pdfFile: await buildDxfPdfFile() } : exportDataUrl();
+            var res = await bridge.save(S.info.buildingId, S.info.floorCode, payload);
             S.savedJson = snapshot();
             window.showToast && window.showToast(res && res.uploaded
                 ? '편집한 도면을 저장했습니다. 점검 도면에 반영됐습니다.'
@@ -1223,9 +1251,14 @@
         hide();
     }
     function hide() {
+        var wasDxf = !!(S && S.dxf);
         if (root) root.hidden = true;
         S = null;
         document.documentElement.style.overflow = '';
+        // 벡터 그리기 캐시를 편집기와 같이 썼다 — 결함위치도가 새로 그리게
+        var DV = window.BSA && window.BSA.dxfView;
+        if (wasDxf && DV && typeof DV.resetCache === 'function') DV.resetCache();
+        if (wasDxf && typeof window.drawCanvas === 'function') { try { window.drawCanvas({ immediate: true }); } catch (_e) { /* 다음 그리기 때 */ } }
     }
 
     // ---------- 열기 ----------
@@ -1267,13 +1300,14 @@
             if (!img) throw new Error('도면 그림을 불러오지 못했습니다.');
             if (!root) buildDom();
             S = newState(info, img);
+            S.dxf = info.dxf || null;
         } catch (err) {
             window.showToast && window.showToast(err && err.message ? err.message : String(err), 'warning', 5000);
             return;
         } finally {
             window.hideLoading && window.hideLoading();
         }
-        titleEl.textContent = '도면 편집 — ' + (info.buildingName ? info.buildingName + ' · ' : '') + info.floorLabel;
+        titleEl.textContent = '도면 편집 — ' + (info.buildingName ? info.buildingName + ' · ' : '') + info.floorLabel + (S.dxf ? ' · DXF 벡터' : '');
         titleEl.title = titleEl.textContent;
         root.hidden = false;
         document.documentElement.style.overflow = 'hidden';

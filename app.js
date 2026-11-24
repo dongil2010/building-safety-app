@@ -6015,7 +6015,7 @@ document.addEventListener('DOMContentLoaded', () => {
         }
     }
 
-// @@app-part 02-buildings.js sha=1146f039dfc0 — 원본은 app/02-buildings.js (여기 말고 거기서 고칠 것)
+// @@app-part 02-buildings.js sha=b9d12dcb51f6 — 원본은 app/02-buildings.js (여기 말고 거기서 고칠 것)
     // --- 5. TAB MANAGER (진입 로직은 js/tabs/*.js) ---
     // ---- 마지막 작업 위치 기억·복원 (js/core/last-location.js, 2026-10-28) ----
     // 로그인 직후 복원 시도가 끝나기 전에는 기록·삭제를 하지 않는다(부팅 중 switchTab('tab-home')이 기록을 지우지 않게).
@@ -10514,6 +10514,22 @@ ${roundMobile ? '' : `<button type="button" class="icon-btn icon-btn-trash" titl
         if (bgSrc) candidates.push(bgSrc);
         const floorLabel = ((bldg.floorsList || []).find((f) => f && f.floorCode === fc) || {}).floorLabel
             || (typeof window.getFloorLabelFromCode === 'function' ? window.getFloorLabelFromCode(fc) : fc);
+        // DXF로 올린 층: 캐드 선 자료(벡터 PDF 안)를 그대로 고쳐 벡터로 저장한다
+        let dxf = null;
+        try {
+            let pdf = (typeof window.getFloorPdfDataUrl === 'function') ? window.getFloorPdfDataUrl(bldg, fc) : null;
+            if (!pdf && typeof window.resolveFloorPdfDataUrlAsync === 'function') pdf = await window.resolveFloorPdfDataUrlAsync(bldg, fc);
+            const P = window.BSA && window.BSA.dxfToPdf;
+            const DV = window.BSA && window.BSA.dxfView;
+            const meta = (pdf && P) ? await P.readMetaFromPdfDataUrl(pdf) : null;
+            if (meta && DV && typeof DV.ensureModel === 'function') {
+                const model = await DV.ensureModel(`${bldg.id}_${fc}`, pdf);
+                if (model) dxf = { meta, model, pdfName: String(meta.src || `${fc}.dxf`).replace(/\.dxf$/i, '') + '.pdf' };
+            }
+        } catch (e) {
+            console.warn('[도면 편집] DXF 자료 읽기 실패 — 그림으로 편집', e);
+            dxf = null;
+        }
         return {
             buildingId: bldg.id,
             buildingName: bldg.name || '',
@@ -10523,39 +10539,64 @@ ${roundMobile ? '' : `<button type="button" class="icon-btn icon-btn-trash" titl
             refH: Math.round(ref.h),
             candidates,
             hasPdf: !!(typeof window.getFloorPdfDataUrl === 'function' && window.getFloorPdfDataUrl(bldg, fc)),
+            dxf,
             markingCount: ((window.state.defects && window.state.defects[`${bldg.id}_${fc}`]) || []).length
         };
     }
 
-    /** 편집기가 만든 그림(dataURL)으로 그 층 도면을 바꾼다 — 「파일로 교체」 저장과 같은 단계 */
-    async function replaceFloorDrawingFromEditor(buildingId, floorCode, dataUrl) {
+    /**
+     * 편집기 결과로 그 층 도면을 바꾼다 — 「파일로 교체」 저장과 같은 단계.
+     * payload: 그림 dataURL(일반 층) | { pdfFile }(DXF 층: 옛 좌표계 그대로 다시 만든 벡터 PDF)
+     */
+    async function replaceFloorDrawingFromEditor(buildingId, floorCode, payload) {
         const bldg = (window.state.buildings || []).find((b) => b && b.id === buildingId)
             || (window.state.currentBuilding && window.state.currentBuilding.id === buildingId ? window.state.currentBuilding : null);
-        if (!bldg || !floorCode || !dataUrl) throw new Error('저장할 건물·층을 찾지 못했습니다.');
+        if (!bldg || !floorCode || !payload) throw new Error('저장할 건물·층을 찾지 못했습니다.');
         if (!bldg.floorDrawings) bldg.floorDrawings = {};
-        const sourceDataUrl = await window.resizeDataUrlToMaxDim(dataUrl, 16000);
-        const tiers = await window.buildFloorDrawingTiersFromDataUrl(sourceDataUrl);
-        const prepared = {
-            rasterDataUrl: (tiers && tiers['4000']) || await window.resizeDataUrlToMaxDim(sourceDataUrl, 4000),
-            sourceDataUrl,
-            tiers,
-            pdfDataUrl: null,
-            isPdf: false
-        };
+        let prepared;
+        if (payload && payload.pdfFile) {
+            prepared = await window.prepareFloorDrawingUpload(payload.pdfFile);
+            if (!prepared || !prepared.pdfDataUrl || !prepared.rasterDataUrl) throw new Error('벡터 도면을 그리지 못했습니다.');
+        } else {
+            const sourceDataUrl = await window.resizeDataUrlToMaxDim(payload, 16000);
+            const tiers = await window.buildFloorDrawingTiersFromDataUrl(sourceDataUrl);
+            prepared = {
+                rasterDataUrl: (tiers && tiers['4000']) || await window.resizeDataUrlToMaxDim(sourceDataUrl, 4000),
+                sourceDataUrl,
+                tiers,
+                pdfDataUrl: null,
+                isPdf: false
+            };
+        }
         await invalidateFloorDrawingBeforeReplace(bldg, floorCode, { skipAlignCapture: true });
         if (typeof window.unretireNewFloorDrawingContent === 'function') {
             window.unretireNewFloorDrawingContent(bldg.id, floorCode, prepared);
         }
+        if (prepared.pdfDataUrl && bldg.floorDrawingPdfs) delete bldg.floorDrawingPdfs[floorCode];
         bldg.floorDrawings[floorCode] = prepared.rasterDataUrl;
         const rasterUploaded = await uploadFloorDrawing(bldg.id, floorCode, prepared.rasterDataUrl);
         if (!bldg.floorDrawingTiers) bldg.floorDrawingTiers = {};
-        bldg.floorDrawingTiers[floorCode] = (tiers && Object.keys(tiers).length) ? tiers : { '4000': prepared.rasterDataUrl };
+        bldg.floorDrawingTiers[floorCode] = (prepared.tiers && Object.keys(prepared.tiers).length) ? prepared.tiers : { '4000': prepared.rasterDataUrl };
         clearFloorTierPersistedFlags(bldg.id, floorCode);
         await uploadFloorDrawingTiers(bldg.id, floorCode, bldg.floorDrawingTiers[floorCode]);
-        cacheFloorDrawingSourceToDevice(bldg, floorCode, sourceDataUrl);
-        // 그림 도면이 됐다 — 옛 PDF가 남으면 그 층 핀이 옛 PDF 기준으로 어긋난다
-        await markFloorPdfRemoved(bldg, floorCode);
-        if (rasterUploaded) stampFloorDrawingUpdated(bldg, floorCode);
+        if (prepared.sourceDataUrl) cacheFloorDrawingSourceToDevice(bldg, floorCode, prepared.sourceDataUrl);
+        if (prepared.pdfDataUrl) {
+            // DXF 층: 다시 만든 벡터 PDF를 그대로 둔다(화면 벡터 그리기·마킹 DXF 캐드 좌표 출력이 이걸 읽는다)
+            clearFloorPdfRemoved(bldg, floorCode);
+            if (!bldg.floorDrawingPdfs) bldg.floorDrawingPdfs = {};
+            bldg.floorDrawingPdfs[floorCode] = prepared.pdfDataUrl;
+            _idbPersistedPdfKeys.delete(`${bldg.id}_${floorCode}`);
+            if (window._cloudSyncedPdfKeys) window._cloudSyncedPdfKeys.delete(`${bldg.id}_${floorCode}`);
+            const pdfUploaded = await uploadFloorDrawingPdf(bldg.id, floorCode, prepared.pdfDataUrl);
+            if (pdfUploaded) stampFloorDrawingUpdated(bldg, floorCode);
+            if (window.BSA && window.BSA.dxfView && typeof window.BSA.dxfView.dropModel === 'function') {
+                window.BSA.dxfView.dropModel(`${bldg.id}_${floorCode}`);
+            }
+        } else {
+            // 그림 도면이 됐다 — 옛 PDF가 남으면 그 층 핀이 옛 PDF 기준으로 어긋난다
+            await markFloorPdfRemoved(bldg, floorCode);
+            if (rasterUploaded) stampFloorDrawingUpdated(bldg, floorCode);
+        }
         bumpDrawingEpoch(bldg, floorCode);
         bldg._drawingReplaceGuard = bldg._drawingReplaceGuard || {};
         bldg._drawingReplaceGuard[floorCode] = Date.now() + 120000;
