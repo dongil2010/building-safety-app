@@ -216,6 +216,53 @@ assert.ok(L.segHitsRect({ x: 0, y: 5 }, { x: 20, y: 5 }, { x1: 5, y1: 0, x2: 15,
     assert.ok(L.inkAtCurrent([Object.assign({}, onWall, { cx: 1000 })], { ink }).w15 < L.INK_ON);
 }
 
+// 2026-11-24 현장 2차: 「NO.」는 걸쳐도 됨(숫자 칸만), 지시선 길게 빼지 않음, 45°에 안 매임
+{
+    const IW = 2000; const IH = 1500;
+    const blank = () => new Uint8ClampedArray(IW * IH * 4).fill(255);
+    const vline = (px, x) => { for (let y = 0; y < IH; y++) { const q = (y * IW + x) * 4; px[q] = px[q + 1] = px[q + 2] = 0; } };
+    const hline = (px, y, x1, x2) => { for (let x = x1; x < x2; x++) { const q = (y * IW + x) * 4; px[q] = px[q + 1] = px[q + 2] = 0; } };
+    const e = { l: 60, t: 20, r: 60, b: 20 };
+    // 숫자 칸 = 박스 오른쪽 절반쯤(가운데 정렬 「NO.10」에서 「NO.」 뺀 부분)
+    const dig = L.rectExtent(-5, -12, 55, 12, 0);
+    assert.deepStrictEqual(dig, { l: 5, t: 12, r: 55, b: 12 });
+    assert.deepStrictEqual(L.rectExtent(-5, -12, 55, 12, 90), { l: 12, t: 55, r: 12, b: 5 }, '90° 회전(boxExtent와 같은 방향)');
+    assert.deepStrictEqual(L.rectExtent(-30, -12, 30, 12, 90), L.boxExtent(60, 24, 90, null), 'boxExtent와 일치');
+    // 「NO.」 자리(박스 왼쪽)에만 선 → 도면 위 아님, 안 옮김
+    const p1 = blank(); vline(p1, 959); vline(p1, 960); vline(p1, 961); // 앱 지도(칸이 이미지 몇 px)처럼 굵게
+    const ink1 = L.buildInkMap(p1, IW, IH, IW, IH);
+    const it1 = { id: 'n1', cx: 1000, cy: 700, ext: e, inkExt: dig, targets: [{ x: 900, y: 800 }], movable: true };
+    assert.ok(L.inkAtCurrent([it1], { ink: ink1 }).n1 < L.INK_ON, 'NO. 위 선은 괜찮음');
+    assert.ok(L.inkAtCurrent([Object.assign({}, it1, { inkExt: null })], { ink: ink1 }).n1 > L.INK_ON, '숫자 칸 없으면 박스 전체로 봄');
+    assert.deepStrictEqual(L.layoutBoxes([it1], { bounds: { w: IW, h: IH }, ink: ink1 }).moves, {}, 'NO.만 걸치면 그대로');
+    // 대각선 네 쪽이 모두 선(가로선 위·아래 가까이) — 옆(수평 쪽)은 비었음 → 45° 아니어도 가까운 옆자리, 지시선 짧게
+    const p2 = blank();
+    hline(p2, 640, 0, IW); hline(p2, 760, 0, IW); // 점(1000,700) 위·아래 60px
+    for (let x = 0; x < IW; x += 7) { if (Math.abs(x - 1000) > 220) { for (let y = 640; y < 760; y += 9) { const q = (y * IW + x) * 4; p2[q] = p2[q + 1] = p2[q + 2] = 0; } } }
+    const ink2 = L.buildInkMap(p2, IW, IH, IW, IH);
+    const it2 = { id: 'n2', cx: 1100, cy: 650, ext: e, targets: [{ x: 1000, y: 700 }], movable: true };
+    const r2 = L.layoutBoxes([it2], { bounds: { w: IW, h: IH }, fresh: true, ink: ink2 }).moves.n2;
+    assert.ok(r2, '옮김');
+    const box2 = { x1: r2.x - e.l, y1: r2.y - e.t, x2: r2.x + e.r, y2: r2.y + e.b };
+    assert.ok(L.inkDensity(ink2, box2) < L.INK_ON, '빈 곳 ' + JSON.stringify(r2));
+    const cl = (v, lo, hi) => Math.max(lo, Math.min(hi, v));
+    const lead = Math.hypot(cl(1000, box2.x1, box2.x2) - 1000, cl(700, box2.y1, box2.y2) - 700);
+    assert.ok(lead < 4 * 40, '지시선 짧게 ' + lead.toFixed(0));
+    // 박스 수십 개 + 도면: 지시선이 길게 빠지지 않음(대부분 박스 높이 4배 안)
+    let sd3 = 5; const rn3 = () => (sd3 = (sd3 * 16807) % 2147483647) / 2147483647;
+    const p3 = blank();
+    for (let x = 100; x < IW; x += 300) vline(p3, x);
+    for (let y = 100; y < IH; y += 250) hline(p3, y, 0, IW);
+    const ink3 = L.buildInkMap(p3, IW, IH, IW, IH);
+    const its = [];
+    for (let i = 0; i < 40; i++) { const tx = 150 + rn3() * 1700; const ty = 150 + rn3() * 1200; its.push({ id: 'k' + i, cx: tx + 70, cy: ty - 40, ext: e, inkExt: dig, targets: [{ x: tx, y: ty }], movable: true }); }
+    const r3 = L.layoutBoxes(its, { bounds: { w: IW, h: IH }, fresh: true, ink: ink3 });
+    assert.strictEqual(r3.after, 0, '충돌 없음');
+    const longs = its.filter((it) => { const m = r3.moves[it.id] || { x: it.cx, y: it.cy }; const T = it.targets[0]; return Math.hypot(cl(T.x, m.x - e.l, m.x + e.r) - T.x, cl(T.y, m.y - e.t, m.y + e.b) - T.y) > 4 * 40; }).length;
+    assert.ok(longs <= 2, '긴 지시선 ' + longs + '/40');
+    assert.ok(r3.inkAfter <= 4, `숫자 칸 도면 위 ${r3.inkBefore}→${r3.inkAfter}`);
+}
+
 // 앱 연결
 const app = read('app.js');
 const idx = read('index.html');
@@ -245,5 +292,6 @@ assert.ok(app.includes('function boxAutoLayoutInkMap()') && app.includes('L.buil
 assert.ok(app.includes("fresh: mode === 'all', ink: boxAutoLayoutInkMap()"), '박스 정리에 잉크 넘김');
 assert.ok(placeFn.includes('ink: boxAutoLayoutInkMap()'), '새 마킹 자리에도 잉크');
 assert.ok(app.includes('{ pool })') && app.includes('2560 / Math.max(dims.w, dims.h)'), '가는 선 안 사라지게 크게 그려 묶음');
+assert.ok(app.includes('inkExt: pinDigitsInkExt(label, dims, rot)') && app.includes('function pinDigitsInkExt('), '숫자 칸만 잉크로 봄');
 assert.ok(app.includes('L.inkAtCurrent(items, opts)') && app.includes("!((inkNow[it.id] || 0) > inkOn)"), '겹친 박스만: 도면 위 박스도 옮김');
 console.log('test-box-auto-layout: ok');

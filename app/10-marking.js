@@ -2290,6 +2290,30 @@
         return [x1, y1, x2, y2].every(Number.isFinite) ? { x1, y1, x2, y2 } : null;
     }
 
+    /**
+     * 2026-11-24 도면(잉크)은 숫자 칸만 본다 — 「NO.」는 도면 선에 걸쳐도 됨(현장 요청).
+     * 글자는 박스 가운데 정렬이라, 「NO.」 너비만큼 왼쪽을 뺀 글자 높이 사각형. 「NO.」로 시작 안 하면 null(박스 전체).
+     */
+    function pinDigitsInkExt(label, dims, rot) {
+        const L = boxAutoLayoutLib();
+        const m = /^(NO\.?\s*)(\S.*)$/i.exec(String(label || ''));
+        if (!L || typeof L.rectExtent !== 'function' || !m || !dims || !(dims.fontSize > 0)) return null;
+        const font = `bold ${dims.fontSize}px "Pretendard", "Malgun Gothic", "맑은 고딕", sans-serif`;
+        let tw = String(label).length * dims.fontSize * 0.58;
+        let pw = m[1].length * dims.fontSize * 0.58;
+        const ctx = state.ctx;
+        if (ctx) {
+            ctx.save();
+            ctx.font = font;
+            tw = ctx.measureText(String(label)).width;
+            pw = ctx.measureText(m[1]).width;
+            ctx.restore();
+        }
+        if (!(tw > pw)) return null;
+        const hh = dims.fontSize * 0.55;
+        return L.rectExtent(-tw / 2 + pw, -hh, tw / 2, hh, rot);
+    }
+
     /** 도면에 그리는 것과 같은 묶음(통합 X-1/X-2는 박스 하나)으로 계산 입력을 만든다 */
     function buildBoxAutoLayoutItems(defects, mode) {
         const L = boxAutoLayoutLib();
@@ -2343,6 +2367,7 @@
                 cx: bx,
                 cy: by,
                 ext: L.boxExtent(dims.w, dims.h, rot, badge),
+                inkExt: pinDigitsInkExt(label, dims, rot),
                 targets,
                 movable: mode === 'all' ? true : !manual,
                 manual

@@ -34,6 +34,7 @@
         cross: 900,       // 지시선끼리 교차
         leaderPoint: 500, // 지시선이 다른 마킹 점을 지남
         diag: 60,         // 지시선이 45° 대각선에서 벗어난 각도(라디안당)
+        diagInk: 6,       // 도면(잉크)을 볼 때는 45°에 매이지 않음(2026-11-24 현장) — 같은 조건일 때만 45° 쪽
         length: 0.5,      // 지시선 길이(단위당) — 길어져도 됨, 같은 조건이면 가까운 쪽
         outside: 2000,    // 도면 밖
         obstacle: 600,    // 범례 등 가림
@@ -42,6 +43,8 @@
         move: 0.25,       // 지금 자리에서 옮긴 거리(단위당)
         stay: 3           // 지금 자리 그대로 두면 덜어 줌(충돌 없는 박스가 괜히 안 움직이게)
     };
+    W.far = 4;           // 지시선이 FAR_FREE(박스 높이 배수)보다 길면 (넘은 길이)² 당 — 잉크 볼 때만
+    const FAR_FREE = 2;
     const HARD = 100; // 이보다 큰 비용 항목 = 「충돌」
 
     function num(v, d) {
@@ -155,7 +158,9 @@
                     }
                     return { x: num(t && t.x, NaN), y: num(t && t.y, NaN) };
                 }).filter((t) => t.rect || (Number.isFinite(t.x) && Number.isFinite(t.y))),
-                movable: !!it.movable
+                movable: !!it.movable,
+                // 잉크를 볼 칸(숫자 부분 — 「NO.」는 도면에 걸쳐도 됨). 없으면 박스 전체
+                inkExt: validInkExt(it.inkExt)
             }));
         const unit = num(o.unit, 0) > 0 ? Number(o.unit) : Math.max(4, median(list.map((it) => it.ext.t + it.ext.b)) || 20);
         const bounds = o.bounds && num(o.bounds.w, 0) > 0 && num(o.bounds.h, 0) > 0 ? { x1: 0, y1: 0, x2: Number(o.bounds.w), y2: Number(o.bounds.h) } : null;
@@ -169,6 +174,17 @@
         return P;
     }
 
+    function validInkExt(e) {
+        if (!e) return null;
+        const v = { l: Number(e.l), t: Number(e.t), r: Number(e.r), b: Number(e.b) };
+        return [v.l, v.t, v.r, v.b].every(Number.isFinite) && v.l + v.r > 0 && v.t + v.b > 0 ? v : null;
+    }
+
+    /** 잉크를 볼 사각형 — 숫자 칸이 있으면 그것(여백 조금), 없으면 박스 전체(+여백) */
+    function inkRectOf(P, it, x, y) {
+        return it.inkExt ? rectOf(x, y, it.inkExt, 0.05 * P.unit) : rectOf(x, y, it.ext, 0.1 * P.unit);
+    }
+
     function anchorOf(it) {
         const pts = it.targets.map((t) => (t.rect ? { x: (t.rect.x1 + t.rect.x2) / 2, y: (t.rect.y1 + t.rect.y2) / 2 } : t));
         if (!pts.length) return { x: it.cx0, y: it.cy0 };
@@ -179,6 +195,7 @@
     const ANGLES = [0, 90, -90, 180, 15, -15, 75, -75, 105, -105, 165, -165];
     const DISTS = [1.2, 2, 3, 4.5, 6.5, 9, 12];
     const ANGLES_WIDE = ANGLES.concat([30, -30, 60, -60, 120, -120, 150, -150, 45, -45, 135, -135]); // 2단계: 360°를 15° 간격(축 방향은 맨 끝)
+    const DISTS_INK = [0.8, 1.2, 2, 3, 4.5, 6.5]; // 잉크 볼 때 1단계(먼 자리는 2단계에서만)
     const DISTS_WIDE = [1.2, 2, 3, 4.5, 6.5, 9, 12, 16, 21];
 
     /** 가운데에서 (ux,uy) 쪽 테두리까지 거리 — 사각형 반폭 기준 */
@@ -204,8 +221,11 @@
             hh = Math.max(hh, (t.rect.y2 - t.rect.y1) / 2);
         });
         const bounds = P.bounds;
-        (wide ? DISTS_WIDE : DISTS).forEach((dk) => {
-            (wide ? ANGLES_WIDE : ANGLES).forEach((deg) => {
+        // 도면(잉크)을 볼 때: 처음부터 360°·가까운 거리 위주(마킹 점 바로 옆에서 빈 곳 찾기, 선 길게 안 뺌)
+        const dists = wide ? DISTS_WIDE : (P.ink ? DISTS_INK : DISTS);
+        const angles = (wide || P.ink) ? ANGLES_WIDE : ANGLES;
+        dists.forEach((dk) => {
+            angles.forEach((deg) => {
                 const th = base + deg * Math.PI / 180;
                 const ux = Math.cos(th); const uy = Math.sin(th);
                 // 지시선이 딱 이 각도가 되게: 마킹 점에서 이 방향으로 g만큼 간 곳에 박스의 **가까운 모서리**(축 방향이면 변 가운데)를 둔다
@@ -254,7 +274,12 @@
         const boxP = rectOf(x, y, it.ext, pr);
         // 내 마킹 점도 가리면 안 됨
         pointsOf(it).forEach((p) => { if (inRect(p, boxP)) { cost += W.point; hard += 1; } });
-        leads.forEach((l) => { cost += W.length * Math.hypot(l.b.x - l.a.x, l.b.y - l.a.y) / u; });
+        leads.forEach((l) => {
+            const len = Math.hypot(l.b.x - l.a.x, l.b.y - l.a.y) / u;
+            cost += W.length * len;
+            // 도면 피하느라 지시선을 길게 빼지 않게(2026-11-24 현장): 잉크 볼 때만, 박스 높이 3배 넘는 만큼 제곱으로
+            if (P.ink && len > FAR_FREE) cost += W.far * (len - FAR_FREE) * (len - FAR_FREE);
+        });
         if (!P.fresh) cost += W.move * Math.hypot(x - it.cx0, y - it.cy0) / u;
         // 지시선이 가장 가까운 45° 대각선에서 벗어난 각도 — 어느 대각선이든 같다 (새로 놓는 게 아니면 지금 자리는 따지지 않음 — 충돌 없는 박스가 괜히 안 움직이게)
         if (P.fresh || Math.abs(x - it.cx0) > 1e-6 || Math.abs(y - it.cy0) > 1e-6) {
@@ -263,7 +288,7 @@
             const vx = clamp(an.x, box.x1, box.x2) - an.x; const vy = clamp(an.y, box.y1, box.y2) - an.y;
             const vl = Math.hypot(vx, vy);
             const dev = vl > 1e-6 ? Math.abs(Math.atan2(Math.abs(vy), Math.abs(vx)) - Math.PI / 4) : Math.PI / 4;
-            cost += W.diag * dev;
+            cost += (P.ink ? W.diagInk : W.diag) * dev;
         }
         const lp = 0.3 * u; // 지시선이 다른 마킹 점을 지난다고 보는 거리
         if (P.bounds) {
@@ -272,9 +297,9 @@
             if (inside < all - 1e-6) { cost += W.outside; hard += 1; }
         }
         P.obstacles.forEach((r) => { if (overlapArea(box, r) > 0) { cost += W.obstacle; hard += 1; } });
-        // 도면 선·글자 위면 숫자가 안 보임 → 박스(+약간 여백) 안 잉크 비율만큼(약하게, 충돌 아님)
+        // 도면 선·글자 위면 숫자가 안 보임 → 숫자 칸(없으면 박스) 안 잉크 비율만큼(충돌 아님). 「NO.」는 걸쳐도 됨
         // √: 숫자를 가로지르는 선 한 줄(넓이로는 몇 %)도 글자를 가리니 작은 비율에 민감하게
-        if (P.ink) cost += W.ink * Math.sqrt(inkDensity(P.ink, rectOf(x, y, it.ext, 0.1 * u)));
+        if (P.ink) cost += W.ink * Math.sqrt(inkDensity(P.ink, inkRectOf(P, it, x, y)));
         const nb = P.neighbors[i];
         for (let k = 0; k < nb.length; k++) {
             const j = nb[k];
@@ -448,7 +473,7 @@
         let cost = 0;
         for (let i = 0; i < n; i++) cost += costAt(P, i, pos[i].x, pos[i].y, pos, allPlaced);
         // 도면(잉크) 위 박스 수 — 옮길 수 있던 박스만
-        const onInk = (x, y, it) => (P.ink && inkDensity(P.ink, rectOf(x, y, it.ext, 0.1 * P.unit)) > INK_ON ? 1 : 0);
+        const onInk = (x, y, it) => (P.ink && inkDensity(P.ink, inkRectOf(P, it, x, y)) > INK_ON ? 1 : 0);
         let inkBefore = 0; let inkAfter = 0;
         movers.forEach((i) => { const it = P.list[i]; inkBefore += onInk(it.cx0, it.cy0, it); inkAfter += onInk(pos[i].x, pos[i].y, it); });
         return { moves, before, after, cost, unit: P.unit, inkBefore, inkAfter };
@@ -532,7 +557,7 @@
     function inkAtCurrent(items, opts) {
         const P = prepare(items, opts);
         const out = {};
-        P.list.forEach((it) => { out[it.id] = P.ink ? inkDensity(P.ink, rectOf(it.cx0, it.cy0, it.ext, 0.1 * P.unit)) : 0; });
+        P.list.forEach((it) => { out[it.id] = P.ink ? inkDensity(P.ink, inkRectOf(P, it, it.cx0, it.cy0)) : 0; });
         return out;
     }
     const INK_ON = 0.02; // 박스가 「도면 위」라고 보는 잉크 비율(선 한 줄 정도)
@@ -556,6 +581,19 @@
         return clamp(sum / area, 0, 1);
     }
 
+    /**
+     * 화면 기준 사각형(박스 가운데 0,0 — 박스는 화면에 수평으로 그려짐) → 이미지 좌표 { l, t, r, b }(가운데에서 끝까지, 음수 가능).
+     * 숫자 칸(「NO.」 뺀 부분)처럼 박스 일부만 따로 볼 때 씀.
+     */
+    function rectExtent(sx1, sy1, sx2, sy2, rotationDeg) {
+        const r = ((Math.round(num(rotationDeg, 0) / 90) * 90) % 360 + 360) % 360;
+        const rad = -r * Math.PI / 180;
+        const c = Math.round(Math.cos(rad)); const s = Math.round(Math.sin(rad));
+        const pts = [[sx1, sy1], [sx2, sy1], [sx2, sy2], [sx1, sy2]].map(([x, y]) => ({ x: x * c - y * s, y: x * s + y * c }));
+        const xs = pts.map((p) => p.x); const ys = pts.map((p) => p.y);
+        return { l: -Math.min.apply(null, xs), t: -Math.min.apply(null, ys), r: Math.max.apply(null, xs), b: Math.max.apply(null, ys) };
+    }
+
     /** 가운데 기준 박스 끝 거리(회전 반영). 박스는 화면 기준 수평으로 그려지고(역회전), 「중요」는 화면 왼쪽 위 모서리 */
     function boxExtent(w, h, rotationDeg, badge) {
         const bw = badge ? Math.max(0, num(badge.w, 0)) : 0;
@@ -572,7 +610,7 @@
         return { l: -Math.min.apply(null, xs), t: -Math.min.apply(null, ys), r: Math.max.apply(null, xs), b: Math.max.apply(null, ys) };
     }
 
-    const api = { layoutBoxes, placeNewBox, conflictsAtCurrent, boxExtent, segCross, segHitsRect, buildInkMap, inkDensity, inkAtCurrent, INK_ON, WEIGHTS: W, HARD };
+    const api = { layoutBoxes, placeNewBox, conflictsAtCurrent, boxExtent, segCross, segHitsRect, buildInkMap, inkDensity, inkAtCurrent, INK_ON, rectExtent, WEIGHTS: W, HARD };
     root.BSA = root.BSA || {};
     root.BSA.boxAutoLayout = api;
     if (typeof module !== 'undefined' && module.exports) module.exports = api;
