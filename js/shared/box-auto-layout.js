@@ -5,6 +5,7 @@
  * - 후보(2026-11-11 45°): 박스마다 기준점(화살표 끝들의 가운데)에서 **대각선 네 방향(45°)**을 기본으로
  *         (지시선이 딱 45°가 되게 박스 모서리를 그 선 위에 둔다. 방사형 아님 — 어느 대각선이든 같고, 지금 박스가 있는 쪽부터 본다),
  *         대각선 ±15° × 거리 7단계 + 지금 자리. 그래도 충돌이 남는 박스만 360° × 더 먼 거리까지 다시 찾는다.
+ * - 비용(2026-11-24 +): 박스가 도면 선·글자 위에 올라간 정도(opts.ink — 잉크 비율, 약하게: 빈 곳을 고르게).
  * - 비용: 박스끼리 겹침, 박스가 마킹 점을 가림, 박스가 다른 지시선을 가림(또는 내 지시선이 다른 박스를 지남),
  *         지시선끼리 교차, 지시선이 다른 마킹 점을 지남 — 이것들은 「충돌」(강하게).
  *         지시선이 45° 대각선에서 벗어난 각도(중간), 지시선 길이(아주 약하게 — 길어져도 됨), 도면 밖,
@@ -18,7 +19,8 @@
  *   targets: [{ x, y }] 또는 [{ rect: { x1, y1, x2, y2 } }](영역: 지시선이 영역 테두리에 꽂힘),
  *   movable: bool
  * }
- * opts: { bounds: { w, h }, fresh: bool, obstacles: [{ x1, y1, x2, y2 }](범례 등 — 박스가 피함), unit(박스 높이 기준, 없으면 중앙값) }
+ * opts: { bounds: { w, h }, fresh: bool, obstacles: [{ x1, y1, x2, y2 }](범례 등 — 박스가 피함), unit(박스 높이 기준, 없으면 중앙값),
+ *         ink: buildInkMap(...) 결과(도면 선·글자 밀도 — 박스가 빈 곳을 고르게, 2026-11-24) }
  * 결과: { moves: { id: { x, y } }, before: 충돌 수, after: 충돌 수, cost }
  */
 (function (root) {
@@ -36,6 +38,7 @@
         outside: 2000,    // 도면 밖
         obstacle: 600,    // 범례 등 가림
         area: 40,         // 다른 영역 마킹 위에 올라감(약하게)
+        ink: 220,         // 2026-11-24 도면 선·글자 위에 올라감(박스 안 잉크 비율 0~1 당) — 빈 곳 우선, 「충돌」은 아님
         move: 0.25,       // 지금 자리에서 옮긴 거리(단위당)
         stay: 3           // 지금 자리 그대로 두면 덜어 줌(충돌 없는 박스가 괜히 안 움직이게)
     };
@@ -157,7 +160,8 @@
         const unit = num(o.unit, 0) > 0 ? Number(o.unit) : Math.max(4, median(list.map((it) => it.ext.t + it.ext.b)) || 20);
         const bounds = o.bounds && num(o.bounds.w, 0) > 0 && num(o.bounds.h, 0) > 0 ? { x1: 0, y1: 0, x2: Number(o.bounds.w), y2: Number(o.bounds.h) } : null;
         const obstacles = (Array.isArray(o.obstacles) ? o.obstacles : []).filter((r) => r && [r.x1, r.y1, r.x2, r.y2].every((v) => Number.isFinite(Number(v))));
-        const P = { list, unit, bounds, obstacles, fresh: !!o.fresh };
+        const ink = o.ink && o.ink.I && o.ink.cw > 0 && o.ink.ch > 0 ? o.ink : null;
+        const P = { list, unit, bounds, obstacles, fresh: !!o.fresh, ink };
         P.anchors = list.map(anchorOf);
         // 먼저 보는 대각선 = 지금 박스가 있는 쪽(같은 값이면 덜 움직이게). 정확히 위·옆이면 오른쪽 위.
         const Q = Math.SQRT1_2;
@@ -268,6 +272,8 @@
             if (inside < all - 1e-6) { cost += W.outside; hard += 1; }
         }
         P.obstacles.forEach((r) => { if (overlapArea(box, r) > 0) { cost += W.obstacle; hard += 1; } });
+        // 도면 선·글자 위면 숫자가 안 보임 → 박스(+약간 여백) 안 잉크 비율만큼(약하게, 충돌 아님)
+        if (P.ink) cost += W.ink * inkDensity(P.ink, rectOf(x, y, it.ext, 0.1 * u));
         const nb = P.neighbors[i];
         for (let k = 0; k < nb.length; k++) {
             const j = nb[k];
@@ -460,6 +466,62 @@
         return { x: mv.x, y: mv.y, moved: true, before, after };
     }
 
+    /**
+     * 2026-11-24 도면 잉크 지도 — 도면(배경 그림)을 작게 줄인 RGBA(흰 바탕에 합성)를 받아 칸마다 「진한 정도」(0~1)를 매기고
+     * 적분 이미지(합계표)로 만든다. 박스 사각형 안 평균은 inkDensity로 O(1).
+     * rgba: Uint8(Clamped)Array (cw*ch*4), imgW·imgH: 이미지 좌표(마킹 좌표) 크기.
+     * 바탕이 누런 스캔이어도 되게, 밝기 중앙값(=바탕)보다 충분히 어두운 것만 잉크로 본다.
+     * 줄이면서 가는 선이 옅은 회색이 되므로 옅은 것도 조금은 센다.
+     */
+    function buildInkMap(rgba, cw, ch, imgW, imgH) {
+        cw = Math.floor(num(cw, 0)); ch = Math.floor(num(ch, 0));
+        const iw = num(imgW, 0); const ih = num(imgH, 0);
+        if (!rgba || cw <= 0 || ch <= 0 || iw <= 0 || ih <= 0 || rgba.length < cw * ch * 4) return null;
+        const n = cw * ch;
+        const lum = new Uint8Array(n);
+        const hist = new Uint32Array(256);
+        for (let p = 0, q = 0; p < n; p++, q += 4) {
+            const a = rgba[q + 3] / 255; // 투명 = 흰 바탕
+            const l = Math.round((0.299 * rgba[q] + 0.587 * rgba[q + 1] + 0.114 * rgba[q + 2]) * a + 255 * (1 - a));
+            lum[p] = l;
+            hist[l] += 1;
+        }
+        let acc = 0; let med = 255;
+        for (let v = 0; v < 256; v++) { acc += hist[v]; if (acc * 2 >= n) { med = v; break; } }
+        const hi = Math.min(235, med - 15); // 이보다 밝으면 바탕
+        const span = Math.max(40, hi - 60); // hi-span 이하면 완전 잉크
+        const W1 = cw + 1;
+        const I = new Float64Array(W1 * (ch + 1));
+        for (let y = 0; y < ch; y++) {
+            let row = 0;
+            for (let x = 0; x < cw; x++) {
+                const d = (hi - lum[y * cw + x]) / span;
+                row += d <= 0 ? 0 : (d >= 1 ? 1 : d);
+                I[(y + 1) * W1 + x + 1] = I[y * W1 + x + 1] + row;
+            }
+        }
+        return { cw, ch, sx: cw / iw, sy: ch / ih, I };
+    }
+
+    /** 이미지 좌표 사각형 안 잉크 평균(0~1). 칸 일부 걸침도 넓이 비율대로(적분 이미지를 쌍선형으로 읽음) */
+    function inkDensity(ink, r) {
+        if (!ink || !r) return 0;
+        const x1 = clamp(r.x1 * ink.sx, 0, ink.cw); const x2 = clamp(r.x2 * ink.sx, 0, ink.cw);
+        const y1 = clamp(r.y1 * ink.sy, 0, ink.ch); const y2 = clamp(r.y2 * ink.sy, 0, ink.ch);
+        const area = (x2 - x1) * (y2 - y1);
+        if (!(area > 1e-9)) return 0;
+        const W1 = ink.cw + 1; const I = ink.I;
+        const S = (x, y) => {
+            const xi = Math.min(ink.cw - 1, Math.floor(x)); const yi = Math.min(ink.ch - 1, Math.floor(y));
+            const fx = x - xi; const fy = y - yi;
+            const a = I[yi * W1 + xi]; const b = I[yi * W1 + xi + 1];
+            const c = I[(yi + 1) * W1 + xi]; const d = I[(yi + 1) * W1 + xi + 1];
+            return a * (1 - fx) * (1 - fy) + b * fx * (1 - fy) + c * (1 - fx) * fy + d * fx * fy;
+        };
+        const sum = S(x2, y2) - S(x1, y2) - S(x2, y1) + S(x1, y1);
+        return clamp(sum / area, 0, 1);
+    }
+
     /** 가운데 기준 박스 끝 거리(회전 반영). 박스는 화면 기준 수평으로 그려지고(역회전), 「중요」는 화면 왼쪽 위 모서리 */
     function boxExtent(w, h, rotationDeg, badge) {
         const bw = badge ? Math.max(0, num(badge.w, 0)) : 0;
@@ -476,7 +538,7 @@
         return { l: -Math.min.apply(null, xs), t: -Math.min.apply(null, ys), r: Math.max.apply(null, xs), b: Math.max.apply(null, ys) };
     }
 
-    const api = { layoutBoxes, placeNewBox, conflictsAtCurrent, boxExtent, segCross, segHitsRect, WEIGHTS: W, HARD };
+    const api = { layoutBoxes, placeNewBox, conflictsAtCurrent, boxExtent, segCross, segHitsRect, buildInkMap, inkDensity, WEIGHTS: W, HARD };
     root.BSA = root.BSA || {};
     root.BSA.boxAutoLayout = api;
     if (typeof module !== 'undefined' && module.exports) module.exports = api;

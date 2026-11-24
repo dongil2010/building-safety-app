@@ -133,6 +133,66 @@ assert.ok(L.segHitsRect({ x: 0, y: 5 }, { x: 20, y: 5 }, { x1: 5, y1: 0, x2: 15,
     assert.strictEqual(L.placeNewBox(others, null, {}), null);
 }
 
+// 2026-11-24 도면 선·글자(잉크) 피하기: 박스 숫자가 도면 위에 안 올라가게 빈 곳 우선
+{
+    // 가짜 도면(이미지 2000×1500 → 잉크 지도 500×375): 흰 바탕, 오른쪽 위(점 기준)에 글자 덩어리처럼 까만 판
+    const IW = 2000; const IH = 1500; const cw = 500; const ch = 375; const k = cw / IW;
+    const rgba = new Uint8ClampedArray(cw * ch * 4).fill(255);
+    const paint = (x1, y1, x2, y2, v) => {
+        for (let y = Math.floor(y1 * k); y < Math.ceil(y2 * k); y++) {
+            for (let x = Math.floor(x1 * k); x < Math.ceil(x2 * k); x++) {
+                const q = (y * cw + x) * 4; rgba[q] = rgba[q + 1] = rgba[q + 2] = v;
+            }
+        }
+    };
+    paint(1000, 300, 1400, 500, 0); // 점(1000,500)의 오른쪽 위 = 지금 박스 쪽 대각선
+    // 얇은 선(가로·세로)도 잉크
+    paint(0, 1200, 2000, 1204, 0);
+    const ink = L.buildInkMap(rgba, cw, ch, IW, IH);
+    assert.ok(ink && ink.I.length === (cw + 1) * (ch + 1), '잉크 지도');
+    assert.ok(L.inkDensity(ink, { x1: 1100, y1: 350, x2: 1300, y2: 450 }) > 0.95, '까만 판 안 = 잉크');
+    assert.ok(L.inkDensity(ink, { x1: 100, y1: 100, x2: 300, y2: 200 }) < 0.01, '빈 곳 = 0');
+    const half = L.inkDensity(ink, { x1: 900, y1: 350, x2: 1100, y2: 450 });
+    assert.ok(half > 0.4 && half < 0.6, '반쯤 걸치면 반 ' + half);
+    assert.ok(L.inkDensity(ink, { x1: 0, y1: 1190, x2: 2000, y2: 1214 }) > 0.1, '가는 선도 셈');
+    assert.strictEqual(L.inkDensity(ink, { x1: 5000, y1: 5000, x2: 6000, y2: 6000 }), 0, '도면 밖 = 0');
+    assert.strictEqual(L.buildInkMap(null, 10, 10, 100, 100), null);
+    assert.strictEqual(L.buildInkMap(new Uint8Array(4), 10, 10, 100, 100), null, '크기 안 맞으면 null');
+    // 누런 스캔 바탕(밝기 200)은 잉크 아님
+    const yel = new Uint8ClampedArray(40 * 30 * 4);
+    for (let q = 0; q < yel.length; q += 4) { yel[q] = 215; yel[q + 1] = 205; yel[q + 2] = 160; yel[q + 3] = 255; }
+    const yInk = L.buildInkMap(yel, 40, 30, 400, 300);
+    assert.ok(L.inkDensity(yInk, { x1: 0, y1: 0, x2: 400, y2: 300 }) < 0.01, '바탕색은 잉크 아님');
+
+    // 「모든 박스」: 잉크 없으면 지금 쪽(오른쪽 위) 45° → 까만 판 위. 잉크 주면 빈 대각선으로
+    const it = mk('ink1', 1000, 500);
+    const noInk = L.layoutBoxes([it], { bounds: { w: IW, h: IH }, fresh: true }).moves.ink1;
+    const boxAt = (m) => ({ x1: m.x - ext.l, y1: m.y - ext.t, x2: m.x + ext.r, y2: m.y + ext.b });
+    assert.ok(noInk && L.inkDensity(ink, boxAt(noInk)) > 0.5, '잉크 모르면 판 위 ' + JSON.stringify(noInk));
+    const withInk = L.layoutBoxes([it], { bounds: { w: IW, h: IH }, fresh: true, ink }).moves.ink1;
+    assert.ok(withInk && L.inkDensity(ink, boxAt(withInk)) < 0.01, '잉크 피해 빈 곳 ' + JSON.stringify(withInk));
+    assert.ok(Math.hypot(withInk.x - 1000, withInk.y - 500) < 300, '그래도 가까운 자리');
+    // 잉크는 「충돌」 수에 안 셈(겹친 박스만 모드에서 멀쩡한 박스를 괜히 안 움직임)
+    assert.deepStrictEqual(L.conflictsAtCurrent([mk('c1', 1150, 435)], { bounds: { w: IW, h: IH }, ink }), { c1: 0 });
+    assert.deepStrictEqual(L.layoutBoxes([mk('c1', 1150, 435, { movable: false })], { ink }).moves, {});
+    // 겹침 풀기는 그대로 되고, 옮겨 간 자리는 빈 곳
+    const pair = [mk('pa', 1000, 500, { movable: false }), mk('pb', 1010, 505)];
+    const rp = L.layoutBoxes(pair, { bounds: { w: IW, h: IH }, ink });
+    assert.ok(rp.after === 0 && rp.moves.pb && L.inkDensity(ink, boxAt(rp.moves.pb)) < 0.05, '겹침 풀고 빈 곳 ' + JSON.stringify(rp.moves.pb));
+    // 수백 개 + 잉크도 빠르게, 결정적
+    const big = new Uint8ClampedArray(1000 * 750 * 4);
+    let sd2 = 11; const rn2 = () => (sd2 = (sd2 * 16807) % 2147483647) / 2147483647;
+    for (let q = 0; q < big.length; q += 4) { const v = rn2() < 0.15 ? 0 : 255; big[q] = big[q + 1] = big[q + 2] = v; big[q + 3] = 255; }
+    const tInk0 = Date.now();
+    const bigInk = L.buildInkMap(big, 1000, 750, 4000, 3000);
+    const r1i = L.layoutBoxes(many, { bounds: { w: 4000, h: 3000 }, ink: bigInk });
+    const msInk = Date.now() - tInk0;
+    const r2i = L.layoutBoxes(many, { bounds: { w: 4000, h: 3000 }, ink: bigInk });
+    assert.strictEqual(JSON.stringify(r1i.moves), JSON.stringify(r2i.moves), '잉크 있어도 결정적');
+    assert.ok(r1i.after < r1i.before / 4, `잉크 있어도 겹침 줄임 ${r1i.before}→${r1i.after}`);
+    assert.ok(msInk < 3000, `잉크 포함 빠름 ${msInk}ms`);
+}
+
 // 앱 연결
 const app = read('app.js');
 const idx = read('index.html');
@@ -158,4 +218,7 @@ assert.ok(relIdx > 0, '점 마킹 손 뗄 때 연결');
 const rel = app.slice(relIdx, relIdx + 2000);
 assert.ok(rel.includes('!getActiveMarkingGroup()?.groupId') && rel.includes('liveBoxImgX = placed.x;') && rel.indexOf('placeNewMarkingBoxAvoidingOverlap') < rel.indexOf('openAddDefectModal(liveBoxImgX'), '묶음 제외, 창 열기 전에 박스만 옮김');
 assert.ok(app.includes('2026-11-24 첫 영역 마킹') && app.includes('areaPlaced ? areaPlaced.x : boxPos.boxX'), '영역 마킹 연결');
+assert.ok(app.includes('function boxAutoLayoutInkMap()') && app.includes('L.buildInkMap(cx.getImageData('), '앱: 도면 잉크 지도');
+assert.ok(app.includes("fresh: mode === 'all', ink: boxAutoLayoutInkMap()"), '박스 정리에 잉크 넘김');
+assert.ok(placeFn.includes('ink: boxAutoLayoutInkMap()'), '새 마킹 자리에도 잉크');
 console.log('test-box-auto-layout: ok');
