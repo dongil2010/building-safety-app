@@ -1242,27 +1242,29 @@
     }
 
     function formatCrackMeasurePair(m) {
+        // 2026-11-24 개수: 숫자(2, 2~3)면 「2EA」, 낱말(다수·전체 …)이면 그 글자 그대로(EA 안 붙임)
+        const crackCountLabel = (v) => (/^[\d\s.,~-]+$/.test(v) ? `${v}EA` : v);
         const join = normalizeMeasureJoin(m && m.join);
         // 폭 칸에 "Cw:0.3"이 그대로 들어간 예전 값 → "Cw:Cw:0.3" 으로 두 번 붙지 않게
         const w = normalizeCrackDecimalText(String((m && m.width) || '').replace(/^\s*Cw\s*[:=]\s*/i, ''));
         const l = normalizeCrackDecimalText((m && m.length) || '');
         const n = String((m && m.count) || '').trim();
         // 한 칸 띄움: 화면/엑셀용. HWPX는 wrapHwpxCellText가 -nEA 앞을 문단 분리.
-        const eaSuffix = n ? ` -${n}EA` : '';
+        const eaSuffix = n ? ` -${crackCountLabel(n)}` : '';
 
         if (join === 'x') {
             if (w && l) return normalizeEaSpacingInText(`${w}x${l}${eaSuffix}`);
             if (w) return normalizeEaSpacingInText(n ? `Cw:${w}${eaSuffix}` : `Cw:${w}`);
-            if (l) return normalizeEaSpacingInText(n ? `${l}m -${n}EA` : `${l}m`);
-            if (n) return `${n}EA`;
+            if (l) return normalizeEaSpacingInText(n ? `${l}m -${crackCountLabel(n)}` : `${l}m`);
+            if (n) return crackCountLabel(n);
             return '';
         }
 
         // 한글(HWPX) 관례: 길이 없이 폭만(또는 폭+개수)이면 Cw:n.n / Cw:n.n -2EA
         if (w && !l) return normalizeEaSpacingInText(`Cw:${w}${eaSuffix}`);
         if (w && l) return normalizeEaSpacingInText(`${w}/${l}${eaSuffix}`);
-        if (l) return normalizeEaSpacingInText(n ? `${l}m -${n}EA` : `${l}m`);
-        if (n) return `${n}EA`;
+        if (l) return normalizeEaSpacingInText(n ? `${l}m -${crackCountLabel(n)}` : `${l}m`);
+        if (n) return crackCountLabel(n);
         return '';
     }
 
@@ -1272,17 +1274,19 @@
      * 「x」(가로x세로) 표기는 단위가 정해져 있지 않아 예전 그대로 둔다. 화면·PDF·엑셀은 바꾸지 않는다.
      */
     function formatCrackMeasurePairHwpx(m) {
+        // 개수가 낱말이면 EA 안 붙임(formatCrackMeasurePair와 같다, 2026-11-24)
+        const crackCountLabel = (v) => (/^[\d\s.,~-]+$/.test(v) ? `${v}EA` : v);
         const join = normalizeMeasureJoin(m && m.join);
         if (join === 'x') return formatCrackMeasurePair(m);
         const strip = (v, re) => String(v == null ? '' : v).replace(re, '').trim();
         const w = normalizeCrackDecimalText(strip(String((m && m.width) || '').replace(/^\s*Cw\s*[:=]\s*/i, ''), /\s*(mm|㎜)\s*$/i));
         const l = normalizeCrackDecimalText(strip(String((m && m.length) || '').replace(/^\s*L\s*[:=]\s*/i, ''), /\s*m\s*$/i));
         const n = strip((m && m.count) || '', /\s*EA\s*$/i);
-        const eaSuffix = n ? ` -${n}EA` : '';
+        const eaSuffix = n ? ` -${crackCountLabel(n)}` : '';
         if (w && !l) return normalizeEaSpacingInText(`Cw:${w}${eaSuffix}`); // 2026-11-02 폭 뒤 mm 빼기(사용자): Cw:0.3
         if (w && l) return normalizeEaSpacingInText(`${w}/${l}${eaSuffix}`); // 2026-10-31 폭+길이는 단위 없이 예전 표기(사용자)
         if (l) return normalizeEaSpacingInText(`L: ${l}m${eaSuffix}`);
-        if (n) return `${n}EA`;
+        if (n) return crackCountLabel(n);
         return '';
     }
 
@@ -1300,7 +1304,8 @@
             .toLowerCase();
         if (!t || t === '-') return true;
         const num = '\\d+(?:\\.\\d+)?';
-        const ea = '(?:-?\\d+ea)?';
+        // 개수가 낱말이면 EA 없이 붙는다(0.3/2.0 -다수, 2026-11-24)
+        const ea = '(?:-?\\d+ea|-[가-힣]+)?';
         const item = `(?:(?:cw[:=])?${num}(?:~${num})?(?:mm)?(?:[/x*]${num}(?:mm|m)?)?${ea}|${num}m${ea}|\\d+ea)`;
         return new RegExp(`^${item}(?:[,;·/]?${item})*$`).test(t);
     }
