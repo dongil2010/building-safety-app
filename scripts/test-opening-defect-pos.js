@@ -71,7 +71,7 @@ assert.strictEqual(sb.fmt({ defectType: '수직균열', openingPos: '문 측면'
 assert.strictEqual(sb.fmt({ defectType: '창 하부 사선균열', openingPos: '창 하부' }), '창 하부 벽체 사선균열');
 assert.strictEqual(sb.fmt({ defectType: '개구부 주위 수직균열', openingPos: '창 측면' }), '창 측면 벽체 수직균열');
 assert.strictEqual(sb.fmt({ defectType: '', openingPos: '문 상부' }), '문 상부 벽체 균열');
-assert.strictEqual(sb.fmt({ defectType: '수직균열, 누수', openingPos: '창 상부' }), '창 상부 벽체 수직균열, 창 상부 벽체 누수');
+assert.strictEqual(sb.fmt({ defectType: '수직균열, 누수', openingPos: '창 상부' }), '창 상부 벽체 수직균열, 누수');
 // 위치 미선택 + 글에 이름 있음 → 글에서 찾아 표기(띄어쓰기 정리)
 assert.strictEqual(sb.fmt({ defectType: '창상부 수직균열' }), '창 상부 벽체 수직균열');
 assert.strictEqual(sb.fmt({ defectType: '문측면  사선균열', isOpeningCrack: true }), '문 측면 벽체 사선균열');
@@ -160,13 +160,13 @@ assert.strictEqual(sb.label(['개구부 상부', '개구부 하부']), '개구�
 assert.strictEqual(sb.label(['창 상부']), '창 상부');
 // 조사내용
 assert.strictEqual(sb.fmt({ defectType: '수직균열', openingPos: '창 상부, 창 하부', isOpeningCrack: true }), '창 상부·하부 벽체 수직균열');
-assert.strictEqual(sb.fmt({ defectType: '수직균열, 누수', openingPos: '창 상부, 창 하부' }), '창 상부·하부 벽체 수직균열, 창 상부·하부 벽체 누수');
+assert.strictEqual(sb.fmt({ defectType: '수직균열, 누수', openingPos: '창 상부, 창 하부' }), '창 상부·하부 벽체 수직균열, 누수');
 assert.strictEqual(sb.fmt({ defectType: '수직균열', openingPos: '개구부 상부', isOpeningCrack: true }), '개구부 상부 벽체 수직균열');
 assert.strictEqual(sb.fmt({ defectType: '', openingPos: '개구부 상부, 개구부 하부' }), '개구부 상부·하부 벽체 균열');
 assert.strictEqual(sb.fmt({ defectType: '창 상부·하부 벽체 수직균열', openingPos: '창 상부, 창 하부' }), '창 상부·하부 벽체 수직균열', '이미 붙은 표기는 한 번만');
 assert.strictEqual(sb.fmt({ defectType: '창 상부·하부 수직균열' }), '창 상부·하부 벽체 수직균열', '글에 줄여 쓴 것');
 assert.strictEqual(sb.fmt({ defectType: '개구부하부 사선균열' }), '개구부 하부 벽체 사선균열');
-assert.strictEqual(sb.fmt({ defectType: '창 상부 수직균열, 창 하부 누수' }), '창 상부 벽체 수직균열, 창 상부 벽체 누수', '위치를 안 고른 예전 글은 예전 표기 그대로');
+assert.strictEqual(sb.fmt({ defectType: '창 상부 수직균열, 창 하부 누수' }), '창 상부 벽체 수직균열, 누수', '위치를 안 고른 예전 글은 예전 표기 그대로');
 assert.strictEqual(sb.det({ location: '', defectType: '개구부 상부 균열', component: '벽체', size: '' }), true);
 // 버튼: 누를 때마다 그 위치만 켜고 끈다(다른 위치는 그대로)
 assert.ok(/if \(at >= 0\) list\.splice\(at, 1\); else list\.push\(v\);\s*setDefectOpeningPosUi\(list\.join\(', '\)\);/.test(app));

@@ -32157,7 +32157,7 @@ ${roundMobile ? '' : `<button type="button" class="icon-btn icon-btn-trash" titl
         refreshDefectQuickPickBar();
     }
 
-// @@app-part 08-defect-presets.js sha=f7d7e48b04fe — 원본은 app/08-defect-presets.js (여기 말고 거기서 고칠 것)
+// @@app-part 08-defect-presets.js sha=c1af75767f51 — 원본은 app/08-defect-presets.js (여기 말고 거기서 고칠 것)
     // --- Dynamic Defect Type Presets & Custom Adding ---
     const STEEL_MEMBER_DEFECTS = [
         '상태양호',
@@ -32570,12 +32570,22 @@ ${roundMobile ? '' : `<button type="button" class="icon-btn icon-btn-trash" titl
             const head = `${pos} ${member}`;
             const ps = parseDefectTypeList(raw);
             if (!ps.length) return `${head} 균열`;
-            return joinDefectTypeList(ps.map((t) => {
-                if (!t || (typeof isGoodDefectType === 'function' ? isGoodDefectType(t) : t === '상태양호')) return t;
+            // 2026-11-24 위치·부재(「창 하부 벽체」)는 첫 결함에만 붙인다
+            // (「창 하부 벽체 수직균열, 창 하부 벽체 수평균열」 → 「창 하부 벽체 수직균열, 수평균열」)
+            let headUsed = false;
+            const seen = [];
+            const outList = [];
+            ps.forEach((t) => {
+                if (!t || (typeof isGoodDefectType === 'function' ? isGoodDefectType(t) : t === '상태양호')) { outList.push(t); return; }
                 let bare = stripOpeningPosPrefix(t);
                 if (extraRe && extraRe.test(bare)) bare = bare.replace(extraRe, '').trim(); // 결함 글에 대상이 또 있으면(「도장 들뜸」) 한 번만
-                return bare ? `${head} ${bare}` : `${head} 균열`;
-            }));
+                if (!bare) bare = '균열';
+                if (seen.indexOf(bare) >= 0) return;
+                seen.push(bare);
+                outList.push(headUsed ? bare : `${head} ${bare}`);
+                headUsed = true;
+            });
+            return joinDefectTypeList(outList);
         }
         if (!d || !d.isOpeningCrack) return raw;
         const parts = parseDefectTypeList(raw);

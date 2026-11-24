@@ -106,7 +106,7 @@ assert.strictEqual(sb.fmt({ defectType: '수직균열', openingPos: '문 상부'
 // 조사내용 전체(부재 + 결함 내용): 「벽체」가 겹치지 않는다
 assert.strictEqual(sb.content({ component: '벽체', defectType: '수직균열', openingPos: '창 상부', isOpeningCrack: true }), '창 상부 벽체 수직균열');
 assert.strictEqual(sb.content({ component: '벽체', defectType: '균열', openingPos: '문 측면', isOpeningCrack: true }), '문 측면 벽체 균열');
-assert.strictEqual(sb.content({ component: '벽체', defectType: '수직균열, 누수', openingPos: '창 하부', isOpeningCrack: true }), '창 하부 벽체 수직균열, 창 하부 벽체 누수');
+assert.strictEqual(sb.content({ component: '벽체', defectType: '수직균열, 누수', openingPos: '창 하부', isOpeningCrack: true }), '창 하부 벽체 수직균열, 누수');
 assert.strictEqual(sb.content({ component: '기둥', defectType: '수직균열', openingPos: '창 상부', isOpeningCrack: true }), '기둥 창 상부 벽체 수직균열', '다른 부재는 그대로 앞에');
 assert.strictEqual(sb.content({ component: '벽체', defectType: '수직균열', isOpeningCrack: true }), '벽체 개구부 주위 수직균열', '종류를 모르면 예전 표기');
 assert.strictEqual(sb.content({ component: '벽체', defectType: '수직균열' }), '벽체 수직균열', '개구부 아닌 결함은 그대로');
@@ -128,7 +128,7 @@ assert.strictEqual(sb.content({ component: '벽체 도장', defectType: '도장�
 assert.strictEqual(sb.content({ component: '벽체 도장 부분', defectType: '들뜸', openingPos: '창 하부' }), '창 하부 벽체 도장 부분 들뜸');
 assert.strictEqual(sb.content({ component: '벽체 미장', defectType: '들뜸', openingPos: '창 측면' }), '창 측면 벽체 미장 들뜸');
 assert.strictEqual(sb.content({ component: '벽체 치장벽돌', defectType: '탈락', openingPos: '창 상부' }), '창 상부 벽체 치장벽돌 탈락');
-assert.strictEqual(sb.content({ component: '벽체 도장', defectType: '들뜸, 박리', openingPos: '창 상부, 창 하부' }), '창 상부·하부 벽체 도장 들뜸, 창 상부·하부 벽체 도장 박리');
+assert.strictEqual(sb.content({ component: '벽체 도장', defectType: '들뜸, 박리', openingPos: '창 상부, 창 하부' }), '창 상부·하부 벽체 도장 들뜸, 박리');
 assert.strictEqual(sb.content({ component: '벽체  도장', defectType: '들뜸', openingPos: '창 하부' }), '창 하부 벽체 도장 들뜸', '부재 띄어쓰기 여러 칸');
 assert.strictEqual(sb.content({ component: '벽체 도장', defectType: '상태양호', openingPos: '창 하부' }), '벽체 도장 상태양호');
 // 부재나 결함 글에 이미 개구부 말이 있으면 「개구부 주위」·위치를 또 붙이지 않는다
