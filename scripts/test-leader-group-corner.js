@@ -28,12 +28,18 @@ assert.deepStrictEqual(n1, n2, '이제: 같은 모서리');
 assert.deepStrictEqual(A(200, 40, [{ x: 200, y: 40 }]), old1);
 // 동그라미/둥근 박스는 예전 그대로
 assert.deepStrictEqual(L.getGroupLeaderBoxAnchor(100, 100, 200, 40, tips, 40, 20, 0, { shape: 'circle' }).x, 0 * 1 + 100);
-// 박스 반대편 점: 공용 모서리에서 가면 박스를 가로지름 → 자기 모서리
-const tips2 = [{ x: 220, y: 60 }, { x: 230, y: 110 }, { x: 0, y: 140 }];
+// 박스 반대편 점: 공용 모서리(오른쪽 위)에서 가면 박스를 관통 → 자기 모서리
+const tips2 = [{ x: 220, y: 60 }, { x: 230, y: 80 }, { x: 0, y: 140 }];
 const far = A(0, 140, tips2);
 const farOwn = L.getPinLeaderBoxAnchorFromPoint(100, 100, 0, 140, 40, 20, 0, R);
-assert.deepStrictEqual(far, farOwn, '가로지르면 자기 모서리');
-assert.deepStrictEqual(A(220, 60, tips2), A(230, 110, tips2), '나머지는 공용 모서리');
+assert.deepStrictEqual(far, farOwn, '관통하면 자기 모서리');
+assert.deepStrictEqual(A(220, 60, tips2), A(230, 80, tips2), '나머지는 공용 모서리');
+// 2026-11-25: 박스 변 바깥을 비스듬히 스치기만 하면(관통 아님) 공용 모서리 그대로
+const tips2b = [{ x: 220, y: 60 }, { x: 230, y: 110 }, { x: 0, y: 140 }];
+assert.deepStrictEqual(A(0, 140, tips2b), A(230, 110, tips2b), '스치기만 하면 공용 모서리');
+// 변 위에 그대로 겹쳐 달리는 선은 관통으로 봄 → 자기 모서리
+const tips2c = [{ x: 220, y: 70 }, { x: 230, y: 75 }, { x: 0, y: 90 }];
+assert.deepStrictEqual(A(0, 90, tips2c), L.getPinLeaderBoxAnchorFromPoint(100, 100, 0, 90, 40, 20, 0, R), '변에 겹치면 자기 모서리');
 // 다른 마킹 점 위를 지나가면 자기 모서리
 const tips3 = [{ x: 160, y: 120 }, { x: 220, y: 150 }, { x: 100, y: 300 }];
 const via = A(220, 150, tips3);

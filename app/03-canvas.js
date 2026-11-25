@@ -3447,17 +3447,17 @@
         const hw = boxW / 2;
         const hh = boxH / 2;
         const eps = Math.max(0.5, Math.min(hw, hh) * 0.05);
-        // 1) 모서리→점 선이 박스 안을 지나가거나 박스 변에 바짝 붙어 지나가면(박스를 가로지름) 제외
-        const pad = Math.min(hw, hh) * 0.6;
+        // 1) 모서리→점 선이 박스를 실제로 관통할 때만 제외(2026-11-25: 박스 변 근처를 비스듬히 지나가는 건 그대로 공용 모서리).
+        //    변 위에 그대로 겹쳐 달리는 선(테두리와 거의 평행)도 관통으로 본다.
         const cl = toLocal(shared.x, shared.y);
-        // 모서리→점 방향이 모서리→중심 방향과 90° 넘게 다르면(박스 반대편으로 돌아 감) 제외
-        if ((targetX - shared.x) * (cx - shared.x) + (targetY - shared.y) * (cy - shared.y) < 0) return own;
-        for (let i = 1; i < 40; i++) {
-            const k = i / 40;
+        const edgeTol = Math.max(1, Math.min(hw, hh) * 0.05);
+        const awayFromCorner = Math.min(hw, hh);
+        for (let i = 1; i < 80; i++) {
+            const k = i / 80;
             const p = toLocal(shared.x + (targetX - shared.x) * k, shared.y + (targetY - shared.y) * k);
             if (Math.abs(p.x) < hw - eps && Math.abs(p.y) < hh - eps) return own;
-            if (Math.hypot(p.x - cl.x, p.y - cl.y) > pad * 1.5
-                && Math.abs(p.x) < hw + pad && Math.abs(p.y) < hh + pad) return own;
+            if (Math.hypot(p.x - cl.x, p.y - cl.y) > awayFromCorner
+                && Math.abs(p.x) < hw + edgeTol && Math.abs(p.y) < hh + edgeTol) return own;
         }
         // 2) 다른 마킹 점 바로 위를 지나가면 제외
         const near = Math.max(6, Math.min(boxW, boxH) * 0.35);
