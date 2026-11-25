@@ -118,9 +118,10 @@ function fakeCtx(W, H) {
         let ctx = fakeCtx(W, H);
         let r = V.render(ctx, model, [k, 0, 0, -k, 0, model.pageH * k], W, H, {});
         assert(ctx.log.fill >= 3, '종이 바탕 + 채움 두 묶음');
-        assert(ctx.log.stroke >= 2, '기본 선 + 굵은 선');
+        assert(ctx.log.stroke >= 1, '선');
         near(ctx.log.widths[0], 1, 1e-9, '가는 선은 화면 1픽셀');
-        assert(ctx.log.widths.some((w) => w > 20), '폭 있는 폴리선은 굵게');
+        // 2026-11-25 폭 있는 폴리선도 화면에서는 1픽셀
+        assert(ctx.log.widths.every((w) => w <= 1 + 1e-9), '폭 있는 폴리선도 1픽셀');
         assert.deepStrictEqual(ctx.log.fillText.slice().sort(), ['6,000', 'X1', '계단실'].sort(), '읽을 수 있는 글자만');
         assert(r.segs > 0);
 

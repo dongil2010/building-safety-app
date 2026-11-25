@@ -18,6 +18,8 @@
     var FILL_COLOR = '#808080';
     var MIN_TEXT_PX = 2.5; // 이보다 작은 글자는 안 그린다(어차피 못 읽음)
     var STROKE_CHUNK = 40000; // 한 번에 긋는 선분 수(너무 긴 경로는 느리다)
+    // 2026-11-25 화면에서는 폭을 준 폴리선도 1픽셀(확대해도 안 굵어짐). PDF·출력 쪽 굵기는 그대로.
+    var ALL_LINES_HAIRLINE = true;
 
     // ───────────────────────── PDF 바이트에서 표시된 스트림 꺼내기 ─────────────────────────
 
@@ -287,7 +289,8 @@
 
         // 2) 선 — 기본 굵기는 한 묶음으로, 굵은 폴리선은 굵기별로
         var baseLw = model.lw;
-        // 기본 선은 캐드 화면처럼 확대해도 늘 1픽셀(2026-11-12 사용자: 선이 두껍다). 폭을 준 폴리선만 실제 폭대로 굵어진다.
+        // 기본 선은 캐드 화면처럼 확대해도 늘 1픽셀(2026-11-12 사용자: 선이 두껍다).
+        // 폭을 준 폴리선도 1픽셀(ALL_LINES_HAIRLINE, 2026-11-25 사용자: 폴리선도 1픽셀로).
         var basePx = minPx;
         var wide = null; // 굵기(픽셀, 0.5 단위) → 폴리선 번호 목록
         ctx.strokeStyle = '#000000';
@@ -326,7 +329,7 @@
                 continue;
             }
             var wPt = widths[p];
-            if (wPt > baseLw + 1e-3 && wPt * k > basePx + 0.25) {
+            if (!ALL_LINES_HAIRLINE && wPt > baseLw + 1e-3 && wPt * k > basePx + 0.25) {
                 var key = Math.round(wPt * k * 2) / 2;
                 if (!wide) wide = new Map();
                 var arr = wide.get(key);
@@ -536,7 +539,7 @@
             nPts++;
             if (cnt < 2) continue;
             var segs0 = cnt - 1 + ((flags[p] & 1) ? 1 : 0);
-            if (widths[p] > baseLw + 1e-3) nWideSeg += segs0; else nLineV += segs0 * 2;
+            if (!ALL_LINES_HAIRLINE && widths[p] > baseLw + 1e-3) nWideSeg += segs0; else nLineV += segs0 * 2;
         }
         var lines = new Float32Array(nLineV * 2), pts = new Float32Array(nPts * 3);
         var wide = new Float32Array(nWideSeg * 6 * 7), fill = new Float32Array(nFillV * 2);
@@ -555,7 +558,7 @@
             var bw = bbox[p * 4 + 2] - bbox[p * 4], bh = bbox[p * 4 + 3] - bbox[p * 4 + 1];
             pts[pi++] = coords[s]; pts[pi++] = coords[s + 1]; pts[pi++] = Math.max(bw, bh);
             if (cnt < 2) continue;
-            var isWide = widths[p] > baseLw + 1e-3;
+            var isWide = !ALL_LINES_HAIRLINE && widths[p] > baseLw + 1e-3;
             var last = cnt - 1 + ((flags[p] & 1) ? 1 : 0);
             for (q = 0; q < last; q++) {
                 var q1 = (q + 1) % cnt;
