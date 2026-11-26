@@ -294,4 +294,25 @@ assert.ok(placeFn.includes('ink: boxAutoLayoutInkMap()'), '새 마킹 자리에�
 assert.ok(app.includes('{ pool })') && app.includes('2560 / Math.max(dims.w, dims.h)'), '가는 선 안 사라지게 크게 그려 묶음');
 assert.ok(app.includes('inkExt: pinDigitsInkExt(label, dims, rot)') && app.includes('function pinDigitsInkExt('), '숫자 칸만 잉크로 봄');
 assert.ok(app.includes('L.inkAtCurrent(items, opts)') && app.includes("!((inkNow[it.id] || 0) > inkOn)"), '겹친 박스만: 도면 위 박스도 옮김');
+// 2026-11-26 지시선은 화면처럼 박스 **모서리**에서 — 테두리 가장 가까운 점으로 보면 놓치던 「다른 마킹 점 지남」을 잡는다
+{
+    const le = { l: 100, t: 25, r: 100, b: 25, shape: 'rect' };
+    // 박스 A(가운데 500,100) → 점 (450,348): 모서리(400,125)에서 나감(예전 계산은 (450,125) 수직선). 그 선 위에 B의 점
+    const tB = { x: 420, y: 125 + (348 - 125) * 0.4 };
+    const A = { id: 'A', cx: 500, cy: 100, ext: le, lead: le, targets: [{ x: 450, y: 348 }], movable: false };
+    const B = { id: 'B', cx: 100, cy: 214, ext: le, lead: le, targets: [tB], movable: true };
+    const plain = L.conflictsAtCurrent([Object.assign({}, A, { lead: null }), Object.assign({}, B, { lead: null })], {});
+    const corner = L.conflictsAtCurrent([A, B], {});
+    assert.ok(!plain.A && corner.A > 0, '모서리 지시선이 다른 점을 지나면 충돌 ' + JSON.stringify({ plain, corner }));
+    // 정리 후: 모서리 지시선끼리 안 엇갈림(많은 박스)
+    let sd = 11; const rr = () => (sd = (sd * 16807) % 2147483647) / 2147483647;
+    const lst = [];
+    for (let i = 0; i < 60; i++) { const tx = 200 + rr() * 1600; const ty = 200 + rr() * 1100; lst.push({ id: 'c' + i, cx: tx + 120, cy: ty - 60, ext: le, lead: le, targets: [{ x: tx, y: ty }], movable: true }); }
+    const rc = L.layoutBoxes(lst, { bounds: { w: 2000, h: 1500 }, fresh: true });
+    assert.ok(rc.after < rc.before, `모서리 지시선 기준 충돌 줄임 ${rc.before}→${rc.after}`);
+    const after = L.conflictsAtCurrent(lst.map((it) => Object.assign({}, it, rc.moves[it.id] ? { cx: rc.moves[it.id].x, cy: rc.moves[it.id].y } : {})), { bounds: { w: 2000, h: 1500 } });
+    assert.strictEqual(Object.values(after).reduce((s, v) => s + v, 0), rc.after, '결과 충돌 수 = 다시 센 값');
+    assert.ok(app.includes("lead: Object.assign(L.boxExtent(dims.w, dims.h, rot, null), { shape:"), '앱: 박스 모서리·모양 넘김');
+}
+
 console.log('test-box-auto-layout: ok');

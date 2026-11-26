@@ -2368,6 +2368,8 @@
                 cy: by,
                 ext: L.boxExtent(dims.w, dims.h, rot, badge),
                 inkExt: pinDigitsInkExt(label, dims, rot),
+                // 2026-11-26 지시선은 화면처럼 「중요」·균열폭 뺀 박스 모서리에서(둥근·원형은 테두리) — 정리 후 실제 선 교차를 정확히 봄
+                lead: Object.assign(L.boxExtent(dims.w, dims.h, rot, null), { shape: (getDefectPinShapeCfg(rep, styleKey) || {}).shape || 'rect' }),
                 targets,
                 movable: mode === 'all' ? true : !manual,
                 manual
@@ -2478,6 +2480,7 @@
                 cx: Number(boxX),
                 cy: Number(boxY),
                 ext: L.boxExtent(box.w, box.h, state.rotationAngle || 0, null),
+                lead: L.boxExtent(box.w, box.h, state.rotationAngle || 0, null),
                 targets: targets || []
             };
             const r = L.placeNewBox(items, item, { bounds: { w: dims.w, h: dims.h }, obstacles: boxAutoLayoutObstacles(), ink: boxAutoLayoutInkMap() });
