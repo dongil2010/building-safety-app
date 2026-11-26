@@ -181,3 +181,11 @@ f.ctx.run(); assert.strictEqual(f.chk.checked, true); assert.strictEqual(f.getPo
 assert.ok(/function scheduleDefectAutoApply\(opts\) \{[\s\S]{0,300}autoDetectOpeningFromDefectContent\(\)/.test(app));
 
 console.log('test-opening-defect-pos OK');
+// 2026-11-26 부재가 「조적벽체」처럼 「…벽체」면 위치 뒤로 (「조적벽체 창 하부 벽체 수직균열」 방지)
+assert.strictEqual(sb.fmt({ defectType: '수직균열', openingPos: '창 하부', isOpeningCrack: true, component: '조적벽체' }), '창 하부 조적벽체 수직균열');
+assert.strictEqual(sb.fmt({ defectType: '수직균열, 수평균열', openingPos: '창 상부, 창 하부', component: '조적벽체' }), '창 상부·하부 조적벽체 수직균열, 수평균열');
+assert.strictEqual(sb.fmt({ defectType: '수직균열', openingPos: '창 하부', component: '벽체' }), '창 하부 벽체 수직균열');
+assert.strictEqual(sb.fmt({ defectType: '수직균열', openingPos: '창 하부', component: '기둥' }), '창 하부 벽체 수직균열', '벽체가 아닌 부재는 예전 그대로');
+assert.strictEqual(sb.fmt({ defectType: '수직균열', openingPos: '창 하부', component: 'RC벽체' }), '창 하부 RC벽체 수직균열');
+assert.strictEqual(sb.fmt({ defectType: '도장 들뜸', openingPos: '창 하부', component: '조적벽체 도장' }), '창 하부 조적벽체 도장 들뜸');
+console.log('조적벽체·RC벽체 개구부 표기 OK');

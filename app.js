@@ -32179,7 +32179,7 @@ ${roundMobile ? '' : `<button type="button" class="icon-btn icon-btn-trash" titl
         refreshDefectQuickPickBar();
     }
 
-// @@app-part 08-defect-presets.js sha=c1af75767f51 — 원본은 app/08-defect-presets.js (여기 말고 거기서 고칠 것)
+// @@app-part 08-defect-presets.js sha=6cb0eadd2770 — 원본은 app/08-defect-presets.js (여기 말고 거기서 고칠 것)
     // --- Dynamic Defect Type Presets & Custom Adding ---
     const STEEL_MEMBER_DEFECTS = [
         '상태양호',
@@ -32585,9 +32585,11 @@ ${roundMobile ? '' : `<button type="button" class="icon-btn icon-btn-trash" titl
         if (pos) {
             // 2026-11-16 부재가 「벽체 도장」·「벽체 치장벽돌」처럼 벽체 + 대상이면 대상까지 위치 뒤에
             // (「벽체 도장 창 하부 벽체 들뜸」 → 「창 하부 벽체 도장 들뜸」). 부재 칸은 surveyContentComponentText가 뺀다.
-            const compOut = /^벽체 \S/.test(comp) ? String((typeof memberNameOut === 'function' ? memberNameOut(comp) : comp) || comp).replace(/[\s\u3000]+/g, ' ').trim() : '';
-            const member = /^벽체 \S/.test(compOut) ? compOut : '벽체';
-            const extra = member === '벽체' ? '' : member.slice(3).replace(/[\s\u3000]+/g, '');
+            // 2026-11-26 「조적벽체」·「조적벽체 도장」처럼 「…벽체」 부재도 위치 뒤로(「조적벽체 창 하부 벽체 균열」 → 「창 하부 조적벽체 균열」)
+            const wallRe = /^(?:벽체 \S|[^\s벽]\S*벽체(?: \S.*)?$)/;
+            const compOut = wallRe.test(comp) ? String((typeof memberNameOut === 'function' ? memberNameOut(comp) : comp) || comp).replace(/[\s\u3000]+/g, ' ').trim() : '';
+            const member = wallRe.test(compOut) ? compOut : '벽체';
+            const extra = member.indexOf(' ') < 0 ? '' : member.slice(member.indexOf(' ') + 1).replace(/[\s\u3000]+/g, '');
             const extraRe = extra ? new RegExp('^' + extra.split('').map((ch) => ch.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')).join('[\\s\\u3000]*') + '[\\s\\u3000]*') : null;
             const head = `${pos} ${member}`;
             const ps = parseDefectTypeList(raw);
@@ -50901,7 +50903,7 @@ ${roundMobile ? '' : `<button type="button" class="icon-btn icon-btn-trash" titl
             endDrawingAlign();
         }
     }, true);
-// @@app-part 12-survey-table.js sha=b78ad01e6ead — 원본은 app/12-survey-table.js (여기 말고 거기서 고칠 것)
+// @@app-part 12-survey-table.js sha=478e06a0f6fe — 원본은 app/12-survey-table.js (여기 말고 거기서 고칠 것)
     // --- 10. SURVEY TABLE & ALBUM RENDERING ---
 
     // 상태조사표 컬럼 기본 정의 (화면/PDF/엑셀 공통). size와 crackWidth/crackLength는 상호 배타적으로
@@ -51525,7 +51527,7 @@ ${roundMobile ? '' : `<button type="button" class="icon-btn icon-btn-trash" titl
         const t = String(getSurveyCellText('defectType', d, ctx) || '').trim();
         // 2026-11-16 「벽체 도장」처럼 벽체 + 대상인 부재도 결함 내용이 「창 하부 벽체 도장 …」으로 시작하면 빼기
         const c = String(comp || '').replace(/[\s\u3000]+/g, ' ').trim();
-        if (/^벽체(?: \S.*)?$/.test(c)) {
+        if (/^\S*벽체(?: \S.*)?$/.test(c)) { // 2026-11-26 「조적벽체」 등 …벽체도
             const esc = c.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
             if (new RegExp('^(?:개구부|창|문) (?:상부|하부|측면)(?:·(?:(?:개구부|창|문) )?(?:상부|하부|측면))* ' + esc + '(?:\\s|,|$)').test(t)) return '';
         }

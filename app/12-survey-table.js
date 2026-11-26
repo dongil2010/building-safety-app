@@ -622,7 +622,7 @@
         const t = String(getSurveyCellText('defectType', d, ctx) || '').trim();
         // 2026-11-16 「벽체 도장」처럼 벽체 + 대상인 부재도 결함 내용이 「창 하부 벽체 도장 …」으로 시작하면 빼기
         const c = String(comp || '').replace(/[\s\u3000]+/g, ' ').trim();
-        if (/^벽체(?: \S.*)?$/.test(c)) {
+        if (/^\S*벽체(?: \S.*)?$/.test(c)) { // 2026-11-26 「조적벽체」 등 …벽체도
             const esc = c.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
             if (new RegExp('^(?:개구부|창|문) (?:상부|하부|측면)(?:·(?:(?:개구부|창|문) )?(?:상부|하부|측면))* ' + esc + '(?:\\s|,|$)').test(t)) return '';
         }

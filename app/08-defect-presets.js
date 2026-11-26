@@ -404,9 +404,11 @@
         if (pos) {
             // 2026-11-16 부재가 「벽체 도장」·「벽체 치장벽돌」처럼 벽체 + 대상이면 대상까지 위치 뒤에
             // (「벽체 도장 창 하부 벽체 들뜸」 → 「창 하부 벽체 도장 들뜸」). 부재 칸은 surveyContentComponentText가 뺀다.
-            const compOut = /^벽체 \S/.test(comp) ? String((typeof memberNameOut === 'function' ? memberNameOut(comp) : comp) || comp).replace(/[\s\u3000]+/g, ' ').trim() : '';
-            const member = /^벽체 \S/.test(compOut) ? compOut : '벽체';
-            const extra = member === '벽체' ? '' : member.slice(3).replace(/[\s\u3000]+/g, '');
+            // 2026-11-26 「조적벽체」·「조적벽체 도장」처럼 「…벽체」 부재도 위치 뒤로(「조적벽체 창 하부 벽체 균열」 → 「창 하부 조적벽체 균열」)
+            const wallRe = /^(?:벽체 \S|[^\s벽]\S*벽체(?: \S.*)?$)/;
+            const compOut = wallRe.test(comp) ? String((typeof memberNameOut === 'function' ? memberNameOut(comp) : comp) || comp).replace(/[\s\u3000]+/g, ' ').trim() : '';
+            const member = wallRe.test(compOut) ? compOut : '벽체';
+            const extra = member.indexOf(' ') < 0 ? '' : member.slice(member.indexOf(' ') + 1).replace(/[\s\u3000]+/g, '');
             const extraRe = extra ? new RegExp('^' + extra.split('').map((ch) => ch.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')).join('[\\s\\u3000]*') + '[\\s\\u3000]*') : null;
             const head = `${pos} ${member}`;
             const ps = parseDefectTypeList(raw);
