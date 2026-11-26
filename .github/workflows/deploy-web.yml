@@ -104,5 +104,24 @@ jobs:
       - uses: actions/upload-pages-artifact@v5
         with:
           path: _site
-      - id: deployment
+      # 2026-11-25부터 방금 올린 github-pages 묶음을 deploy-pages가 바로 못 찾고 「묶음 없음」으로 실패한다
+      # (묶음은 실제로 올라가 있음). 한 번 실패하면 잠깐 기다렸다 다시 한다.
+      - id: deploy1
+        continue-on-error: true
         uses: actions/deploy-pages@v5
+      - name: 다시 하기 전 기다림
+        if: steps.deploy1.outcome == 'failure'
+        run: sleep 60
+      - id: deploy2
+        if: steps.deploy1.outcome == 'failure'
+        continue-on-error: true
+        uses: actions/deploy-pages@v5
+      - name: 다시 하기 전 기다림(2)
+        if: steps.deploy1.outcome == 'failure' && steps.deploy2.outcome == 'failure'
+        run: sleep 120
+      - id: deploy3
+        if: steps.deploy1.outcome == 'failure' && steps.deploy2.outcome == 'failure'
+        uses: actions/deploy-pages@v5
+      - id: deployment
+        name: 배포 주소
+        run: echo "page_url=${{ steps.deploy1.outputs.page_url || steps.deploy2.outputs.page_url || steps.deploy3.outputs.page_url }}" >> "$GITHUB_OUTPUT"
