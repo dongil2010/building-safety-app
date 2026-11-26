@@ -286,12 +286,13 @@
     }
     window.refreshCarbItemResults = refreshCarbItemResults;
 
-    // 콘크리트 반발경도 성과표(hwpx 내보내기 전용) — NO. 하나(위치 슬롯 하나)의 반발치 원시값
-    // 5행×4열 그리드, 평균경도(R)·각도보정·Ro, 재령·α, 압축강도(식별 1식/2식/3식)+최종강도,
-    // 막대그래프를 한 장의 캔버스 이미지로 그린다. ±20% 밖이라 제외된 값은 그래프/숫자 모두
-    // 다른 색으로 표시한다.
+    // 콘크리트 반발경도 성과표(hwpx 내보내기 전용) — NO. 하나(위치 슬롯 하나)의 반발치 원시값,
+    // 평균경도(R)·각도보정·Ro, 재령·α, 압축강도(1식/2식/3식)+최종강도, 막대그래프를 한 장의
+    // 캔버스 이미지로 그린다. ±20% 밖이라 제외된 값은 그래프/숫자 모두 다른 색으로 표시한다.
+    // 2026-11-26 사용자 요청: 한 쪽에 12개 들어가게 — 높이 620→250(NO. 사이 24 그대로), 측정값 4행×5열.
     function renderStrengthPerfPointCanvas(seq, item, slot, readings, calc) {
-        const W = 2200, H = 620;
+        const W = 2200, H = 250;
+        const FONT = '"Pretendard", "Malgun Gothic", "맑은 고딕", sans-serif';
         const canvas = document.createElement('canvas');
         canvas.width = W;
         canvas.height = H;
@@ -302,7 +303,7 @@
         ctx.lineWidth = 3;
         ctx.strokeRect(1.5, 1.5, W - 3, H - 3);
 
-        const colX = [0, 300, 820, 1110, 1340, 1680, W];
+        const colX = [0, 260, 760, 1020, 1220, 1600, W];
         ctx.lineWidth = 1.5;
         for (let i = 1; i < colX.length - 1; i++) {
             ctx.beginPath();
@@ -313,100 +314,117 @@
 
         const rawAvg = calc.rawAvg;
         const isOutlier = (v) => isStrengthOutlierValue(v, rawAvg);
+        // 칸 폭을 넘는 글자는 글꼴을 줄여서 칸 안에 넣는다(긴 위치 이름)
+        const fitText = (text, x, y, maxW, size, bold) => {
+            let s = size;
+            ctx.font = `${bold ? 'bold ' : ''}${s}px ${FONT}`;
+            while (s > 18 && ctx.measureText(text).width > maxW) {
+                s -= 2;
+                ctx.font = `${bold ? 'bold ' : ''}${s}px ${FONT}`;
+            }
+            ctx.fillText(text, x, y);
+        };
+        // 여러 줄 묶음을 칸 위아래 가운데에 놓는다(2026-11-26 평균경도 칸 가운데 요청과 같은 방식)
+        const drawCentered = (cx, lines, step) => {
+            const y0 = H / 2 - (step * (lines.length - 1)) / 2;
+            lines.forEach((ln, i) => {
+                ctx.font = ln.font;
+                ctx.fillStyle = ln.color;
+                ctx.fillText(ln.text, cx, y0 + i * step);
+            });
+        };
 
-        // 1) 측정위치
+        // 1) 측정위치 — NO.와 위치·부재를 같은 굵은 글꼴로, 칸 가운데
         ctx.textBaseline = 'middle';
         ctx.textAlign = 'center';
         ctx.fillStyle = '#111111';
-        ctx.font = 'bold 34px "Pretendard", "Malgun Gothic", "맑은 고딕", sans-serif';
-        ctx.fillText(`NO.${String(seq).padStart(2, '0')}`, (colX[0] + colX[1]) / 2, 75);
-        // 2026-09-04 사용자 요청: 위치 글씨가 너무 작아 안 보인다고 해서 NO.와 같은 글꼴/크기로 맞춤.
-        ctx.font = 'bold 34px "Pretendard", "Malgun Gothic", "맑은 고딕", sans-serif';
-        [slot.location || item.location || '', memberNameOut(item.component) || ''].filter(Boolean).forEach((line, i) => {
-            ctx.fillText(line, (colX[0] + colX[1]) / 2, 150 + i * 42);
-        });
+        const c1x = (colX[0] + colX[1]) / 2;
+        const c1MaxW = colX[1] - colX[0] - 20;
+        // 긴 위치 이름은 글자를 줄이기 전에 띄어쓰기에서 두 줄로 나눈다
+        const splitLoc = (text) => {
+            ctx.font = `bold 28px ${FONT}`;
+            if (!text || ctx.measureText(text).width <= c1MaxW) return [text];
+            const words = text.split(/\s+/);
+            if (words.length < 2) return [text];
+            let best = 1, bestW = Infinity;
+            for (let k = 1; k < words.length; k++) {
+                const w = Math.max(ctx.measureText(words.slice(0, k).join(' ')).width, ctx.measureText(words.slice(k).join(' ')).width);
+                if (w < bestW) { bestW = w; best = k; }
+            }
+            return [words.slice(0, best).join(' '), words.slice(best).join(' ')];
+        };
+        const locLines = [...splitLoc(slot.location || item.location || ''), memberNameOut(item.component) || ''].filter(Boolean);
+        const c1Step = locLines.length > 2 ? 40 : 44;
+        const c1y0 = H / 2 - (c1Step * locLines.length) / 2;
+        fitText(`NO.${String(seq).padStart(2, '0')}`, c1x, c1y0, c1MaxW, 32, true);
+        locLines.forEach((line, i) => fitText(line, c1x, c1y0 + (i + 1) * c1Step, c1MaxW, 28, true));
 
-        // 2) 반발치 그리드 (5행 × 4열, ±20% 초과 제외값은 주황색)
-        // 2026-09-04: R값 글씨 크기를 2배로 키움(24px→48px) — 셀 높이도 같이 키워서 안 겹치게 함.
-        const gridX0 = colX[1] + 25, gridX1 = colX[2] - 25;
-        const gridCols = 4, gridRows = 5, cellH = 80, gridY0 = 45;
+        // 2) 반발치 그리드 (4행 × 5열, ±20% 초과 제외값은 주황색)
+        // 2026-11-26 사용자 요청: 4줄로, 밑의 「(총 20개 · ±20% 제외 0개)」 문구는 뺀다(제외값은 주황색으로만 표시)
+        const gridX0 = colX[1] + 20, gridX1 = colX[2] - 20;
+        const gridCols = 5, gridRows = 4, cellH = 55, gridY0 = (H - gridRows * cellH) / 2;
         const cellW = (gridX1 - gridX0) / gridCols;
-        ctx.font = '48px "Pretendard", "Malgun Gothic", "맑은 고딕", sans-serif';
+        ctx.font = `38px ${FONT}`;
         readings.forEach((v, idx) => {
             if (idx >= gridCols * gridRows) return;
             const r = Math.floor(idx / gridCols), c = idx % gridCols;
             ctx.fillStyle = isOutlier(v) ? '#c2410c' : '#111111';
             ctx.fillText(String(v), gridX0 + c * cellW + cellW / 2, gridY0 + r * cellH + cellH / 2);
         });
-        ctx.fillStyle = '#555555';
-        // 2026-09-04 사용자 요청: 작은 글씨들이 안 보인다고 해서 Ro값(32px)만큼 전부 키움.
-        ctx.font = '32px "Pretendard", "Malgun Gothic", "맑은 고딕", sans-serif';
-        ctx.textAlign = 'left';
-        ctx.fillText(`(총 ${calc.totalCount}개 · ±20% 제외 ${calc.excludedCount}개)`, gridX0, gridY0 + gridRows * cellH + 30);
 
-        // 3) 평균경도(R) · 각도보정 · Ro
+        // 3) 평균경도(R) · 각도보정 · Ro — 칸 위아래 가운데(2026-11-26 사용자 요청)
         ctx.textAlign = 'center';
-        const c3x = (colX[2] + colX[3]) / 2;
-        // 2026-11-26 사용자 요청: 평균경도 칸만 위아래 가운데로 — 글자 묶음(45~225, 앤빌 줄이 있으면 ~285)을 통째로 내린다.
-        const hasAnvil = !!(calc.anvilFactor && calc.anvilFactor !== 1);
-        const c3dy = Math.round(H / 2 - (45 + (hasAnvil ? 285 : 225)) / 2);
-        ctx.font = '32px "Pretendard", "Malgun Gothic", "맑은 고딕", sans-serif'; ctx.fillStyle = '#555555';
-        ctx.fillText('평균경도(R)', c3x, 45 + c3dy);
-        ctx.font = 'bold 42px "Pretendard", "Malgun Gothic", "맑은 고딕", sans-serif'; ctx.fillStyle = '#111111';
-        ctx.fillText(fmtExcel(calc.finalAvg, 1), c3x, 105 + c3dy);
-        ctx.font = '32px "Pretendard", "Malgun Gothic", "맑은 고딕", sans-serif'; ctx.fillStyle = '#555555';
-        ctx.fillText(`각도보정 ${calc.correction >= 0 ? '+' : ''}${calc.correction.toFixed(2)}`, c3x, 165 + c3dy);
-        ctx.font = 'bold 32px "Pretendard", "Malgun Gothic", "맑은 고딕", sans-serif'; ctx.fillStyle = '#0369a1';
-        // Ro는 엑셀처럼 소수 1자리로 반올림된 값이다(2026-09-22)
-        ctx.fillText(`Ro = ${calc.ro.toFixed(1)}`, c3x, 225 + c3dy);
-        if (hasAnvil) {
+        const c3Lines = [
+            { text: '평균경도(R)', font: `28px ${FONT}`, color: '#555555' },
+            { text: fmtExcel(calc.finalAvg, 1), font: `bold 38px ${FONT}`, color: '#111111' },
+            { text: `각도보정 ${calc.correction >= 0 ? '+' : ''}${calc.correction.toFixed(2)}`, font: `28px ${FONT}`, color: '#555555' },
+            // Ro는 엑셀처럼 소수 1자리로 반올림된 값이다(2026-09-22)
+            { text: `Ro = ${calc.ro.toFixed(1)}`, font: `bold 30px ${FONT}`, color: '#0369a1' }
+        ];
+        if (calc.anvilFactor && calc.anvilFactor !== 1) {
             // 앤빌 보정(엑셀 "Anvil기준 82 / 장비평균 = 보정" 칸)은 1.00이 아닐 때만 적는다
-            ctx.font = '28px "Pretendard", "Malgun Gothic", "맑은 고딕", sans-serif'; ctx.fillStyle = '#555555';
-            ctx.fillText(`앤빌 82/${calc.anvilAvg} = ${calc.anvilFactor.toFixed(3)}`, c3x, 285 + c3dy);
+            c3Lines.push({ text: `앤빌 82/${calc.anvilAvg} = ${calc.anvilFactor.toFixed(3)}`, font: `24px ${FONT}`, color: '#555555' });
         }
+        drawCentered((colX[2] + colX[3]) / 2, c3Lines, c3Lines.length > 4 ? 40 : 46);
 
         // 4) 재령 · α(재령보정계수)
-        const c4x = (colX[3] + colX[4]) / 2;
-        ctx.font = '32px "Pretendard", "Malgun Gothic", "맑은 고딕", sans-serif'; ctx.fillStyle = '#555555';
-        ctx.fillText('재령(일)', c4x, 45);
-        ctx.font = 'bold 34px "Pretendard", "Malgun Gothic", "맑은 고딕", sans-serif'; ctx.fillStyle = '#111111';
-        ctx.fillText(calc.ageDays != null ? String(calc.ageDays) : '-', c4x, 110);
-        ctx.font = '32px "Pretendard", "Malgun Gothic", "맑은 고딕", sans-serif'; ctx.fillStyle = '#555555';
-        ctx.fillText('α(재령보정)', c4x, 180);
-        ctx.font = 'bold 32px "Pretendard", "Malgun Gothic", "맑은 고딕", sans-serif'; ctx.fillStyle = '#111111';
-        ctx.fillText(calc.alpha != null ? calc.alpha.toFixed(2) : '-', c4x, 235);
+        drawCentered((colX[3] + colX[4]) / 2, [
+            { text: '재령(일)', font: `28px ${FONT}`, color: '#555555' },
+            { text: calc.ageDays != null ? String(calc.ageDays) : '-', font: `bold 30px ${FONT}`, color: '#111111' },
+            { text: 'α(재령보정)', font: `28px ${FONT}`, color: '#555555' },
+            { text: calc.alpha != null ? calc.alpha.toFixed(2) : '-', font: `bold 30px ${FONT}`, color: '#111111' }
+        ], 46);
 
         // 5) 압축강도(Fc): 활성화된 추정식만 1식/2식/3식 순서로, 맨 아래 최종 강도(굵게)
         const c5x0 = colX[4] + 20, c5x1 = colX[5] - 20;
-        ctx.textAlign = 'left'; ctx.font = 'bold 32px "Pretendard", "Malgun Gothic", "맑은 고딕", sans-serif'; ctx.fillStyle = '#555555';
-        ctx.fillText('압축강도(Fc, MPa)', c5x0, 40);
-        let fy = 90;
+        ctx.textAlign = 'left'; ctx.font = `bold 28px ${FONT}`; ctx.fillStyle = '#555555';
+        ctx.fillText('압축강도(Fc, MPa)', c5x0, 34);
+        let fy = 76;
         calc.results.forEach((r, i) => {
             if (!r.enabled) return;
-            ctx.font = '32px "Pretendard", "Malgun Gothic", "맑은 고딕", sans-serif'; ctx.fillStyle = '#333333'; ctx.textAlign = 'left';
+            ctx.font = `28px ${FONT}`; ctx.fillStyle = '#333333'; ctx.textAlign = 'left';
             ctx.fillText(`${i + 1}식`, c5x0, fy);
-            ctx.font = 'bold 32px "Pretendard", "Malgun Gothic", "맑은 고딕", sans-serif'; ctx.fillStyle = '#111111'; ctx.textAlign = 'right';
+            ctx.font = `bold 28px ${FONT}`; ctx.fillStyle = '#111111'; ctx.textAlign = 'right';
             ctx.fillText(fmtExcel(r.value, 1), c5x1, fy);
-            fy += 54;
+            fy += 38;
         });
         ctx.strokeStyle = '#94a3b8'; ctx.lineWidth = 1.5;
-        ctx.beginPath(); ctx.moveTo(c5x0, fy - 15); ctx.lineTo(c5x1, fy - 15); ctx.stroke();
-        ctx.font = 'bold 32px "Pretendard", "Malgun Gothic", "맑은 고딕", sans-serif'; ctx.fillStyle = '#333333'; ctx.textAlign = 'left';
-        ctx.fillText('강도', c5x0, fy + 28);
-        ctx.font = 'bold 40px "Pretendard", "Malgun Gothic", "맑은 고딕", sans-serif'; ctx.fillStyle = '#b91c1c'; ctx.textAlign = 'right';
-        ctx.fillText(calc.finalStrength.toFixed(1), c5x1, fy + 28);
+        ctx.beginPath(); ctx.moveTo(c5x0, fy - 16); ctx.lineTo(c5x1, fy - 16); ctx.stroke();
+        ctx.font = `bold 28px ${FONT}`; ctx.fillStyle = '#333333'; ctx.textAlign = 'left';
+        ctx.fillText('강도', c5x0, fy + 18);
+        ctx.font = `bold 36px ${FONT}`; ctx.fillStyle = '#b91c1c'; ctx.textAlign = 'right';
+        ctx.fillText(calc.finalStrength.toFixed(1), c5x1, fy + 18);
 
-        // 6) 막대그래프 — ±20% 제외값은 옅은 빨강, 점선은 평균경도(R) 위치
-        const chX0 = colX[5] + 20, chX1 = colX[6] - 20, chY0 = 35, chY1 = H - 35;
+        // 6) 막대그래프(2026-11-26 막대 색을 진한 파랑 #378ADD로) — ±20% 제외값은 옅은 빨강, 점선은 평균경도(R) 위치
+        const chX0 = colX[5] + 20, chX1 = colX[6] - 20, chY0 = 18, chY1 = H - 18;
         const maxV = Math.max(...readings) * 1.15;
-        const barGap = 5;
+        const barGap = 4;
         const barW = (chX1 - chX0 - barGap * (readings.length - 1)) / readings.length;
         ctx.strokeStyle = '#cbd5e1'; ctx.lineWidth = 1.5;
         ctx.beginPath(); ctx.moveTo(chX0, chY1); ctx.lineTo(chX1, chY1); ctx.stroke();
         readings.forEach((v, i) => {
             const bh = (v / maxV) * (chY1 - chY0);
             const bx = chX0 + i * (barW + barGap);
-            // 2026-11-26 사용자 요청: 막대 색을 옅은 하늘색(#93c5fd)에서 진한 파랑으로
             ctx.fillStyle = isOutlier(v) ? '#fca5a5' : '#378ADD';
             ctx.fillRect(bx, chY1 - bh, barW, bh);
         });
