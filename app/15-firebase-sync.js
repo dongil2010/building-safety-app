@@ -1451,8 +1451,12 @@
         deleteCloudPhoto(id).catch((e) => console.warn('NDT 전용 도면 클라우드 정리 실패:', id, e));
     }
 
-    /** dataUrl이 없으면 전용 도면을 뺀다(층 도면을 쓴다) */
-    async function setNdtCustomDrawing(floorKey, dataUrl) {
+    /**
+     * dataUrl이 없으면 전용 도면을 뺀다(층 도면을 쓴다).
+     * 2026-11-26 pdfDataUrl: DXF·PDF로 올린 전용 도면의 원본(DXF는 벡터 PDF로 바꾼 것) — 화면은 dataUrl 그림,
+     * 한글 위치도·비파괴 DXF 출력은 이 원본으로 도면 선·글자를 벡터로 넣는다. 참조 { id, at, pdfId }
+     */
+    async function setNdtCustomDrawing(floorKey, dataUrl, pdfDataUrl) {
         if (!floorKey) return;
         if (!window.state.ndtDrawingRefs) window.state.ndtDrawingRefs = {};
         const oldRef = ndtDrawingRefFor(floorKey);
@@ -1465,7 +1469,8 @@
             delete state.ndtImages[floorKey];
             delete _ndtImageLoadedId[floorKey];
         }
-        window.state.ndtDrawingRefs[floorKey] = { id, at: Date.now() };
+        const pdfId = (dataUrl && pdfDataUrl) ? `${id}_pdf` : '';
+        window.state.ndtDrawingRefs[floorKey] = pdfId ? { id, at: Date.now(), pdfId } : { id, at: Date.now() };
         markFloorKeyDirty(floorKey);
         saveStateToLocalStorage();
         if (dataUrl) {
@@ -1474,8 +1479,50 @@
             await persistPhotoUrlToIdb(id, dataUrl);
             persistPhotoToCloud(id, dataUrl).catch((e) => console.warn('NDT 전용 도면 업로드 실패:', id, e));
         }
+        if (pdfId) {
+            window._photoCache[pdfId] = pdfDataUrl;
+            await persistPhotoUrlToIdb(pdfId, pdfDataUrl);
+            persistPhotoToCloud(pdfId, pdfDataUrl).catch((e) => console.warn('NDT 전용 도면 원본 업로드 실패:', pdfId, e));
+        }
         if (oldRef && oldRef.id && oldRef.id !== id) releaseNdtDrawingImage(oldRef.id);
+        if (oldRef && oldRef.pdfId && oldRef.pdfId !== pdfId) releaseNdtDrawingImage(oldRef.pdfId);
     }
+
+    /** 전용 도면의 원본 PDF(dataURL). DXF·PDF로 올리지 않았거나 못 받으면 null */
+    async function loadNdtCustomDrawingPdf(floorKey) {
+        const ref = ndtDrawingRefFor(floorKey);
+        if (!ref || !ref.id || !ref.pdfId) return null;
+        let url = await loadNdtDrawingDataUrl(ref.pdfId);
+        if (typeof url !== 'string' || !url) return null;
+        if (url.indexOf('data:') !== 0) {
+            try {
+                const blob = await (await fetch(url)).blob();
+                url = await new Promise((resolve, reject) => {
+                    const r = new FileReader();
+                    r.onload = () => resolve(r.result);
+                    r.onerror = () => reject(r.error);
+                    r.readAsDataURL(blob);
+                });
+                if (!window._photoCache) window._photoCache = {};
+                window._photoCache[ref.pdfId] = url;
+            } catch (e) {
+                console.warn('NDT 전용 도면 원본 받기 실패:', ref.pdfId, e);
+                return null;
+            }
+        }
+        return url.slice(0, 24).toLowerCase().indexOf('data:application/pdf') === 0 ? url : null;
+    }
+    window.loadNdtCustomDrawingPdf = loadNdtCustomDrawingPdf;
+
+    /** 전용 도면이 DXF로 올린 것이면 그 캐드 선·글자 모델(js/core/dxf-view.js), 아니면 null */
+    async function getNdtCustomDxfModel(floorKey) {
+        const view = window.BSA && window.BSA.dxfView;
+        if (!view || typeof view.ensureModel !== 'function') return null;
+        const pdf = await loadNdtCustomDrawingPdf(floorKey);
+        if (!pdf) return null;
+        try { return await view.ensureModel(`ndt_${floorKey}`, pdf); } catch (_e) { return null; }
+    }
+    window.getNdtCustomDxfModel = getNdtCustomDxfModel;
 
     async function loadNdtDrawingDataUrl(id) {
         if (!id) return null;
@@ -1543,6 +1590,7 @@
         if (!window.state.ndtDrawingRefs) window.state.ndtDrawingRefs = {};
         const changed = !local || local.id !== String(remote.id || '');
         window.state.ndtDrawingRefs[floorKey] = { id: String(remote.id || ''), at: Number(remote.at) || 0 };
+        if (remote.id && remote.pdfId) window.state.ndtDrawingRefs[floorKey].pdfId = String(remote.pdfId);
         if (!changed) return;
         if (state.ndtImages) delete state.ndtImages[floorKey];
         delete _ndtImageLoadedId[floorKey];

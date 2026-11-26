@@ -188,4 +188,5 @@ assert.strictEqual(sb.fmt({ defectType: '수직균열', openingPos: '창 하부'
 assert.strictEqual(sb.fmt({ defectType: '수직균열', openingPos: '창 하부', component: '기둥' }), '창 하부 벽체 수직균열', '벽체가 아닌 부재는 예전 그대로');
 assert.strictEqual(sb.fmt({ defectType: '수직균열', openingPos: '창 하부', component: 'RC벽체' }), '창 하부 RC벽체 수직균열');
 assert.strictEqual(sb.fmt({ defectType: '도장 들뜸', openingPos: '창 하부', component: '조적벽체 도장' }), '창 하부 조적벽체 도장 들뜸');
-console.log('조적벽체·RC벽체 개구부 표기 OK');
+assert.strictEqual(sb.fmt({ defectType: '수직균열', openingPos: '창 하부', component: '콘크리트벽체' }), '창 하부 콘크리트벽체 수직균열');
+console.log('조적벽체·RC벽체·콘크리트벽체 개구부 표기 OK');

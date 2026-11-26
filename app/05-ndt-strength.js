@@ -3105,8 +3105,33 @@
         // NDT Drawing File Upload
         const inputNdtDrawing = document.getElementById('inputNdtDrawing');
         if (inputNdtDrawing) {
-            inputNdtDrawing.addEventListener('change', (e) => {
+            inputNdtDrawing.addEventListener('change', async (e) => {
                 const file = e.target.files[0];
+                e.target.value = '';
+                // 2026-11-26 DXF·PDF 전용 도면: 화면은 그림, 원본(DXF는 벡터 PDF로 바꾼 것)도 같이 둬서
+                // 한글 위치도·비파괴 DXF 출력에 도면 선·글자가 벡터로 들어간다(층 도면 DXF와 같은 길)
+                if (file && (/[.](dxf|pdf)$/i.test(file.name || '') || file.type === 'application/pdf')) {
+                    if (typeof window.prepareFloorDrawingUpload !== 'function') {
+                        window.showToast('도면 변환 모듈이 없습니다. 새로고침(Ctrl+F5) 뒤 다시 해 주세요.', 'error');
+                        return;
+                    }
+                    const isDxf = /[.]dxf$/i.test(file.name || '');
+                    if (typeof window.showLoading === 'function') window.showLoading(isDxf ? 'DXF 도면 변환 중...' : 'PDF 도면 변환 중...');
+                    try {
+                        const up = await window.prepareFloorDrawingUpload(file);
+                        if (!up || !up.rasterDataUrl) throw new Error('도면을 그림으로 바꾸지 못했습니다');
+                        const key = `${state.currentBuildingId}_${state.currentFloor}`;
+                        await setNdtCustomDrawing(key, up.rasterDataUrl, up.pdfDataUrl || null);
+                        loadFloorNdtDrawing();
+                        window.showToast(isDxf ? 'NDT 전용 도면(DXF)이 등록되었습니다 — 출력 때 도면이 벡터로 들어갑니다.' : 'NDT 전용 도면(PDF)이 등록되었습니다.', 'success');
+                    } catch (err) {
+                        console.error(err);
+                        window.showToast(`전용 도면 등록 실패: ${(err && (err.bsaUserMessage || err.message)) || err}`, 'error', 6000);
+                    } finally {
+                        if (typeof window.hideLoading === 'function') window.hideLoading();
+                    }
+                    return;
+                }
                 if (file) {
                     const reader = new FileReader();
                     reader.onload = async (event) => {

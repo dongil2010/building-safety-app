@@ -2672,6 +2672,7 @@
                 if (!k.startsWith(prefix)) return;
                 const ref = refs[k];
                 if (ref && ref.id) pushJob(ref.id, null, k);
+                if (ref && ref.id && ref.pdfId) pushJob(ref.pdfId, null, k); // DXF·PDF 원본
             });
         }
         const seen = new Set();

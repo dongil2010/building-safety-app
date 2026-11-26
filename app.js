@@ -18561,7 +18561,7 @@ ${roundMobile ? '' : `<button type="button" class="icon-btn icon-btn-trash" titl
         URL.revokeObjectURL(url);
     };
 
-// @@app-part 05-ndt-strength.js sha=f8cacbf86dea — 원본은 app/05-ndt-strength.js (여기 말고 거기서 고칠 것)
+// @@app-part 05-ndt-strength.js sha=b8aefd3225da — 원본은 app/05-ndt-strength.js (여기 말고 거기서 고칠 것)
     // --- 콘크리트 강도(반발경도) 추정 엔진 ---
     // 회사에서 쓰던 엑셀(반발경도-고강도포함) 자료를 그대로 옮겼다.
     // 각 행: [R, 0도 보정값, +90도 보정값, +45도 보정값, -45도 보정값, -90도 보정값]
@@ -21668,8 +21668,33 @@ ${roundMobile ? '' : `<button type="button" class="icon-btn icon-btn-trash" titl
         // NDT Drawing File Upload
         const inputNdtDrawing = document.getElementById('inputNdtDrawing');
         if (inputNdtDrawing) {
-            inputNdtDrawing.addEventListener('change', (e) => {
+            inputNdtDrawing.addEventListener('change', async (e) => {
                 const file = e.target.files[0];
+                e.target.value = '';
+                // 2026-11-26 DXF·PDF 전용 도면: 화면은 그림, 원본(DXF는 벡터 PDF로 바꾼 것)도 같이 둬서
+                // 한글 위치도·비파괴 DXF 출력에 도면 선·글자가 벡터로 들어간다(층 도면 DXF와 같은 길)
+                if (file && (/[.](dxf|pdf)$/i.test(file.name || '') || file.type === 'application/pdf')) {
+                    if (typeof window.prepareFloorDrawingUpload !== 'function') {
+                        window.showToast('도면 변환 모듈이 없습니다. 새로고침(Ctrl+F5) 뒤 다시 해 주세요.', 'error');
+                        return;
+                    }
+                    const isDxf = /[.]dxf$/i.test(file.name || '');
+                    if (typeof window.showLoading === 'function') window.showLoading(isDxf ? 'DXF 도면 변환 중...' : 'PDF 도면 변환 중...');
+                    try {
+                        const up = await window.prepareFloorDrawingUpload(file);
+                        if (!up || !up.rasterDataUrl) throw new Error('도면을 그림으로 바꾸지 못했습니다');
+                        const key = `${state.currentBuildingId}_${state.currentFloor}`;
+                        await setNdtCustomDrawing(key, up.rasterDataUrl, up.pdfDataUrl || null);
+                        loadFloorNdtDrawing();
+                        window.showToast(isDxf ? 'NDT 전용 도면(DXF)이 등록되었습니다 — 출력 때 도면이 벡터로 들어갑니다.' : 'NDT 전용 도면(PDF)이 등록되었습니다.', 'success');
+                    } catch (err) {
+                        console.error(err);
+                        window.showToast(`전용 도면 등록 실패: ${(err && (err.bsaUserMessage || err.message)) || err}`, 'error', 6000);
+                    } finally {
+                        if (typeof window.hideLoading === 'function') window.hideLoading();
+                    }
+                    return;
+                }
                 if (file) {
                     const reader = new FileReader();
                     reader.onload = async (event) => {
@@ -50903,7 +50928,7 @@ ${roundMobile ? '' : `<button type="button" class="icon-btn icon-btn-trash" titl
             endDrawingAlign();
         }
     }, true);
-// @@app-part 12-survey-table.js sha=478e06a0f6fe — 원본은 app/12-survey-table.js (여기 말고 거기서 고칠 것)
+// @@app-part 12-survey-table.js sha=300c1f58e5a1 — 원본은 app/12-survey-table.js (여기 말고 거기서 고칠 것)
     // --- 10. SURVEY TABLE & ALBUM RENDERING ---
 
     // 상태조사표 컬럼 기본 정의 (화면/PDF/엑셀 공통). size와 crackWidth/crackLength는 상호 배타적으로
@@ -55532,7 +55557,7 @@ ${roundMobile ? '' : `<button type="button" class="icon-btn icon-btn-trash" titl
      * (drawPin·drawNdtPin·drawNdtDisplacementGroup)를 그대로 돌린다.
      * mode 'report': 한글 종이(1800×2540, 출력 범위면 그 크기)·같은 돌림/자르기 — 바탕 도면 포함
      * mode 'image' : 그림 픽셀 좌표 그대로, 바탕 없이 마킹만(DXF 용 — 원본 도면은 DXF 쪽이 따로 넣는다)
-     * DXF 로 올린 층(전용 비파괴 도면이 아닐 때)은 바탕을 캐드 선·글자 벡터로, 그 밖은 그림으로.
+     * DXF 로 올린 층·DXF 로 올린 비파괴 전용 도면은 바탕을 캐드 선·글자 벡터로, 그 밖은 그림으로.
      * 반환 { ops, w, h, imgW, imgH, img, model, custom, count } | null
      */
     async function recordNdtFloorMap(floorCode, categoryFilter, mode) {
@@ -55559,6 +55584,9 @@ ${roundMobile ? '' : `<button type="button" class="icon-btn icon-btn-trash" titl
         let model = null;
         if (!customSrc && typeof window.getFloorDxfDrawingModel === 'function') {
             try { model = await window.getFloorDxfDrawingModel(bldg, floorCode, bId); } catch (_e) { model = null; }
+        } else if (customSrc && typeof window.getNdtCustomDxfModel === 'function') {
+            // 2026-11-26 DXF로 올린 비파괴 전용 도면도 바탕을 캐드 선·글자 벡터로
+            try { model = await window.getNdtCustomDxfModel(key); } catch (_e) { model = null; }
         }
         // 'image'(비파괴 DXF)는 화면 글꼴 그대로, 그 밖(한글 위치도 SVG)은 SVG 글꼴로 글자 폭을 잰다
         const measureCtx = mode === 'image'
@@ -66491,7 +66519,7 @@ ${roundMobile ? '' : `<button type="button" class="icon-btn icon-btn-trash" titl
         btnDownloadImportTemplate.addEventListener('click', window.downloadImportDefectExcelTemplate);
     }
 
-// @@app-part 15-firebase-sync.js sha=ec39b90fe4ed — 원본은 app/15-firebase-sync.js (여기 말고 거기서 고칠 것)
+// @@app-part 15-firebase-sync.js sha=09f8829e0327 — 원본은 app/15-firebase-sync.js (여기 말고 거기서 고칠 것)
     // ==========================================================================
     // 🌐 FIREBASE REALTIME SYNC ENGINE (구글 파이어베이스 실시간 1초 동기화)
     // ==========================================================================
@@ -67944,8 +67972,12 @@ ${roundMobile ? '' : `<button type="button" class="icon-btn icon-btn-trash" titl
         deleteCloudPhoto(id).catch((e) => console.warn('NDT 전용 도면 클라우드 정리 실패:', id, e));
     }
 
-    /** dataUrl이 없으면 전용 도면을 뺀다(층 도면을 쓴다) */
-    async function setNdtCustomDrawing(floorKey, dataUrl) {
+    /**
+     * dataUrl이 없으면 전용 도면을 뺀다(층 도면을 쓴다).
+     * 2026-11-26 pdfDataUrl: DXF·PDF로 올린 전용 도면의 원본(DXF는 벡터 PDF로 바꾼 것) — 화면은 dataUrl 그림,
+     * 한글 위치도·비파괴 DXF 출력은 이 원본으로 도면 선·글자를 벡터로 넣는다. 참조 { id, at, pdfId }
+     */
+    async function setNdtCustomDrawing(floorKey, dataUrl, pdfDataUrl) {
         if (!floorKey) return;
         if (!window.state.ndtDrawingRefs) window.state.ndtDrawingRefs = {};
         const oldRef = ndtDrawingRefFor(floorKey);
@@ -67958,7 +67990,8 @@ ${roundMobile ? '' : `<button type="button" class="icon-btn icon-btn-trash" titl
             delete state.ndtImages[floorKey];
             delete _ndtImageLoadedId[floorKey];
         }
-        window.state.ndtDrawingRefs[floorKey] = { id, at: Date.now() };
+        const pdfId = (dataUrl && pdfDataUrl) ? `${id}_pdf` : '';
+        window.state.ndtDrawingRefs[floorKey] = pdfId ? { id, at: Date.now(), pdfId } : { id, at: Date.now() };
         markFloorKeyDirty(floorKey);
         saveStateToLocalStorage();
         if (dataUrl) {
@@ -67967,8 +68000,50 @@ ${roundMobile ? '' : `<button type="button" class="icon-btn icon-btn-trash" titl
             await persistPhotoUrlToIdb(id, dataUrl);
             persistPhotoToCloud(id, dataUrl).catch((e) => console.warn('NDT 전용 도면 업로드 실패:', id, e));
         }
+        if (pdfId) {
+            window._photoCache[pdfId] = pdfDataUrl;
+            await persistPhotoUrlToIdb(pdfId, pdfDataUrl);
+            persistPhotoToCloud(pdfId, pdfDataUrl).catch((e) => console.warn('NDT 전용 도면 원본 업로드 실패:', pdfId, e));
+        }
         if (oldRef && oldRef.id && oldRef.id !== id) releaseNdtDrawingImage(oldRef.id);
+        if (oldRef && oldRef.pdfId && oldRef.pdfId !== pdfId) releaseNdtDrawingImage(oldRef.pdfId);
     }
+
+    /** 전용 도면의 원본 PDF(dataURL). DXF·PDF로 올리지 않았거나 못 받으면 null */
+    async function loadNdtCustomDrawingPdf(floorKey) {
+        const ref = ndtDrawingRefFor(floorKey);
+        if (!ref || !ref.id || !ref.pdfId) return null;
+        let url = await loadNdtDrawingDataUrl(ref.pdfId);
+        if (typeof url !== 'string' || !url) return null;
+        if (url.indexOf('data:') !== 0) {
+            try {
+                const blob = await (await fetch(url)).blob();
+                url = await new Promise((resolve, reject) => {
+                    const r = new FileReader();
+                    r.onload = () => resolve(r.result);
+                    r.onerror = () => reject(r.error);
+                    r.readAsDataURL(blob);
+                });
+                if (!window._photoCache) window._photoCache = {};
+                window._photoCache[ref.pdfId] = url;
+            } catch (e) {
+                console.warn('NDT 전용 도면 원본 받기 실패:', ref.pdfId, e);
+                return null;
+            }
+        }
+        return url.slice(0, 24).toLowerCase().indexOf('data:application/pdf') === 0 ? url : null;
+    }
+    window.loadNdtCustomDrawingPdf = loadNdtCustomDrawingPdf;
+
+    /** 전용 도면이 DXF로 올린 것이면 그 캐드 선·글자 모델(js/core/dxf-view.js), 아니면 null */
+    async function getNdtCustomDxfModel(floorKey) {
+        const view = window.BSA && window.BSA.dxfView;
+        if (!view || typeof view.ensureModel !== 'function') return null;
+        const pdf = await loadNdtCustomDrawingPdf(floorKey);
+        if (!pdf) return null;
+        try { return await view.ensureModel(`ndt_${floorKey}`, pdf); } catch (_e) { return null; }
+    }
+    window.getNdtCustomDxfModel = getNdtCustomDxfModel;
 
     async function loadNdtDrawingDataUrl(id) {
         if (!id) return null;
@@ -68036,6 +68111,7 @@ ${roundMobile ? '' : `<button type="button" class="icon-btn icon-btn-trash" titl
         if (!window.state.ndtDrawingRefs) window.state.ndtDrawingRefs = {};
         const changed = !local || local.id !== String(remote.id || '');
         window.state.ndtDrawingRefs[floorKey] = { id: String(remote.id || ''), at: Number(remote.at) || 0 };
+        if (remote.id && remote.pdfId) window.state.ndtDrawingRefs[floorKey].pdfId = String(remote.pdfId);
         if (!changed) return;
         if (state.ndtImages) delete state.ndtImages[floorKey];
         delete _ndtImageLoadedId[floorKey];
@@ -72444,7 +72520,7 @@ ${roundMobile ? '' : `<button type="button" class="icon-btn icon-btn-trash" titl
         }
     };
 
-// @@app-part 16-backup-auth-init.js sha=ffcffad721f7 — 원본은 app/16-backup-auth-init.js (여기 말고 거기서 고칠 것)
+// @@app-part 16-backup-auth-init.js sha=230c5145734a — 원본은 app/16-backup-auth-init.js (여기 말고 거기서 고칠 것)
     // ==========================================================================
     // 건물 백업(체크포인트) — 2026-09-27
     // safety_app/{회사}/buildingCheckpoints/{id}          요약 + 이 백업이 쓰는 사진 id(photoIds)
@@ -75118,6 +75194,7 @@ ${roundMobile ? '' : `<button type="button" class="icon-btn icon-btn-trash" titl
                 if (!k.startsWith(prefix)) return;
                 const ref = refs[k];
                 if (ref && ref.id) pushJob(ref.id, null, k);
+                if (ref && ref.id && ref.pdfId) pushJob(ref.pdfId, null, k); // DXF·PDF 원본
             });
         }
         const seen = new Set();
