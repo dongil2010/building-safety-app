@@ -9,6 +9,8 @@ permissions:
   contents: read
   pages: write
   id-token: write
+  # deploy-pages가 이 실행의 github-pages 묶음을 API로 찾을 때 필요(2026-11-25부터 없으면 「묶음 없음」으로 실패)
+  actions: read
 
 concurrency:
   group: pages
