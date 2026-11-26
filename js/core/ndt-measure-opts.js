@@ -129,14 +129,11 @@
     function excludeNote(item, kind) {
         if (!item) return '';
         var parts = [];
-        if (supportsExcludeSlab(kind)) {
-            var s = excludePartNote(item.excludeSlab, item.excludeSlabThickness, '슬래브', '슬래브 두께 제외');
-            if (s) parts.push(s);
-        }
-        if (supportsExcludeInsulation(kind)) {
-            var i = excludePartNote(item.excludeInsulation, item.excludeInsulationThickness, '단열', '단열 두께 제외');
-            if (i) parts.push(i);
-        }
+        // 2026-11-26 보: 두께 숫자 없이 「슬래브 두께 제외」 / 「단열 두께 제외」 / 둘 다면 「슬래브, 단열 두께 제외」
+        var beamEx = [];
+        if (supportsExcludeSlab(kind) && flag(item.excludeSlab)) beamEx.push('슬래브');
+        if (supportsExcludeInsulation(kind) && flag(item.excludeInsulation)) beamEx.push('단열');
+        if (beamEx.length) parts.push(beamEx.join(', ') + ' 두께 제외');
         if (supportsExcludeWall(kind)) {
             var w = excludePartNote(item.excludeWall, item.excludeWallThickness, '벽체', '벽체 두께 제외');
             if (w) parts.push(w);

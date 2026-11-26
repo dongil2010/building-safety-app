@@ -62,7 +62,9 @@ function testModule() {
     assert.strictEqual(mo.depthInputValue({
         measuredDepth: 710, measuredDepthRaw: 590, excludeSlab: true, excludeSlabThickness: 120
     }), 590);
-    assert.strictEqual(mo.excludeNote({ excludeSlab: true, excludeSlabThickness: 120 }, 'beam'), '슬래브 120 제외');
+    assert.strictEqual(mo.excludeNote({ excludeSlab: true, excludeSlabThickness: 120 }, 'beam'), '슬래브 두께 제외');
+    assert.strictEqual(mo.excludeNote({ excludeSlab: true, excludeSlabThickness: 120, excludeInsulation: true, excludeInsulationThickness: 50 }, 'beam'), '슬래브, 단열 두께 제외');
+    assert.strictEqual(mo.excludeNote({ excludeInsulation: true }, 'beam'), '단열 두께 제외');
 
     const bothEx = mo.resolveRc({
         kind: 'beam', rawW: 400, rawD: 600, excludeSlabOn: true, excludeSlabMm: 100,
@@ -127,7 +129,7 @@ function testFormat() {
         component: '보', designWidth: 400, designDepth: 600, measuredWidth: 405, measuredDepth: 710,
         excludeSlab: true, excludeSlabThickness: 120, measuredDepthRaw: 590
     };
-    assert.strictEqual(c.out(beamExOut, 'measured', '×'), '405×710\n(슬래브 120 제외)', '출력 칸에 제외 주석·더한 춤');
+    assert.strictEqual(c.out(beamExOut, 'measured', '×'), '405×710\n(슬래브 두께 제외)', '출력 칸에 제외 주석·더한 춤');
     const colExOut = {
         component: '기둥', measureDimMode: 'column', designWidth: 500, designDepth: 600,
         measuredWidth: 460, measuredDepth: 600, excludeWall: true, excludeWallThickness: 40, measuredWidthRaw: 500
