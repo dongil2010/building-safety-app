@@ -468,6 +468,35 @@
     }
   }
 
+  /** 선분을 닫힌 다각형 안쪽 조각들로 자르기(짝홀 규칙) — 오목 다각형은 여러 조각. dxf-write.js 와 같은 규칙 */
+  function clipLineToPolygon(x0, y0, x1, y1, poly) {
+    const dx = x1 - x0;
+    const dy = y1 - y0;
+    const ts = [];
+    for (let i = 0, n = poly.length; i < n; i++) {
+      const a = poly[i];
+      const b = poly[(i + 1) % n];
+      const ex = b.x - a.x;
+      const ey = b.y - a.y;
+      const den = dx * ey - dy * ex;
+      if (Math.abs(den) < 1e-12) continue; // 평행
+      const wx = a.x - x0;
+      const wy = a.y - y0;
+      const u = (wx * dy - wy * dx) / den;
+      if (u < 0 || u >= 1) continue; // 꼭짓점 두 번 세지 않게 [0,1)
+      ts.push((wx * ey - wy * ex) / den);
+    }
+    ts.sort((p, q) => p - q);
+    const out = [];
+    for (let k = 0; k + 1 < ts.length; k += 2) {
+      const t0 = Math.max(0, ts[k]);
+      const t1 = Math.min(1, ts[k + 1]);
+      if (t1 - t0 <= 1e-9) continue;
+      out.push({ x1: x0 + t0 * dx, y1: y0 + t0 * dy, x2: x0 + t1 * dx, y2: y0 + t1 * dy });
+    }
+    return out;
+  }
+
   /** Liang-Barsky: 선분을 AABB로 잘라 교점이 있으면 {x1,y1,x2,y2} */
   function clipLineToRect(x0, y0, x1, y1, minX, minY, maxX, maxY) {
     let t0 = 0;
@@ -637,19 +666,21 @@
     } else if (fillStyle === 'hatch') {
       const step = Math.max(4, 9 * sAvg);
       const hatchW = Math.max(0.35, 0.9 * sAvg);
+      // 사각형이 아닌 모양(다각형·타원·회전 사각형)은 바깥선 안쪽으로만 — 오목 다각형 밖으로 삐져나오지 않게
+      const clipPoly = axisAlignedRect ? null : outlinePdf.filter((p) => Number.isFinite(p.x) && Number.isFinite(p.y));
       for (let i = -rh; i <= rw + rh; i += step) {
-        const seg = clipLineToRect(
-          minX + i, minY + rh,
-          minX + i + rh, minY,
-          minX, minY, maxX, maxY
-        );
-        if (!seg) continue;
-        page.drawLine({
-          start: { x: seg.x1, y: seg.y1 },
-          end: { x: seg.x2, y: seg.y2 },
-          thickness: hatchW,
-          color,
-          opacity: 0.7
+        const segs = clipPoly && clipPoly.length >= 3
+          ? clipLineToPolygon(minX + i, minY + rh, minX + i + rh, minY, clipPoly)
+          : [clipLineToRect(minX + i, minY + rh, minX + i + rh, minY, minX, minY, maxX, maxY)];
+        segs.forEach((seg) => {
+          if (!seg) return;
+          page.drawLine({
+            start: { x: seg.x1, y: seg.y1 },
+            end: { x: seg.x2, y: seg.y2 },
+            thickness: hatchW,
+            color,
+            opacity: 0.7
+          });
         });
       }
     }
@@ -699,6 +730,7 @@
       }
     });
   }
+  window.BSA_PDF_VECTOR.drawAreaMark = drawVectorAreaMark; // 테스트용(scripts/test-vector-pdf-area-hatch.js)
 
   /**
    * 본앱 drawPinSafe와 같은 이미지-픽셀 비율로 PDF에 벡터 마킹
