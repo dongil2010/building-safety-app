@@ -1292,7 +1292,9 @@
         c.imageSmoothingQuality = 'high';
         c.drawImage(S.img, 0, 0, cv.width, cv.height);
         c.scale(k, k);
-        S.objs.forEach(function (o) { drawObj(c, o, S.lw); });
+        // 저장 그림도 그린 선은 모두 1픽셀(그림 픽셀 기준, 2026-11-26)
+        var hc = hairlineCtx(c, 1 / k);
+        S.objs.forEach(function (o) { drawObj(hc, o, S.lw); });
         var url = cv.toDataURL('image/jpeg', 0.92);
         cv.width = cv.height = 1;
         return url;
@@ -1306,7 +1308,9 @@
         var d = S.dxf, meta = d.meta;
         var W = S.info.refW, H = S.info.refH;
         var R = V.createRecorder(V.pxToPtMatrix(W, H, meta.pageW, meta.pageH));
-        S.objs.forEach(function (o) { drawObj(R.ctx, o, S.lw); });
+        // 그린 선은 모두 기본 굵기 = 캐드 가는 선(폭 없는 폴리선 → 화면·PDF 1픽셀). 지우개(흰 선)는 폭 그대로
+        var hr = hairlineCtx(R.ctx, S.lw);
+        S.objs.forEach(function (o) { drawObj(hr, o, S.lw); });
         var k = Math.sqrt((meta.pageW / W) * (meta.pageH / H));
         var res = V.buildEditedFlat(d.model, meta, R.events, { baseLwPt: S.lw * k });
         var out = await P.convertFlatToPdf(res.flat, { fit: meta, lineWidth: d.model.lw, src: meta.src, unit: meta.unit });
