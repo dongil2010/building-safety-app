@@ -221,6 +221,29 @@ hl.forEach((e) => {
   assert.ok(Math.abs(Math.abs(b.x - a.x) - Math.abs(b.y - a.y)) < 1e-4, '45도');
 });
 assert.strictEqual(polys(d, 'BSA_AREA')[0].e.get(6), 'DASHED');
+// 빗금 + 오목 다각형(ㄱ자): 빗금이 다각형 밖(비어 있는 오른쪽 아래)으로 삐져나오지 않음
+{
+  const L = [{ x: 0, y: 0 }, { x: 60, y: 0 }, { x: 60, y: 20 }, { x: 20, y: 20 }, { x: 20, y: 60 }, { x: 0, y: 60 }];
+  d = areaDxf({ shape: 'polygon', x1: 0, y1: 0, x2: 60, y2: 60, points: L, fillStyle: 'hatch' });
+  const lines = d.ents.filter((e) => e.type === 'LINE' && e.get(8) === 'BSA_AREA');
+  assert.ok(lines.length > 5, 'ㄱ자 빗금 선 ' + lines.length);
+  const wl = polys(d, 'BSA_AREA')[0].v; // 세계 좌표 바깥선
+  const inside = (q) => {
+    let c = false;
+    for (let i = 0, j = wl.length - 1; i < wl.length; j = i++) {
+      const a = wl[i], b = wl[j];
+      if ((a.y > q.y) !== (b.y > q.y) && q.x < ((b.x - a.x) * (q.y - a.y)) / (b.y - a.y) + a.x) c = !c;
+    }
+    return c;
+  };
+  lines.forEach((e) => {
+    const a = e.pt(10), b = e.pt(11);
+    for (const f of [0.02, 0.25, 0.5, 0.75, 0.98]) {
+      const q = { x: a.x + (b.x - a.x) * f, y: a.y + (b.y - a.y) * f };
+      assert.ok(inside(q), 'ㄱ자 밖 빗금 ' + JSON.stringify([a, b]));
+    }
+  });
+}
 // 해치 줄 수 상한
 d = areaDxf({ shape: 'rect', x1: 0, y1: 0, x2: 20000, y2: 20000, fillStyle: 'hatch' });
 assert.ok(count(d, 'LINE', 'BSA_AREA') < 1600);
