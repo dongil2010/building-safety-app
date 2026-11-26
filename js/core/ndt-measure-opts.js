@@ -129,11 +129,20 @@
     function excludeNote(item, kind) {
         if (!item) return '';
         var parts = [];
-        // 2026-11-26 보: 두께 숫자 없이 「슬래브 두께 제외」 / 「단열 두께 제외」 / 둘 다면 「슬래브, 단열 두께 제외」
-        var beamEx = [];
-        if (supportsExcludeSlab(kind) && flag(item.excludeSlab)) beamEx.push('슬래브');
-        if (supportsExcludeInsulation(kind) && flag(item.excludeInsulation)) beamEx.push('단열');
-        if (beamEx.length) parts.push(beamEx.join(', ') + ' 두께 제외');
+        // 2026-11-26 보: 두께를 적었으면 「슬래브 두께 150mm 미포함」(둘 다면 「슬래브 두께 150mm, 단열 두께 50mm 미포함」),
+        //  체크만이면 「슬래브 두께 제외」 / 둘 다면 「슬래브, 단열 두께 제외」
+        var beamExMm = [];
+        var beamExFlag = [];
+        var addBeamEx = function (on, mm, label) {
+            if (!flag(on)) return;
+            var n = num(mm);
+            if (n) beamExMm.push(label + ' 두께 ' + n + 'mm');
+            else beamExFlag.push(label);
+        };
+        if (supportsExcludeSlab(kind)) addBeamEx(item.excludeSlab, item.excludeSlabThickness, '슬래브');
+        if (supportsExcludeInsulation(kind)) addBeamEx(item.excludeInsulation, item.excludeInsulationThickness, '단열');
+        if (beamExMm.length) parts.push(beamExMm.join(', ') + ' 미포함');
+        if (beamExFlag.length) parts.push(beamExFlag.join(', ') + ' 두께 제외');
         if (supportsExcludeWall(kind)) {
             var w = excludePartNote(item.excludeWall, item.excludeWallThickness, '벽체', '벽체 두께 제외');
             if (w) parts.push(w);
@@ -161,6 +170,19 @@
         return (item.measuredDepth !== undefined && item.measuredDepth !== null) ? item.measuredDepth : '';
     }
 
+    /**
+     * 2026-11-26 표·출력에 보일 실측 춤 — 보에서 슬래브/단열 두께(mm)를 적어 더했으면 더하기 전 잰 값.
+     * (계산·저장값 measuredDepth는 더한 값 그대로. 해당 없으면 null → 저장값을 쓴다)
+     */
+    function displayDepth(item, kind) {
+        if (!item || kind !== 'beam') return null;
+        var added = (flag(item.excludeSlab) && num(item.excludeSlabThickness))
+            || (flag(item.excludeInsulation) && num(item.excludeInsulationThickness));
+        if (!added) return null;
+        var raw = num(item.measuredDepthRaw);
+        return raw !== null ? raw : null;
+    }
+
     /** 다시 열 때 폭/지름 칸 — 벽체 제외면 빼기 전 입력값 */
     function widthInputValue(item) {
         if (!item) return '';
@@ -181,7 +203,7 @@
         supportsExcludeSlab: supportsExcludeSlab, supportsExcludeInsulation: supportsExcludeInsulation,
         supportsExcludeWall: supportsExcludeWall,
         resolveRc: resolveRc, measuredForCalc: measuredForCalc, oneSideNote: oneSideNote, slabNote: slabNote,
-        excludeNote: excludeNote, depthInputValue: depthInputValue, widthInputValue: widthInputValue
+        excludeNote: excludeNote, displayDepth: displayDepth, depthInputValue: depthInputValue, widthInputValue: widthInputValue
     };
     if (typeof module !== 'undefined' && module.exports) module.exports = api;
     root.BSA = root.BSA || {};

@@ -14640,7 +14640,7 @@ ${roundMobile ? '' : `<button type="button" class="icon-btn icon-btn-trash" titl
         return 'ndtStrength';
     }
 
-// @@app-part 04-ndt-disp.js sha=3fc8c05619b5 — 원본은 app/04-ndt-disp.js (여기 말고 거기서 고칠 것)
+// @@app-part 04-ndt-disp.js sha=60de16766b8f — 원본은 app/04-ndt-disp.js (여기 말고 거기서 고칠 것)
     // --- 바닥 수직변위: 그룹(NO.박스) + 다중 레벨 포인트 데이터 ---
     const NDT_DISPLACEMENT_COLORS = ['#ef4444', '#525252', '#f97316', '#22c55e', '#a855f7', '#eab308', '#06b6d4', '#ec4899'];
     const NDT_GRADE_BADGES = {
@@ -15233,19 +15233,23 @@ ${roundMobile ? '' : `<button type="button" class="icon-btn icon-btn-trash" titl
             const measuredW = (item.measuredWidth !== undefined && item.measuredWidth !== null) ? item.measuredWidth : item.avgValue;
             return measuredW != null && measuredW !== '' ? `Φ${measuredW}` : '-';
         }
+        // 2026-11-26 보 「슬래브/단열 두께 제외」에 mm를 적었으면 표에는 더하기 전 잰 춤(주석: 「…mm 미포함」)
+        const moApi = (typeof window !== 'undefined' && window.BSA && window.BSA.ndtMeasureOpts) || null;
+        const rawShown = moApi && typeof moApi.displayDepth === 'function' ? moApi.displayDepth(item, dimMode) : null;
+        const shownDepth = rawShown != null ? rawShown : item.measuredDepth;
         // 2026-10-19 「이쪽만 측정」 — 안 잰 쪽은 '-'
         const oneSide = (dimMode === 'beam' || dimMode === 'column')
             && (item.measureOneSide === 'primary' || item.measureOneSide === 'secondary') ? item.measureOneSide : null;
         if (kind !== 'design' && oneSide) {
             const has = (v) => v !== undefined && v !== null && v !== '';
             if (oneSide === 'primary') return has(item.measuredWidth) ? `${item.measuredWidth}${joiner}-` : '-';
-            return has(item.measuredDepth) ? `-${joiner}${item.measuredDepth}` : '-';
+            return has(item.measuredDepth) ? `-${joiner}${shownDepth}` : '-';
         }
         if (kind === 'design') {
             return item.designWidth ? `${item.designWidth}${item.designDepth ? joiner + item.designDepth : ''}` : '-';
         }
         const measuredW = (item.measuredWidth !== undefined && item.measuredWidth !== null) ? item.measuredWidth : item.avgValue;
-        return measuredW ? `${measuredW}${item.measuredDepth ? joiner + item.measuredDepth : ''}` : '-';
+        return measuredW ? `${measuredW}${item.measuredDepth ? joiner + shownDepth : ''}` : '-';
     }
 
     /**

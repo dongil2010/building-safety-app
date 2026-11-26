@@ -591,19 +591,23 @@
             const measuredW = (item.measuredWidth !== undefined && item.measuredWidth !== null) ? item.measuredWidth : item.avgValue;
             return measuredW != null && measuredW !== '' ? `Φ${measuredW}` : '-';
         }
+        // 2026-11-26 보 「슬래브/단열 두께 제외」에 mm를 적었으면 표에는 더하기 전 잰 춤(주석: 「…mm 미포함」)
+        const moApi = (typeof window !== 'undefined' && window.BSA && window.BSA.ndtMeasureOpts) || null;
+        const rawShown = moApi && typeof moApi.displayDepth === 'function' ? moApi.displayDepth(item, dimMode) : null;
+        const shownDepth = rawShown != null ? rawShown : item.measuredDepth;
         // 2026-10-19 「이쪽만 측정」 — 안 잰 쪽은 '-'
         const oneSide = (dimMode === 'beam' || dimMode === 'column')
             && (item.measureOneSide === 'primary' || item.measureOneSide === 'secondary') ? item.measureOneSide : null;
         if (kind !== 'design' && oneSide) {
             const has = (v) => v !== undefined && v !== null && v !== '';
             if (oneSide === 'primary') return has(item.measuredWidth) ? `${item.measuredWidth}${joiner}-` : '-';
-            return has(item.measuredDepth) ? `-${joiner}${item.measuredDepth}` : '-';
+            return has(item.measuredDepth) ? `-${joiner}${shownDepth}` : '-';
         }
         if (kind === 'design') {
             return item.designWidth ? `${item.designWidth}${item.designDepth ? joiner + item.designDepth : ''}` : '-';
         }
         const measuredW = (item.measuredWidth !== undefined && item.measuredWidth !== null) ? item.measuredWidth : item.avgValue;
-        return measuredW ? `${measuredW}${item.measuredDepth ? joiner + item.measuredDepth : ''}` : '-';
+        return measuredW ? `${measuredW}${item.measuredDepth ? joiner + shownDepth : ''}` : '-';
     }
 
     /**

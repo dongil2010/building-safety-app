@@ -62,8 +62,9 @@ function testModule() {
     assert.strictEqual(mo.depthInputValue({
         measuredDepth: 710, measuredDepthRaw: 590, excludeSlab: true, excludeSlabThickness: 120
     }), 590);
-    assert.strictEqual(mo.excludeNote({ excludeSlab: true, excludeSlabThickness: 120 }, 'beam'), '슬래브 두께 제외');
-    assert.strictEqual(mo.excludeNote({ excludeSlab: true, excludeSlabThickness: 120, excludeInsulation: true, excludeInsulationThickness: 50 }, 'beam'), '슬래브, 단열 두께 제외');
+    assert.strictEqual(mo.excludeNote({ excludeSlab: true, excludeSlabThickness: 120 }, 'beam'), '슬래브 두께 120mm 미포함');
+    assert.strictEqual(mo.excludeNote({ excludeSlab: true, excludeSlabThickness: 120, excludeInsulation: true, excludeInsulationThickness: 50 }, 'beam'), '슬래브 두께 120mm, 단열 두께 50mm 미포함');
+    assert.strictEqual(mo.excludeNote({ excludeSlab: true, excludeInsulation: true }, 'beam'), '슬래브, 단열 두께 제외');
     assert.strictEqual(mo.excludeNote({ excludeInsulation: true }, 'beam'), '단열 두께 제외');
 
     const bothEx = mo.resolveRc({
@@ -129,7 +130,8 @@ function testFormat() {
         component: '보', designWidth: 400, designDepth: 600, measuredWidth: 405, measuredDepth: 710,
         excludeSlab: true, excludeSlabThickness: 120, measuredDepthRaw: 590
     };
-    assert.strictEqual(c.out(beamExOut, 'measured', '×'), '405×710\n(슬래브 두께 제외)', '출력 칸에 제외 주석·더한 춤');
+    assert.strictEqual(c.out(beamExOut, 'measured', '×'), '405×590\n(슬래브 두께 120mm 미포함)', '출력 칸엔 잰 춤 + 미포함 주석(계산은 더한 춤)');
+    assert.strictEqual(c.area(beamExOut, 'measured'), 405 * 710, '면적·등급은 더한 춤');
     const colExOut = {
         component: '기둥', measureDimMode: 'column', designWidth: 500, designDepth: 600,
         measuredWidth: 460, measuredDepth: 600, excludeWall: true, excludeWallThickness: 40, measuredWidthRaw: 500
