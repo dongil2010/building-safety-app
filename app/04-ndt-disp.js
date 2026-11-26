@@ -1066,7 +1066,37 @@
     }
 
     function getNdtViewScaleLimits() {
-        return getViewScaleLimits(getNdtFitScale);
+        const lim = getViewScaleLimits(getNdtFitScale);
+        // 벡터로 그리는 DXF 도면은 확대해도 안 깨지므로 결함위치도처럼 깊이 확대
+        if (ndtBgImage && getNdtDxfViewModel()) lim.max = Math.max(lim.max, Math.max(getNdtFitScale() || 0.05, 0.05) * VIEW_MAX_ZOOM_VS_FIT_DXF);
+        return lim;
+    }
+
+    /**
+     * 2026-11-26 비파괴 탭도 DXF 도면은 그림 대신 선·글자를 지금 배율로 직접 그린다(결함위치도와 같은 js/core/dxf-view.js).
+     * 층 도면 = 결함위치도가 읽어 둔 층 모델 / DXF로 올린 비파괴 전용 도면 = 그 원본에서 읽은 모델(뒤에서 읽고 다 되면 다시 그림)
+     */
+    const _ndtDxfModelReq = {};
+    const _ndtDxfModelReady = {};
+    function getNdtDxfViewModel() {
+        const V = window.BSA && window.BSA.dxfView;
+        if (!V || typeof V.getModel !== 'function' || (window.BSA_PDF_VECTOR && window.BSA_PDF_VECTOR.dxfLiveView === false)) return null;
+        const key = `${state.currentBuildingId}_${state.currentFloor}`;
+        if (!currentNdtCustomDrawingSrc(key)) return getDxfViewModelForCurrentFloor();
+        const ref = ndtDrawingRefFor(key);
+        if (!ref || !ref.id || !ref.pdfId) return null;
+        if (_ndtDxfModelReady[key] === ref.pdfId) return V.getModel(`ndt_${key}`);
+        if (_ndtDxfModelReq[key] !== ref.pdfId && typeof window.getNdtCustomDxfModel === 'function') {
+            const pdfId = ref.pdfId;
+            _ndtDxfModelReq[key] = pdfId;
+            window.getNdtCustomDxfModel(key).then((m) => {
+                const now = ndtDrawingRefFor(key);
+                if (!m || !now || now.pdfId !== pdfId) return;
+                _ndtDxfModelReady[key] = pdfId;
+                if (`${state.currentBuildingId}_${state.currentFloor}` === key) drawNdtCanvas();
+            }).catch(() => {});
+        }
+        return null;
     }
 
     function shouldAutoFitNdtView() {
@@ -1194,11 +1224,29 @@
         }
 
         if (ndtBgImage) {
-            ctx.drawImage(ndtBgImage, 0, 0, imgW, imgH);
             const ndtKey = `${state.currentBuildingId}_${state.currentFloor}`;
-            if (!currentNdtCustomDrawingSrc(ndtKey)) {
-                applyFloorDrawingDarken(ctx, getFloorDrawingDarken(state.currentBuildingId, state.currentFloor),
-                    () => ctx.drawImage(ndtBgImage, 0, 0, imgW, imgH));
+            const isCustom = !!currentNdtCustomDrawingSrc(ndtKey);
+            const darken = isCustom ? null : getFloorDrawingDarken(state.currentBuildingId, state.currentFloor);
+            const blitImg = () => ctx.drawImage(ndtBgImage, 0, 0, imgW, imgH);
+            const dxfModel = getNdtDxfViewModel();
+            let drew = false;
+            if (dxfModel) {
+                try {
+                    ctx.fillStyle = '#ffffff';
+                    ctx.fillRect(0, 0, imgW, imgH);
+                    drew = window.BSA.dxfView.drawOnCanvas(ctx, dxfModel, imgW, imgH, {
+                        fallback: blitImg,
+                        darken: isCustom ? undefined : (blit) => applyFloorDrawingDarken(ctx, darken, blit),
+                        requestRedraw: () => drawNdtCanvas()
+                    });
+                } catch (dxfErr) {
+                    console.warn('[DXF 화면] 비파괴 벡터 그리기 실패 — 그림으로 표시', dxfErr);
+                    drew = false;
+                }
+            }
+            if (!drew) {
+                blitImg();
+                if (!isCustom) applyFloorDrawingDarken(ctx, darken, blitImg);
             }
         }
 
