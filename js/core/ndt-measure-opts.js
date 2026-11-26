@@ -2,7 +2,7 @@
  * 부재실측 선택 입력 — 2026-10-19 / 2026-11-06
  *  - 「이쪽만 측정」: 보·기둥에서 한쪽만 잰 부재. 안 잰 쪽은 설계치수로 보고 단면적 비율을 낸다.
  *  - 「슬래브 두께 합산」(보만): 입력한 춤 + 슬래브 두께 = 실측 춤.
- *  - 「슬래브/단열 두께 제외」(보): 체크만이면 주석만. mm를 적으면 춤에서 뺀다. 합산과 슬래브 제외는 서로 못 켬.
+ *  - 「슬래브/단열 두께 제외」(보): 체크만이면 주석만. mm를 적으면 잰 춤에 더한다(2026-11-26, 예전엔 뺐음). 합산과 슬래브 제외는 서로 못 켬.
  *  - 「벽체 두께 제외」(기둥 사각/원형): 체크만이면 주석만. mm를 적으면 폭·지름에서 뺀다.
  * 순수 함수 — app.js와 테스트가 같이 쓴다.
  */
@@ -63,8 +63,9 @@
         var depthTotal = rawD;
         if (depthTotal !== null) {
             if (slab) depthTotal = depthTotal + slab;
-            if (exSlabMm) depthTotal = depthTotal - exSlabMm;
-            if (exInsMm) depthTotal = depthTotal - exInsMm;
+            // 2026-11-26 「제외」 = 잰 춤에 슬래브·단열이 빠져 있다는 뜻 → 보 춤 = 잰 춤 + 두께 (예전엔 뺐음)
+            if (exSlabMm) depthTotal = depthTotal + exSlabMm;
+            if (exInsMm) depthTotal = depthTotal + exInsMm;
             depthTotal = clampPositive(depthTotal, rawD);
         }
         var widthTotal = rawW;
@@ -158,7 +159,7 @@
         if (flag(item.excludeSlab) || flag(item.excludeInsulation)) {
             var stored = num(item.measuredDepth);
             var add = (num(item.excludeSlabThickness) || 0) + (num(item.excludeInsulationThickness) || 0);
-            if (stored !== null && add) return Math.round((stored + add) * 100) / 100;
+            if (stored !== null && add && stored > add) return Math.round((stored - add) * 100) / 100;
         }
         return (item.measuredDepth !== undefined && item.measuredDepth !== null) ? item.measuredDepth : '';
     }

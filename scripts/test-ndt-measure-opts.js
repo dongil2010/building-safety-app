@@ -48,9 +48,9 @@ function testModule() {
     assert.deepStrictEqual([flagOnly.storeD, flagOnly.excludeSlabOn, flagOnly.excludeSlabMm], [590, true, null]);
     assert.strictEqual(mo.excludeNote({ excludeSlab: true }, 'beam'), '슬래브 두께 제외');
 
-    // mm 있으면 춤에서 빼고, 다시 열면 입력값
+    // mm 있으면 잰 춤에 더하고(2026-11-26), 다시 열면 입력값
     const beamEx = mo.resolveRc({ kind: 'beam', designW: 400, designD: 600, rawW: 405, rawD: 590, excludeSlabOn: true, excludeSlabMm: 120 });
-    assert.deepStrictEqual([beamEx.storeD, beamEx.rawD, beamEx.excludeSlabMm], [470, 590, 120]);
+    assert.deepStrictEqual([beamEx.storeD, beamEx.rawD, beamEx.excludeSlabMm], [710, 590, 120]);
     const again = mo.resolveRc({
         kind: 'beam', designW: 400, designD: 600, rawW: mo.depthInputValue({
             measuredDepth: beamEx.storeD, measuredDepthRaw: beamEx.rawD, excludeSlab: true, excludeSlabThickness: 120
@@ -58,9 +58,9 @@ function testModule() {
             measuredDepth: beamEx.storeD, measuredDepthRaw: beamEx.rawD, excludeSlab: true, excludeSlabThickness: 120
         }), excludeSlabOn: true, excludeSlabMm: 120
     });
-    assert.strictEqual(again.storeD, 470, '다시 저장해도 두 번 빼지 않음');
+    assert.strictEqual(again.storeD, 710, '다시 저장해도 두 번 더하지 않음');
     assert.strictEqual(mo.depthInputValue({
-        measuredDepth: 470, measuredDepthRaw: 590, excludeSlab: true, excludeSlabThickness: 120
+        measuredDepth: 710, measuredDepthRaw: 590, excludeSlab: true, excludeSlabThickness: 120
     }), 590);
     assert.strictEqual(mo.excludeNote({ excludeSlab: true, excludeSlabThickness: 120 }, 'beam'), '슬래브 120 제외');
 
@@ -68,7 +68,7 @@ function testModule() {
         kind: 'beam', rawW: 400, rawD: 600, excludeSlabOn: true, excludeSlabMm: 100,
         excludeInsulationOn: true, excludeInsulationMm: 50
     });
-    assert.strictEqual(bothEx.storeD, 450);
+    assert.strictEqual(bothEx.storeD, 750);
 
     // 합산과 슬래브 제외는 같이 못 켬 — 합산이 이김
     const mutex = mo.resolveRc({ kind: 'beam', rawW: 400, rawD: 450, slabOn: true, slab: 150, excludeSlabOn: true, excludeSlabMm: 80 });
@@ -124,10 +124,10 @@ function testFormat() {
     assert.ok(/슬래브 150 포함/.test(c.screen(beamSlab, 'measured', '×')), '앱 화면엔 슬래브 합산 표시');
 
     const beamExOut = {
-        component: '보', designWidth: 400, designDepth: 600, measuredWidth: 405, measuredDepth: 470,
+        component: '보', designWidth: 400, designDepth: 600, measuredWidth: 405, measuredDepth: 710,
         excludeSlab: true, excludeSlabThickness: 120, measuredDepthRaw: 590
     };
-    assert.strictEqual(c.out(beamExOut, 'measured', '×'), '405×470\n(슬래브 120 제외)', '출력 칸에 제외 주석·빼 둔 춤');
+    assert.strictEqual(c.out(beamExOut, 'measured', '×'), '405×710\n(슬래브 120 제외)', '출력 칸에 제외 주석·더한 춤');
     const colExOut = {
         component: '기둥', measureDimMode: 'column', designWidth: 500, designDepth: 600,
         measuredWidth: 460, measuredDepth: 600, excludeWall: true, excludeWallThickness: 40, measuredWidthRaw: 500

@@ -498,7 +498,7 @@
         const parts = [];
         if (mo && mo.slab != null && rawD > 0) parts.push(`실측 춤 = ${rawD} + 슬래브 ${mo.slab} = ${Math.round((rawD + mo.slab) * 100) / 100} mm`);
         if (mo && (mo.excludeSlabMm || mo.excludeInsulationMm) && rawD > 0 && mo.storeD != null) {
-            parts.push(`실측 춤 = ${rawD}${mo.excludeSlabMm ? ` − 슬래브 ${mo.excludeSlabMm}` : ''}${mo.excludeInsulationMm ? ` − 단열 ${mo.excludeInsulationMm}` : ''} = ${mo.storeD} mm`);
+            parts.push(`실측 춤 = ${rawD}${mo.excludeSlabMm ? ` + 슬래브 ${mo.excludeSlabMm}` : ''}${mo.excludeInsulationMm ? ` + 단열 ${mo.excludeInsulationMm}` : ''} = ${mo.storeD} mm`);
         }
         if (mo && mo.excludeWallMm && mo.rawW > 0 && mo.storeW != null) {
             parts.push(`실측 폭/지름 = ${mo.rawW} − 벽체 ${mo.excludeWallMm} = ${mo.storeW} mm`);

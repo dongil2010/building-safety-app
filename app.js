@@ -14640,7 +14640,7 @@ ${roundMobile ? '' : `<button type="button" class="icon-btn icon-btn-trash" titl
         return 'ndtStrength';
     }
 
-// @@app-part 04-ndt-disp.js sha=92126a5c72b8 — 원본은 app/04-ndt-disp.js (여기 말고 거기서 고칠 것)
+// @@app-part 04-ndt-disp.js sha=3fc8c05619b5 — 원본은 app/04-ndt-disp.js (여기 말고 거기서 고칠 것)
     // --- 바닥 수직변위: 그룹(NO.박스) + 다중 레벨 포인트 데이터 ---
     const NDT_DISPLACEMENT_COLORS = ['#ef4444', '#525252', '#f97316', '#22c55e', '#a855f7', '#eab308', '#06b6d4', '#ec4899'];
     const NDT_GRADE_BADGES = {
@@ -15140,7 +15140,7 @@ ${roundMobile ? '' : `<button type="button" class="icon-btn icon-btn-trash" titl
         const parts = [];
         if (mo && mo.slab != null && rawD > 0) parts.push(`실측 춤 = ${rawD} + 슬래브 ${mo.slab} = ${Math.round((rawD + mo.slab) * 100) / 100} mm`);
         if (mo && (mo.excludeSlabMm || mo.excludeInsulationMm) && rawD > 0 && mo.storeD != null) {
-            parts.push(`실측 춤 = ${rawD}${mo.excludeSlabMm ? ` − 슬래브 ${mo.excludeSlabMm}` : ''}${mo.excludeInsulationMm ? ` − 단열 ${mo.excludeInsulationMm}` : ''} = ${mo.storeD} mm`);
+            parts.push(`실측 춤 = ${rawD}${mo.excludeSlabMm ? ` + 슬래브 ${mo.excludeSlabMm}` : ''}${mo.excludeInsulationMm ? ` + 단열 ${mo.excludeInsulationMm}` : ''} = ${mo.storeD} mm`);
         }
         if (mo && mo.excludeWallMm && mo.rawW > 0 && mo.storeW != null) {
             parts.push(`실측 폭/지름 = ${mo.rawW} − 벽체 ${mo.excludeWallMm} = ${mo.storeW} mm`);
