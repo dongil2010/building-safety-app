@@ -3665,6 +3665,7 @@ ${roundMobile ? '' : `<button type="button" class="icon-btn icon-btn-trash" titl
         if (document.getElementById('inputEditBuildingCompletionDate')) document.getElementById('inputEditBuildingCompletionDate').value = bldg.completionDate || '';
         if (document.getElementById('inputEditBuildingNotes')) document.getElementById('inputEditBuildingNotes').value = bldg.notes || '';
         initEditRoundDates(bldg);
+        initEditDongCompletionDates(bldg);
         if (typeof window.syncInspectionRoundDateInput === 'function') window.syncInspectionRoundDateInput();
 
         populateEditBuildingImportSources(bldg.id);
@@ -4864,7 +4865,10 @@ ${roundMobile ? '' : `<button type="button" class="icon-btn icon-btn-trash" titl
             if (facilityGrade !== prevFacilityGrade) {
                 applyBuildingLocationMapLegend(bldg, { forceDefault: true });
             }
-            bldg.completionDate = completionDate;
+            // 2026-11-26 여러 동이면 동별 준공일 칸 값을 각 동에 넣는다(이 동 값도 그 칸에서)
+            const dongCompletionMine = applyEditDongCompletionDates(bldg);
+            bldg.completionDate = dongCompletionMine != null ? dongCompletionMine : completionDate;
+            if (inArr && inArr !== bldg) inArr.completionDate = bldg.completionDate;
             bldg.notes = notes;
             setSiteMultiDongFlag(siteName, multiDong);
             if (prevSiteName && prevSiteName !== siteName) {

@@ -6022,7 +6022,7 @@ document.addEventListener('DOMContentLoaded', () => {
         }
     }
 
-// @@app-part 02-buildings.js sha=8724bebd6bbb — 원본은 app/02-buildings.js (여기 말고 거기서 고칠 것)
+// @@app-part 02-buildings.js sha=0603af2e9f90 — 원본은 app/02-buildings.js (여기 말고 거기서 고칠 것)
     // --- 5. TAB MANAGER (진입 로직은 js/tabs/*.js) ---
     // ---- 마지막 작업 위치 기억·복원 (js/core/last-location.js, 2026-10-28) ----
     // 로그인 직후 복원 시도가 끝나기 전에는 기록·삭제를 하지 않는다(부팅 중 switchTab('tab-home')이 기록을 지우지 않게).
@@ -9689,6 +9689,7 @@ ${roundMobile ? '' : `<button type="button" class="icon-btn icon-btn-trash" titl
         if (document.getElementById('inputEditBuildingCompletionDate')) document.getElementById('inputEditBuildingCompletionDate').value = bldg.completionDate || '';
         if (document.getElementById('inputEditBuildingNotes')) document.getElementById('inputEditBuildingNotes').value = bldg.notes || '';
         initEditRoundDates(bldg);
+        initEditDongCompletionDates(bldg);
         if (typeof window.syncInspectionRoundDateInput === 'function') window.syncInspectionRoundDateInput();
 
         populateEditBuildingImportSources(bldg.id);
@@ -10888,7 +10889,10 @@ ${roundMobile ? '' : `<button type="button" class="icon-btn icon-btn-trash" titl
             if (facilityGrade !== prevFacilityGrade) {
                 applyBuildingLocationMapLegend(bldg, { forceDefault: true });
             }
-            bldg.completionDate = completionDate;
+            // 2026-11-26 여러 동이면 동별 준공일 칸 값을 각 동에 넣는다(이 동 값도 그 칸에서)
+            const dongCompletionMine = applyEditDongCompletionDates(bldg);
+            bldg.completionDate = dongCompletionMine != null ? dongCompletionMine : completionDate;
+            if (inArr && inArr !== bldg) inArr.completionDate = bldg.completionDate;
             bldg.notes = notes;
             setSiteMultiDongFlag(siteName, multiDong);
             if (prevSiteName && prevSiteName !== siteName) {
@@ -18561,7 +18565,7 @@ ${roundMobile ? '' : `<button type="button" class="icon-btn icon-btn-trash" titl
         URL.revokeObjectURL(url);
     };
 
-// @@app-part 05-ndt-strength.js sha=b8aefd3225da — 원본은 app/05-ndt-strength.js (여기 말고 거기서 고칠 것)
+// @@app-part 05-ndt-strength.js sha=b20a547e259a — 원본은 app/05-ndt-strength.js (여기 말고 거기서 고칠 것)
     // --- 콘크리트 강도(반발경도) 추정 엔진 ---
     // 회사에서 쓰던 엑셀(반발경도-고강도포함) 자료를 그대로 옮겼다.
     // 각 행: [R, 0도 보정값, +90도 보정값, +45도 보정값, -45도 보정값, -90도 보정값]
@@ -19910,6 +19914,84 @@ ${roundMobile ? '' : `<button type="button" class="icon-btn icon-btn-trash" titl
         const d = (_editRoundDatesDraft && _editRoundDatesDraft.bldgId === bldg.id) ? _editRoundDatesDraft.dates : {};
         Object.keys(d).forEach((k) => { if (k !== selectedKey) mm.setRoundDate(bldg, k, d[k]); });
         if (selectedDate) mm.setRoundDate(bldg, selectedKey, selectedDate);
+    }
+
+    // ── 2026-11-26 건물 수정창: 동별 준공일 ──
+    // 여러 동 현장의 「현장 정보 수정」은 동 하나만 열어서, 준공일을 넣어도 그 동에만 들어가고
+    // 다른 동은 준공일이 비어 비파괴(강도 재령·탄산화 수명)가 계산되지 않았다.
+    // 같은 현장·같은 회차의 동이 2개 이상이면 동마다 준공일 칸을 보여 주고 저장 때 각 동에 넣는다.
+    let _editDongCompletionDraft = null;
+    function getEditDongCompletionSiblings(bldg) {
+        if (!bldg) return [];
+        const siteKey = getBuildingSiteName(bldg);
+        const roundKey = getBuildingSurveyRoundKey(bldg);
+        if (!siteKey || !isSiteMultiDong(siteKey)) return [];
+        const list = filterActiveBuildings(window.state.buildings || [], window.state.deletedBuildingIds)
+            .filter((b) => b && getBuildingSiteName(b) === siteKey && getBuildingSurveyRoundKey(b) === roundKey);
+        list.sort(makeDongComparator(siteKey));
+        return list;
+    }
+    function syncEditDongCompletionVisibility() {
+        const box = document.getElementById('editDongCompletionDates');
+        const mainInput = document.getElementById('inputEditBuildingCompletionDate');
+        const mainGroup = mainInput ? mainInput.closest('.form-group') : null;
+        const multi = readSiteLayoutRadio('editBuildingSiteLayout', false);
+        const show = !!(multi && _editDongCompletionDraft && _editDongCompletionDraft.entries.length >= 2);
+        if (box) box.hidden = !show;
+        if (mainGroup) mainGroup.hidden = show;
+    }
+    function renderEditDongCompletionDates() {
+        const box = document.getElementById('editDongCompletionDates');
+        const d = _editDongCompletionDraft;
+        if (!box) return;
+        if (!d || d.entries.length < 2) { box.innerHTML = ''; syncEditDongCompletionVisibility(); return; }
+        box.innerHTML = '<label class="form-label">준공일 (동별 · 콘크리트 재령 계산용)</label>'
+            + d.entries.map((e, i) => `<div style="display:flex;align-items:center;gap:0.5rem;margin-top:0.3rem;">
+                <span style="min-width:6rem;font-size:0.85rem;">${escapeHtml(e.label)}</span>
+                <input type="date" class="form-control edit-dong-completion-input" data-idx="${i}" value="${escapeHtml(e.date || '')}" style="max-width:11rem;">
+            </div>`).join('')
+            + '<button type="button" class="btn btn-sm btn-outline" id="btnEditDongCompletionFillAll" style="margin-top:0.4rem;">첫 동 준공일을 모든 동에 적용</button>';
+        box.querySelectorAll('.edit-dong-completion-input').forEach((inp) => {
+            inp.addEventListener('change', () => {
+                const e = d.entries[Number(inp.dataset.idx)];
+                if (e) e.date = inp.value || '';
+            });
+        });
+        box.querySelector('#btnEditDongCompletionFillAll')?.addEventListener('click', () => {
+            const first = (d.entries.find((e) => e.date) || {}).date || '';
+            if (!first) { window.showToast('먼저 동 하나에 준공일을 넣어 주세요.', 'warning'); return; }
+            d.entries.forEach((e) => { e.date = first; });
+            renderEditDongCompletionDates();
+        });
+        syncEditDongCompletionVisibility();
+    }
+    function initEditDongCompletionDates(bldg) {
+        const sibs = getEditDongCompletionSiblings(bldg);
+        _editDongCompletionDraft = {
+            bldgId: bldg && bldg.id,
+            entries: sibs.map((b) => ({ id: b.id, label: formatDongRowLabel(b), date: b.completionDate || '' }))
+        };
+        document.querySelectorAll('input[name="editBuildingSiteLayout"]').forEach((el) => {
+            if (el.dataset.dongCompletionBound) return;
+            el.dataset.dongCompletionBound = '1';
+            el.addEventListener('change', syncEditDongCompletionVisibility);
+        });
+        renderEditDongCompletionDates();
+    }
+    /** 저장: 동별 칸이 보이면 각 동에 준공일을 넣는다. 반환: 이 건물(bldg)에 넣을 준공일(동별 칸이 안 쓰이면 null) */
+    function applyEditDongCompletionDates(bldg) {
+        const d = _editDongCompletionDraft;
+        const box = document.getElementById('editDongCompletionDates');
+        if (!bldg || !d || d.bldgId !== bldg.id || d.entries.length < 2 || !box || box.hidden) return null;
+        let mine = null;
+        d.entries.forEach((e) => {
+            if (e.id === bldg.id) { mine = e.date || ''; return; }
+            const sib = (window.state.buildings || []).find((b) => b && b.id === e.id);
+            if (!sib || (sib.completionDate || '') === (e.date || '')) return;
+            sib.completionDate = e.date || '';
+            markBuildingMetaDirty(sib);
+        });
+        return mine;
     }
 
     function getConcreteStrengthAgeDays(bldg) {
