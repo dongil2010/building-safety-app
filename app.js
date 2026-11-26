@@ -43994,7 +43994,7 @@ ${roundMobile ? '' : `<button type="button" class="icon-btn icon-btn-trash" titl
         });
     }
 
-// @@app-part 10-marking.js sha=9d4194995eb4 — 원본은 app/10-marking.js (여기 말고 거기서 고칠 것)
+// @@app-part 10-marking.js sha=a5a3abeefb21 — 원본은 app/10-marking.js (여기 말고 거기서 고칠 것)
     // --- 9. BUTTON CONTROLS & LISTENERS ---
 
     // Main Navigation Tabs Click Listener
@@ -47743,7 +47743,7 @@ ${roundMobile ? '' : `<button type="button" class="icon-btn icon-btn-trash" titl
      */
     /**
      * 2026-10-20 같은 층 도면을 크기가 다른 도면으로 바꿨는지(이 기기가 전에 본 크기와 비교) — 바뀌었고 마킹이 있으면
-     * 「새 도면 비율에 맞춰 옮길까요?」를 한 번 묻는다. 지우지 않는다(그대로 두기도 가능).
+     * 「마킹 맞추기를 열까요?」를 한 번 묻는다(2026-11-26부터 비율로 바로 옮기지 않음). 지우지 않는다(그대로 두기도 가능).
      */
     const _drawingSizeAsked = new Set();
     function checkFloorDrawingSizeChange() {
@@ -47757,25 +47757,27 @@ ${roundMobile ? '' : `<button type="button" class="icon-btn icon-btn-trash" titl
         const change = R.noteDims(typeof localStorage !== 'undefined' ? localStorage : null, 'bsa_floor_drawing_dims_v1', key, dims.w, dims.h, sig);
         if (!change || _drawingSizeAsked.has(key)) return;
         _drawingSizeAsked.add(key);
-        const list = (state.defects && state.defects[key]) || [];
-        if (!list.length) return;
-        const sx = change.to.w / change.from.w;
-        const sy = change.to.h / change.from.h;
+        // 2026-11-26 사용자 지적: 도면 크기만 보고 비율로 늘이면, 새 도면 안에서 그림 자리가 옮겨진 경우(테두리·여백이 다름)
+        // 마킹이 어긋난다. 그래서 비율로 바로 옮기지 않고 「마킹 맞추기」(옛·새 도면의 같은 점 2~3곳 또는 테두리 자동)로 보낸다.
+        // 거기서 결함·비파괴·구조 부재·행·열 선을 같은 변환으로 함께 옮긴다.
+        const cnt = typeof window.countFloorAlignableMarkings === 'function' ? window.countFloorAlignableMarkings(key) : null;
+        const total = cnt ? cnt.total : ((state.defects && state.defects[key]) || []).length;
+        if (!total) return;
+        if (typeof window.startDrawingAlign !== 'function') return;
+        const what = cnt
+            ? [cnt.defects ? `마킹 ${cnt.defects}개` : '', cnt.ndt ? `비파괴 ${cnt.ndt}개` : '', cnt.struct ? `구조 부재 ${cnt.struct}개` : ''].filter(Boolean).join(' · ')
+            : `마킹 ${total}개`;
         setTimeout(async () => {
+            if (window.drawingAlignState) return;
             const ok = typeof window.appConfirm === 'function'
-                ? await window.appConfirm(`이 층 도면이 크기가 다른 도면으로 바뀌었습니다 (${change.from.w}×${change.from.h} → ${change.to.w}×${change.to.h}).\n\n기존 마킹 ${list.length}개를 새 도면 비율에 맞춰 옮길까요?\n(취소하면 마킹 위치를 그대로 둡니다 — 필요 없으면 목록에서 선택해 지울 수 있습니다)`)
+                ? await window.appConfirm(`이 층 도면이 크기가 다른 도면으로 바뀌었습니다 (${change.from.w}×${change.from.h} → ${change.to.w}×${change.to.h}).
+
+기존 ${what}가 옛 도면 위치에 있습니다. 「📐 마킹 맞추기」를 열어 옛·새 도면의 같은 점(기둥 모서리 등)을 찍어 맞출까요?
+(도면 크기 비율만으로는 그림 자리가 옮겨진 경우 어긋나서, 기준점으로 맞춥니다. 취소하면 위치를 그대로 둡니다)`)
                 : false;
             if (!ok) return;
             if (`${state.currentBuildingId}_${state.currentFloor}` !== key) return;
-            if (typeof pushDefectHistory === 'function') pushDefectHistory([key]);
-            (state.defects[key] || []).forEach((d) => {
-                if (R.scaleDefect(d, sx, sy) && typeof touchDefectPositionUpdatedAt === 'function') touchDefectPositionUpdatedAt(d);
-            });
-            if (typeof markFloorKeyDirty === 'function') markFloorKeyDirty(key);
-            if (typeof saveStateToLocalStorage === 'function') saveStateToLocalStorage();
-            if (typeof drawCanvas === 'function') drawCanvas();
-            if (typeof renderDefectListPanel === 'function') renderDefectListPanel();
-            if (typeof window.showToast === 'function') window.showToast('마킹을 새 도면 비율에 맞췄습니다. (되돌리기로 취소 가능)', 'success', 4000);
+            window.startDrawingAlign().catch((e) => console.error('[마킹 맞추기] 시작 실패', e));
         }, 300);
     }
 
@@ -48669,7 +48671,7 @@ ${roundMobile ? '' : `<button type="button" class="icon-btn icon-btn-trash" titl
         });
     }
 
-// @@app-part 11-cad-import.js sha=79279812e348 — 원본은 app/11-cad-import.js (여기 말고 거기서 고칠 것)
+// @@app-part 11-cad-import.js sha=177b303e0089 — 원본은 app/11-cad-import.js (여기 말고 거기서 고칠 것)
     // --- 9-1. CAD Defect Pins 2-Point Calibration Engine (v2.0) ---
     window.cadCalibrationState = null;
 
@@ -50118,8 +50120,50 @@ ${roundMobile ? '' : `<button type="button" class="icon-btn icon-btn-trash" titl
         const defects = ((state.defects && state.defects[floorKey]) || []).filter(has).length;
         const ndt = ((state.ndtData && state.ndtData[floorKey]) || []).filter(has).length
             + ((state.ndtDisplacementGroups && state.ndtDisplacementGroups[floorKey]) || []).filter(has).length;
-        return { defects, ndt, total: defects + ndt };
+        const SM = window.BSA && window.BSA.structMembers;
+        const struct = SM ? SM.listFor(state, floorKey).length + (SM.overlayFor(state, floorKey) ? 1 : 0) : 0;
+        return { defects, ndt, struct, total: defects + ndt + struct };
     }
+
+    /**
+     * 2026-11-26 구조 부재(기둥·거더·빔·통심선)·구조도 그림, 비파괴 마킹을 결함과 같은 변환 T로 옮긴다.
+     * 「마킹 맞추기」 확정과 「새 도면 비율에 맞춰 옮길까요?」 둘 다 쓴다. → { struct, ndt } 옮긴 개수
+     */
+    function moveFloorExtrasByTransform(floorKey, T, opts) {
+        const o = opts || {};
+        const MA = window.BSA && window.BSA.markingAlign;
+        const out = { struct: 0, ndt: 0 };
+        if (!MA || !T || !floorKey) return out;
+        if (o.ndt) {
+            ((state.ndtData && state.ndtData[floorKey]) || []).forEach((it) => {
+                if (!it || !MA.hasPosition(it)) return;
+                MA.transformNdtItem(it, T);
+                if (typeof touchNdtUpdatedAt === 'function') touchNdtUpdatedAt(it);
+                else it.updatedAt = Date.now();
+                out.ndt++;
+            });
+            ((state.ndtDisplacementGroups && state.ndtDisplacementGroups[floorKey]) || []).forEach((g) => {
+                if (!g || !MA.hasPosition(g)) return;
+                MA.transformDispGroup(g, T);
+                if (typeof touchNdtDispGroup === 'function') touchNdtDispGroup(g);
+                else g.updatedAt = Date.now();
+                out.ndt++;
+            });
+        }
+        const SM = window.BSA && window.BSA.structMembers;
+        if (o.struct && SM) {
+            const now = Date.now();
+            SM.listFor(state, floorKey).slice().forEach((m) => {
+                const p = MA.transformStructMember(m, T);
+                if (p && SM.update(state, floorKey, m.id, p, now)) out.struct++;
+            });
+            const ov = SM.overlayFor(state, floorKey);
+            const fit = ov && MA.composeOverlayFit(ov.fit, T);
+            if (fit && SM.setOverlay(state, floorKey, Object.assign({}, ov, { fit }), now)) out.struct++;
+        }
+        return out;
+    }
+    window.moveFloorExtrasByTransform = moveFloorExtrasByTransform;
 
     /** 비파괴 탭에 따로 넣은 도면이 있으면 비파괴 마킹은 그 도면 좌표 — 층 도면을 바꿔도 옮기지 않는다 */
     function floorNdtUsesOwnDrawing(floorKey) {
@@ -50447,6 +50491,8 @@ ${roundMobile ? '' : `<button type="button" class="icon-btn icon-btn-trash" titl
             snapLines: true,
             moveNdt: cnt.ndt > 0 && !floorNdtUsesOwnDrawing(floorKey),
             moveGrid: drawingAlignGridLineCount() > 0,
+            moveStruct: cnt.struct > 0,
+            structCount: cnt.struct,
             gridCount: drawingAlignGridLineCount(),
             ndtCount: cnt.ndt,
             defectCount: cnt.defects,
@@ -50620,6 +50666,13 @@ ${roundMobile ? '' : `<button type="button" class="icon-btn icon-btn-trash" titl
         });
     }
 
+    /** 구조 부재 화면(SVG)이 미리보기 때 부재를 옮겨 그리도록 변환을 준다(자료는 확정 때만 바뀜) */
+    window.drawingAlignStructPreviewT = function (floorKey) {
+        const st = window.drawingAlignState;
+        if (!st || !st.T || !st.moveStruct || st.floorKey !== floorKey || floorKey !== drawingAlignFloorKey()) return null;
+        return st.T;
+    };
+
     /** 새 도면 바로 위(마킹 아래)에 옛 도면을 빨갛게 — 미리보기 때는 옮긴 자리에 */
     function drawDrawingAlignGhost(ctx) {
         refreshDrawingAlignBadge();
@@ -50716,6 +50769,9 @@ ${roundMobile ? '' : `<button type="button" class="icon-btn icon-btn-trash" titl
         const gridCtl = st.gridCount > 0
             ? `<label class="dab-chk" title="행·열 선(구역 포함)도 마킹과 같은 비율로 옮깁니다 — 행·열 위치가 그대로 유지됩니다"><input type="checkbox" id="dabGrid"${st.moveGrid ? ' checked' : ''}> 행·열 선도</label>`
             : '';
+        const structCtl = st.structCount > 0
+            ? `<label class="dab-chk" title="구조 부재(기둥·거더·빔·통심선)와 구조도 그림도 마킹과 같은 비율로 옮깁니다"><input type="checkbox" id="dabStruct"${st.moveStruct ? ' checked' : ''}> 구조 부재 ${st.structCount}개도</label>`
+            : '';
         const modeCtl = '<span class="dab-seg" role="group" aria-label="기준점 수">'
             + B('dabMode2', '2점', st.pointCount === 2 ? 'dab-seg-on' : '', '이동·배율·회전 — 1.5° 미만 기울기는 버림')
             + B('dabMode3', '3점', st.pointCount === 3 ? 'dab-seg-on' : '', '돌아간 도면용 — 작은 회전·가로세로 배율 차이·뒤집힘까지 맞춤(세 점이 삼각형이 되게)')
@@ -50727,13 +50783,13 @@ ${roundMobile ? '' : `<button type="button" class="icon-btn icon-btn-trash" titl
                 + `<span class="dab-sep"></span>${ghostCtl}${snapCtl}`
                 + `<span class="dab-sep"></span>${st.step > 0 ? B('dabRestart', '다시 찍기') : ''}${B('dabCancel', '취소', 'dab-cancel')}`;
         } else {
-            const okLabel = `✅ 확정 (결함 ${st.defectCount}개${st.moveNdt && st.ndtCount ? ` + 비파괴 ${st.ndtCount}개` : ''})`;
+            const okLabel = `✅ 확정 (결함 ${st.defectCount}개${st.moveNdt && st.ndtCount ? ` + 비파괴 ${st.ndtCount}개` : ''}${st.moveStruct && st.structCount ? ` + 구조 부재 ${st.structCount}개` : ''})`;
             body = `<span class="dab-step"><b>미리보기(${st.pointCount}점)</b> ${drawingAlignInfoText(st)} — 마킹이 새 도면 자리에 맞으면 확정</span>`
                 + '<span class="dab-sep"></span><span class="dab-note">미세 조정</span>'
                 + B('dabL', '⬅', 'dab-sm', '왼쪽으로') + B('dabU', '⬆', 'dab-sm', '위로') + B('dabD', '⬇', 'dab-sm', '아래로') + B('dabR', '➡', 'dab-sm', '오른쪽으로')
                 + B('dabSUp', '➕', 'dab-sm', '조금 크게(0.2%)') + B('dabSDown', '➖', 'dab-sm', '조금 작게(0.2%)')
                 + B('dabRotL', '⟲', 'dab-sm', '반시계로 조금 돌리기(0.1°)') + B('dabRotR', '⟳', 'dab-sm', '시계로 조금 돌리기(0.1°)')
-                + `<span class="dab-sep"></span>${ghostCtl}${ndtCtl}${gridCtl}`
+                + `<span class="dab-sep"></span>${ghostCtl}${ndtCtl}${structCtl}${gridCtl}`
                 + '<span class="dab-sep"></span>'
                 + B('dabConfirm', okLabel, 'dab-ok') + B('dabRestart', '다시 찍기') + B('dabCancel', '취소', 'dab-cancel');
         }
@@ -50749,6 +50805,7 @@ ${roundMobile ? '' : `<button type="button" class="icon-btn icon-btn-trash" titl
         on('dabSnap', 'change', (e) => { st.snapLines = !!e.target.checked; });
         on('dabNdt', 'change', (e) => { st.moveNdt = !!e.target.checked; renderDrawingAlignBar(); });
         on('dabGrid', 'change', (e) => { st.moveGrid = !!e.target.checked; });
+        on('dabStruct', 'change', (e) => { st.moveStruct = !!e.target.checked; renderDrawingAlignBar(); drawCanvas(); });
         const nudge = (dxPx, dyPx) => {
             const sc = Math.max(state.view.scale || 1, 0.01);
             st.adj.dx += dxPx / sc; st.adj.dy += dyPx / sc;
@@ -50787,29 +50844,15 @@ ${roundMobile ? '' : `<button type="button" class="icon-btn icon-btn-trash" titl
         if (window.drawingAlignState !== st) return; // 기다리는 동안 취소됨
         if (typeof pushDefectHistory === 'function') pushDefectHistory();
 
-        let nDef = 0, nNdt = 0;
+        let nDef = 0;
         ((state.defects && state.defects[floorKey]) || []).forEach((d) => {
             if (!d || !MA.hasPosition(d)) return;
             MA.transformDefect(d, T);
             if (typeof touchDefectPositionUpdatedAt === 'function') touchDefectPositionUpdatedAt(d);
             nDef++;
         });
-        if (moveNdt) {
-            ((state.ndtData && state.ndtData[floorKey]) || []).forEach((it) => {
-                if (!it || !MA.hasPosition(it)) return;
-                MA.transformNdtItem(it, T);
-                if (typeof touchNdtUpdatedAt === 'function') touchNdtUpdatedAt(it);
-                else it.updatedAt = Date.now();
-                nNdt++;
-            });
-            ((state.ndtDisplacementGroups && state.ndtDisplacementGroups[floorKey]) || []).forEach((g) => {
-                if (!g || !MA.hasPosition(g)) return;
-                MA.transformDispGroup(g, T);
-                if (typeof touchNdtDispGroup === 'function') touchNdtDispGroup(g);
-                else g.updatedAt = Date.now();
-                nNdt++;
-            });
-        }
+        const extra = moveFloorExtrasByTransform(floorKey, T, { ndt: moveNdt, struct: st.moveStruct });
+        const nNdt = extra.ndt, nStruct = extra.struct;
         // 행·열 선도 같은 변환으로 — 마킹만 옮기면 선과 어긋나 행·열 위치가 틀어진다
         let gridMoved = false;
         if (st.moveGrid) {
@@ -50826,6 +50869,7 @@ ${roundMobile ? '' : `<button type="button" class="icon-btn icon-btn-trash" titl
         if (typeof markFloorKeyDirty === 'function') markFloorKeyDirty(floorKey);
         if (typeof discardStalePendingRemoteAfterLocalPinEdit === 'function') discardStalePendingRemoteAfterLocalPinEdit();
         saveStateToLocalStorage();
+        if (nStruct && typeof scheduleSyncToFirebase === 'function') scheduleSyncToFirebase();
         if (typeof recordAfterBulkOp === 'function') recordAfterBulkOp(snaps);
 
         await drawingAlignDbOp('delete', floorKey);
@@ -50834,10 +50878,13 @@ ${roundMobile ? '' : `<button type="button" class="icon-btn icon-btn-trash" titl
         endDrawingAlign();
         if (typeof renderDefectListPanel === 'function') renderDefectListPanel();
         if (typeof drawNdtCanvas === 'function' && state.currentTab === 'tab-ndt') drawNdtCanvas();
-        let msg = `마킹 위치를 새 도면에 맞췄습니다 — 결함 ${nDef}개${nNdt ? ` · 비파괴 ${nNdt}개` : ''} ${gridMoved ? ' · 행·열 선' : ''} (${info}). 결함 위치는 되돌리기(Ctrl+Z)로 되돌릴 수 있습니다.`;
+        let msg = `마킹 위치를 새 도면에 맞췄습니다 — 결함 ${nDef}개${nNdt ? ` · 비파괴 ${nNdt}개` : ''}${nStruct ? ` · 구조 부재 ${nStruct}개` : ''}${gridMoved ? ' · 행·열 선' : ''} (${info}). 결함 위치는 되돌리기(Ctrl+Z)로 되돌릴 수 있습니다.`;
         if (T.scale < 0.6 || T.scale > 1.6) msg += ' 핀이 도면에 비해 크거나 작아 보이면 「크기」에서 조절하세요.';
         window.showToast?.(msg, 'success', 8000);
     }
+
+    window.startDrawingAlign = startDrawingAlign;
+    window.countFloorAlignableMarkings = countFloorAlignableMarkings;
 
     const btnAlignMarkingsToDrawing = document.getElementById('btnAlignMarkingsToDrawing');
     if (btnAlignMarkingsToDrawing) {

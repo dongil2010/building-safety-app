@@ -267,7 +267,15 @@
         }
         // 도면 좌표 → 화면 좌표 행렬(회전·확대·이동 모두 여기 담긴다)
         var o = B.imgToScreen({ x: 0, y: 0 }), px = B.imgToScreen({ x: 1, y: 0 }), py = B.imgToScreen({ x: 0, y: 1 });
-        g.setAttribute('transform', 'matrix(' + [px.sx - o.sx, px.sy - o.sy, py.sx - o.sx, py.sy - o.sy, o.sx, o.sy].map(function (v) { return v.toFixed(4); }).join(' ') + ')');
+        var S = [px.sx - o.sx, px.sy - o.sy, py.sx - o.sx, py.sy - o.sy, o.sx, o.sy];
+        // 2026-11-26 「마킹 맞추기」 미리보기: 부재도 결함과 같이 옮겨 보인다(자료는 확정 때 바뀜) — 화면 행렬 · T
+        var T = typeof window.drawingAlignStructPreviewT === 'function' ? window.drawingAlignStructPreviewT(B.floorKey()) : null;
+        if (T) {
+            var tc = typeof T.c === 'number' ? T.c : -T.b, td = typeof T.d === 'number' ? T.d : T.a;
+            S = [S[0] * T.a + S[2] * T.b, S[1] * T.a + S[3] * T.b, S[0] * tc + S[2] * td, S[1] * tc + S[3] * td,
+                S[0] * T.e + S[2] * T.f + S[4], S[1] * T.e + S[3] * T.f + S[5]];
+        }
+        g.setAttribute('transform', 'matrix(' + S.map(function (v) { return v.toFixed(4); }).join(' ') + ')');
         syncBar();
     }
 
@@ -370,6 +378,7 @@
     var SLANT_MIN_DEG = 8;   // 이보다 덜 기울면 가로·세로로 곧게(손떨림), 더 기울면 비스듬한 보
     /** 누른 점을 기둥 중심(또는 빔이면 거더·빔 중심선)에 붙인다 → { x, y, hx, hy } (hx·hy = 막대를 자를 반폭) */
     function snapPoint(p, pad, type, excludeId) {
+        if (ui.noSnap) return { x: p.x, y: p.y, hx: 0, hy: 0, on: '' };   // Alt 누르고 찍으면 붙이지 않음(2026-11-26)
         var targets = list().filter(function (d) { return d.id !== excludeId && (d.type === '기둥' || (type === '빔' && isLineType(d.type))); });
         var hit = api.hitTest(targets, p.x, p.y, pad);
         if (!hit) return { x: p.x, y: p.y, hx: 0, hy: 0, on: '' };
@@ -434,7 +443,9 @@
      * 한 열에 이어 그리는 빔(거더)이 들쭉날쭉하지 않고 한 줄로 반듯하게 선다. → 맞춘 중심 좌표
      */
     function alignPerp(type, horiz, perp, th, pad) {
-        var reach = Math.max(pad * 2, th * 2), best = perp, bd = reach;
+        // 2026-11-26 「스냅이 지 맘대로 꽂힘」: 확대했을 때 두께 2배가 화면에서 수십 px라 먼 줄에 붙었다 → 작은 쪽(화면 약 12px·두께 2배)
+        if (ui.noSnap) return perp;
+        var reach = Math.min(pad * 2, th * 2), best = perp, bd = reach;
         list().forEach(function (d) {
             if (d.type !== type || d.ang || (d.w >= d.h) !== horiz) return;   // 비스듬한 보는 줄 맞춤 기준에서 뺌
             var c = horiz ? d.y : d.x;
@@ -448,14 +459,17 @@
      * → { x, y }
      */
     function alignColumn(x, y, size, pad, excludeId) {
-        var reach = Math.max(pad * 2, size * 0.75), bx = x, by = y, dx = reach, dy = reach;
+        // 2026-11-26 「스냅이 지 맘대로 꽂힘」: 예전엔 max(화면 12px, 기둥 크기 3/4)라 확대하면 도면 끝 다른 기둥 줄에도 붙었다.
+        //   이제 화면 약 18px을 넘지 않는다(기둥 절반·화면 12px 중 큰 쪽, 최대 18px). Alt 누르면 안 붙는다.
+        if (ui.noSnap) return { x: x, y: y };
+        var reach = Math.min(Math.max(pad * 2, size * 0.5), pad * 3), bx = x, by = y, dx = reach, dy = reach;
         list().forEach(function (d) {
             if (d.type !== '기둥' || d.id === excludeId) return;
             if (Math.abs(d.x - x) < dx) { dx = Math.abs(d.x - x); bx = d.x; }
             if (Math.abs(d.y - y) < dy) { dy = Math.abs(d.y - y); by = d.y; }
         });
         // 통심선이 있으면 그 선이 먼저(2026-10-17) — 찍은 곳 가까운 세로선·가로선에 붙어 교차점에 선다
-        var g = api.snapToGrid ? api.snapToGrid(x, y, gridList(), Math.max(pad * 3, size)) : null;
+        var g = api.snapToGrid ? api.snapToGrid(x, y, gridList(), Math.min(pad * 3, size * 0.75)) : null;
         if (g && g.onX != null) bx = g.onX;
         if (g && g.onY != null) by = g.onY;
         return { x: bx, y: by };
@@ -465,7 +479,8 @@
      * 다른 줄(먼저 옮긴 기둥이 만든 새 줄 포함)에는 화면 약 12px·기둥 절반 안이면 붙는다 — 옮긴 기둥들이 들쭉날쭉하지 않고 새 줄에 같이 선다.
      */
     function alignColumnMove(x, y, size, pad, excludeId, orig) {
-        var far = Math.max(pad * 2, size * 0.5), bx = x, by = y, sx = Infinity, sy = Infinity;
+        if (ui.noSnap) return { x: x, y: y };
+        var far = Math.min(Math.max(pad * 2, size * 0.5), pad * 3), bx = x, by = y, sx = Infinity, sy = Infinity;
         var tryX = function (v) { var dd = Math.abs(v - x), lim = Math.abs(v - orig.x) < 1e-6 ? pad : far; if (dd < lim && dd < sx) { sx = dd; bx = v; } };
         var tryY = function (v) { var dd = Math.abs(v - y), lim = Math.abs(v - orig.y) < 1e-6 ? pad : far; if (dd < lim && dd < sy) { sy = dd; by = v; } };
         tryX(orig.x); tryY(orig.y);   // 원래 줄(옆 기둥이 없어도) — 세로로만 옮길 때 가로가 손떨림으로 틀어지지 않게
@@ -736,9 +751,21 @@
             if (rec) { pushHist(B.floorKey(), [{ id: rec.id, before: null, after: snap(rec) }]); ui.selId = rec.id; commit(); return true; }
             return false;
         }
+        // 2026-11-26 휠(가운데) 버튼 끌기 = 도면 이동 — 부재를 찍는 중에도(도면과 같은 동작). 자동 스크롤 아이콘이 안 뜨게 막는다
+        ov.addEventListener('mousedown', function (e) { if (ui.editing && e.button === 1) e.preventDefault(); });
+        ov.addEventListener('auxclick', function (e) { if (ui.editing && e.button === 1) e.preventDefault(); });
         ov.addEventListener('pointerdown', function (e) {
+            if (ui.editing && e.button === 1) {
+                e.preventDefault(); e.stopPropagation();
+                if (ui.drag && ui.drag.mode !== 'pan') return;   // 부재를 끄는 중이면 그대로
+                startPan(e);
+                ui.drag.mid = true;
+                try { ov.setPointerCapture(e.pointerId); } catch (_e) { /* ignore */ }
+                return;
+            }
             if (!ui.editing || e.button > 0) return;
             e.preventDefault(); e.stopPropagation();
+            ui.noSnap = !!e.altKey;
             var isTouch = e.pointerType === 'touch';
             if (isTouch) {
                 touches[e.pointerId] = { x: e.clientX, y: e.clientY };
@@ -816,6 +843,7 @@
             var dr = ui.drag;
             if (!dr || e.pointerId !== dr.pointerId) return;
             e.preventDefault();
+            if (!dr.mid) ui.noSnap = !!e.altKey;
             if (dr.mode === 'tap' && Math.hypot(e.clientX - dr.sx, e.clientY - dr.sy) > 10) dr.mode = 'pan';   // 누르고 끌면 추가 대신 도면 이동
             if (dr.mode === 'pan' || dr.mode === 'tap') {
                 var dx = e.clientX - dr.last.x, dy = e.clientY - dr.last.y;
@@ -853,7 +881,7 @@
                 ui.drag = null;
                 if (dr.mode === 'tap' && e.type !== 'pointercancel') dr.act();
                 else if (dr.moved) B.viewDone();
-                else if (e.type !== 'pointercancel') { ui.selId = ''; sync(); }
+                else if (!dr.mid && e.type !== 'pointercancel') { ui.selId = ''; sync(); }
                 return;
             }
             finishDrag(e);
@@ -1068,7 +1096,7 @@
             html += '<button type="button" data-act="cancel">가져오기 취소</button>'
                 + '<span class="map-struct-hint">[' + (ui.calib.pts.length + 1) + '/2] 구조도에서 찍은 ' + (ui.calib.pts.length ? '두' : '첫') + ' 번째 기준점과 같은 곳을 도면에서 누르세요. (끌면 도면 이동, 휠로 확대)</span>';
         } else {
-            html += '<button type="button" data-act="edit" class="' + (ui.editing ? 'active' : '') + '" title="옮기기·지우기·추가">편집</button>';
+            html += '<button type="button" data-act="edit" class="' + (ui.editing ? 'active' : '') + '" title="옮기기·지우기·추가 — 휠 버튼 끌기 = 화면 이동 · Alt 누른 채 찍기·끌기 = 줄·기둥에 안 붙임">편집</button>';
             if (ui.editing) {
                 html += ACTIVE.map(function (t) {
                     return '<button type="button" data-act="type" data-type="' + t + '" class="map-count-type' + (ui.addType === t ? ' active' : '') + '" style="--mc-color:' + api.COLORS[t] + '" title="' + (ui.selId && !ui.addType ? '고른 부재를 ' + t + '(으)로' : (isLineType(t) ? '시작·끝 두 곳을 눌러 ' + t + ' 추가' : '빈 곳을 눌러 ' + t + ' 추가')) + '">' + t + ' <b><small>' + c[t] + '</small></b></button>';

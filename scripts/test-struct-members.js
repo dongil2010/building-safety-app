@@ -303,7 +303,7 @@ assert.ok(layer.includes('var al = alignColumnMove(d.x, d.y, Math.max(d.w, d.h),
     const src = layer.slice(layer.indexOf('function alignColumnMove('), layer.indexOf('function addLinePoint('));
     const cols = [{ id: 'a', type: '기둥', x: 100, y: 0 }, { id: 'b', type: '기둥', x: 100, y: 50 }, { id: 'm', type: '기둥', x: 130, y: 100 }];
     let grids = [];
-    const f = new Function('list', 'gridList', 'api', src + '; return alignColumnMove;')(() => cols, () => grids, S);
+    const f = new Function('list', 'gridList', 'api', 'ui', src + '; return alignColumnMove;')(() => cols, () => grids, S, {});
     const orig = { x: 100, y: 100 };   // 옮기는 기둥(c)은 원래 x=100 줄, m은 먼저 옮겨 x=130 새 줄
     assert.deepStrictEqual(f(108, 100, 10, 2, 'c', orig), { x: 108, y: 100 }, '원래 줄(100)에서 8 떨어지면 안 붙음(약하게)');
     assert.deepStrictEqual(f(101, 140, 10, 2, 'c', orig), { x: 100, y: 140 }, '원래 줄에 아주 가까우면 붙음(세로로만 옮길 때)');
@@ -343,7 +343,11 @@ assert.ok(layer.includes("data-act=\"grid\""), '「통심선」 단추');
 assert.ok(layer.includes('data-act="fillcross"') && layer.includes('function fillGridCrossings()'), '「교차점 기둥 넣기」 단추');
 assert.ok(layer.includes("var fk = B.floorKey(), sz = defaultSize('기둥'), changes = [];"), '마지막으로 고친 기둥 크기로');
 assert.ok(layer.includes('ui.drag = startGridDrag(p, pad, e.pointerId);'), '통심선 긋기·옮기기');
-assert.ok(layer.includes("var g = api.snapToGrid ? api.snapToGrid(x, y, gridList(), Math.max(pad * 3, size)) : null;"), '기둥 찍을 때 통심선 교차점에 붙음');
+// 2026-11-26 「스냅이 지 맘대로 꽂힘」: 붙는 거리를 화면 px로 묶음(확대해도 먼 선에 안 붙음), Alt = 안 붙임
+assert.ok(layer.includes("var g = api.snapToGrid ? api.snapToGrid(x, y, gridList(), Math.min(pad * 3, size * 0.75)) : null;"), '기둥 찍을 때 통심선 교차점에 붙음(화면 약 18px 안)');
+assert.ok(layer.includes("var reach = Math.min(Math.max(pad * 2, size * 0.5), pad * 3), bx = x"), '기둥 줄 맞춤도 화면 약 18px 안');
+assert.ok(layer.includes("if (ui.noSnap) return { x: x, y: y };"), 'Alt 누르면 안 붙음');
+assert.ok(layer.includes("if (ui.editing && e.button === 1) {"), '휠 버튼 끌기 = 도면 이동');
 assert.ok(layer.includes("if (ui.selId && !list().some(function (d) { return d.id === ui.selId; })) ui.selId = '';"), '통심선 고른 채 종류 단추를 눌러도 선이 기둥으로 안 바뀜');
 {
 }

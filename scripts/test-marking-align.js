@@ -236,4 +236,29 @@ t('3점 변환(가로세로 배율 다름)도 행·열 선·구역에 마킹과 
     assert.deepStrictEqual(grid.zones[0].rect, { x1: 210, y1: 70, x2: 1810, y2: 370 });
 });
 
+t('구조 부재도 같은 변환으로 — 가운데·크기, 90° 돌면 가로세로 바뀜, 비스듬한 보는 각도', () => {
+    const T = { a: 2, b: 0, c: 0, d: 2, e: 10, f: 20 };
+    assert.deepStrictEqual(M.transformStructMember({ x: 100, y: 50, w: 40, h: 8 }, T), { x: 210, y: 120, w: 80, h: 16, ang: 0 });
+    const R = { a: 0, b: 1, c: -1, d: 0, e: 0, f: 0 };   // 90° 회전
+    assert.deepStrictEqual(M.transformStructMember({ x: 10, y: 0, w: 40, h: 8 }, R), { x: 0, y: 10, w: 8, h: 40, ang: 0 });
+    const m = M.transformStructMember({ x: 0, y: 0, w: 10, h: 2, ang: 30 }, M.solveSimilarity([{ x: 0, y: 0 }, { x: 100, y: 0 }], [{ x: 0, y: 0 }, { x: 100 * Math.cos(Math.PI / 18), y: 100 * Math.sin(Math.PI / 18) }]));
+    assert.ok(Math.abs(m.ang - 40) < 0.02 && Math.abs(m.w - 10) < 0.02 && Math.abs(m.h - 2) < 0.02);
+    // 가로·세로 배율이 다르면 막대 방향 따라 길이·두께
+    const A = { a: 2, b: 0, c: 0, d: 0.5, e: 0, f: 0 };
+    assert.deepStrictEqual(M.transformStructMember({ x: 4, y: 4, w: 10, h: 10 }, A), { x: 8, y: 2, w: 20, h: 5, ang: 0 });
+});
+
+t('구조도 그림 맞춤(fit)에 변환을 이어 붙이면 그림 위 점이 마킹과 같이 간다', () => {
+    const fit = { a: 0.8, b: 0.1, tx: 30, ty: -5 };
+    const F = (p) => ({ x: fit.a * p.x - fit.b * p.y + fit.tx, y: fit.b * p.x + fit.a * p.y + fit.ty });
+    const T = M.solveSimilarity([{ x: 0, y: 0 }, { x: 500, y: 300 }], [{ x: 20, y: 40 }, { x: 1020, y: 640 }], { allowRotation: false });
+    const nf = M.composeOverlayFit(fit, T);
+    [{ x: 0, y: 0 }, { x: 123, y: 456 }, { x: -50, y: 900 }].forEach((p) => {
+        const want = M.applyPoint(T, F(p).x, F(p).y);
+        const got = { x: nf.a * p.x - nf.b * p.y + nf.tx, y: nf.b * p.x + nf.a * p.y + nf.ty };
+        assert.ok(Math.abs(want.x - got.x) < 1e-6 && Math.abs(want.y - got.y) < 1e-6);
+    });
+    assert.strictEqual(M.composeOverlayFit(null, T), null);
+});
+
 console.log(`marking-align: ${n}개 통과`);
