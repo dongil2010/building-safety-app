@@ -347,19 +347,22 @@
         // 3) 평균경도(R) · 각도보정 · Ro
         ctx.textAlign = 'center';
         const c3x = (colX[2] + colX[3]) / 2;
+        // 2026-11-26 사용자 요청: 평균경도 칸만 위아래 가운데로 — 글자 묶음(45~225, 앤빌 줄이 있으면 ~285)을 통째로 내린다.
+        const hasAnvil = !!(calc.anvilFactor && calc.anvilFactor !== 1);
+        const c3dy = Math.round(H / 2 - (45 + (hasAnvil ? 285 : 225)) / 2);
         ctx.font = '32px "Pretendard", "Malgun Gothic", "맑은 고딕", sans-serif'; ctx.fillStyle = '#555555';
-        ctx.fillText('평균경도(R)', c3x, 45);
+        ctx.fillText('평균경도(R)', c3x, 45 + c3dy);
         ctx.font = 'bold 42px "Pretendard", "Malgun Gothic", "맑은 고딕", sans-serif'; ctx.fillStyle = '#111111';
-        ctx.fillText(fmtExcel(calc.finalAvg, 1), c3x, 105);
+        ctx.fillText(fmtExcel(calc.finalAvg, 1), c3x, 105 + c3dy);
         ctx.font = '32px "Pretendard", "Malgun Gothic", "맑은 고딕", sans-serif'; ctx.fillStyle = '#555555';
-        ctx.fillText(`각도보정 ${calc.correction >= 0 ? '+' : ''}${calc.correction.toFixed(2)}`, c3x, 165);
+        ctx.fillText(`각도보정 ${calc.correction >= 0 ? '+' : ''}${calc.correction.toFixed(2)}`, c3x, 165 + c3dy);
         ctx.font = 'bold 32px "Pretendard", "Malgun Gothic", "맑은 고딕", sans-serif'; ctx.fillStyle = '#0369a1';
         // Ro는 엑셀처럼 소수 1자리로 반올림된 값이다(2026-09-22)
-        ctx.fillText(`Ro = ${calc.ro.toFixed(1)}`, c3x, 225);
-        if (calc.anvilFactor && calc.anvilFactor !== 1) {
+        ctx.fillText(`Ro = ${calc.ro.toFixed(1)}`, c3x, 225 + c3dy);
+        if (hasAnvil) {
             // 앤빌 보정(엑셀 "Anvil기준 82 / 장비평균 = 보정" 칸)은 1.00이 아닐 때만 적는다
             ctx.font = '28px "Pretendard", "Malgun Gothic", "맑은 고딕", sans-serif'; ctx.fillStyle = '#555555';
-            ctx.fillText(`앤빌 82/${calc.anvilAvg} = ${calc.anvilFactor.toFixed(3)}`, c3x, 285);
+            ctx.fillText(`앤빌 82/${calc.anvilAvg} = ${calc.anvilFactor.toFixed(3)}`, c3x, 285 + c3dy);
         }
 
         // 4) 재령 · α(재령보정계수)
@@ -403,7 +406,8 @@
         readings.forEach((v, i) => {
             const bh = (v / maxV) * (chY1 - chY0);
             const bx = chX0 + i * (barW + barGap);
-            ctx.fillStyle = isOutlier(v) ? '#fca5a5' : '#93c5fd';
+            // 2026-11-26 사용자 요청: 막대 색을 옅은 하늘색(#93c5fd)에서 진한 파랑으로
+            ctx.fillStyle = isOutlier(v) ? '#fca5a5' : '#378ADD';
             ctx.fillRect(bx, chY1 - bh, barW, bh);
         });
         const avgY = chY1 - (calc.finalAvg / maxV) * (chY1 - chY0);
