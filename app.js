@@ -1,5 +1,5 @@
 // @@app-parts 자동 생성 파일 — 여기를 고치지 말고 app/ 조각을 고친 뒤 `node scripts/app-parts.js join` (CLAUDE.md 「app.js 조각」)
-// @@app-part 01-base.js sha=aae1f7721e39 — 원본은 app/01-base.js (여기 말고 거기서 고칠 것)
+// @@app-part 01-base.js sha=e06c5ab5ddf3 — 원본은 app/01-base.js (여기 말고 거기서 고칠 것)
 /* ==========================================================================
    스마트 건축물 안전점검 현장점검 시스템 — UI 부트스트랩
    전역 상태·IndexedDB·이미지 헬퍼: js/core/state.js
@@ -3293,6 +3293,10 @@ document.addEventListener('DOMContentLoaded', () => {
                 hiddenDefectComponents: window.state.hiddenDefectComponents || [],
                 hiddenDefectTypes: window.state.hiddenDefectTypes || {},
                 hiddenDefectCauses: window.state.hiddenDefectCauses || {},
+                // 부재 실측 마감상태·부재 구분 목록 (직접 추가 / 기본 항목 숨김)
+                customNdtFinishStates: window.state.customNdtFinishStates || [],
+                hiddenNdtFinishStates: window.state.hiddenNdtFinishStates || [],
+                customNdtComponents: window.state.customNdtComponents || [],
                 defectComponentOrder: window.state.defectComponentOrder || {},
                 defectTypeOrder: window.state.defectTypeOrder || {},
                 defectCauseOrder: window.state.defectCauseOrder || {},
@@ -3517,6 +3521,9 @@ document.addEventListener('DOMContentLoaded', () => {
                 if (parsed.hiddenDefectCauses) {
                     window.state.hiddenDefectCauses = parsed.hiddenDefectCauses;
                 }
+                ['customNdtFinishStates', 'hiddenNdtFinishStates', 'customNdtComponents'].forEach((k) => {
+                    if (Array.isArray(parsed[k])) window.state[k] = parsed[k];
+                });
                 if (parsed.defectComponentOrder) {
                     window.state.defectComponentOrder = parsed.defectComponentOrder;
                 }
@@ -29173,7 +29180,7 @@ ${roundMobile ? '' : `<button type="button" class="icon-btn icon-btn-trash" titl
         ctx.restore();
     }
 
-// @@app-part 07-defect-component.js sha=de955fbf0e47 — 원본은 app/07-defect-component.js (여기 말고 거기서 고칠 것)
+// @@app-part 07-defect-component.js sha=d8466eaebac1 — 원본은 app/07-defect-component.js (여기 말고 거기서 고칠 것)
     // --- Dynamic Defect Component(부재 명칭) — 분류별 플랫 프리셋 ---
     // 2026-09-28 접합부는 거더/빔 구분이 필요 없음 — 큰보·작은보 → 보, 철골거더·철골빔 → 철골보
     // 2026-11-04 보(G)·보(B) 다시 넣음(사용자) — 통계 평가 표가 접합부 결함을 맞닿은 부재 줄(큰보·작은보·슬래브…)에 같이 세서
@@ -31481,20 +31488,58 @@ ${roundMobile ? '' : `<button type="button" class="icon-btn icon-btn-trash" titl
         });
     }
 
+    // 2026-11-26 기본 항목을 「삭제」하면 hidden 목록에 넣어 칩에서 숨긴다 (customNdtFinishStates → hiddenNdtFinishStates)
+    function ndtHiddenStateKey(customStateKey) {
+        return String(customStateKey || '').replace(/^custom/, 'hidden');
+    }
+
     function getNdtPickOptions(preset, customStateKey) {
         if (!window.state[customStateKey]) window.state[customStateKey] = [];
+        const hidden = window.state[ndtHiddenStateKey(customStateKey)] || [];
         const customs = window.state[customStateKey].filter(v => v && !preset.includes(v));
-        return preset.concat(customs);
+        return preset.filter(v => !hidden.includes(v)).concat(customs);
     }
 
     function rememberNdtCustomPick(value, preset, customStateKey) {
         const v = String(value || '').trim();
-        if (!v || preset.includes(v)) return;
+        if (!v) return;
+        const hiddenKey = ndtHiddenStateKey(customStateKey);
+        if (preset.includes(v)) {
+            // 숨겼던 기본 항목을 다시 「추가」하면 되살린다
+            const hidden = window.state[hiddenKey];
+            if (Array.isArray(hidden) && hidden.includes(v)) {
+                window.state[hiddenKey] = hidden.filter(x => x !== v);
+                if (typeof saveStateToLocalStorage === 'function') saveStateToLocalStorage();
+            }
+            return;
+        }
         if (!window.state[customStateKey]) window.state[customStateKey] = [];
         if (!window.state[customStateKey].includes(v)) {
             window.state[customStateKey].push(v);
             if (typeof saveStateToLocalStorage === 'function') saveStateToLocalStorage();
         }
+    }
+
+    /** 목록에서 항목 삭제: 직접 추가한 항목은 지우고, 기본 항목은 숨김. 이미 저장된 마킹 값은 그대로 둔다. */
+    function forgetNdtCustomPick(value, preset, customStateKey) {
+        const v = String(value || '').trim();
+        if (!v) return false;
+        let changed = false;
+        const list = window.state[customStateKey];
+        if (Array.isArray(list) && list.includes(v)) {
+            window.state[customStateKey] = list.filter(x => x !== v);
+            changed = true;
+        }
+        if (preset.includes(v)) {
+            const hiddenKey = ndtHiddenStateKey(customStateKey);
+            if (!Array.isArray(window.state[hiddenKey])) window.state[hiddenKey] = [];
+            if (!window.state[hiddenKey].includes(v)) {
+                window.state[hiddenKey].push(v);
+                changed = true;
+            }
+        }
+        if (changed && typeof saveStateToLocalStorage === 'function') saveStateToLocalStorage();
+        return changed;
     }
 
     function refreshNdtComponentPickBar() {
@@ -31545,6 +31590,8 @@ ${roundMobile ? '' : `<button type="button" class="icon-btn icon-btn-trash" titl
                 selectId: 'ndtFinishState',
                 inputId: 'ndtFinishStateInput',
                 addBtnId: 'btnAddNdtFinishState',
+                delBtnId: 'btnDelNdtFinishState',
+                label: '마감상태',
                 preset: NDT_FINISH_STATE_PRESET,
                 customKey: 'customNdtFinishStates',
                 populate: populateNdtFinishStateDropdown,
@@ -31599,6 +31646,27 @@ ${roundMobile ? '' : `<button type="button" class="icon-btn icon-btn-trash" titl
                 addBtn.addEventListener('click', (e) => {
                     e.preventDefault();
                     applyTypedValue(spec, true);
+                });
+            }
+            const delBtn = spec.delBtnId ? document.getElementById(spec.delBtnId) : null;
+            if (delBtn && !delBtn.dataset.ndtPickBound) {
+                delBtn.dataset.ndtPickBound = '1';
+                delBtn.addEventListener('click', (e) => {
+                    e.preventDefault();
+                    const select = document.getElementById(spec.selectId);
+                    const v = getDefectComboValue(select, input);
+                    const toast = (msg, kind) => { if (typeof window.showToast === 'function') window.showToast(msg, kind, 2000); };
+                    if (!v) {
+                        toast(`삭제할 ${spec.label || '항목'}을 칩에서 고르거나 입력칸에 적어 주세요`, 'info');
+                        return;
+                    }
+                    if (!forgetNdtCustomPick(v, spec.preset, spec.customKey)) {
+                        toast(`「${v}」은(는) 목록에 없습니다`, 'info');
+                        return;
+                    }
+                    // 칩·목록에서만 뺀다 — 이 마킹에 들어간 값을 비우지 않으려면 입력칸은 그대로 둔다
+                    spec.refresh();
+                    toast(`「${v}」을(를) ${spec.label || ''} 목록에서 삭제했습니다`, 'success');
                 });
             }
         });
