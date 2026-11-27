@@ -2540,6 +2540,7 @@
 
     /** 한글 층 이름(「지하 1층」→「지하1층」) — 동마다 그 동의 층 목록으로 */
     function makeHwpxFloorLabelFn(bldg) {
+        const isExt = (fc) => (typeof window.isExteriorFloorCode === 'function' ? window.isExteriorFloorCode(fc) : /^EXT/i.test(String(fc || '')));
         return (floorCode) => {
             const fromList = (bldg.floorsList || []).find(f => f.floorCode === floorCode);
             const raw = fromList
@@ -2547,8 +2548,32 @@
                 : (typeof window.getFloorLabelFromCode === 'function'
                     ? window.getFloorLabelFromCode(floorCode, bldg)
                     : floorCode);
-            return stripFloorCodeSuffix(raw || floorCode).replace(/\s+(?=\d)/g, '');
+            const label = stripFloorCodeSuffix(raw || floorCode).replace(/\s+(?=\d)/g, '');
+            return soleExteriorHwpxLabel(bldg, floorCode, label, isExt);
         };
+    }
+
+    /** 위치도 캡션 층 이름 — 외부 한 장(「외부」)은 표 제목처럼 「건축물 외부」(2026-11-24) */
+    function hwpxMapCaptionFloor(label) {
+        return String(label || '').replace(/(^|\s)외부$/, '$1건축물 외부');
+    }
+
+    /**
+     * 2026-11-24 외부 도면이 한 장뿐인 동은 자동으로 붙은 「외부1」을 「외부」로(표 구분 칸·위치도 캡션).
+     * 외부가 여러 장(외부1·외부2 …)이거나 사람이 지은 이름(「정면」 등)은 그대로. 부대시설은 외부가 아니다.
+     */
+    function soleExteriorHwpxLabel(bldg, floorCode, label, isExt) {
+        if (!/^외부\s*1$/.test(String(label || ''))) return label;
+        if (!isExt(floorCode)) return label;
+        const extCodes = new Set();
+        (bldg && bldg.floorsList || []).forEach((f) => {
+            if (f && f.floorCode && isExt(f.floorCode) && !/부대/.test(String(f.floorLabel || ''))) extCodes.add(f.floorCode);
+        });
+        if (bldg && bldg.floorDrawings && typeof bldg.floorDrawings === 'object') {
+            Object.keys(bldg.floorDrawings).forEach((fc) => { if (isExt(fc) && !/부대/.test(fc)) extCodes.add(fc); });
+        }
+        extCodes.add(floorCode);
+        return extCodes.size === 1 ? '외부' : label;
     }
 
     /** 한 동의 출력 층(외부는 한 장으로 합침)과 층별 결함 */
@@ -2704,17 +2729,9 @@
         // 안 열어 본 층이 빠지거나 옛 값으로 나가지 않게 모든 층을 서버에서 먼저 받는다(2026-09-29)
         if (!(await ensureBuildingFloorsFreshForReport(bldg, '한글 보고서'))) return;
 
-        const getFloorLabel = (floorCode) => {
-            const fromList = (bldg.floorsList || []).find(f => f.floorCode === floorCode);
-            const raw = fromList
-                ? fromList.floorLabel
-                : (typeof window.getFloorLabelFromCode === 'function'
-                    ? window.getFloorLabelFromCode(floorCode, bldg)
-                    : floorCode);
-            // "지하 1층"처럼 "지하/지상"과 숫자 사이에 띄어쓰기가 들어간 라벨을 표본 문서와 같은
-            // "지하1층" 붙여쓰기 형식으로 맞춘다.
-            return stripFloorCodeSuffix(raw || floorCode).replace(/\s+(?=\d)/g, '');
-        };
+        // "지하 1층"처럼 "지하/지상"과 숫자 사이에 띄어쓰기가 들어간 라벨을 표본 문서와 같은
+        // "지하1층" 붙여쓰기 형식으로 맞춘다. 외부 도면이 한 장뿐이면 「외부1」 → 「외부」(여러 동 출력과 같은 함수).
+        const getFloorLabel = makeHwpxFloorLabelFn(bldg);
 
         // PDF 보고서와 동일하게, 현재 층 하나가 아니라 건물에 등록된 모든 층을 대상으로 한다.
         let availableFloors = [];
@@ -3789,7 +3806,7 @@
 
                         const captionTc = locationMapTbl.getElementsByTagNameNS(HP_NS, 'tc')[1];
                         const captionT = captionTc.getElementsByTagNameNS(HP_NS, 't')[0];
-                        if (captionT) captionT.textContent = `${HWPX_FIG_MARK}${getFloorLabel(floorCode)} 상태조사 위치도`;
+                        if (captionT) captionT.textContent = `${HWPX_FIG_MARK}${hwpxMapCaptionFloor(getFloorLabel(floorCode))} 상태조사 위치도`;
                         return true;
                     }
                     if (!(opts && opts.silent)) {
@@ -6694,7 +6711,7 @@
 
                         const captionTc = locationMapTbl.getElementsByTagNameNS(HP_NS, 'tc')[1];
                         const captionT = captionTc.getElementsByTagNameNS(HP_NS, 't')[0];
-                        if (captionT) captionT.textContent = `${HWPX_FIG_MARK}${getFloorLabel(floorCode)} 상태조사 위치도`;
+                        if (captionT) captionT.textContent = `${HWPX_FIG_MARK}${hwpxMapCaptionFloor(getFloorLabel(floorCode))} 상태조사 위치도`;
                         return true;
                     }
                     if (!(opts && opts.silent)) {

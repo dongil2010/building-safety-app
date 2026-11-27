@@ -98,7 +98,7 @@ assert.strictEqual((g3Body.match(/numberHwpxFigureCaptions\(/g) || []).length, 1
 assert.strictEqual((g12Body.match(/numberHwpxFigureCaptions\(xmlDoc, bldg\.inspectionType\);/g) || []).length, 1, '1·2종은 그대로 6/7');
 assert.ok(!/grade3: true/.test(g12Body.slice(0, g12Body.indexOf('numberHwpxFigureCaptions(') + 80)));
 assert.ok(!/numberHwpxFigureCaptions\(xmlDoc\)/.test(app), '점검 종류 없이 부르면 정기점검도 7로 나간다');
-assert.strictEqual((app.match(/getFloorLabel\(floorCode\)\} 상태조사 위치도/g) || []).length, 2);
+assert.strictEqual((app.match(/getFloorLabel\(floorCode\)\)\} 상태조사 위치도/g) || []).length, 2);
 assert.ok(!/getFloorLabel\(floorCode\)\} 결함위치도/.test(app), '한글 위치도 캡션은 상태조사 위치도');
 
 console.log('test-hwpx-figure-chapter: ok');

@@ -20,7 +20,7 @@ assert.ok(hwpxStart > 0 && hwpxEnd > hwpxStart);
 const shared = ['function paginateSurveyDefects(', 'function formatSurveyReportNo(', 'function getReportSurveyRowValues(']
     .map((h) => extractFunction(app, h)).join('\n');
 const FP = {
-    "hwpxExport": "550ab12e1c307b25", // 2026-11-24 3종: 여러 동 상태조사표 제목은 동 첫 층에만 「N) 동 상태조사표」 + 동 마지막 표 밑 「※ 범례」 — 일부러 바꿈
+    "hwpxExport": "8ce7953f4b0428d8", // 2026-11-24 외부 도면 한 장인 동은 「외부1」→「외부」, 위치도 캡션 「건축물 외부」 — 일부러 바꿈
     "sharedRows": "0ce605cc38dd62c3", // 2026-11-11 번호 칸: 직접 준 하위번호(noManual, NO.74-2)는 꼬리 유지 — 일부러 바꿈
     "hwpx-survey-row-fit.js": "3d22dcdf170a4bc4",
     "hwpx-font-8pt.js": "792b4169159c5676",
