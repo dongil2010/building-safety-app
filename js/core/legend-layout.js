@@ -18,6 +18,9 @@
         return out;
     }
 
+    /** 동마다 따로 정하는 박스 설정 — 다른 동 박스를 이어 쓸 때 넘기지 않는다 */
+    var PER_BUILDING_OPTS = ['hidden', 'monoPin', 'locked'];
+
     function hasCustomItems(bldg) {
         return !!(bldg && Array.isArray(bldg.locationMapLegend) && bldg.locationMapLegend.length);
     }
@@ -57,8 +60,16 @@
         if (bldg.locationMapLegendBox) {
             result.box = cloneBox(bldg.locationMapLegendBox);
         } else if (result.box) {
+            // 2026-11-27 「현장별(동별)로 따로 둬야」: 범례 설정이 없는 동을 처음 열면 직전 동의 박스를 이어 쓰는데,
+            // 위치·크기만 잇고 동마다 정하는 설정(범례 숨기기·핀 한 색·범례 고정)은 다른 동에서 온 것이면 뺀다.
+            // 같은 동의 박스가 동기화·새로고침으로 지워진 복구일 때(주인이 같거나 모를 때)는 그대로 둔다.
+            if (result.box.ownerBldgId && bldg.id && result.box.ownerBldgId !== bldg.id) {
+                PER_BUILDING_OPTS.forEach(function (k) { delete result.box[k]; });
+            }
+            if (bldg.id) result.box.ownerBldgId = bldg.id;
             result.writeBoxToBuilding = cloneBox(result.box);
         }
+        if (result.box && bldg.id) result.box.ownerBldgId = bldg.id;
         return result;
     }
 
