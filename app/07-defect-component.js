@@ -2306,20 +2306,58 @@
         });
     }
 
+    // 2026-11-26 기본 항목을 「삭제」하면 hidden 목록에 넣어 칩에서 숨긴다 (customNdtFinishStates → hiddenNdtFinishStates)
+    function ndtHiddenStateKey(customStateKey) {
+        return String(customStateKey || '').replace(/^custom/, 'hidden');
+    }
+
     function getNdtPickOptions(preset, customStateKey) {
         if (!window.state[customStateKey]) window.state[customStateKey] = [];
+        const hidden = window.state[ndtHiddenStateKey(customStateKey)] || [];
         const customs = window.state[customStateKey].filter(v => v && !preset.includes(v));
-        return preset.concat(customs);
+        return preset.filter(v => !hidden.includes(v)).concat(customs);
     }
 
     function rememberNdtCustomPick(value, preset, customStateKey) {
         const v = String(value || '').trim();
-        if (!v || preset.includes(v)) return;
+        if (!v) return;
+        const hiddenKey = ndtHiddenStateKey(customStateKey);
+        if (preset.includes(v)) {
+            // 숨겼던 기본 항목을 다시 「추가」하면 되살린다
+            const hidden = window.state[hiddenKey];
+            if (Array.isArray(hidden) && hidden.includes(v)) {
+                window.state[hiddenKey] = hidden.filter(x => x !== v);
+                if (typeof saveStateToLocalStorage === 'function') saveStateToLocalStorage();
+            }
+            return;
+        }
         if (!window.state[customStateKey]) window.state[customStateKey] = [];
         if (!window.state[customStateKey].includes(v)) {
             window.state[customStateKey].push(v);
             if (typeof saveStateToLocalStorage === 'function') saveStateToLocalStorage();
         }
+    }
+
+    /** 목록에서 항목 삭제: 직접 추가한 항목은 지우고, 기본 항목은 숨김. 이미 저장된 마킹 값은 그대로 둔다. */
+    function forgetNdtCustomPick(value, preset, customStateKey) {
+        const v = String(value || '').trim();
+        if (!v) return false;
+        let changed = false;
+        const list = window.state[customStateKey];
+        if (Array.isArray(list) && list.includes(v)) {
+            window.state[customStateKey] = list.filter(x => x !== v);
+            changed = true;
+        }
+        if (preset.includes(v)) {
+            const hiddenKey = ndtHiddenStateKey(customStateKey);
+            if (!Array.isArray(window.state[hiddenKey])) window.state[hiddenKey] = [];
+            if (!window.state[hiddenKey].includes(v)) {
+                window.state[hiddenKey].push(v);
+                changed = true;
+            }
+        }
+        if (changed && typeof saveStateToLocalStorage === 'function') saveStateToLocalStorage();
+        return changed;
     }
 
     function refreshNdtComponentPickBar() {
@@ -2370,6 +2408,8 @@
                 selectId: 'ndtFinishState',
                 inputId: 'ndtFinishStateInput',
                 addBtnId: 'btnAddNdtFinishState',
+                delBtnId: 'btnDelNdtFinishState',
+                label: '마감상태',
                 preset: NDT_FINISH_STATE_PRESET,
                 customKey: 'customNdtFinishStates',
                 populate: populateNdtFinishStateDropdown,
@@ -2424,6 +2464,27 @@
                 addBtn.addEventListener('click', (e) => {
                     e.preventDefault();
                     applyTypedValue(spec, true);
+                });
+            }
+            const delBtn = spec.delBtnId ? document.getElementById(spec.delBtnId) : null;
+            if (delBtn && !delBtn.dataset.ndtPickBound) {
+                delBtn.dataset.ndtPickBound = '1';
+                delBtn.addEventListener('click', (e) => {
+                    e.preventDefault();
+                    const select = document.getElementById(spec.selectId);
+                    const v = getDefectComboValue(select, input);
+                    const toast = (msg, kind) => { if (typeof window.showToast === 'function') window.showToast(msg, kind, 2000); };
+                    if (!v) {
+                        toast(`삭제할 ${spec.label || '항목'}을 칩에서 고르거나 입력칸에 적어 주세요`, 'info');
+                        return;
+                    }
+                    if (!forgetNdtCustomPick(v, spec.preset, spec.customKey)) {
+                        toast(`「${v}」은(는) 목록에 없습니다`, 'info');
+                        return;
+                    }
+                    // 칩·목록에서만 뺀다 — 이 마킹에 들어간 값을 비우지 않으려면 입력칸은 그대로 둔다
+                    spec.refresh();
+                    toast(`「${v}」을(를) ${spec.label || ''} 목록에서 삭제했습니다`, 'success');
                 });
             }
         });

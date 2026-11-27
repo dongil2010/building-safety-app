@@ -3292,6 +3292,10 @@ document.addEventListener('DOMContentLoaded', () => {
                 hiddenDefectComponents: window.state.hiddenDefectComponents || [],
                 hiddenDefectTypes: window.state.hiddenDefectTypes || {},
                 hiddenDefectCauses: window.state.hiddenDefectCauses || {},
+                // 부재 실측 마감상태·부재 구분 목록 (직접 추가 / 기본 항목 숨김)
+                customNdtFinishStates: window.state.customNdtFinishStates || [],
+                hiddenNdtFinishStates: window.state.hiddenNdtFinishStates || [],
+                customNdtComponents: window.state.customNdtComponents || [],
                 defectComponentOrder: window.state.defectComponentOrder || {},
                 defectTypeOrder: window.state.defectTypeOrder || {},
                 defectCauseOrder: window.state.defectCauseOrder || {},
@@ -3516,6 +3520,9 @@ document.addEventListener('DOMContentLoaded', () => {
                 if (parsed.hiddenDefectCauses) {
                     window.state.hiddenDefectCauses = parsed.hiddenDefectCauses;
                 }
+                ['customNdtFinishStates', 'hiddenNdtFinishStates', 'customNdtComponents'].forEach((k) => {
+                    if (Array.isArray(parsed[k])) window.state[k] = parsed[k];
+                });
                 if (parsed.defectComponentOrder) {
                     window.state.defectComponentOrder = parsed.defectComponentOrder;
                 }

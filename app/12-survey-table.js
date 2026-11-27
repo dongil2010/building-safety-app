@@ -622,7 +622,7 @@
         const t = String(getSurveyCellText('defectType', d, ctx) || '').trim();
         // 2026-11-16 「벽체 도장」처럼 벽체 + 대상인 부재도 결함 내용이 「창 하부 벽체 도장 …」으로 시작하면 빼기
         const c = String(comp || '').replace(/[\s\u3000]+/g, ' ').trim();
-        if (/^벽체(?: \S.*)?$/.test(c)) {
+        if (/^\S*벽체(?: \S.*)?$/.test(c)) { // 2026-11-26 「조적벽체」 등 …벽체도
             const esc = c.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
             if (new RegExp('^(?:개구부|창|문) (?:상부|하부|측면)(?:·(?:(?:개구부|창|문) )?(?:상부|하부|측면))* ' + esc + '(?:\\s|,|$)').test(t)) return '';
         }
@@ -4627,7 +4627,7 @@
      * (drawPin·drawNdtPin·drawNdtDisplacementGroup)를 그대로 돌린다.
      * mode 'report': 한글 종이(1800×2540, 출력 범위면 그 크기)·같은 돌림/자르기 — 바탕 도면 포함
      * mode 'image' : 그림 픽셀 좌표 그대로, 바탕 없이 마킹만(DXF 용 — 원본 도면은 DXF 쪽이 따로 넣는다)
-     * DXF 로 올린 층(전용 비파괴 도면이 아닐 때)은 바탕을 캐드 선·글자 벡터로, 그 밖은 그림으로.
+     * DXF 로 올린 층·DXF 로 올린 비파괴 전용 도면은 바탕을 캐드 선·글자 벡터로, 그 밖은 그림으로.
      * 반환 { ops, w, h, imgW, imgH, img, model, custom, count } | null
      */
     async function recordNdtFloorMap(floorCode, categoryFilter, mode) {
@@ -4654,6 +4654,9 @@
         let model = null;
         if (!customSrc && typeof window.getFloorDxfDrawingModel === 'function') {
             try { model = await window.getFloorDxfDrawingModel(bldg, floorCode, bId); } catch (_e) { model = null; }
+        } else if (customSrc && typeof window.getNdtCustomDxfModel === 'function') {
+            // 2026-11-26 DXF로 올린 비파괴 전용 도면도 바탕을 캐드 선·글자 벡터로
+            try { model = await window.getNdtCustomDxfModel(key); } catch (_e) { model = null; }
         }
         // 'image'(비파괴 DXF)는 화면 글꼴 그대로, 그 밖(한글 위치도 SVG)은 SVG 글꼴로 글자 폭을 잰다
         const measureCtx = mode === 'image'

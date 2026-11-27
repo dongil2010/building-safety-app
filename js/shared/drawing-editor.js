@@ -36,29 +36,44 @@
         fillWhiteRect(ctx, -w / 2, h / 2 - o.cut / 2, w, o.cut);
     }
 
+    /**
+     * 문짝(2026-11-26): 예전엔 선 굵기 1.6배 한 줄 → 확대하면 시커먼 막대, DXF에선 폭 준 굵은 선이 됐다.
+     * 이제 문짝 두께(o.leaf, 도면 좌표)만큼의 가는 테두리 상자 — 0이면 가는 한 줄. 속성 칸 「문짝 두께」로 조절.
+     * dir = 1이면 x에서 오른쪽(안쪽)으로, -1이면 왼쪽으로 두께를 준다.
+     */
+    function doorLeaf(ctx, o, x, h, lw, dir) {
+        var t = Math.max(0, +o.leaf || 0);
+        ctx.lineWidth = lw * 0.7;
+        if (t > 0) {
+            var x0 = dir > 0 ? x : x - t;
+            fillWhiteRect(ctx, x0, -h / 2, t, h);
+            strokeRect(ctx, x0, -h / 2, t, h);
+        } else {
+            line(ctx, x, h / 2, x, -h / 2);
+        }
+    }
+
     var SYMBOLS = {
         door1: {
-            label: '여닫이문', group: '문', size: [1.8, 1.8], cut: true,
+            label: '여닫이문', group: '문', size: [1.8, 1.8], cut: true, leaf: 0.08,
             draw: function (ctx, o, w, h, lw) {
                 doorCut(ctx, o, w, h);
                 ctx.lineWidth = lw * 0.7;
                 ctx.beginPath();
                 ctx.ellipse(-w / 2, h / 2, w, h, 0, -Math.PI / 2, 0);
                 ctx.stroke();
-                ctx.lineWidth = lw * 1.6;
-                line(ctx, -w / 2, h / 2, -w / 2, -h / 2);
+                doorLeaf(ctx, o, -w / 2, h, lw, 1);
             }
         },
         door2: {
-            label: '양여닫이문', group: '문', size: [3, 1.5], cut: true,
+            label: '양여닫이문', group: '문', size: [3, 1.5], cut: true, leaf: 0.08,
             draw: function (ctx, o, w, h, lw) {
                 doorCut(ctx, o, w, h);
                 ctx.lineWidth = lw * 0.7;
                 ctx.beginPath(); ctx.ellipse(-w / 2, h / 2, w / 2, h, 0, -Math.PI / 2, 0); ctx.stroke();
                 ctx.beginPath(); ctx.ellipse(w / 2, h / 2, w / 2, h, 0, Math.PI, Math.PI * 1.5); ctx.stroke();
-                ctx.lineWidth = lw * 1.6;
-                line(ctx, -w / 2, h / 2, -w / 2, -h / 2);
-                line(ctx, w / 2, h / 2, w / 2, -h / 2);
+                doorLeaf(ctx, o, -w / 2, h, lw, 1);
+                doorLeaf(ctx, o, w / 2, h, lw, -1);
             }
         },
         doorSlide: {
@@ -266,6 +281,7 @@
     // ---------- 상태 ----------
     var S = null; // 열려 있는 동안만 값이 있다
     var _lastSize = {}; // 기호 종류별 마지막 크기(같은 문을 여러 개 놓을 때 같은 크기)
+    var _lastLeaf = {}; // 문 종류별 마지막 문짝 두께
 
     function newState(info, img) {
         var long = Math.max(info.refW, info.refH);
@@ -445,7 +461,7 @@
         c.scale(s, s);
         c.strokeStyle = '#0f172a';
         c.fillStyle = '#0f172a';
-        var o = { k: k, cut: 0 };
+        var o = { k: k, cut: 0, leaf: sym.leaf || 0 };
         sym.draw(c, o, sw, sh, 2.2 / s);
         c.restore();
     }
@@ -552,6 +568,24 @@
         c.restore();
     }
 
+    /**
+     * 선 굵기를 늘 px(= 화면 1픽셀)로 고정하는 캔버스 대리(2026-11-26).
+     * 흰색 선(지우개 자국)은 지우는 폭이라 그대로 둔다.
+     */
+    function hairlineCtx(c, px) {
+        return new Proxy(c, {
+            get: function (t, k) { var val = t[k]; return typeof val === 'function' ? val.bind(t) : val; },
+            set: function (t, k, val) {
+                if (k === 'lineWidth') {
+                    var ss = String(t.strokeStyle).toLowerCase();
+                    if (ss !== '#ffffff' && ss !== '#fff' && ss !== 'white') val = px;
+                }
+                t[k] = val;
+                return true;
+            }
+        });
+    }
+
     function draw() {
         var c = ctx2d;
         var dpr = window.devicePixelRatio || 1;
@@ -573,8 +607,10 @@
             c.setTransform(dpr * v.scale, 0, 0, dpr * v.scale, dpr * v.ox, dpr * v.oy);
         }
         if (!vecDrawn) c.drawImage(S.img, 0, 0, S.info.refW, S.info.refH);
-        S.objs.forEach(function (o) { drawObj(c, o, S.lw); });
-        if (S.drag && S.drag.preview) drawObj(c, S.drag.preview, S.lw);
+        // 화면에서는 그린 선을 모두 1픽셀(확대해도 안 굵어짐) — 캐드 바탕선과 같게. 저장(그림·DXF)은 원래 굵기 그대로
+        var hc = hairlineCtx(c, 1 / v.scale);
+        S.objs.forEach(function (o) { drawObj(hc, o, S.lw); });
+        if (S.drag && S.drag.preview) drawObj(hc, S.drag.preview, S.lw);
         drawOverlay(c);
         updateButtons();
     }
@@ -783,6 +819,7 @@
         var size = _lastSize[k] || [sym.size[0] * S.unit, sym.size[1] * S.unit];
         var o = { t: 'sym', k: k, x: p.x, y: p.y, w: size[0], h: size[1], rot: 0, flip: false, lw: S.lw };
         if (sym.cut) o.cut = S.wallTh * 2; // 누른 점이 벽선에서 조금 벗어나도 뚫리게 넉넉히(속성 「벽 뚫기」로 조절)
+        if (sym.leaf) o.leaf = _lastLeaf[k] != null ? _lastLeaf[k] : sym.leaf * S.unit; // 문짝 두께(속성 「문짝 두께」)
         var prev = S.objs[S.sel];
         if (prev && prev.t === 'sym' && prev.k === k) { o.rot = prev.rot; o.flip = prev.flip; }
         if (sym.cut) {
@@ -800,7 +837,7 @@
 
     async function addText(p) {
         var txt = typeof window.appPrompt === 'function'
-            ? await window.appPrompt('넣을 글자 (예: 사무실, 화장실, 계단실)', '')
+            ? await window.appPrompt('넣을 글자 — 한글·영문·숫자·기호 모두 됩니다 (예: 사무실, Room-1, ※점검구, 12㎡)', '')
             : window.prompt('넣을 글자', '');
         if (!S || txt == null) return;
         txt = String(txt).trim();
@@ -1034,6 +1071,13 @@
             if (SYMBOLS[o.k] && SYMBOLS[o.k].cut) {
                 h += '<div class="bde-row" title="문 아래쪽 기존 벽선을 문 폭만큼 흰색으로 지웁니다. 0이면 끔">벽 뚫기 <input type="number" data-p="cut" value="' + fmt(o.cut || 0) + '"></div>';
             }
+            if (SYMBOLS[o.k] && SYMBOLS[o.k].leaf) {
+                h += '<div class="bde-row" title="문짝(여닫는 판) 두께. 0이면 가는 한 줄">문짝 두께 <input type="number" step="0.5" min="0" data-p="leaf" value="' + fmt(o.leaf || 0) + '"></div>' +
+                    '<div class="bde-row"><button data-a="leaf:0">한 줄</button><button data-a="leaf:0.08">얇게</button><button data-a="leaf:0.16">보통</button><button data-a="leaf:0.3">두껍게</button></div>';
+            }
+            if (o.k !== 'wipe') {
+                h += '<div class="bde-row" title="이 기호의 선 굵기">선 굵기 <input type="number" step="0.5" min="0.1" data-p="lw" value="' + fmt(o.lw || S.lw) + '"></div>';
+            }
         } else if (o.t === 'wall' || o.t === 'line') {
             if (o.t === 'wall') h += '<div class="bde-row">두께 <input type="number" step="1" min="0.5" data-p="th" value="' + fmt(o.th) + '"></div>';
             h += '<div class="bde-row" title="시작점(첫 점)을 기준으로 돌리고 늘립니다. 각도는 오른쪽이 0°, 위로 갈수록 +">각도 <input type="number" step="1" data-p="ang" value="' + fmt(segAngle(o)) + '">° 길이 <input type="number" step="1" min="1" data-p="len" value="' + fmt(segLen(o)) + '"></div>';
@@ -1044,6 +1088,7 @@
         } else if (o.t === 'text') {
             h += '<div class="bde-row"><input type="text" data-p="text" value="' + String(o.text).replace(/&/g, '&amp;').replace(/"/g, '&quot;').replace(/</g, '&lt;') + '"></div>';
             h += '<div class="bde-row">크기 <input type="number" data-p="size" value="' + fmt(o.size) + '"> 회전 <input type="number" data-p="rot" value="' + fmt(o.rot || 0) + '">°</div>';
+            h += '<div class="bde-row"><button data-a="tsize:0.7">작게</button><button data-a="tsize:1.2">보통</button><button data-a="tsize:2">크게</button><button data-a="rotL">⟲90</button><button data-a="rotR">⟳90</button></div>';
         }
         h += '<div class="bde-row"><button data-a="dup">복제</button><button data-a="front">맨 앞</button><button data-a="del" class="bde-del">삭제</button></div>';
         propsEl.innerHTML = h;
@@ -1062,13 +1107,14 @@
             if (!isFinite(v)) return;
             if (key === 'ang' || key === 'len') { setSeg(o, key === 'ang' ? v : segAngle(o), key === 'len' ? v : segLen(o)); requestDraw(); return; }
             if (key === 'rot') v = ((v % 360) + 360) % 360;
-            else if (key === 'cut') v = Math.max(0, v);
+            else if (key === 'cut' || key === 'leaf') v = Math.max(0, v);
             else if (key === 'lw') v = Math.max(0.1, v);
             else v = Math.max(0.5, v);
             o[key] = v;
             if (key === 'th') { S.wallTh = v; syncOptInputs(); }
             if (key === 'lw') { S.lw = v; syncOptInputs(); }
             if (o.t === 'sym' && (key === 'w' || key === 'h')) _lastSize[o.k] = [o.w, o.h];
+            if (o.t === 'sym' && key === 'leaf') _lastLeaf[o.k] = v;
         }
         requestDraw();
     }
@@ -1110,6 +1156,15 @@
             if (o.t !== 'wall' && o.t !== 'line') return;
             pushUndo();
             setSeg(o, Number(a.slice(4)), segLen(o));
+        } else if (a.indexOf('tsize:') === 0) {
+            if (o.t !== 'text') return;
+            pushUndo();
+            o.size = Number(a.slice(6)) * S.unit;
+        } else if (a.indexOf('leaf:') === 0) {
+            if (o.t !== 'sym' || !(SYMBOLS[o.k] && SYMBOLS[o.k].leaf)) return;
+            pushUndo();
+            o.leaf = Number(a.slice(5)) * S.unit;
+            _lastLeaf[o.k] = o.leaf;
         } else if (a.indexOf('fill:') === 0) {
             if (o.t !== 'wall') return;
             pushUndo();
@@ -1237,7 +1292,9 @@
         c.imageSmoothingQuality = 'high';
         c.drawImage(S.img, 0, 0, cv.width, cv.height);
         c.scale(k, k);
-        S.objs.forEach(function (o) { drawObj(c, o, S.lw); });
+        // 저장 그림도 그린 선은 모두 1픽셀(그림 픽셀 기준, 2026-11-26)
+        var hc = hairlineCtx(c, 1 / k);
+        S.objs.forEach(function (o) { drawObj(hc, o, S.lw); });
         var url = cv.toDataURL('image/jpeg', 0.92);
         cv.width = cv.height = 1;
         return url;
@@ -1251,7 +1308,9 @@
         var d = S.dxf, meta = d.meta;
         var W = S.info.refW, H = S.info.refH;
         var R = V.createRecorder(V.pxToPtMatrix(W, H, meta.pageW, meta.pageH));
-        S.objs.forEach(function (o) { drawObj(R.ctx, o, S.lw); });
+        // 그린 선은 모두 기본 굵기 = 캐드 가는 선(폭 없는 폴리선 → 화면·PDF 1픽셀). 지우개(흰 선)는 폭 그대로
+        var hr = hairlineCtx(R.ctx, S.lw);
+        S.objs.forEach(function (o) { drawObj(hr, o, S.lw); });
         var k = Math.sqrt((meta.pageW / W) * (meta.pageH / H));
         var res = V.buildEditedFlat(d.model, meta, R.events, { baseLwPt: S.lw * k });
         var out = await P.convertFlatToPdf(res.flat, { fit: meta, lineWidth: d.model.lw, src: meta.src, unit: meta.unit });

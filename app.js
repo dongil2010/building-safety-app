@@ -1,5 +1,5 @@
 // @@app-parts 자동 생성 파일 — 여기를 고치지 말고 app/ 조각을 고친 뒤 `node scripts/app-parts.js join` (CLAUDE.md 「app.js 조각」)
-// @@app-part 01-base.js sha=aae1f7721e39 — 원본은 app/01-base.js (여기 말고 거기서 고칠 것)
+// @@app-part 01-base.js sha=e06c5ab5ddf3 — 원본은 app/01-base.js (여기 말고 거기서 고칠 것)
 /* ==========================================================================
    스마트 건축물 안전점검 현장점검 시스템 — UI 부트스트랩
    전역 상태·IndexedDB·이미지 헬퍼: js/core/state.js
@@ -3293,6 +3293,10 @@ document.addEventListener('DOMContentLoaded', () => {
                 hiddenDefectComponents: window.state.hiddenDefectComponents || [],
                 hiddenDefectTypes: window.state.hiddenDefectTypes || {},
                 hiddenDefectCauses: window.state.hiddenDefectCauses || {},
+                // 부재 실측 마감상태·부재 구분 목록 (직접 추가 / 기본 항목 숨김)
+                customNdtFinishStates: window.state.customNdtFinishStates || [],
+                hiddenNdtFinishStates: window.state.hiddenNdtFinishStates || [],
+                customNdtComponents: window.state.customNdtComponents || [],
                 defectComponentOrder: window.state.defectComponentOrder || {},
                 defectTypeOrder: window.state.defectTypeOrder || {},
                 defectCauseOrder: window.state.defectCauseOrder || {},
@@ -3517,6 +3521,9 @@ document.addEventListener('DOMContentLoaded', () => {
                 if (parsed.hiddenDefectCauses) {
                     window.state.hiddenDefectCauses = parsed.hiddenDefectCauses;
                 }
+                ['customNdtFinishStates', 'hiddenNdtFinishStates', 'customNdtComponents'].forEach((k) => {
+                    if (Array.isArray(parsed[k])) window.state[k] = parsed[k];
+                });
                 if (parsed.defectComponentOrder) {
                     window.state.defectComponentOrder = parsed.defectComponentOrder;
                 }
@@ -6022,7 +6029,7 @@ document.addEventListener('DOMContentLoaded', () => {
         }
     }
 
-// @@app-part 02-buildings.js sha=8724bebd6bbb — 원본은 app/02-buildings.js (여기 말고 거기서 고칠 것)
+// @@app-part 02-buildings.js sha=0603af2e9f90 — 원본은 app/02-buildings.js (여기 말고 거기서 고칠 것)
     // --- 5. TAB MANAGER (진입 로직은 js/tabs/*.js) ---
     // ---- 마지막 작업 위치 기억·복원 (js/core/last-location.js, 2026-10-28) ----
     // 로그인 직후 복원 시도가 끝나기 전에는 기록·삭제를 하지 않는다(부팅 중 switchTab('tab-home')이 기록을 지우지 않게).
@@ -9689,6 +9696,7 @@ ${roundMobile ? '' : `<button type="button" class="icon-btn icon-btn-trash" titl
         if (document.getElementById('inputEditBuildingCompletionDate')) document.getElementById('inputEditBuildingCompletionDate').value = bldg.completionDate || '';
         if (document.getElementById('inputEditBuildingNotes')) document.getElementById('inputEditBuildingNotes').value = bldg.notes || '';
         initEditRoundDates(bldg);
+        initEditDongCompletionDates(bldg);
         if (typeof window.syncInspectionRoundDateInput === 'function') window.syncInspectionRoundDateInput();
 
         populateEditBuildingImportSources(bldg.id);
@@ -10888,7 +10896,10 @@ ${roundMobile ? '' : `<button type="button" class="icon-btn icon-btn-trash" titl
             if (facilityGrade !== prevFacilityGrade) {
                 applyBuildingLocationMapLegend(bldg, { forceDefault: true });
             }
-            bldg.completionDate = completionDate;
+            // 2026-11-26 여러 동이면 동별 준공일 칸 값을 각 동에 넣는다(이 동 값도 그 칸에서)
+            const dongCompletionMine = applyEditDongCompletionDates(bldg);
+            bldg.completionDate = dongCompletionMine != null ? dongCompletionMine : completionDate;
+            if (inArr && inArr !== bldg) inArr.completionDate = bldg.completionDate;
             bldg.notes = notes;
             setSiteMultiDongFlag(siteName, multiDong);
             if (prevSiteName && prevSiteName !== siteName) {
@@ -11033,7 +11044,7 @@ ${roundMobile ? '' : `<button type="button" class="icon-btn icon-btn-trash" titl
         });
     }
 
-// @@app-part 03-canvas.js sha=7fcd4af90a85 — 원본은 app/03-canvas.js (여기 말고 거기서 고칠 것)
+// @@app-part 03-canvas.js sha=d5d9c4a47b30 — 원본은 app/03-canvas.js (여기 말고 거기서 고칠 것)
     // --- 8. DRAWING CANVAS ENGINE (PAN/ZOOM/ROTATE & PINS) ---
 
     function setupCanvas() {
@@ -14482,17 +14493,17 @@ ${roundMobile ? '' : `<button type="button" class="icon-btn icon-btn-trash" titl
         const hw = boxW / 2;
         const hh = boxH / 2;
         const eps = Math.max(0.5, Math.min(hw, hh) * 0.05);
-        // 1) 모서리→점 선이 박스 안을 지나가거나 박스 변에 바짝 붙어 지나가면(박스를 가로지름) 제외
-        const pad = Math.min(hw, hh) * 0.6;
+        // 1) 모서리→점 선이 박스를 실제로 관통할 때만 제외(2026-11-25: 박스 변 근처를 비스듬히 지나가는 건 그대로 공용 모서리).
+        //    변 위에 그대로 겹쳐 달리는 선(테두리와 거의 평행)도 관통으로 본다.
         const cl = toLocal(shared.x, shared.y);
-        // 모서리→점 방향이 모서리→중심 방향과 90° 넘게 다르면(박스 반대편으로 돌아 감) 제외
-        if ((targetX - shared.x) * (cx - shared.x) + (targetY - shared.y) * (cy - shared.y) < 0) return own;
-        for (let i = 1; i < 40; i++) {
-            const k = i / 40;
+        const edgeTol = Math.max(1, Math.min(hw, hh) * 0.05);
+        const awayFromCorner = Math.min(hw, hh);
+        for (let i = 1; i < 80; i++) {
+            const k = i / 80;
             const p = toLocal(shared.x + (targetX - shared.x) * k, shared.y + (targetY - shared.y) * k);
             if (Math.abs(p.x) < hw - eps && Math.abs(p.y) < hh - eps) return own;
-            if (Math.hypot(p.x - cl.x, p.y - cl.y) > pad * 1.5
-                && Math.abs(p.x) < hw + pad && Math.abs(p.y) < hh + pad) return own;
+            if (Math.hypot(p.x - cl.x, p.y - cl.y) > awayFromCorner
+                && Math.abs(p.x) < hw + edgeTol && Math.abs(p.y) < hh + edgeTol) return own;
         }
         // 2) 다른 마킹 점 바로 위를 지나가면 제외
         const near = Math.max(6, Math.min(boxW, boxH) * 0.35);
@@ -14629,7 +14640,7 @@ ${roundMobile ? '' : `<button type="button" class="icon-btn icon-btn-trash" titl
         return 'ndtStrength';
     }
 
-// @@app-part 04-ndt-disp.js sha=27dc698437e4 — 원본은 app/04-ndt-disp.js (여기 말고 거기서 고칠 것)
+// @@app-part 04-ndt-disp.js sha=60de16766b8f — 원본은 app/04-ndt-disp.js (여기 말고 거기서 고칠 것)
     // --- 바닥 수직변위: 그룹(NO.박스) + 다중 레벨 포인트 데이터 ---
     const NDT_DISPLACEMENT_COLORS = ['#ef4444', '#525252', '#f97316', '#22c55e', '#a855f7', '#eab308', '#06b6d4', '#ec4899'];
     const NDT_GRADE_BADGES = {
@@ -15129,7 +15140,7 @@ ${roundMobile ? '' : `<button type="button" class="icon-btn icon-btn-trash" titl
         const parts = [];
         if (mo && mo.slab != null && rawD > 0) parts.push(`실측 춤 = ${rawD} + 슬래브 ${mo.slab} = ${Math.round((rawD + mo.slab) * 100) / 100} mm`);
         if (mo && (mo.excludeSlabMm || mo.excludeInsulationMm) && rawD > 0 && mo.storeD != null) {
-            parts.push(`실측 춤 = ${rawD}${mo.excludeSlabMm ? ` − 슬래브 ${mo.excludeSlabMm}` : ''}${mo.excludeInsulationMm ? ` − 단열 ${mo.excludeInsulationMm}` : ''} = ${mo.storeD} mm`);
+            parts.push(`실측 춤 = ${rawD}${mo.excludeSlabMm ? ` + 슬래브 ${mo.excludeSlabMm}` : ''}${mo.excludeInsulationMm ? ` + 단열 ${mo.excludeInsulationMm}` : ''} = ${mo.storeD} mm`);
         }
         if (mo && mo.excludeWallMm && mo.rawW > 0 && mo.storeW != null) {
             parts.push(`실측 폭/지름 = ${mo.rawW} − 벽체 ${mo.excludeWallMm} = ${mo.storeW} mm`);
@@ -15222,19 +15233,23 @@ ${roundMobile ? '' : `<button type="button" class="icon-btn icon-btn-trash" titl
             const measuredW = (item.measuredWidth !== undefined && item.measuredWidth !== null) ? item.measuredWidth : item.avgValue;
             return measuredW != null && measuredW !== '' ? `Φ${measuredW}` : '-';
         }
+        // 2026-11-26 보 「슬래브/단열 두께 제외」에 mm를 적었으면 표에는 더하기 전 잰 춤(주석: 「…mm 미포함」)
+        const moApi = (typeof window !== 'undefined' && window.BSA && window.BSA.ndtMeasureOpts) || null;
+        const rawShown = moApi && typeof moApi.displayDepth === 'function' ? moApi.displayDepth(item, dimMode) : null;
+        const shownDepth = rawShown != null ? rawShown : item.measuredDepth;
         // 2026-10-19 「이쪽만 측정」 — 안 잰 쪽은 '-'
         const oneSide = (dimMode === 'beam' || dimMode === 'column')
             && (item.measureOneSide === 'primary' || item.measureOneSide === 'secondary') ? item.measureOneSide : null;
         if (kind !== 'design' && oneSide) {
             const has = (v) => v !== undefined && v !== null && v !== '';
             if (oneSide === 'primary') return has(item.measuredWidth) ? `${item.measuredWidth}${joiner}-` : '-';
-            return has(item.measuredDepth) ? `-${joiner}${item.measuredDepth}` : '-';
+            return has(item.measuredDepth) ? `-${joiner}${shownDepth}` : '-';
         }
         if (kind === 'design') {
             return item.designWidth ? `${item.designWidth}${item.designDepth ? joiner + item.designDepth : ''}` : '-';
         }
         const measuredW = (item.measuredWidth !== undefined && item.measuredWidth !== null) ? item.measuredWidth : item.avgValue;
-        return measuredW ? `${measuredW}${item.measuredDepth ? joiner + item.measuredDepth : ''}` : '-';
+        return measuredW ? `${measuredW}${item.measuredDepth ? joiner + shownDepth : ''}` : '-';
     }
 
     /**
@@ -15697,7 +15712,37 @@ ${roundMobile ? '' : `<button type="button" class="icon-btn icon-btn-trash" titl
     }
 
     function getNdtViewScaleLimits() {
-        return getViewScaleLimits(getNdtFitScale);
+        const lim = getViewScaleLimits(getNdtFitScale);
+        // 벡터로 그리는 DXF 도면은 확대해도 안 깨지므로 결함위치도처럼 깊이 확대
+        if (ndtBgImage && getNdtDxfViewModel()) lim.max = Math.max(lim.max, Math.max(getNdtFitScale() || 0.05, 0.05) * VIEW_MAX_ZOOM_VS_FIT_DXF);
+        return lim;
+    }
+
+    /**
+     * 2026-11-26 비파괴 탭도 DXF 도면은 그림 대신 선·글자를 지금 배율로 직접 그린다(결함위치도와 같은 js/core/dxf-view.js).
+     * 층 도면 = 결함위치도가 읽어 둔 층 모델 / DXF로 올린 비파괴 전용 도면 = 그 원본에서 읽은 모델(뒤에서 읽고 다 되면 다시 그림)
+     */
+    const _ndtDxfModelReq = {};
+    const _ndtDxfModelReady = {};
+    function getNdtDxfViewModel() {
+        const V = window.BSA && window.BSA.dxfView;
+        if (!V || typeof V.getModel !== 'function' || (window.BSA_PDF_VECTOR && window.BSA_PDF_VECTOR.dxfLiveView === false)) return null;
+        const key = `${state.currentBuildingId}_${state.currentFloor}`;
+        if (!currentNdtCustomDrawingSrc(key)) return getDxfViewModelForCurrentFloor();
+        const ref = ndtDrawingRefFor(key);
+        if (!ref || !ref.id || !ref.pdfId) return null;
+        if (_ndtDxfModelReady[key] === ref.pdfId) return V.getModel(`ndt_${key}`);
+        if (_ndtDxfModelReq[key] !== ref.pdfId && typeof window.getNdtCustomDxfModel === 'function') {
+            const pdfId = ref.pdfId;
+            _ndtDxfModelReq[key] = pdfId;
+            window.getNdtCustomDxfModel(key).then((m) => {
+                const now = ndtDrawingRefFor(key);
+                if (!m || !now || now.pdfId !== pdfId) return;
+                _ndtDxfModelReady[key] = pdfId;
+                if (`${state.currentBuildingId}_${state.currentFloor}` === key) drawNdtCanvas();
+            }).catch(() => {});
+        }
+        return null;
     }
 
     function shouldAutoFitNdtView() {
@@ -15825,11 +15870,29 @@ ${roundMobile ? '' : `<button type="button" class="icon-btn icon-btn-trash" titl
         }
 
         if (ndtBgImage) {
-            ctx.drawImage(ndtBgImage, 0, 0, imgW, imgH);
             const ndtKey = `${state.currentBuildingId}_${state.currentFloor}`;
-            if (!currentNdtCustomDrawingSrc(ndtKey)) {
-                applyFloorDrawingDarken(ctx, getFloorDrawingDarken(state.currentBuildingId, state.currentFloor),
-                    () => ctx.drawImage(ndtBgImage, 0, 0, imgW, imgH));
+            const isCustom = !!currentNdtCustomDrawingSrc(ndtKey);
+            const darken = isCustom ? null : getFloorDrawingDarken(state.currentBuildingId, state.currentFloor);
+            const blitImg = () => ctx.drawImage(ndtBgImage, 0, 0, imgW, imgH);
+            const dxfModel = getNdtDxfViewModel();
+            let drew = false;
+            if (dxfModel) {
+                try {
+                    ctx.fillStyle = '#ffffff';
+                    ctx.fillRect(0, 0, imgW, imgH);
+                    drew = window.BSA.dxfView.drawOnCanvas(ctx, dxfModel, imgW, imgH, {
+                        fallback: blitImg,
+                        darken: isCustom ? undefined : (blit) => applyFloorDrawingDarken(ctx, darken, blit),
+                        requestRedraw: () => drawNdtCanvas()
+                    });
+                } catch (dxfErr) {
+                    console.warn('[DXF 화면] 비파괴 벡터 그리기 실패 — 그림으로 표시', dxfErr);
+                    drew = false;
+                }
+            }
+            if (!drew) {
+                blitImg();
+                if (!isCustom) applyFloorDrawingDarken(ctx, darken, blitImg);
             }
         }
 
@@ -18561,7 +18624,7 @@ ${roundMobile ? '' : `<button type="button" class="icon-btn icon-btn-trash" titl
         URL.revokeObjectURL(url);
     };
 
-// @@app-part 05-ndt-strength.js sha=d9cf8cc847b8 — 원본은 app/05-ndt-strength.js (여기 말고 거기서 고칠 것)
+// @@app-part 05-ndt-strength.js sha=b20a547e259a — 원본은 app/05-ndt-strength.js (여기 말고 거기서 고칠 것)
     // --- 콘크리트 강도(반발경도) 추정 엔진 ---
     // 회사에서 쓰던 엑셀(반발경도-고강도포함) 자료를 그대로 옮겼다.
     // 각 행: [R, 0도 보정값, +90도 보정값, +45도 보정값, -45도 보정값, -90도 보정값]
@@ -18849,12 +18912,13 @@ ${roundMobile ? '' : `<button type="button" class="icon-btn icon-btn-trash" titl
     }
     window.refreshCarbItemResults = refreshCarbItemResults;
 
-    // 콘크리트 반발경도 성과표(hwpx 내보내기 전용) — NO. 하나(위치 슬롯 하나)의 반발치 원시값
-    // 5행×4열 그리드, 평균경도(R)·각도보정·Ro, 재령·α, 압축강도(식별 1식/2식/3식)+최종강도,
-    // 막대그래프를 한 장의 캔버스 이미지로 그린다. ±20% 밖이라 제외된 값은 그래프/숫자 모두
-    // 다른 색으로 표시한다.
+    // 콘크리트 반발경도 성과표(hwpx 내보내기 전용) — NO. 하나(위치 슬롯 하나)의 반발치 원시값,
+    // 평균경도(R)·각도보정·Ro, 재령·α, 압축강도(1식/2식/3식)+최종강도, 막대그래프를 한 장의
+    // 캔버스 이미지로 그린다. ±20% 밖이라 제외된 값은 그래프/숫자 모두 다른 색으로 표시한다.
+    // 2026-11-26 사용자 요청: 한 쪽에 12개 들어가게 — 높이 620→250(NO. 사이 24 그대로), 측정값 4행×5열.
     function renderStrengthPerfPointCanvas(seq, item, slot, readings, calc) {
-        const W = 2200, H = 620;
+        const W = 2200, H = 250;
+        const FONT = '"Pretendard", "Malgun Gothic", "맑은 고딕", sans-serif';
         const canvas = document.createElement('canvas');
         canvas.width = W;
         canvas.height = H;
@@ -18865,7 +18929,7 @@ ${roundMobile ? '' : `<button type="button" class="icon-btn icon-btn-trash" titl
         ctx.lineWidth = 3;
         ctx.strokeRect(1.5, 1.5, W - 3, H - 3);
 
-        const colX = [0, 300, 820, 1110, 1340, 1680, W];
+        const colX = [0, 260, 760, 1020, 1220, 1600, W];
         ctx.lineWidth = 1.5;
         for (let i = 1; i < colX.length - 1; i++) {
             ctx.beginPath();
@@ -18876,97 +18940,118 @@ ${roundMobile ? '' : `<button type="button" class="icon-btn icon-btn-trash" titl
 
         const rawAvg = calc.rawAvg;
         const isOutlier = (v) => isStrengthOutlierValue(v, rawAvg);
+        // 칸 폭을 넘는 글자는 글꼴을 줄여서 칸 안에 넣는다(긴 위치 이름)
+        const fitText = (text, x, y, maxW, size, bold) => {
+            let s = size;
+            ctx.font = `${bold ? 'bold ' : ''}${s}px ${FONT}`;
+            while (s > 18 && ctx.measureText(text).width > maxW) {
+                s -= 2;
+                ctx.font = `${bold ? 'bold ' : ''}${s}px ${FONT}`;
+            }
+            ctx.fillText(text, x, y);
+        };
+        // 여러 줄 묶음을 칸 위아래 가운데에 놓는다(2026-11-26 평균경도 칸 가운데 요청과 같은 방식)
+        const drawCentered = (cx, lines, step) => {
+            const y0 = H / 2 - (step * (lines.length - 1)) / 2;
+            lines.forEach((ln, i) => {
+                ctx.font = ln.font;
+                ctx.fillStyle = ln.color;
+                ctx.fillText(ln.text, cx, y0 + i * step);
+            });
+        };
 
-        // 1) 측정위치
+        // 1) 측정위치 — NO.와 위치·부재를 같은 굵은 글꼴로, 칸 가운데
         ctx.textBaseline = 'middle';
         ctx.textAlign = 'center';
         ctx.fillStyle = '#111111';
-        ctx.font = 'bold 34px "Pretendard", "Malgun Gothic", "맑은 고딕", sans-serif';
-        ctx.fillText(`NO.${String(seq).padStart(2, '0')}`, (colX[0] + colX[1]) / 2, 75);
-        // 2026-09-04 사용자 요청: 위치 글씨가 너무 작아 안 보인다고 해서 NO.와 같은 글꼴/크기로 맞춤.
-        ctx.font = 'bold 34px "Pretendard", "Malgun Gothic", "맑은 고딕", sans-serif';
-        [slot.location || item.location || '', memberNameOut(item.component) || ''].filter(Boolean).forEach((line, i) => {
-            ctx.fillText(line, (colX[0] + colX[1]) / 2, 150 + i * 42);
-        });
+        const c1x = (colX[0] + colX[1]) / 2;
+        const c1MaxW = colX[1] - colX[0] - 20;
+        // 긴 위치 이름은 글자를 줄이기 전에 띄어쓰기에서 두 줄로 나눈다
+        const splitLoc = (text) => {
+            ctx.font = `bold 28px ${FONT}`;
+            if (!text || ctx.measureText(text).width <= c1MaxW) return [text];
+            const words = text.split(/\s+/);
+            if (words.length < 2) return [text];
+            let best = 1, bestW = Infinity;
+            for (let k = 1; k < words.length; k++) {
+                const w = Math.max(ctx.measureText(words.slice(0, k).join(' ')).width, ctx.measureText(words.slice(k).join(' ')).width);
+                if (w < bestW) { bestW = w; best = k; }
+            }
+            return [words.slice(0, best).join(' '), words.slice(best).join(' ')];
+        };
+        const locLines = [...splitLoc(slot.location || item.location || ''), memberNameOut(item.component) || ''].filter(Boolean);
+        const c1Step = locLines.length > 2 ? 40 : 44;
+        const c1y0 = H / 2 - (c1Step * locLines.length) / 2;
+        fitText(`NO.${String(seq).padStart(2, '0')}`, c1x, c1y0, c1MaxW, 32, true);
+        locLines.forEach((line, i) => fitText(line, c1x, c1y0 + (i + 1) * c1Step, c1MaxW, 28, true));
 
-        // 2) 반발치 그리드 (5행 × 4열, ±20% 초과 제외값은 주황색)
-        // 2026-09-04: R값 글씨 크기를 2배로 키움(24px→48px) — 셀 높이도 같이 키워서 안 겹치게 함.
-        const gridX0 = colX[1] + 25, gridX1 = colX[2] - 25;
-        const gridCols = 4, gridRows = 5, cellH = 80, gridY0 = 45;
+        // 2) 반발치 그리드 (4행 × 5열, ±20% 초과 제외값은 주황색)
+        // 2026-11-26 사용자 요청: 4줄로, 밑의 「(총 20개 · ±20% 제외 0개)」 문구는 뺀다(제외값은 주황색으로만 표시)
+        const gridX0 = colX[1] + 20, gridX1 = colX[2] - 20;
+        const gridCols = 5, gridRows = 4, cellH = 55, gridY0 = (H - gridRows * cellH) / 2;
         const cellW = (gridX1 - gridX0) / gridCols;
-        ctx.font = '48px "Pretendard", "Malgun Gothic", "맑은 고딕", sans-serif';
+        ctx.font = `38px ${FONT}`;
         readings.forEach((v, idx) => {
             if (idx >= gridCols * gridRows) return;
             const r = Math.floor(idx / gridCols), c = idx % gridCols;
             ctx.fillStyle = isOutlier(v) ? '#c2410c' : '#111111';
             ctx.fillText(String(v), gridX0 + c * cellW + cellW / 2, gridY0 + r * cellH + cellH / 2);
         });
-        ctx.fillStyle = '#555555';
-        // 2026-09-04 사용자 요청: 작은 글씨들이 안 보인다고 해서 Ro값(32px)만큼 전부 키움.
-        ctx.font = '32px "Pretendard", "Malgun Gothic", "맑은 고딕", sans-serif';
-        ctx.textAlign = 'left';
-        ctx.fillText(`(총 ${calc.totalCount}개 · ±20% 제외 ${calc.excludedCount}개)`, gridX0, gridY0 + gridRows * cellH + 30);
 
-        // 3) 평균경도(R) · 각도보정 · Ro
+        // 3) 평균경도(R) · 각도보정 · Ro — 칸 위아래 가운데(2026-11-26 사용자 요청)
         ctx.textAlign = 'center';
-        const c3x = (colX[2] + colX[3]) / 2;
-        ctx.font = '32px "Pretendard", "Malgun Gothic", "맑은 고딕", sans-serif'; ctx.fillStyle = '#555555';
-        ctx.fillText('평균경도(R)', c3x, 45);
-        ctx.font = 'bold 42px "Pretendard", "Malgun Gothic", "맑은 고딕", sans-serif'; ctx.fillStyle = '#111111';
-        ctx.fillText(fmtExcel(calc.finalAvg, 1), c3x, 105);
-        ctx.font = '32px "Pretendard", "Malgun Gothic", "맑은 고딕", sans-serif'; ctx.fillStyle = '#555555';
-        ctx.fillText(`각도보정 ${calc.correction >= 0 ? '+' : ''}${calc.correction.toFixed(2)}`, c3x, 165);
-        ctx.font = 'bold 32px "Pretendard", "Malgun Gothic", "맑은 고딕", sans-serif'; ctx.fillStyle = '#0369a1';
-        // Ro는 엑셀처럼 소수 1자리로 반올림된 값이다(2026-09-22)
-        ctx.fillText(`Ro = ${calc.ro.toFixed(1)}`, c3x, 225);
+        const c3Lines = [
+            { text: '평균경도(R)', font: `28px ${FONT}`, color: '#555555' },
+            { text: fmtExcel(calc.finalAvg, 1), font: `bold 38px ${FONT}`, color: '#111111' },
+            { text: `각도보정 ${calc.correction >= 0 ? '+' : ''}${calc.correction.toFixed(2)}`, font: `28px ${FONT}`, color: '#555555' },
+            // Ro는 엑셀처럼 소수 1자리로 반올림된 값이다(2026-09-22)
+            { text: `Ro = ${calc.ro.toFixed(1)}`, font: `bold 30px ${FONT}`, color: '#0369a1' }
+        ];
         if (calc.anvilFactor && calc.anvilFactor !== 1) {
             // 앤빌 보정(엑셀 "Anvil기준 82 / 장비평균 = 보정" 칸)은 1.00이 아닐 때만 적는다
-            ctx.font = '28px "Pretendard", "Malgun Gothic", "맑은 고딕", sans-serif'; ctx.fillStyle = '#555555';
-            ctx.fillText(`앤빌 82/${calc.anvilAvg} = ${calc.anvilFactor.toFixed(3)}`, c3x, 285);
+            c3Lines.push({ text: `앤빌 82/${calc.anvilAvg} = ${calc.anvilFactor.toFixed(3)}`, font: `24px ${FONT}`, color: '#555555' });
         }
+        drawCentered((colX[2] + colX[3]) / 2, c3Lines, c3Lines.length > 4 ? 40 : 46);
 
         // 4) 재령 · α(재령보정계수)
-        const c4x = (colX[3] + colX[4]) / 2;
-        ctx.font = '32px "Pretendard", "Malgun Gothic", "맑은 고딕", sans-serif'; ctx.fillStyle = '#555555';
-        ctx.fillText('재령(일)', c4x, 45);
-        ctx.font = 'bold 34px "Pretendard", "Malgun Gothic", "맑은 고딕", sans-serif'; ctx.fillStyle = '#111111';
-        ctx.fillText(calc.ageDays != null ? String(calc.ageDays) : '-', c4x, 110);
-        ctx.font = '32px "Pretendard", "Malgun Gothic", "맑은 고딕", sans-serif'; ctx.fillStyle = '#555555';
-        ctx.fillText('α(재령보정)', c4x, 180);
-        ctx.font = 'bold 32px "Pretendard", "Malgun Gothic", "맑은 고딕", sans-serif'; ctx.fillStyle = '#111111';
-        ctx.fillText(calc.alpha != null ? calc.alpha.toFixed(2) : '-', c4x, 235);
+        drawCentered((colX[3] + colX[4]) / 2, [
+            { text: '재령(일)', font: `28px ${FONT}`, color: '#555555' },
+            { text: calc.ageDays != null ? String(calc.ageDays) : '-', font: `bold 30px ${FONT}`, color: '#111111' },
+            { text: 'α(재령보정)', font: `28px ${FONT}`, color: '#555555' },
+            { text: calc.alpha != null ? calc.alpha.toFixed(2) : '-', font: `bold 30px ${FONT}`, color: '#111111' }
+        ], 46);
 
         // 5) 압축강도(Fc): 활성화된 추정식만 1식/2식/3식 순서로, 맨 아래 최종 강도(굵게)
         const c5x0 = colX[4] + 20, c5x1 = colX[5] - 20;
-        ctx.textAlign = 'left'; ctx.font = 'bold 32px "Pretendard", "Malgun Gothic", "맑은 고딕", sans-serif'; ctx.fillStyle = '#555555';
-        ctx.fillText('압축강도(Fc, MPa)', c5x0, 40);
-        let fy = 90;
+        ctx.textAlign = 'left'; ctx.font = `bold 28px ${FONT}`; ctx.fillStyle = '#555555';
+        ctx.fillText('압축강도(Fc, MPa)', c5x0, 34);
+        let fy = 76;
         calc.results.forEach((r, i) => {
             if (!r.enabled) return;
-            ctx.font = '32px "Pretendard", "Malgun Gothic", "맑은 고딕", sans-serif'; ctx.fillStyle = '#333333'; ctx.textAlign = 'left';
+            ctx.font = `28px ${FONT}`; ctx.fillStyle = '#333333'; ctx.textAlign = 'left';
             ctx.fillText(`${i + 1}식`, c5x0, fy);
-            ctx.font = 'bold 32px "Pretendard", "Malgun Gothic", "맑은 고딕", sans-serif'; ctx.fillStyle = '#111111'; ctx.textAlign = 'right';
+            ctx.font = `bold 28px ${FONT}`; ctx.fillStyle = '#111111'; ctx.textAlign = 'right';
             ctx.fillText(fmtExcel(r.value, 1), c5x1, fy);
-            fy += 54;
+            fy += 38;
         });
         ctx.strokeStyle = '#94a3b8'; ctx.lineWidth = 1.5;
-        ctx.beginPath(); ctx.moveTo(c5x0, fy - 15); ctx.lineTo(c5x1, fy - 15); ctx.stroke();
-        ctx.font = 'bold 32px "Pretendard", "Malgun Gothic", "맑은 고딕", sans-serif'; ctx.fillStyle = '#333333'; ctx.textAlign = 'left';
-        ctx.fillText('강도', c5x0, fy + 28);
-        ctx.font = 'bold 40px "Pretendard", "Malgun Gothic", "맑은 고딕", sans-serif'; ctx.fillStyle = '#b91c1c'; ctx.textAlign = 'right';
-        ctx.fillText(calc.finalStrength.toFixed(1), c5x1, fy + 28);
+        ctx.beginPath(); ctx.moveTo(c5x0, fy - 16); ctx.lineTo(c5x1, fy - 16); ctx.stroke();
+        ctx.font = `bold 28px ${FONT}`; ctx.fillStyle = '#333333'; ctx.textAlign = 'left';
+        ctx.fillText('강도', c5x0, fy + 18);
+        ctx.font = `bold 36px ${FONT}`; ctx.fillStyle = '#b91c1c'; ctx.textAlign = 'right';
+        ctx.fillText(calc.finalStrength.toFixed(1), c5x1, fy + 18);
 
-        // 6) 막대그래프 — ±20% 제외값은 옅은 빨강, 점선은 평균경도(R) 위치
-        const chX0 = colX[5] + 20, chX1 = colX[6] - 20, chY0 = 35, chY1 = H - 35;
+        // 6) 막대그래프(2026-11-26 막대 색을 진한 파랑 #378ADD로) — ±20% 제외값은 옅은 빨강, 점선은 평균경도(R) 위치
+        const chX0 = colX[5] + 20, chX1 = colX[6] - 20, chY0 = 18, chY1 = H - 18;
         const maxV = Math.max(...readings) * 1.15;
-        const barGap = 5;
+        const barGap = 4;
         const barW = (chX1 - chX0 - barGap * (readings.length - 1)) / readings.length;
         ctx.strokeStyle = '#cbd5e1'; ctx.lineWidth = 1.5;
         ctx.beginPath(); ctx.moveTo(chX0, chY1); ctx.lineTo(chX1, chY1); ctx.stroke();
         readings.forEach((v, i) => {
             const bh = (v / maxV) * (chY1 - chY0);
             const bx = chX0 + i * (barW + barGap);
-            ctx.fillStyle = isOutlier(v) ? '#fca5a5' : '#93c5fd';
+            ctx.fillStyle = isOutlier(v) ? '#fca5a5' : '#378ADD';
             ctx.fillRect(bx, chY1 - bh, barW, bh);
         });
         const avgY = chY1 - (calc.finalAvg / maxV) * (chY1 - chY0);
@@ -19888,6 +19973,84 @@ ${roundMobile ? '' : `<button type="button" class="icon-btn icon-btn-trash" titl
         const d = (_editRoundDatesDraft && _editRoundDatesDraft.bldgId === bldg.id) ? _editRoundDatesDraft.dates : {};
         Object.keys(d).forEach((k) => { if (k !== selectedKey) mm.setRoundDate(bldg, k, d[k]); });
         if (selectedDate) mm.setRoundDate(bldg, selectedKey, selectedDate);
+    }
+
+    // ── 2026-11-26 건물 수정창: 동별 준공일 ──
+    // 여러 동 현장의 「현장 정보 수정」은 동 하나만 열어서, 준공일을 넣어도 그 동에만 들어가고
+    // 다른 동은 준공일이 비어 비파괴(강도 재령·탄산화 수명)가 계산되지 않았다.
+    // 같은 현장·같은 회차의 동이 2개 이상이면 동마다 준공일 칸을 보여 주고 저장 때 각 동에 넣는다.
+    let _editDongCompletionDraft = null;
+    function getEditDongCompletionSiblings(bldg) {
+        if (!bldg) return [];
+        const siteKey = getBuildingSiteName(bldg);
+        const roundKey = getBuildingSurveyRoundKey(bldg);
+        if (!siteKey || !isSiteMultiDong(siteKey)) return [];
+        const list = filterActiveBuildings(window.state.buildings || [], window.state.deletedBuildingIds)
+            .filter((b) => b && getBuildingSiteName(b) === siteKey && getBuildingSurveyRoundKey(b) === roundKey);
+        list.sort(makeDongComparator(siteKey));
+        return list;
+    }
+    function syncEditDongCompletionVisibility() {
+        const box = document.getElementById('editDongCompletionDates');
+        const mainInput = document.getElementById('inputEditBuildingCompletionDate');
+        const mainGroup = mainInput ? mainInput.closest('.form-group') : null;
+        const multi = readSiteLayoutRadio('editBuildingSiteLayout', false);
+        const show = !!(multi && _editDongCompletionDraft && _editDongCompletionDraft.entries.length >= 2);
+        if (box) box.hidden = !show;
+        if (mainGroup) mainGroup.hidden = show;
+    }
+    function renderEditDongCompletionDates() {
+        const box = document.getElementById('editDongCompletionDates');
+        const d = _editDongCompletionDraft;
+        if (!box) return;
+        if (!d || d.entries.length < 2) { box.innerHTML = ''; syncEditDongCompletionVisibility(); return; }
+        box.innerHTML = '<label class="form-label">준공일 (동별 · 콘크리트 재령 계산용)</label>'
+            + d.entries.map((e, i) => `<div style="display:flex;align-items:center;gap:0.5rem;margin-top:0.3rem;">
+                <span style="min-width:6rem;font-size:0.85rem;">${escapeHtml(e.label)}</span>
+                <input type="date" class="form-control edit-dong-completion-input" data-idx="${i}" value="${escapeHtml(e.date || '')}" style="max-width:11rem;">
+            </div>`).join('')
+            + '<button type="button" class="btn btn-sm btn-outline" id="btnEditDongCompletionFillAll" style="margin-top:0.4rem;">첫 동 준공일을 모든 동에 적용</button>';
+        box.querySelectorAll('.edit-dong-completion-input').forEach((inp) => {
+            inp.addEventListener('change', () => {
+                const e = d.entries[Number(inp.dataset.idx)];
+                if (e) e.date = inp.value || '';
+            });
+        });
+        box.querySelector('#btnEditDongCompletionFillAll')?.addEventListener('click', () => {
+            const first = (d.entries.find((e) => e.date) || {}).date || '';
+            if (!first) { window.showToast('먼저 동 하나에 준공일을 넣어 주세요.', 'warning'); return; }
+            d.entries.forEach((e) => { e.date = first; });
+            renderEditDongCompletionDates();
+        });
+        syncEditDongCompletionVisibility();
+    }
+    function initEditDongCompletionDates(bldg) {
+        const sibs = getEditDongCompletionSiblings(bldg);
+        _editDongCompletionDraft = {
+            bldgId: bldg && bldg.id,
+            entries: sibs.map((b) => ({ id: b.id, label: formatDongRowLabel(b), date: b.completionDate || '' }))
+        };
+        document.querySelectorAll('input[name="editBuildingSiteLayout"]').forEach((el) => {
+            if (el.dataset.dongCompletionBound) return;
+            el.dataset.dongCompletionBound = '1';
+            el.addEventListener('change', syncEditDongCompletionVisibility);
+        });
+        renderEditDongCompletionDates();
+    }
+    /** 저장: 동별 칸이 보이면 각 동에 준공일을 넣는다. 반환: 이 건물(bldg)에 넣을 준공일(동별 칸이 안 쓰이면 null) */
+    function applyEditDongCompletionDates(bldg) {
+        const d = _editDongCompletionDraft;
+        const box = document.getElementById('editDongCompletionDates');
+        if (!bldg || !d || d.bldgId !== bldg.id || d.entries.length < 2 || !box || box.hidden) return null;
+        let mine = null;
+        d.entries.forEach((e) => {
+            if (e.id === bldg.id) { mine = e.date || ''; return; }
+            const sib = (window.state.buildings || []).find((b) => b && b.id === e.id);
+            if (!sib || (sib.completionDate || '') === (e.date || '')) return;
+            sib.completionDate = e.date || '';
+            markBuildingMetaDirty(sib);
+        });
+        return mine;
     }
 
     function getConcreteStrengthAgeDays(bldg) {
@@ -21646,8 +21809,33 @@ ${roundMobile ? '' : `<button type="button" class="icon-btn icon-btn-trash" titl
         // NDT Drawing File Upload
         const inputNdtDrawing = document.getElementById('inputNdtDrawing');
         if (inputNdtDrawing) {
-            inputNdtDrawing.addEventListener('change', (e) => {
+            inputNdtDrawing.addEventListener('change', async (e) => {
                 const file = e.target.files[0];
+                e.target.value = '';
+                // 2026-11-26 DXF·PDF 전용 도면: 화면은 그림, 원본(DXF는 벡터 PDF로 바꾼 것)도 같이 둬서
+                // 한글 위치도·비파괴 DXF 출력에 도면 선·글자가 벡터로 들어간다(층 도면 DXF와 같은 길)
+                if (file && (/[.](dxf|pdf)$/i.test(file.name || '') || file.type === 'application/pdf')) {
+                    if (typeof window.prepareFloorDrawingUpload !== 'function') {
+                        window.showToast('도면 변환 모듈이 없습니다. 새로고침(Ctrl+F5) 뒤 다시 해 주세요.', 'error');
+                        return;
+                    }
+                    const isDxf = /[.]dxf$/i.test(file.name || '');
+                    if (typeof window.showLoading === 'function') window.showLoading(isDxf ? 'DXF 도면 변환 중...' : 'PDF 도면 변환 중...');
+                    try {
+                        const up = await window.prepareFloorDrawingUpload(file);
+                        if (!up || !up.rasterDataUrl) throw new Error('도면을 그림으로 바꾸지 못했습니다');
+                        const key = `${state.currentBuildingId}_${state.currentFloor}`;
+                        await setNdtCustomDrawing(key, up.rasterDataUrl, up.pdfDataUrl || null);
+                        loadFloorNdtDrawing();
+                        window.showToast(isDxf ? 'NDT 전용 도면(DXF)이 등록되었습니다 — 출력 때 도면이 벡터로 들어갑니다.' : 'NDT 전용 도면(PDF)이 등록되었습니다.', 'success');
+                    } catch (err) {
+                        console.error(err);
+                        window.showToast(`전용 도면 등록 실패: ${(err && (err.bsaUserMessage || err.message)) || err}`, 'error', 6000);
+                    } finally {
+                        if (typeof window.hideLoading === 'function') window.hideLoading();
+                    }
+                    return;
+                }
                 if (file) {
                     const reader = new FileReader();
                     reader.onload = async (event) => {
@@ -28996,7 +29184,7 @@ ${roundMobile ? '' : `<button type="button" class="icon-btn icon-btn-trash" titl
         ctx.restore();
     }
 
-// @@app-part 07-defect-component.js sha=de955fbf0e47 — 원본은 app/07-defect-component.js (여기 말고 거기서 고칠 것)
+// @@app-part 07-defect-component.js sha=d8466eaebac1 — 원본은 app/07-defect-component.js (여기 말고 거기서 고칠 것)
     // --- Dynamic Defect Component(부재 명칭) — 분류별 플랫 프리셋 ---
     // 2026-09-28 접합부는 거더/빔 구분이 필요 없음 — 큰보·작은보 → 보, 철골거더·철골빔 → 철골보
     // 2026-11-04 보(G)·보(B) 다시 넣음(사용자) — 통계 평가 표가 접합부 결함을 맞닿은 부재 줄(큰보·작은보·슬래브…)에 같이 세서
@@ -31304,20 +31492,58 @@ ${roundMobile ? '' : `<button type="button" class="icon-btn icon-btn-trash" titl
         });
     }
 
+    // 2026-11-26 기본 항목을 「삭제」하면 hidden 목록에 넣어 칩에서 숨긴다 (customNdtFinishStates → hiddenNdtFinishStates)
+    function ndtHiddenStateKey(customStateKey) {
+        return String(customStateKey || '').replace(/^custom/, 'hidden');
+    }
+
     function getNdtPickOptions(preset, customStateKey) {
         if (!window.state[customStateKey]) window.state[customStateKey] = [];
+        const hidden = window.state[ndtHiddenStateKey(customStateKey)] || [];
         const customs = window.state[customStateKey].filter(v => v && !preset.includes(v));
-        return preset.concat(customs);
+        return preset.filter(v => !hidden.includes(v)).concat(customs);
     }
 
     function rememberNdtCustomPick(value, preset, customStateKey) {
         const v = String(value || '').trim();
-        if (!v || preset.includes(v)) return;
+        if (!v) return;
+        const hiddenKey = ndtHiddenStateKey(customStateKey);
+        if (preset.includes(v)) {
+            // 숨겼던 기본 항목을 다시 「추가」하면 되살린다
+            const hidden = window.state[hiddenKey];
+            if (Array.isArray(hidden) && hidden.includes(v)) {
+                window.state[hiddenKey] = hidden.filter(x => x !== v);
+                if (typeof saveStateToLocalStorage === 'function') saveStateToLocalStorage();
+            }
+            return;
+        }
         if (!window.state[customStateKey]) window.state[customStateKey] = [];
         if (!window.state[customStateKey].includes(v)) {
             window.state[customStateKey].push(v);
             if (typeof saveStateToLocalStorage === 'function') saveStateToLocalStorage();
         }
+    }
+
+    /** 목록에서 항목 삭제: 직접 추가한 항목은 지우고, 기본 항목은 숨김. 이미 저장된 마킹 값은 그대로 둔다. */
+    function forgetNdtCustomPick(value, preset, customStateKey) {
+        const v = String(value || '').trim();
+        if (!v) return false;
+        let changed = false;
+        const list = window.state[customStateKey];
+        if (Array.isArray(list) && list.includes(v)) {
+            window.state[customStateKey] = list.filter(x => x !== v);
+            changed = true;
+        }
+        if (preset.includes(v)) {
+            const hiddenKey = ndtHiddenStateKey(customStateKey);
+            if (!Array.isArray(window.state[hiddenKey])) window.state[hiddenKey] = [];
+            if (!window.state[hiddenKey].includes(v)) {
+                window.state[hiddenKey].push(v);
+                changed = true;
+            }
+        }
+        if (changed && typeof saveStateToLocalStorage === 'function') saveStateToLocalStorage();
+        return changed;
     }
 
     function refreshNdtComponentPickBar() {
@@ -31368,6 +31594,8 @@ ${roundMobile ? '' : `<button type="button" class="icon-btn icon-btn-trash" titl
                 selectId: 'ndtFinishState',
                 inputId: 'ndtFinishStateInput',
                 addBtnId: 'btnAddNdtFinishState',
+                delBtnId: 'btnDelNdtFinishState',
+                label: '마감상태',
                 preset: NDT_FINISH_STATE_PRESET,
                 customKey: 'customNdtFinishStates',
                 populate: populateNdtFinishStateDropdown,
@@ -31422,6 +31650,27 @@ ${roundMobile ? '' : `<button type="button" class="icon-btn icon-btn-trash" titl
                 addBtn.addEventListener('click', (e) => {
                     e.preventDefault();
                     applyTypedValue(spec, true);
+                });
+            }
+            const delBtn = spec.delBtnId ? document.getElementById(spec.delBtnId) : null;
+            if (delBtn && !delBtn.dataset.ndtPickBound) {
+                delBtn.dataset.ndtPickBound = '1';
+                delBtn.addEventListener('click', (e) => {
+                    e.preventDefault();
+                    const select = document.getElementById(spec.selectId);
+                    const v = getDefectComboValue(select, input);
+                    const toast = (msg, kind) => { if (typeof window.showToast === 'function') window.showToast(msg, kind, 2000); };
+                    if (!v) {
+                        toast(`삭제할 ${spec.label || '항목'}을 칩에서 고르거나 입력칸에 적어 주세요`, 'info');
+                        return;
+                    }
+                    if (!forgetNdtCustomPick(v, spec.preset, spec.customKey)) {
+                        toast(`「${v}」은(는) 목록에 없습니다`, 'info');
+                        return;
+                    }
+                    // 칩·목록에서만 뺀다 — 이 마킹에 들어간 값을 비우지 않으려면 입력칸은 그대로 둔다
+                    spec.refresh();
+                    toast(`「${v}」을(를) ${spec.label || ''} 목록에서 삭제했습니다`, 'success');
                 });
             }
         });
@@ -32157,7 +32406,7 @@ ${roundMobile ? '' : `<button type="button" class="icon-btn icon-btn-trash" titl
         refreshDefectQuickPickBar();
     }
 
-// @@app-part 08-defect-presets.js sha=89f492a91998 — 원본은 app/08-defect-presets.js (여기 말고 거기서 고칠 것)
+// @@app-part 08-defect-presets.js sha=c4d22820ff30 — 원본은 app/08-defect-presets.js (여기 말고 거기서 고칠 것)
     // --- Dynamic Defect Type Presets & Custom Adding ---
     const STEEL_MEMBER_DEFECTS = [
         '상태양호',
@@ -32566,9 +32815,11 @@ ${roundMobile ? '' : `<button type="button" class="icon-btn icon-btn-trash" titl
         if (pos) {
             // 2026-11-16 부재가 「벽체 도장」·「벽체 치장벽돌」처럼 벽체 + 대상이면 대상까지 위치 뒤에
             // (「벽체 도장 창 하부 벽체 들뜸」 → 「창 하부 벽체 도장 들뜸」). 부재 칸은 surveyContentComponentText가 뺀다.
-            const compOut = /^벽체 \S/.test(comp) ? String((typeof memberNameOut === 'function' ? memberNameOut(comp) : comp) || comp).replace(/[\s\u3000]+/g, ' ').trim() : '';
-            const member = /^벽체 \S/.test(compOut) ? compOut : '벽체';
-            const extra = member === '벽체' ? '' : member.slice(3).replace(/[\s\u3000]+/g, '');
+            // 2026-11-26 「조적벽체」·「조적벽체 도장」처럼 「…벽체」 부재도 위치 뒤로(「조적벽체 창 하부 벽체 균열」 → 「창 하부 조적벽체 균열」)
+            const wallRe = /^(?:벽체 \S|[^\s벽]\S*벽체(?: \S.*)?$)/;
+            const compOut = wallRe.test(comp) ? String((typeof memberNameOut === 'function' ? memberNameOut(comp) : comp) || comp).replace(/[\s\u3000]+/g, ' ').trim() : '';
+            const member = wallRe.test(compOut) ? compOut : '벽체';
+            const extra = member.indexOf(' ') < 0 ? '' : member.slice(member.indexOf(' ') + 1).replace(/[\s\u3000]+/g, '');
             const extraRe = extra ? new RegExp('^' + extra.split('').map((ch) => ch.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')).join('[\\s\\u3000]*') + '[\\s\\u3000]*') : null;
             const head = `${pos} ${member}`;
             const ps = parseDefectTypeList(raw);
@@ -43975,7 +44226,7 @@ ${roundMobile ? '' : `<button type="button" class="icon-btn icon-btn-trash" titl
         });
     }
 
-// @@app-part 10-marking.js sha=9d4194995eb4 — 원본은 app/10-marking.js (여기 말고 거기서 고칠 것)
+// @@app-part 10-marking.js sha=aa24d6c77116 — 원본은 app/10-marking.js (여기 말고 거기서 고칠 것)
     // --- 9. BUTTON CONTROLS & LISTENERS ---
 
     // Main Navigation Tabs Click Listener
@@ -46345,6 +46596,8 @@ ${roundMobile ? '' : `<button type="button" class="icon-btn icon-btn-trash" titl
                 cy: by,
                 ext: L.boxExtent(dims.w, dims.h, rot, badge),
                 inkExt: pinDigitsInkExt(label, dims, rot),
+                // 2026-11-26 지시선은 화면처럼 「중요」·균열폭 뺀 박스 모서리에서(둥근·원형은 테두리) — 정리 후 실제 선 교차를 정확히 봄
+                lead: Object.assign(L.boxExtent(dims.w, dims.h, rot, null), { shape: (getDefectPinShapeCfg(rep, styleKey) || {}).shape || 'rect' }),
                 targets,
                 movable: mode === 'all' ? true : !manual,
                 manual
@@ -46455,6 +46708,7 @@ ${roundMobile ? '' : `<button type="button" class="icon-btn icon-btn-trash" titl
                 cx: Number(boxX),
                 cy: Number(boxY),
                 ext: L.boxExtent(box.w, box.h, state.rotationAngle || 0, null),
+                lead: L.boxExtent(box.w, box.h, state.rotationAngle || 0, null),
                 targets: targets || []
             };
             const r = L.placeNewBox(items, item, { bounds: { w: dims.w, h: dims.h }, obstacles: boxAutoLayoutObstacles(), ink: boxAutoLayoutInkMap() });
@@ -47724,7 +47978,7 @@ ${roundMobile ? '' : `<button type="button" class="icon-btn icon-btn-trash" titl
      */
     /**
      * 2026-10-20 같은 층 도면을 크기가 다른 도면으로 바꿨는지(이 기기가 전에 본 크기와 비교) — 바뀌었고 마킹이 있으면
-     * 「새 도면 비율에 맞춰 옮길까요?」를 한 번 묻는다. 지우지 않는다(그대로 두기도 가능).
+     * 「마킹 맞추기를 열까요?」를 한 번 묻는다(2026-11-26부터 비율로 바로 옮기지 않음). 지우지 않는다(그대로 두기도 가능).
      */
     const _drawingSizeAsked = new Set();
     function checkFloorDrawingSizeChange() {
@@ -47738,25 +47992,27 @@ ${roundMobile ? '' : `<button type="button" class="icon-btn icon-btn-trash" titl
         const change = R.noteDims(typeof localStorage !== 'undefined' ? localStorage : null, 'bsa_floor_drawing_dims_v1', key, dims.w, dims.h, sig);
         if (!change || _drawingSizeAsked.has(key)) return;
         _drawingSizeAsked.add(key);
-        const list = (state.defects && state.defects[key]) || [];
-        if (!list.length) return;
-        const sx = change.to.w / change.from.w;
-        const sy = change.to.h / change.from.h;
+        // 2026-11-26 사용자 지적: 도면 크기만 보고 비율로 늘이면, 새 도면 안에서 그림 자리가 옮겨진 경우(테두리·여백이 다름)
+        // 마킹이 어긋난다. 그래서 비율로 바로 옮기지 않고 「마킹 맞추기」(옛·새 도면의 같은 점 2~3곳 또는 테두리 자동)로 보낸다.
+        // 거기서 결함·비파괴·구조 부재·행·열 선을 같은 변환으로 함께 옮긴다.
+        const cnt = typeof window.countFloorAlignableMarkings === 'function' ? window.countFloorAlignableMarkings(key) : null;
+        const total = cnt ? cnt.total : ((state.defects && state.defects[key]) || []).length;
+        if (!total) return;
+        if (typeof window.startDrawingAlign !== 'function') return;
+        const what = cnt
+            ? [cnt.defects ? `마킹 ${cnt.defects}개` : '', cnt.ndt ? `비파괴 ${cnt.ndt}개` : '', cnt.struct ? `구조 부재 ${cnt.struct}개` : ''].filter(Boolean).join(' · ')
+            : `마킹 ${total}개`;
         setTimeout(async () => {
+            if (window.drawingAlignState) return;
             const ok = typeof window.appConfirm === 'function'
-                ? await window.appConfirm(`이 층 도면이 크기가 다른 도면으로 바뀌었습니다 (${change.from.w}×${change.from.h} → ${change.to.w}×${change.to.h}).\n\n기존 마킹 ${list.length}개를 새 도면 비율에 맞춰 옮길까요?\n(취소하면 마킹 위치를 그대로 둡니다 — 필요 없으면 목록에서 선택해 지울 수 있습니다)`)
+                ? await window.appConfirm(`이 층 도면이 크기가 다른 도면으로 바뀌었습니다 (${change.from.w}×${change.from.h} → ${change.to.w}×${change.to.h}).
+
+기존 ${what}가 옛 도면 위치에 있습니다. 「📐 마킹 맞추기」를 열어 옛·새 도면의 같은 점(기둥 모서리 등)을 찍어 맞출까요?
+(도면 크기 비율만으로는 그림 자리가 옮겨진 경우 어긋나서, 기준점으로 맞춥니다. 취소하면 위치를 그대로 둡니다)`)
                 : false;
             if (!ok) return;
             if (`${state.currentBuildingId}_${state.currentFloor}` !== key) return;
-            if (typeof pushDefectHistory === 'function') pushDefectHistory([key]);
-            (state.defects[key] || []).forEach((d) => {
-                if (R.scaleDefect(d, sx, sy) && typeof touchDefectPositionUpdatedAt === 'function') touchDefectPositionUpdatedAt(d);
-            });
-            if (typeof markFloorKeyDirty === 'function') markFloorKeyDirty(key);
-            if (typeof saveStateToLocalStorage === 'function') saveStateToLocalStorage();
-            if (typeof drawCanvas === 'function') drawCanvas();
-            if (typeof renderDefectListPanel === 'function') renderDefectListPanel();
-            if (typeof window.showToast === 'function') window.showToast('마킹을 새 도면 비율에 맞췄습니다. (되돌리기로 취소 가능)', 'success', 4000);
+            window.startDrawingAlign().catch((e) => console.error('[마킹 맞추기] 시작 실패', e));
         }, 300);
     }
 
@@ -48650,7 +48906,7 @@ ${roundMobile ? '' : `<button type="button" class="icon-btn icon-btn-trash" titl
         });
     }
 
-// @@app-part 11-cad-import.js sha=79279812e348 — 원본은 app/11-cad-import.js (여기 말고 거기서 고칠 것)
+// @@app-part 11-cad-import.js sha=177b303e0089 — 원본은 app/11-cad-import.js (여기 말고 거기서 고칠 것)
     // --- 9-1. CAD Defect Pins 2-Point Calibration Engine (v2.0) ---
     window.cadCalibrationState = null;
 
@@ -50099,8 +50355,50 @@ ${roundMobile ? '' : `<button type="button" class="icon-btn icon-btn-trash" titl
         const defects = ((state.defects && state.defects[floorKey]) || []).filter(has).length;
         const ndt = ((state.ndtData && state.ndtData[floorKey]) || []).filter(has).length
             + ((state.ndtDisplacementGroups && state.ndtDisplacementGroups[floorKey]) || []).filter(has).length;
-        return { defects, ndt, total: defects + ndt };
+        const SM = window.BSA && window.BSA.structMembers;
+        const struct = SM ? SM.listFor(state, floorKey).length + (SM.overlayFor(state, floorKey) ? 1 : 0) : 0;
+        return { defects, ndt, struct, total: defects + ndt + struct };
     }
+
+    /**
+     * 2026-11-26 구조 부재(기둥·거더·빔·통심선)·구조도 그림, 비파괴 마킹을 결함과 같은 변환 T로 옮긴다.
+     * 「마킹 맞추기」 확정과 「새 도면 비율에 맞춰 옮길까요?」 둘 다 쓴다. → { struct, ndt } 옮긴 개수
+     */
+    function moveFloorExtrasByTransform(floorKey, T, opts) {
+        const o = opts || {};
+        const MA = window.BSA && window.BSA.markingAlign;
+        const out = { struct: 0, ndt: 0 };
+        if (!MA || !T || !floorKey) return out;
+        if (o.ndt) {
+            ((state.ndtData && state.ndtData[floorKey]) || []).forEach((it) => {
+                if (!it || !MA.hasPosition(it)) return;
+                MA.transformNdtItem(it, T);
+                if (typeof touchNdtUpdatedAt === 'function') touchNdtUpdatedAt(it);
+                else it.updatedAt = Date.now();
+                out.ndt++;
+            });
+            ((state.ndtDisplacementGroups && state.ndtDisplacementGroups[floorKey]) || []).forEach((g) => {
+                if (!g || !MA.hasPosition(g)) return;
+                MA.transformDispGroup(g, T);
+                if (typeof touchNdtDispGroup === 'function') touchNdtDispGroup(g);
+                else g.updatedAt = Date.now();
+                out.ndt++;
+            });
+        }
+        const SM = window.BSA && window.BSA.structMembers;
+        if (o.struct && SM) {
+            const now = Date.now();
+            SM.listFor(state, floorKey).slice().forEach((m) => {
+                const p = MA.transformStructMember(m, T);
+                if (p && SM.update(state, floorKey, m.id, p, now)) out.struct++;
+            });
+            const ov = SM.overlayFor(state, floorKey);
+            const fit = ov && MA.composeOverlayFit(ov.fit, T);
+            if (fit && SM.setOverlay(state, floorKey, Object.assign({}, ov, { fit }), now)) out.struct++;
+        }
+        return out;
+    }
+    window.moveFloorExtrasByTransform = moveFloorExtrasByTransform;
 
     /** 비파괴 탭에 따로 넣은 도면이 있으면 비파괴 마킹은 그 도면 좌표 — 층 도면을 바꿔도 옮기지 않는다 */
     function floorNdtUsesOwnDrawing(floorKey) {
@@ -50428,6 +50726,8 @@ ${roundMobile ? '' : `<button type="button" class="icon-btn icon-btn-trash" titl
             snapLines: true,
             moveNdt: cnt.ndt > 0 && !floorNdtUsesOwnDrawing(floorKey),
             moveGrid: drawingAlignGridLineCount() > 0,
+            moveStruct: cnt.struct > 0,
+            structCount: cnt.struct,
             gridCount: drawingAlignGridLineCount(),
             ndtCount: cnt.ndt,
             defectCount: cnt.defects,
@@ -50601,6 +50901,13 @@ ${roundMobile ? '' : `<button type="button" class="icon-btn icon-btn-trash" titl
         });
     }
 
+    /** 구조 부재 화면(SVG)이 미리보기 때 부재를 옮겨 그리도록 변환을 준다(자료는 확정 때만 바뀜) */
+    window.drawingAlignStructPreviewT = function (floorKey) {
+        const st = window.drawingAlignState;
+        if (!st || !st.T || !st.moveStruct || st.floorKey !== floorKey || floorKey !== drawingAlignFloorKey()) return null;
+        return st.T;
+    };
+
     /** 새 도면 바로 위(마킹 아래)에 옛 도면을 빨갛게 — 미리보기 때는 옮긴 자리에 */
     function drawDrawingAlignGhost(ctx) {
         refreshDrawingAlignBadge();
@@ -50697,6 +51004,9 @@ ${roundMobile ? '' : `<button type="button" class="icon-btn icon-btn-trash" titl
         const gridCtl = st.gridCount > 0
             ? `<label class="dab-chk" title="행·열 선(구역 포함)도 마킹과 같은 비율로 옮깁니다 — 행·열 위치가 그대로 유지됩니다"><input type="checkbox" id="dabGrid"${st.moveGrid ? ' checked' : ''}> 행·열 선도</label>`
             : '';
+        const structCtl = st.structCount > 0
+            ? `<label class="dab-chk" title="구조 부재(기둥·거더·빔·통심선)와 구조도 그림도 마킹과 같은 비율로 옮깁니다"><input type="checkbox" id="dabStruct"${st.moveStruct ? ' checked' : ''}> 구조 부재 ${st.structCount}개도</label>`
+            : '';
         const modeCtl = '<span class="dab-seg" role="group" aria-label="기준점 수">'
             + B('dabMode2', '2점', st.pointCount === 2 ? 'dab-seg-on' : '', '이동·배율·회전 — 1.5° 미만 기울기는 버림')
             + B('dabMode3', '3점', st.pointCount === 3 ? 'dab-seg-on' : '', '돌아간 도면용 — 작은 회전·가로세로 배율 차이·뒤집힘까지 맞춤(세 점이 삼각형이 되게)')
@@ -50708,13 +51018,13 @@ ${roundMobile ? '' : `<button type="button" class="icon-btn icon-btn-trash" titl
                 + `<span class="dab-sep"></span>${ghostCtl}${snapCtl}`
                 + `<span class="dab-sep"></span>${st.step > 0 ? B('dabRestart', '다시 찍기') : ''}${B('dabCancel', '취소', 'dab-cancel')}`;
         } else {
-            const okLabel = `✅ 확정 (결함 ${st.defectCount}개${st.moveNdt && st.ndtCount ? ` + 비파괴 ${st.ndtCount}개` : ''})`;
+            const okLabel = `✅ 확정 (결함 ${st.defectCount}개${st.moveNdt && st.ndtCount ? ` + 비파괴 ${st.ndtCount}개` : ''}${st.moveStruct && st.structCount ? ` + 구조 부재 ${st.structCount}개` : ''})`;
             body = `<span class="dab-step"><b>미리보기(${st.pointCount}점)</b> ${drawingAlignInfoText(st)} — 마킹이 새 도면 자리에 맞으면 확정</span>`
                 + '<span class="dab-sep"></span><span class="dab-note">미세 조정</span>'
                 + B('dabL', '⬅', 'dab-sm', '왼쪽으로') + B('dabU', '⬆', 'dab-sm', '위로') + B('dabD', '⬇', 'dab-sm', '아래로') + B('dabR', '➡', 'dab-sm', '오른쪽으로')
                 + B('dabSUp', '➕', 'dab-sm', '조금 크게(0.2%)') + B('dabSDown', '➖', 'dab-sm', '조금 작게(0.2%)')
                 + B('dabRotL', '⟲', 'dab-sm', '반시계로 조금 돌리기(0.1°)') + B('dabRotR', '⟳', 'dab-sm', '시계로 조금 돌리기(0.1°)')
-                + `<span class="dab-sep"></span>${ghostCtl}${ndtCtl}${gridCtl}`
+                + `<span class="dab-sep"></span>${ghostCtl}${ndtCtl}${structCtl}${gridCtl}`
                 + '<span class="dab-sep"></span>'
                 + B('dabConfirm', okLabel, 'dab-ok') + B('dabRestart', '다시 찍기') + B('dabCancel', '취소', 'dab-cancel');
         }
@@ -50730,6 +51040,7 @@ ${roundMobile ? '' : `<button type="button" class="icon-btn icon-btn-trash" titl
         on('dabSnap', 'change', (e) => { st.snapLines = !!e.target.checked; });
         on('dabNdt', 'change', (e) => { st.moveNdt = !!e.target.checked; renderDrawingAlignBar(); });
         on('dabGrid', 'change', (e) => { st.moveGrid = !!e.target.checked; });
+        on('dabStruct', 'change', (e) => { st.moveStruct = !!e.target.checked; renderDrawingAlignBar(); drawCanvas(); });
         const nudge = (dxPx, dyPx) => {
             const sc = Math.max(state.view.scale || 1, 0.01);
             st.adj.dx += dxPx / sc; st.adj.dy += dyPx / sc;
@@ -50768,29 +51079,15 @@ ${roundMobile ? '' : `<button type="button" class="icon-btn icon-btn-trash" titl
         if (window.drawingAlignState !== st) return; // 기다리는 동안 취소됨
         if (typeof pushDefectHistory === 'function') pushDefectHistory();
 
-        let nDef = 0, nNdt = 0;
+        let nDef = 0;
         ((state.defects && state.defects[floorKey]) || []).forEach((d) => {
             if (!d || !MA.hasPosition(d)) return;
             MA.transformDefect(d, T);
             if (typeof touchDefectPositionUpdatedAt === 'function') touchDefectPositionUpdatedAt(d);
             nDef++;
         });
-        if (moveNdt) {
-            ((state.ndtData && state.ndtData[floorKey]) || []).forEach((it) => {
-                if (!it || !MA.hasPosition(it)) return;
-                MA.transformNdtItem(it, T);
-                if (typeof touchNdtUpdatedAt === 'function') touchNdtUpdatedAt(it);
-                else it.updatedAt = Date.now();
-                nNdt++;
-            });
-            ((state.ndtDisplacementGroups && state.ndtDisplacementGroups[floorKey]) || []).forEach((g) => {
-                if (!g || !MA.hasPosition(g)) return;
-                MA.transformDispGroup(g, T);
-                if (typeof touchNdtDispGroup === 'function') touchNdtDispGroup(g);
-                else g.updatedAt = Date.now();
-                nNdt++;
-            });
-        }
+        const extra = moveFloorExtrasByTransform(floorKey, T, { ndt: moveNdt, struct: st.moveStruct });
+        const nNdt = extra.ndt, nStruct = extra.struct;
         // 행·열 선도 같은 변환으로 — 마킹만 옮기면 선과 어긋나 행·열 위치가 틀어진다
         let gridMoved = false;
         if (st.moveGrid) {
@@ -50807,6 +51104,7 @@ ${roundMobile ? '' : `<button type="button" class="icon-btn icon-btn-trash" titl
         if (typeof markFloorKeyDirty === 'function') markFloorKeyDirty(floorKey);
         if (typeof discardStalePendingRemoteAfterLocalPinEdit === 'function') discardStalePendingRemoteAfterLocalPinEdit();
         saveStateToLocalStorage();
+        if (nStruct && typeof scheduleSyncToFirebase === 'function') scheduleSyncToFirebase();
         if (typeof recordAfterBulkOp === 'function') recordAfterBulkOp(snaps);
 
         await drawingAlignDbOp('delete', floorKey);
@@ -50815,10 +51113,13 @@ ${roundMobile ? '' : `<button type="button" class="icon-btn icon-btn-trash" titl
         endDrawingAlign();
         if (typeof renderDefectListPanel === 'function') renderDefectListPanel();
         if (typeof drawNdtCanvas === 'function' && state.currentTab === 'tab-ndt') drawNdtCanvas();
-        let msg = `마킹 위치를 새 도면에 맞췄습니다 — 결함 ${nDef}개${nNdt ? ` · 비파괴 ${nNdt}개` : ''} ${gridMoved ? ' · 행·열 선' : ''} (${info}). 결함 위치는 되돌리기(Ctrl+Z)로 되돌릴 수 있습니다.`;
+        let msg = `마킹 위치를 새 도면에 맞췄습니다 — 결함 ${nDef}개${nNdt ? ` · 비파괴 ${nNdt}개` : ''}${nStruct ? ` · 구조 부재 ${nStruct}개` : ''}${gridMoved ? ' · 행·열 선' : ''} (${info}). 결함 위치는 되돌리기(Ctrl+Z)로 되돌릴 수 있습니다.`;
         if (T.scale < 0.6 || T.scale > 1.6) msg += ' 핀이 도면에 비해 크거나 작아 보이면 「크기」에서 조절하세요.';
         window.showToast?.(msg, 'success', 8000);
     }
+
+    window.startDrawingAlign = startDrawingAlign;
+    window.countFloorAlignableMarkings = countFloorAlignableMarkings;
 
     const btnAlignMarkingsToDrawing = document.getElementById('btnAlignMarkingsToDrawing');
     if (btnAlignMarkingsToDrawing) {
@@ -50832,7 +51133,7 @@ ${roundMobile ? '' : `<button type="button" class="icon-btn icon-btn-trash" titl
             endDrawingAlign();
         }
     }, true);
-// @@app-part 12-survey-table.js sha=b78ad01e6ead — 원본은 app/12-survey-table.js (여기 말고 거기서 고칠 것)
+// @@app-part 12-survey-table.js sha=300c1f58e5a1 — 원본은 app/12-survey-table.js (여기 말고 거기서 고칠 것)
     // --- 10. SURVEY TABLE & ALBUM RENDERING ---
 
     // 상태조사표 컬럼 기본 정의 (화면/PDF/엑셀 공통). size와 crackWidth/crackLength는 상호 배타적으로
@@ -51456,7 +51757,7 @@ ${roundMobile ? '' : `<button type="button" class="icon-btn icon-btn-trash" titl
         const t = String(getSurveyCellText('defectType', d, ctx) || '').trim();
         // 2026-11-16 「벽체 도장」처럼 벽체 + 대상인 부재도 결함 내용이 「창 하부 벽체 도장 …」으로 시작하면 빼기
         const c = String(comp || '').replace(/[\s\u3000]+/g, ' ').trim();
-        if (/^벽체(?: \S.*)?$/.test(c)) {
+        if (/^\S*벽체(?: \S.*)?$/.test(c)) { // 2026-11-26 「조적벽체」 등 …벽체도
             const esc = c.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
             if (new RegExp('^(?:개구부|창|문) (?:상부|하부|측면)(?:·(?:(?:개구부|창|문) )?(?:상부|하부|측면))* ' + esc + '(?:\\s|,|$)').test(t)) return '';
         }
@@ -55461,7 +55762,7 @@ ${roundMobile ? '' : `<button type="button" class="icon-btn icon-btn-trash" titl
      * (drawPin·drawNdtPin·drawNdtDisplacementGroup)를 그대로 돌린다.
      * mode 'report': 한글 종이(1800×2540, 출력 범위면 그 크기)·같은 돌림/자르기 — 바탕 도면 포함
      * mode 'image' : 그림 픽셀 좌표 그대로, 바탕 없이 마킹만(DXF 용 — 원본 도면은 DXF 쪽이 따로 넣는다)
-     * DXF 로 올린 층(전용 비파괴 도면이 아닐 때)은 바탕을 캐드 선·글자 벡터로, 그 밖은 그림으로.
+     * DXF 로 올린 층·DXF 로 올린 비파괴 전용 도면은 바탕을 캐드 선·글자 벡터로, 그 밖은 그림으로.
      * 반환 { ops, w, h, imgW, imgH, img, model, custom, count } | null
      */
     async function recordNdtFloorMap(floorCode, categoryFilter, mode) {
@@ -55488,6 +55789,9 @@ ${roundMobile ? '' : `<button type="button" class="icon-btn icon-btn-trash" titl
         let model = null;
         if (!customSrc && typeof window.getFloorDxfDrawingModel === 'function') {
             try { model = await window.getFloorDxfDrawingModel(bldg, floorCode, bId); } catch (_e) { model = null; }
+        } else if (customSrc && typeof window.getNdtCustomDxfModel === 'function') {
+            // 2026-11-26 DXF로 올린 비파괴 전용 도면도 바탕을 캐드 선·글자 벡터로
+            try { model = await window.getNdtCustomDxfModel(key); } catch (_e) { model = null; }
         }
         // 'image'(비파괴 DXF)는 화면 글꼴 그대로, 그 밖(한글 위치도 SVG)은 SVG 글꼴로 글자 폭을 잰다
         const measureCtx = mode === 'image'
@@ -66456,7 +66760,7 @@ ${roundMobile ? '' : `<button type="button" class="icon-btn icon-btn-trash" titl
         btnDownloadImportTemplate.addEventListener('click', window.downloadImportDefectExcelTemplate);
     }
 
-// @@app-part 15-firebase-sync.js sha=ec39b90fe4ed — 원본은 app/15-firebase-sync.js (여기 말고 거기서 고칠 것)
+// @@app-part 15-firebase-sync.js sha=09f8829e0327 — 원본은 app/15-firebase-sync.js (여기 말고 거기서 고칠 것)
     // ==========================================================================
     // 🌐 FIREBASE REALTIME SYNC ENGINE (구글 파이어베이스 실시간 1초 동기화)
     // ==========================================================================
@@ -67909,8 +68213,12 @@ ${roundMobile ? '' : `<button type="button" class="icon-btn icon-btn-trash" titl
         deleteCloudPhoto(id).catch((e) => console.warn('NDT 전용 도면 클라우드 정리 실패:', id, e));
     }
 
-    /** dataUrl이 없으면 전용 도면을 뺀다(층 도면을 쓴다) */
-    async function setNdtCustomDrawing(floorKey, dataUrl) {
+    /**
+     * dataUrl이 없으면 전용 도면을 뺀다(층 도면을 쓴다).
+     * 2026-11-26 pdfDataUrl: DXF·PDF로 올린 전용 도면의 원본(DXF는 벡터 PDF로 바꾼 것) — 화면은 dataUrl 그림,
+     * 한글 위치도·비파괴 DXF 출력은 이 원본으로 도면 선·글자를 벡터로 넣는다. 참조 { id, at, pdfId }
+     */
+    async function setNdtCustomDrawing(floorKey, dataUrl, pdfDataUrl) {
         if (!floorKey) return;
         if (!window.state.ndtDrawingRefs) window.state.ndtDrawingRefs = {};
         const oldRef = ndtDrawingRefFor(floorKey);
@@ -67923,7 +68231,8 @@ ${roundMobile ? '' : `<button type="button" class="icon-btn icon-btn-trash" titl
             delete state.ndtImages[floorKey];
             delete _ndtImageLoadedId[floorKey];
         }
-        window.state.ndtDrawingRefs[floorKey] = { id, at: Date.now() };
+        const pdfId = (dataUrl && pdfDataUrl) ? `${id}_pdf` : '';
+        window.state.ndtDrawingRefs[floorKey] = pdfId ? { id, at: Date.now(), pdfId } : { id, at: Date.now() };
         markFloorKeyDirty(floorKey);
         saveStateToLocalStorage();
         if (dataUrl) {
@@ -67932,8 +68241,50 @@ ${roundMobile ? '' : `<button type="button" class="icon-btn icon-btn-trash" titl
             await persistPhotoUrlToIdb(id, dataUrl);
             persistPhotoToCloud(id, dataUrl).catch((e) => console.warn('NDT 전용 도면 업로드 실패:', id, e));
         }
+        if (pdfId) {
+            window._photoCache[pdfId] = pdfDataUrl;
+            await persistPhotoUrlToIdb(pdfId, pdfDataUrl);
+            persistPhotoToCloud(pdfId, pdfDataUrl).catch((e) => console.warn('NDT 전용 도면 원본 업로드 실패:', pdfId, e));
+        }
         if (oldRef && oldRef.id && oldRef.id !== id) releaseNdtDrawingImage(oldRef.id);
+        if (oldRef && oldRef.pdfId && oldRef.pdfId !== pdfId) releaseNdtDrawingImage(oldRef.pdfId);
     }
+
+    /** 전용 도면의 원본 PDF(dataURL). DXF·PDF로 올리지 않았거나 못 받으면 null */
+    async function loadNdtCustomDrawingPdf(floorKey) {
+        const ref = ndtDrawingRefFor(floorKey);
+        if (!ref || !ref.id || !ref.pdfId) return null;
+        let url = await loadNdtDrawingDataUrl(ref.pdfId);
+        if (typeof url !== 'string' || !url) return null;
+        if (url.indexOf('data:') !== 0) {
+            try {
+                const blob = await (await fetch(url)).blob();
+                url = await new Promise((resolve, reject) => {
+                    const r = new FileReader();
+                    r.onload = () => resolve(r.result);
+                    r.onerror = () => reject(r.error);
+                    r.readAsDataURL(blob);
+                });
+                if (!window._photoCache) window._photoCache = {};
+                window._photoCache[ref.pdfId] = url;
+            } catch (e) {
+                console.warn('NDT 전용 도면 원본 받기 실패:', ref.pdfId, e);
+                return null;
+            }
+        }
+        return url.slice(0, 24).toLowerCase().indexOf('data:application/pdf') === 0 ? url : null;
+    }
+    window.loadNdtCustomDrawingPdf = loadNdtCustomDrawingPdf;
+
+    /** 전용 도면이 DXF로 올린 것이면 그 캐드 선·글자 모델(js/core/dxf-view.js), 아니면 null */
+    async function getNdtCustomDxfModel(floorKey) {
+        const view = window.BSA && window.BSA.dxfView;
+        if (!view || typeof view.ensureModel !== 'function') return null;
+        const pdf = await loadNdtCustomDrawingPdf(floorKey);
+        if (!pdf) return null;
+        try { return await view.ensureModel(`ndt_${floorKey}`, pdf); } catch (_e) { return null; }
+    }
+    window.getNdtCustomDxfModel = getNdtCustomDxfModel;
 
     async function loadNdtDrawingDataUrl(id) {
         if (!id) return null;
@@ -68001,6 +68352,7 @@ ${roundMobile ? '' : `<button type="button" class="icon-btn icon-btn-trash" titl
         if (!window.state.ndtDrawingRefs) window.state.ndtDrawingRefs = {};
         const changed = !local || local.id !== String(remote.id || '');
         window.state.ndtDrawingRefs[floorKey] = { id: String(remote.id || ''), at: Number(remote.at) || 0 };
+        if (remote.id && remote.pdfId) window.state.ndtDrawingRefs[floorKey].pdfId = String(remote.pdfId);
         if (!changed) return;
         if (state.ndtImages) delete state.ndtImages[floorKey];
         delete _ndtImageLoadedId[floorKey];
@@ -72409,7 +72761,7 @@ ${roundMobile ? '' : `<button type="button" class="icon-btn icon-btn-trash" titl
         }
     };
 
-// @@app-part 16-backup-auth-init.js sha=ffcffad721f7 — 원본은 app/16-backup-auth-init.js (여기 말고 거기서 고칠 것)
+// @@app-part 16-backup-auth-init.js sha=230c5145734a — 원본은 app/16-backup-auth-init.js (여기 말고 거기서 고칠 것)
     // ==========================================================================
     // 건물 백업(체크포인트) — 2026-09-27
     // safety_app/{회사}/buildingCheckpoints/{id}          요약 + 이 백업이 쓰는 사진 id(photoIds)
@@ -75083,6 +75435,7 @@ ${roundMobile ? '' : `<button type="button" class="icon-btn icon-btn-trash" titl
                 if (!k.startsWith(prefix)) return;
                 const ref = refs[k];
                 if (ref && ref.id) pushJob(ref.id, null, k);
+                if (ref && ref.id && ref.pdfId) pushJob(ref.pdfId, null, k); // DXF·PDF 원본
             });
         }
         const seen = new Set();

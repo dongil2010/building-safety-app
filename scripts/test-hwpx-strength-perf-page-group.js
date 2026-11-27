@@ -34,8 +34,11 @@ const ctx = {};
 vm.createContext(ctx);
 vm.runInContext(extractFunction('function getStrengthPerfPerPage(') + '\nthis.f = getStrengthPerfPerPage;', ctx);
 const BODY = 83340 - 5669 - 4252 - 4331 - 4252; // 템플릿 쪽 본문 높이
-assert.strictEqual(ctx.f(BODY, 42520, 2200, 620, 24), 5, 'A4 본문에 성과표 NO. 5개');
-assert.ok(5 * (42520 * 620 / 2200) + 4 * (42520 * 24 / 2200) <= BODY - 1500, '5개가 실제로 한 쪽에 들어가야 한다');
+// 2026-11-26 사용자 요청: 한 쪽에 12개 — NO. 한 칸 2200×250, 사이 24
+assert.strictEqual(ctx.f(BODY, 42520, 2200, 250, 24), 12, 'A4 본문에 성과표 NO. 12개');
+assert.ok(12 * (42520 * 250 / 2200) + 11 * (42520 * 24 / 2200) <= BODY - 1500, '12개가 실제로 한 쪽에 들어가야 한다');
+assert.ok(/function renderStrengthPerfPointCanvas\([^)]*\) \{\s*const W = 2200, H = 250;/.test(app), '성과표 NO. 한 칸은 2200×250');
+assert.strictEqual((app.match(/const PERF_GAP_PX = 24;/g) || []).length, 2, '두 출력 경로 모두 사이 24');
 assert.strictEqual(ctx.f(20000, 42520, 2200, 620, 24), 1, '한 개도 안 들어가도 최소 1개');
 assert.strictEqual(ctx.f(0, 42520, 2200, 620, 24), 1);
 

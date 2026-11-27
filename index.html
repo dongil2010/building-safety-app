@@ -188,7 +188,7 @@
                 <i class="fa-solid fa-file-image"></i>
                 <span class="header-ndt-draw-label-long">NDT 전용 도면</span>
                 <span class="header-ndt-draw-label-short">NDT 도면</span>
-                <input type="file" id="inputNdtDrawing" accept="image/*" style="display: none;">
+                <input type="file" id="inputNdtDrawing" accept="image/*,application/pdf,.pdf,.dxf" style="display: none;">
             </label>
             <button type="button" id="btnNdtSyncFloorDrawing" class="btn btn-sm btn-outline header-ndt-draw-btn" title="층별 원본 도면 연동">
                 <i class="fa-solid fa-rotate"></i>
@@ -2296,6 +2296,7 @@
                             <div class="defect-cause-custom-row ndt-pick-direct-row">
                                 <input type="text" id="ndtFinishStateInput" class="form-control defect-quick-direct-input ndt-quick-direct-input" placeholder="마감상태 직접 입력 → 추가" autocomplete="off">
                                 <button type="button" id="btnAddNdtFinishState" class="btn btn-sm btn-outline defect-cause-add-btn" title="입력한 마감상태 추가">추가</button>
+                                <button type="button" id="btnDelNdtFinishState" class="btn btn-sm btn-outline defect-cause-add-btn ndt-pick-del-btn" title="입력칸의 마감상태를 목록에서 삭제">삭제</button>
                             </div>
                             <div class="defect-quick-chip-grid dqg-finish ndt-quick-chip-grid" id="ndtFinishStateChips"></div>
                         </div>
@@ -3150,6 +3151,8 @@
                             <input type="date" id="inputEditBuildingCompletionDate" class="form-control" title="콘크리트 재령 계산용">
                         </div>
                     </div>
+                    <!-- 2026-11-26 여러 동 현장: 동마다 준공일(비파괴 재령 계산용) -->
+                    <div id="editDongCompletionDates" class="form-group" hidden></div>
                 </section>
 
                 <section class="add-building-section edit-only-info">

@@ -209,6 +209,47 @@
         mapPointList(T, g.points);
     }
 
+    /**
+     * 구조 부재 기호 하나(2026-11-26) — { x, y(가운데), w(가로·막대 길이), h(세로·두께), ang?(도) }.
+     * 가운데를 옮기고, 부재의 가로축·세로축을 T로 보내 길이·두께·각도를 구한다.
+     * 90°·180° 근처로 돌면 ang 없이 가로·세로를 바꿔 둔다(곧은 기둥·보가 비스듬한 막대로 바뀌지 않게).
+     * 제자리에서 바꾸지 않고 바뀐 값 { x, y, w, h, ang } 을 돌려준다(저장은 BSA.structMembers.update로).
+     */
+    function transformStructMember(m, T) {
+        if (!m || !T || !isNum(Number(m.x)) || !isNum(Number(m.y))) return null;
+        var c = applyPoint(T, Number(m.x), Number(m.y));
+        var th = (Number(m.ang) || 0) * Math.PI / 180;
+        var tc = mC(T), td = mD(T);
+        var ux = T.a * Math.cos(th) + tc * Math.sin(th), uy = T.b * Math.cos(th) + td * Math.sin(th);
+        var vx = -T.a * Math.sin(th) + tc * Math.cos(th), vy = -T.b * Math.sin(th) + td * Math.cos(th);
+        var w = Number(m.w) * Math.hypot(ux, uy), h = Number(m.h) * Math.hypot(vx, vy);
+        var ang = Math.atan2(uy, ux) * 180 / Math.PI;
+        var q = Math.round(ang / 90);
+        if (Math.abs(ang - q * 90) < 0.05) {
+            if (Math.abs(q) % 2 === 1) { var t = w; w = h; h = t; }
+            ang = 0;
+        } else {
+            ang = ((ang % 180) + 270) % 180 - 90;   // 막대는 앞뒤가 같다 → -90~90
+        }
+        return { x: round2(c.x), y: round2(c.y), w: round2(w), h: round2(h), ang: round2(ang) };
+    }
+
+    /**
+     * 구조도 그림 맞춤(fit: X = a·x − b·y + tx, Y = b·x + a·y + ty)에 T를 이어 붙인다 → 새 fit.
+     * fit은 닮음 변환만 담으므로 3점 변환(가로세로 배율 차이)은 가로축 기준으로 근사한다.
+     */
+    function composeOverlayFit(fit, T) {
+        if (!fit || !T || ![fit.a, fit.b, fit.tx, fit.ty].every(function (v) { return isNum(Number(v)); })) return null;
+        var fa = Number(fit.a), fb = Number(fit.b);
+        var tc = mC(T), td = mD(T);
+        // 열1 = M·(a, b), 열2 = M·(−b, a) → 닮음꼴 (A, B)는 두 열의 평균
+        var A1 = T.a * fa + tc * fb, B1 = T.b * fa + td * fb;
+        var A2 = -T.b * fb + td * fa, B2 = T.a * fb - tc * fa;   // 열2 = (−B, A) → B = −열2.x, A = 열2.y
+        var p = applyPoint(T, Number(fit.tx), Number(fit.ty));
+        var A = (A1 + A2) / 2, B = (B1 + B2) / 2;
+        return { a: A, b: B, tx: p.x, ty: p.y };
+    }
+
     var POS_KEYS = ['x', 'y', 'targetX', 'targetY', 'boxX', 'boxY', 'areaX1', 'areaY1', 'areaX2', 'areaY2', 'areaAngle'];
     var POS_LIST_KEYS = ['areaPoints', 'areaDrawings', 'points'];
 
@@ -312,6 +353,8 @@
         transformDefect: transformDefect,
         transformNdtItem: transformNdtItem,
         transformDispGroup: transformDispGroup,
+        transformStructMember: transformStructMember,
+        composeOverlayFit: composeOverlayFit,
         snapshotPositions: snapshotPositions,
         restorePositions: restorePositions,
         hasPosition: hasPosition,

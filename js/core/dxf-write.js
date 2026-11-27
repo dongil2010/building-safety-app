@@ -168,6 +168,33 @@
         return { x1: x1 + t0 * dx, y1: y1 + t0 * dy, x2: x1 + t1 * dx, y2: y1 + t1 * dy };
     }
 
+    /** 선분을 닫힌 다각형 안쪽 조각들로 자르기(짝홀 규칙). 오목 다각형도 여러 조각으로 나옴 */
+    function clipLineToPolygon(x1, y1, x2, y2, poly) {
+        var dx = x2 - x1, dy = y2 - y1;
+        var ts = [];
+        var n = poly.length;
+        for (var i = 0; i < n; i++) {
+            var a = poly[i], b = poly[(i + 1) % n];
+            var ex = b.x - a.x, ey = b.y - a.y;
+            var den = dx * ey - dy * ex;
+            if (Math.abs(den) < 1e-12) continue; // 평행
+            var wx = a.x - x1, wy = a.y - y1;
+            var t = (wx * ey - wy * ex) / den;
+            var u = (wx * dy - wy * dx) / den;
+            // 꼭짓점을 두 번 세지 않게 변의 한쪽 끝만 포함 [0,1)
+            if (u < 0 || u >= 1) continue;
+            ts.push(t);
+        }
+        ts.sort(function (p, q) { return p - q; });
+        var out = [];
+        for (var k = 0; k + 1 < ts.length; k += 2) {
+            var t0 = Math.max(0, ts[k]), t1 = Math.min(1, ts[k + 1]);
+            if (t1 - t0 <= 1e-9) continue;
+            out.push({ x1: x1 + t0 * dx, y1: y1 + t0 * dy, x2: x1 + t1 * dx, y2: y1 + t1 * dy });
+        }
+        return out;
+    }
+
     /* ---------- 본체 ---------- */
 
     function buildMarkingDxf(opts) {
@@ -369,8 +396,10 @@
             var fillStyle = area.fillStyle === 'hatch' || area.fillStyle === 'none' ? area.fillStyle : 'solid';
             var dashed = area.borderStyle === 'dashed';
 
-            // 빗금: 바깥 사각형 안에 45도 선(벡터 PDF와 같음). 솔리드 채우기는 바깥선만
+            // 빗금: 45도 선을 영역 바깥선(다각형) 안쪽으로만 자름 — 사각형으로만 자르면 오목한 다각형 밖으로 삐져나옴.
+            // 솔리드 채우기는 바깥선만
             if (!isLine && fillStyle === 'hatch') {
+                var clipPoly = outline.filter(function (p) { return finite(p.x, p.y); });
                 var minX = Infinity, maxX = -Infinity, minY = Infinity, maxY = -Infinity;
                 outline.forEach(function (p) {
                     if (!finite(p.x, p.y)) return;
@@ -382,9 +411,12 @@
                     var step = 9;
                     while ((rw + 2 * rh) / step > 1500) step *= 2; // 선이 너무 많아지지 않게
                     for (var i = -rh; i <= rw + rh; i += step) {
-                        var seg = clipLineToRect(minX + i, minY, minX + i + rh, maxY, minX, minY, maxX, maxY);
-                        if (!seg) continue;
-                        addLine('BSA_AREA', aci, W(seg.x1, seg.y1), W(seg.x2, seg.y2));
+                        var segs = clipPoly.length >= 3
+                            ? clipLineToPolygon(minX + i, minY, minX + i + rh, maxY, clipPoly)
+                            : [clipLineToRect(minX + i, minY, minX + i + rh, maxY, minX, minY, maxX, maxY)];
+                        segs.forEach(function (seg) {
+                            if (seg) addLine('BSA_AREA', aci, W(seg.x1, seg.y1), W(seg.x2, seg.y2));
+                        });
                     }
                 }
             }

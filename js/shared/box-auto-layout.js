@@ -90,12 +90,54 @@
         return { x: t.x, y: t.y };
     }
 
-    /** 지시선: 박스 테두리에서 가장 가까운 점 → 마킹 점 */
+    /** 박스(가운데 cx,cy, 끝 거리 e)에서 p에 가장 가까운 모서리 */
+    function nearestCorner(cx, cy, e, p) {
+        const xs = [cx - e.l, cx + e.r]; const ys = [cy - e.t, cy + e.b];
+        let best = null; let bd = Infinity;
+        // 그리는 쪽(getRectCornerAnchorLocal)과 같은 순서: 오른위 → 왼위 → 오른아래 → 왼아래(동점이면 앞)
+        [[1, 0], [0, 0], [1, 1], [0, 1]].forEach(([i, j]) => {
+            const d = Math.hypot(p.x - xs[i], p.y - ys[j]);
+            if (d < bd - 1e-9) { bd = d; best = { x: xs[i], y: ys[j] }; }
+        });
+        return best;
+    }
+
+    /** 가운데→p 방향 광선이 박스 테두리와 만나는 점(둥근·원형 박스 근사) */
+    function rayOnBox(cx, cy, e, p) {
+        const dx = p.x - cx; const dy = p.y - cy;
+        if (Math.hypot(dx, dy) < 1e-9) return { x: cx, y: cy - e.t };
+        const hx = dx >= 0 ? e.r : e.l; const hy = dy >= 0 ? e.b : e.t;
+        const k = Math.min(Math.abs(dx) > 1e-9 ? hx / Math.abs(dx) : Infinity, Math.abs(dy) > 1e-9 ? hy / Math.abs(dy) : Infinity);
+        return { x: cx + dx * k, y: cy + dy * k };
+    }
+
+    /**
+     * 지시선: 박스 → 마킹 점. 2026-11-26 화면에 그리는 것과 같게 — 사각형 박스는 **가장 가까운 모서리**에서 나감
+     * (예전엔 테두리에서 가장 가까운 점으로 계산해서, 정리 후에도 실제 선은 엇갈리거나 다른 점을 지났음).
+     * 점이 여럿이면 점들 가운데에 가까운 모서리 하나에서 함께(그 선이 박스를 관통하면 그 점만 자기 모서리 — getGroupLeaderBoxAnchor).
+     * item.lead(「중요」·균열폭 뺀 박스 끝 거리 + shape)가 없으면 예전처럼 테두리 가장 가까운 점.
+     */
     function leadersFor(item, cx, cy) {
-        const box = rectOf(cx, cy, item.ext, 0);
-        return item.targets.map((t) => {
-            const p = targetPoint(t, cx, cy);
-            const a = { x: clamp(p.x, box.x1, box.x2), y: clamp(p.y, box.y1, box.y2) };
+        const lead = item.lead;
+        if (!lead) {
+            const box = rectOf(cx, cy, item.ext, 0);
+            return item.targets.map((t) => {
+                const p = targetPoint(t, cx, cy);
+                const a = { x: clamp(p.x, box.x1, box.x2), y: clamp(p.y, box.y1, box.y2) };
+                return { a, b: p };
+            });
+        }
+        const pts = item.targets.map((t) => targetPoint(t, cx, cy));
+        if (lead.shape !== 'rect') return pts.map((p) => ({ a: rayOnBox(cx, cy, lead, p), b: p }));
+        let shared = null;
+        if (pts.length >= 2) {
+            const c = pts.reduce((s, p) => ({ x: s.x + p.x / pts.length, y: s.y + p.y / pts.length }), { x: 0, y: 0 });
+            shared = nearestCorner(cx, cy, lead, c);
+        }
+        const inner = rectOf(cx, cy, lead, -Math.max(0.5, Math.min(lead.t + lead.b, lead.l + lead.r) * 0.025));
+        return pts.map((p) => {
+            const own = nearestCorner(cx, cy, lead, p);
+            const a = (shared && !segHitsRect(shared, p, inner)) ? shared : own;
             return { a, b: p };
         });
     }
@@ -159,6 +201,7 @@
                     return { x: num(t && t.x, NaN), y: num(t && t.y, NaN) };
                 }).filter((t) => t.rect || (Number.isFinite(t.x) && Number.isFinite(t.y))),
                 movable: !!it.movable,
+                lead: validLead(it.lead),
                 // 잉크를 볼 칸(숫자 부분 — 「NO.」는 도면에 걸쳐도 됨). 없으면 박스 전체
                 inkExt: validInkExt(it.inkExt)
             }));
@@ -172,6 +215,13 @@
         const Q = Math.SQRT1_2;
         P.dirs = P.anchors.map((a, i) => ({ x: (list[i].cx0 - a.x >= 0 ? 1 : -1) * Q, y: (list[i].cy0 - a.y > 0 ? 1 : -1) * Q }));
         return P;
+    }
+
+    /** 지시선이 나가는 박스(「중요」·균열폭 뺀 박스 끝 거리) + 모양('rect'|'rounded'|'circle') */
+    function validLead(e) {
+        if (!e) return null;
+        const v = { l: Number(e.l), t: Number(e.t), r: Number(e.r), b: Number(e.b), shape: e.shape || 'rect' };
+        return [v.l, v.t, v.r, v.b].every((x) => Number.isFinite(x) && x > 0) ? v : null;
     }
 
     function validInkExt(e) {
@@ -231,8 +281,9 @@
                 // 지시선이 딱 이 각도가 되게: 마킹 점에서 이 방향으로 g만큼 간 곳에 박스의 **가까운 모서리**(축 방향이면 변 가운데)를 둔다
                 const areaReach = (hw || hh) ? reachAlong(ux, uy, hw, hh) : 0;
                 const g = dk * P.unit + areaReach;
-                let x = a.x + ux * g + (ux > 1e-6 ? it.ext.l : (ux < -1e-6 ? -it.ext.r : 0));
-                let y = a.y + uy * g + (uy > 1e-6 ? it.ext.t : (uy < -1e-6 ? -it.ext.b : 0));
+                const ce = it.lead || it.ext; // 지시선이 나가는 모서리 = 「중요」·균열폭 뺀 박스 모서리
+                let x = a.x + ux * g + (ux > 1e-6 ? ce.l : (ux < -1e-6 ? -ce.r : 0));
+                let y = a.y + uy * g + (uy > 1e-6 ? ce.t : (uy < -1e-6 ? -ce.b : 0));
                 if (bounds) {
                     x = clamp(x, bounds.x1 + it.ext.l, bounds.x2 - it.ext.r);
                     y = clamp(y, bounds.y1 + it.ext.t, bounds.y2 - it.ext.b);
@@ -285,7 +336,8 @@
         if (P.fresh || Math.abs(x - it.cx0) > 1e-6 || Math.abs(y - it.cy0) > 1e-6) {
             const an = P.anchors[i];
             // 지시선 각도 = 기준점 → 박스에서 가장 가까운 점
-            const vx = clamp(an.x, box.x1, box.x2) - an.x; const vy = clamp(an.y, box.y1, box.y2) - an.y;
+            const ap = (it.lead && it.lead.shape === 'rect') ? nearestCorner(x, y, it.lead, an) : { x: clamp(an.x, box.x1, box.x2), y: clamp(an.y, box.y1, box.y2) };
+            const vx = ap.x - an.x; const vy = ap.y - an.y;
             const vl = Math.hypot(vx, vy);
             const dev = vl > 1e-6 ? Math.abs(Math.atan2(Math.abs(vy), Math.abs(vx)) - Math.PI / 4) : Math.PI / 4;
             cost += (P.ink ? W.diagInk : W.diag) * dev;

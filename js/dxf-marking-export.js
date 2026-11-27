@@ -477,10 +477,12 @@
     let toWorld = (ix, iy) => ({ x: ix, y: imgH - iy });
     let unitPerPx = 1;
     let drawing = null;
-    // 비파괴 전용 도면(따로 올린 그림)은 층 도면과 좌표가 달라 그림 픽셀 그대로
+    // 비파괴 전용 도면: 그림으로 올린 것은 그림 픽셀 그대로, DXF·PDF로 올린 것(2026-11-26)은 그 원본 좌표
     let pdfDataUrl = null;
     if (!rec.custom) {
       try { pdfDataUrl = await window.resolveFloorPdfDataUrlAsync(bldg, floorCode); } catch (_e) { pdfDataUrl = null; }
+    } else if (typeof window.loadNdtCustomDrawingPdf === 'function') {
+      try { pdfDataUrl = await window.loadNdtCustomDrawingPdf(`${id}_${floorCode}`); } catch (_e) { pdfDataUrl = null; }
     }
     const size = pdfDataUrl ? await readPdfPageSize(pdfDataUrl) : null;
     if (size) {

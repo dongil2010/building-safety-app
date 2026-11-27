@@ -2368,6 +2368,8 @@
                 cy: by,
                 ext: L.boxExtent(dims.w, dims.h, rot, badge),
                 inkExt: pinDigitsInkExt(label, dims, rot),
+                // 2026-11-26 지시선은 화면처럼 「중요」·균열폭 뺀 박스 모서리에서(둥근·원형은 테두리) — 정리 후 실제 선 교차를 정확히 봄
+                lead: Object.assign(L.boxExtent(dims.w, dims.h, rot, null), { shape: (getDefectPinShapeCfg(rep, styleKey) || {}).shape || 'rect' }),
                 targets,
                 movable: mode === 'all' ? true : !manual,
                 manual
@@ -2478,6 +2480,7 @@
                 cx: Number(boxX),
                 cy: Number(boxY),
                 ext: L.boxExtent(box.w, box.h, state.rotationAngle || 0, null),
+                lead: L.boxExtent(box.w, box.h, state.rotationAngle || 0, null),
                 targets: targets || []
             };
             const r = L.placeNewBox(items, item, { bounds: { w: dims.w, h: dims.h }, obstacles: boxAutoLayoutObstacles(), ink: boxAutoLayoutInkMap() });
@@ -3747,7 +3750,7 @@
      */
     /**
      * 2026-10-20 같은 층 도면을 크기가 다른 도면으로 바꿨는지(이 기기가 전에 본 크기와 비교) — 바뀌었고 마킹이 있으면
-     * 「새 도면 비율에 맞춰 옮길까요?」를 한 번 묻는다. 지우지 않는다(그대로 두기도 가능).
+     * 「마킹 맞추기를 열까요?」를 한 번 묻는다(2026-11-26부터 비율로 바로 옮기지 않음). 지우지 않는다(그대로 두기도 가능).
      */
     const _drawingSizeAsked = new Set();
     function checkFloorDrawingSizeChange() {
@@ -3761,25 +3764,27 @@
         const change = R.noteDims(typeof localStorage !== 'undefined' ? localStorage : null, 'bsa_floor_drawing_dims_v1', key, dims.w, dims.h, sig);
         if (!change || _drawingSizeAsked.has(key)) return;
         _drawingSizeAsked.add(key);
-        const list = (state.defects && state.defects[key]) || [];
-        if (!list.length) return;
-        const sx = change.to.w / change.from.w;
-        const sy = change.to.h / change.from.h;
+        // 2026-11-26 사용자 지적: 도면 크기만 보고 비율로 늘이면, 새 도면 안에서 그림 자리가 옮겨진 경우(테두리·여백이 다름)
+        // 마킹이 어긋난다. 그래서 비율로 바로 옮기지 않고 「마킹 맞추기」(옛·새 도면의 같은 점 2~3곳 또는 테두리 자동)로 보낸다.
+        // 거기서 결함·비파괴·구조 부재·행·열 선을 같은 변환으로 함께 옮긴다.
+        const cnt = typeof window.countFloorAlignableMarkings === 'function' ? window.countFloorAlignableMarkings(key) : null;
+        const total = cnt ? cnt.total : ((state.defects && state.defects[key]) || []).length;
+        if (!total) return;
+        if (typeof window.startDrawingAlign !== 'function') return;
+        const what = cnt
+            ? [cnt.defects ? `마킹 ${cnt.defects}개` : '', cnt.ndt ? `비파괴 ${cnt.ndt}개` : '', cnt.struct ? `구조 부재 ${cnt.struct}개` : ''].filter(Boolean).join(' · ')
+            : `마킹 ${total}개`;
         setTimeout(async () => {
+            if (window.drawingAlignState) return;
             const ok = typeof window.appConfirm === 'function'
-                ? await window.appConfirm(`이 층 도면이 크기가 다른 도면으로 바뀌었습니다 (${change.from.w}×${change.from.h} → ${change.to.w}×${change.to.h}).\n\n기존 마킹 ${list.length}개를 새 도면 비율에 맞춰 옮길까요?\n(취소하면 마킹 위치를 그대로 둡니다 — 필요 없으면 목록에서 선택해 지울 수 있습니다)`)
+                ? await window.appConfirm(`이 층 도면이 크기가 다른 도면으로 바뀌었습니다 (${change.from.w}×${change.from.h} → ${change.to.w}×${change.to.h}).
+
+기존 ${what}가 옛 도면 위치에 있습니다. 「📐 마킹 맞추기」를 열어 옛·새 도면의 같은 점(기둥 모서리 등)을 찍어 맞출까요?
+(도면 크기 비율만으로는 그림 자리가 옮겨진 경우 어긋나서, 기준점으로 맞춥니다. 취소하면 위치를 그대로 둡니다)`)
                 : false;
             if (!ok) return;
             if (`${state.currentBuildingId}_${state.currentFloor}` !== key) return;
-            if (typeof pushDefectHistory === 'function') pushDefectHistory([key]);
-            (state.defects[key] || []).forEach((d) => {
-                if (R.scaleDefect(d, sx, sy) && typeof touchDefectPositionUpdatedAt === 'function') touchDefectPositionUpdatedAt(d);
-            });
-            if (typeof markFloorKeyDirty === 'function') markFloorKeyDirty(key);
-            if (typeof saveStateToLocalStorage === 'function') saveStateToLocalStorage();
-            if (typeof drawCanvas === 'function') drawCanvas();
-            if (typeof renderDefectListPanel === 'function') renderDefectListPanel();
-            if (typeof window.showToast === 'function') window.showToast('마킹을 새 도면 비율에 맞췄습니다. (되돌리기로 취소 가능)', 'success', 4000);
+            window.startDrawingAlign().catch((e) => console.error('[마킹 맞추기] 시작 실패', e));
         }, 300);
     }
 

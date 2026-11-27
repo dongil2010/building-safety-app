@@ -2,7 +2,7 @@
  * 부재실측 선택 입력 — 2026-10-19 / 2026-11-06
  *  - 「이쪽만 측정」: 보·기둥에서 한쪽만 잰 부재. 안 잰 쪽은 설계치수로 보고 단면적 비율을 낸다.
  *  - 「슬래브 두께 합산」(보만): 입력한 춤 + 슬래브 두께 = 실측 춤.
- *  - 「슬래브/단열 두께 제외」(보): 체크만이면 주석만. mm를 적으면 춤에서 뺀다. 합산과 슬래브 제외는 서로 못 켬.
+ *  - 「슬래브/단열 두께 제외」(보): 체크만이면 주석만. mm를 적으면 잰 춤에 더한다(2026-11-26, 예전엔 뺐음). 합산과 슬래브 제외는 서로 못 켬.
  *  - 「벽체 두께 제외」(기둥 사각/원형): 체크만이면 주석만. mm를 적으면 폭·지름에서 뺀다.
  * 순수 함수 — app.js와 테스트가 같이 쓴다.
  */
@@ -63,8 +63,9 @@
         var depthTotal = rawD;
         if (depthTotal !== null) {
             if (slab) depthTotal = depthTotal + slab;
-            if (exSlabMm) depthTotal = depthTotal - exSlabMm;
-            if (exInsMm) depthTotal = depthTotal - exInsMm;
+            // 2026-11-26 「제외」 = 잰 춤에 슬래브·단열이 빠져 있다는 뜻 → 보 춤 = 잰 춤 + 두께 (예전엔 뺐음)
+            if (exSlabMm) depthTotal = depthTotal + exSlabMm;
+            if (exInsMm) depthTotal = depthTotal + exInsMm;
             depthTotal = clampPositive(depthTotal, rawD);
         }
         var widthTotal = rawW;
@@ -128,14 +129,20 @@
     function excludeNote(item, kind) {
         if (!item) return '';
         var parts = [];
-        if (supportsExcludeSlab(kind)) {
-            var s = excludePartNote(item.excludeSlab, item.excludeSlabThickness, '슬래브', '슬래브 두께 제외');
-            if (s) parts.push(s);
-        }
-        if (supportsExcludeInsulation(kind)) {
-            var i = excludePartNote(item.excludeInsulation, item.excludeInsulationThickness, '단열', '단열 두께 제외');
-            if (i) parts.push(i);
-        }
+        // 2026-11-26 보: 두께를 적었으면 「슬래브 두께 150mm 미포함」(둘 다면 「슬래브 두께 150mm, 단열 두께 50mm 미포함」),
+        //  체크만이면 「슬래브 두께 제외」 / 둘 다면 「슬래브, 단열 두께 제외」
+        var beamExMm = [];
+        var beamExFlag = [];
+        var addBeamEx = function (on, mm, label) {
+            if (!flag(on)) return;
+            var n = num(mm);
+            if (n) beamExMm.push(label + ' 두께 ' + n + 'mm');
+            else beamExFlag.push(label);
+        };
+        if (supportsExcludeSlab(kind)) addBeamEx(item.excludeSlab, item.excludeSlabThickness, '슬래브');
+        if (supportsExcludeInsulation(kind)) addBeamEx(item.excludeInsulation, item.excludeInsulationThickness, '단열');
+        if (beamExMm.length) parts.push(beamExMm.join(', ') + ' 미포함');
+        if (beamExFlag.length) parts.push(beamExFlag.join(', ') + ' 두께 제외');
         if (supportsExcludeWall(kind)) {
             var w = excludePartNote(item.excludeWall, item.excludeWallThickness, '벽체', '벽체 두께 제외');
             if (w) parts.push(w);
@@ -158,9 +165,22 @@
         if (flag(item.excludeSlab) || flag(item.excludeInsulation)) {
             var stored = num(item.measuredDepth);
             var add = (num(item.excludeSlabThickness) || 0) + (num(item.excludeInsulationThickness) || 0);
-            if (stored !== null && add) return Math.round((stored + add) * 100) / 100;
+            if (stored !== null && add && stored > add) return Math.round((stored - add) * 100) / 100;
         }
         return (item.measuredDepth !== undefined && item.measuredDepth !== null) ? item.measuredDepth : '';
+    }
+
+    /**
+     * 2026-11-26 표·출력에 보일 실측 춤 — 보에서 슬래브/단열 두께(mm)를 적어 더했으면 더하기 전 잰 값.
+     * (계산·저장값 measuredDepth는 더한 값 그대로. 해당 없으면 null → 저장값을 쓴다)
+     */
+    function displayDepth(item, kind) {
+        if (!item || kind !== 'beam') return null;
+        var added = (flag(item.excludeSlab) && num(item.excludeSlabThickness))
+            || (flag(item.excludeInsulation) && num(item.excludeInsulationThickness));
+        if (!added) return null;
+        var raw = num(item.measuredDepthRaw);
+        return raw !== null ? raw : null;
     }
 
     /** 다시 열 때 폭/지름 칸 — 벽체 제외면 빼기 전 입력값 */
@@ -183,7 +203,7 @@
         supportsExcludeSlab: supportsExcludeSlab, supportsExcludeInsulation: supportsExcludeInsulation,
         supportsExcludeWall: supportsExcludeWall,
         resolveRc: resolveRc, measuredForCalc: measuredForCalc, oneSideNote: oneSideNote, slabNote: slabNote,
-        excludeNote: excludeNote, depthInputValue: depthInputValue, widthInputValue: widthInputValue
+        excludeNote: excludeNote, displayDepth: displayDepth, depthInputValue: depthInputValue, widthInputValue: widthInputValue
     };
     if (typeof module !== 'undefined' && module.exports) module.exports = api;
     root.BSA = root.BSA || {};
