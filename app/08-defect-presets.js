@@ -397,8 +397,11 @@
         else pos = formatOpeningPosLabel(findOpeningPosListInText(raw));
         // 2026-11-16 시립도서관: 부재 칸에 이미 개구부 말(「조적벽체 기존 개구부 부위」·「조적벽체 문 상부」)이 있으면
         // 조사내용에 「개구부 주위」·「문 상부 벽체」를 또 붙이지 않는다(부재 + 결함 내용이 원문 순서 그대로)
+        // 2026-11-27 성가롤로병원: 위치 목록에 없는 「문 하부」「문 주위」「창 주위」, 줄여 쓴 「창 상·하부」「창 상하부」도 개구부 말
+        // (「문 하부 벽체 개구부 주위 경사균열」 → 「문 하부 벽체 경사균열」)
         const comp = (d && d.component) ? String(d.component).replace(/[\s\u3000]+/g, ' ').trim() : '';
-        if ((pos || (d && d.isOpeningCrack)) && comp && (/개구부/.test(comp) || findOpeningPosListInText(comp).length)) {
+        if ((pos || (d && d.isOpeningCrack)) && comp && (/개구부/.test(comp) || findOpeningPosListInText(comp).length
+            || /(?:창|문) ?(?:상부|하부|측면|주위|상 ?[·ㆍ\/]? ?하부)/.test(comp))) {
             return raw || '균열';
         }
         if (pos) {

@@ -142,6 +142,37 @@ assert.strictEqual(sb.content({ component: '조적벽체 문 상부', defectType
 const r14 = sb.ext('조적벽체 기존 개구부 부위');
 assert.strictEqual(sb.content({ component: r14.component, defectType: '수평·수직균열', openingPos: r14.pos, isOpeningCrack: r14.found }), '조적벽체 기존 개구부 부위 수평·수직균열');
 
+// ---- 2026-11-27 성가롤로병원: 여러 위치를 한데 쓴 부재명칭·목록에 없는 위치 ----
+// 가져오기 흉내(부재명칭 → 지우기 → 개구부 판정 → 조사내용)
+const imp27 = (member, type) => {
+    const x = sb.ext(member);
+    const comp = x.found ? (x.component || '벽체') : member;
+    const isOC = sb.det({ location: '', defectType: type, component: comp, size: '', openingFromMember: x.found });
+    const d = { component: comp, defectType: type, isOpeningCrack: isOC };
+    if (x.pos) d.openingPos = x.pos;
+    return sb.content(d);
+};
+assert.strictEqual(E('개구부 상·하부 벽체'), 'true|개구부 상부, 개구부 하부|개구부 상·하부 벽체', '줄여 쓴 여러 위치는 글 그대로 + 칩 둘');
+assert.strictEqual(E('개구부 상부·하부 벽체'), 'true|개구부 상부, 개구부 하부|개구부 상부·하부 벽체');
+assert.strictEqual(E('창 상·하부 벽체'), 'true|창 상부, 창 하부|창 상·하부 벽체');
+assert.strictEqual(E('창 상부/하부'), 'true|창 상부, 창 하부|창 상부/하부');
+assert.strictEqual(E('창 상하부 벽체'), 'true|창 상부, 창 하부|창 상하부 벽체');
+assert.strictEqual(E('창 상부·문 상부 벽체'), 'true|창 상부, 문 상부|창 상부·문 상부 벽체');
+assert.strictEqual(E('문 상·하부 벽체'), 'true|문 상부|문 상·하부 벽체', '목록에 없는 문 하부는 칩 없이 글만');
+assert.strictEqual(E('벽체(개구부 상·하부)'), 'true|개구부 상부, 개구부 하부|벽체(개구부 상·하부)');
+assert.strictEqual(imp27('개구부 상·하부 벽체', '수직·경사균열'), '개구부 상·하부 벽체 수직·경사균열');
+assert.strictEqual(imp27('개구부 상부·하부 벽체', '수직균열'), '개구부 상부·하부 벽체 수직균열');
+assert.strictEqual(imp27('창 상부·하부 벽체', '수직균열, 누수'), '창 상부·하부 벽체 수직균열, 누수');
+assert.strictEqual(imp27('문 하부 벽체', '경사균열'), '문 하부 벽체 경사균열', '「개구부 주위」를 덧붙이지 않는다');
+assert.strictEqual(imp27('문 주위 벽체', '수직균열'), '문 주위 벽체 수직균열');
+assert.strictEqual(imp27('창 주위 벽체', '수직균열, 경사균열'), '창 주위 벽체 수직균열, 경사균열');
+assert.strictEqual(imp27('출입문 하부 벽체', '균열'), '출입문 하부 벽체 균열');
+// 예전 동작 그대로
+assert.strictEqual(imp27('창 상부 벽체', '수직균열, 누수'), '창 상부 벽체 수직균열, 누수');
+assert.strictEqual(imp27('개구부 주위 벽체', '수직균열'), '벽체 개구부 주위 수직균열');
+assert.strictEqual(imp27('창고 하부 벽체', '균열'), '창고 하부 벽체 균열', '「창고」는 개구부가 아니다');
+assert.strictEqual(E('창 상부 벽체'), 'true|창 상부|벽체');
+
 // 조사내용을 만드는 곳은 모두 중복 방지 도우미를 쓴다
 ['const headParts = [surveyContentComponentText(d, ctx),', 'const content = [surveyContentComponentText(d),',
     '[surveyContentComponentText(slot1.d),', '[surveyContentComponentText(slot2.d),'].forEach((s) => assert.ok(app.includes(s), s));

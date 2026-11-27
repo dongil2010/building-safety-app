@@ -32157,7 +32157,7 @@ ${roundMobile ? '' : `<button type="button" class="icon-btn icon-btn-trash" titl
         refreshDefectQuickPickBar();
     }
 
-// @@app-part 08-defect-presets.js sha=c1af75767f51 — 원본은 app/08-defect-presets.js (여기 말고 거기서 고칠 것)
+// @@app-part 08-defect-presets.js sha=89f492a91998 — 원본은 app/08-defect-presets.js (여기 말고 거기서 고칠 것)
     // --- Dynamic Defect Type Presets & Custom Adding ---
     const STEEL_MEMBER_DEFECTS = [
         '상태양호',
@@ -32556,8 +32556,11 @@ ${roundMobile ? '' : `<button type="button" class="icon-btn icon-btn-trash" titl
         else pos = formatOpeningPosLabel(findOpeningPosListInText(raw));
         // 2026-11-16 시립도서관: 부재 칸에 이미 개구부 말(「조적벽체 기존 개구부 부위」·「조적벽체 문 상부」)이 있으면
         // 조사내용에 「개구부 주위」·「문 상부 벽체」를 또 붙이지 않는다(부재 + 결함 내용이 원문 순서 그대로)
+        // 2026-11-27 성가롤로병원: 위치 목록에 없는 「문 하부」「문 주위」「창 주위」, 줄여 쓴 「창 상·하부」「창 상하부」도 개구부 말
+        // (「문 하부 벽체 개구부 주위 경사균열」 → 「문 하부 벽체 경사균열」)
         const comp = (d && d.component) ? String(d.component).replace(/[\s\u3000]+/g, ' ').trim() : '';
-        if ((pos || (d && d.isOpeningCrack)) && comp && (/개구부/.test(comp) || findOpeningPosListInText(comp).length)) {
+        if ((pos || (d && d.isOpeningCrack)) && comp && (/개구부/.test(comp) || findOpeningPosListInText(comp).length
+            || /(?:창|문) ?(?:상부|하부|측면|주위|상 ?[·ㆍ\/]? ?하부)/.test(comp))) {
             return raw || '균열';
         }
         if (pos) {
@@ -55709,7 +55712,7 @@ ${roundMobile ? '' : `<button type="button" class="icon-btn icon-btn-trash" titl
         }
     }
 
-// @@app-part 13-report-export.js sha=8bc602ab874a — 원본은 app/13-report-export.js (여기 말고 거기서 고칠 것)
+// @@app-part 13-report-export.js sha=dd8fe150f1f8 — 원본은 app/13-report-export.js (여기 말고 거기서 고칠 것)
     // --- REPORT PREVIEW MODAL (Instant Modal Open & Pure White Paper Theme) ---
     window.openReportPreviewModalFunc = async function(opts) {
         const manageLoading = !(opts && opts.skipLoading);
@@ -58251,6 +58254,7 @@ ${roundMobile ? '' : `<button type="button" class="icon-btn icon-btn-trash" titl
 
     /** 한글 층 이름(「지하 1층」→「지하1층」) — 동마다 그 동의 층 목록으로 */
     function makeHwpxFloorLabelFn(bldg) {
+        const isExt = (fc) => (typeof window.isExteriorFloorCode === 'function' ? window.isExteriorFloorCode(fc) : /^EXT/i.test(String(fc || '')));
         return (floorCode) => {
             const fromList = (bldg.floorsList || []).find(f => f.floorCode === floorCode);
             const raw = fromList
@@ -58258,8 +58262,32 @@ ${roundMobile ? '' : `<button type="button" class="icon-btn icon-btn-trash" titl
                 : (typeof window.getFloorLabelFromCode === 'function'
                     ? window.getFloorLabelFromCode(floorCode, bldg)
                     : floorCode);
-            return stripFloorCodeSuffix(raw || floorCode).replace(/\s+(?=\d)/g, '');
+            const label = stripFloorCodeSuffix(raw || floorCode).replace(/\s+(?=\d)/g, '');
+            return soleExteriorHwpxLabel(bldg, floorCode, label, isExt);
         };
+    }
+
+    /** 위치도 캡션 층 이름 — 외부 한 장(「외부」)은 표 제목처럼 「건축물 외부」(2026-11-24) */
+    function hwpxMapCaptionFloor(label) {
+        return String(label || '').replace(/(^|\s)외부$/, '$1건축물 외부');
+    }
+
+    /**
+     * 2026-11-24 외부 도면이 한 장뿐인 동은 자동으로 붙은 「외부1」을 「외부」로(표 구분 칸·위치도 캡션).
+     * 외부가 여러 장(외부1·외부2 …)이거나 사람이 지은 이름(「정면」 등)은 그대로. 부대시설은 외부가 아니다.
+     */
+    function soleExteriorHwpxLabel(bldg, floorCode, label, isExt) {
+        if (!/^외부\s*1$/.test(String(label || ''))) return label;
+        if (!isExt(floorCode)) return label;
+        const extCodes = new Set();
+        (bldg && bldg.floorsList || []).forEach((f) => {
+            if (f && f.floorCode && isExt(f.floorCode) && !/부대/.test(String(f.floorLabel || ''))) extCodes.add(f.floorCode);
+        });
+        if (bldg && bldg.floorDrawings && typeof bldg.floorDrawings === 'object') {
+            Object.keys(bldg.floorDrawings).forEach((fc) => { if (isExt(fc) && !/부대/.test(fc)) extCodes.add(fc); });
+        }
+        extCodes.add(floorCode);
+        return extCodes.size === 1 ? '외부' : label;
     }
 
     /** 한 동의 출력 층(외부는 한 장으로 합침)과 층별 결함 */
@@ -58415,17 +58443,9 @@ ${roundMobile ? '' : `<button type="button" class="icon-btn icon-btn-trash" titl
         // 안 열어 본 층이 빠지거나 옛 값으로 나가지 않게 모든 층을 서버에서 먼저 받는다(2026-09-29)
         if (!(await ensureBuildingFloorsFreshForReport(bldg, '한글 보고서'))) return;
 
-        const getFloorLabel = (floorCode) => {
-            const fromList = (bldg.floorsList || []).find(f => f.floorCode === floorCode);
-            const raw = fromList
-                ? fromList.floorLabel
-                : (typeof window.getFloorLabelFromCode === 'function'
-                    ? window.getFloorLabelFromCode(floorCode, bldg)
-                    : floorCode);
-            // "지하 1층"처럼 "지하/지상"과 숫자 사이에 띄어쓰기가 들어간 라벨을 표본 문서와 같은
-            // "지하1층" 붙여쓰기 형식으로 맞춘다.
-            return stripFloorCodeSuffix(raw || floorCode).replace(/\s+(?=\d)/g, '');
-        };
+        // "지하 1층"처럼 "지하/지상"과 숫자 사이에 띄어쓰기가 들어간 라벨을 표본 문서와 같은
+        // "지하1층" 붙여쓰기 형식으로 맞춘다. 외부 도면이 한 장뿐이면 「외부1」 → 「외부」(여러 동 출력과 같은 함수).
+        const getFloorLabel = makeHwpxFloorLabelFn(bldg);
 
         // PDF 보고서와 동일하게, 현재 층 하나가 아니라 건물에 등록된 모든 층을 대상으로 한다.
         let availableFloors = [];
@@ -59500,7 +59520,7 @@ ${roundMobile ? '' : `<button type="button" class="icon-btn icon-btn-trash" titl
 
                         const captionTc = locationMapTbl.getElementsByTagNameNS(HP_NS, 'tc')[1];
                         const captionT = captionTc.getElementsByTagNameNS(HP_NS, 't')[0];
-                        if (captionT) captionT.textContent = `${HWPX_FIG_MARK}${getFloorLabel(floorCode)} 상태조사 위치도`;
+                        if (captionT) captionT.textContent = `${HWPX_FIG_MARK}${hwpxMapCaptionFloor(getFloorLabel(floorCode))} 상태조사 위치도`;
                         return true;
                     }
                     if (!(opts && opts.silent)) {
@@ -62405,7 +62425,7 @@ ${roundMobile ? '' : `<button type="button" class="icon-btn icon-btn-trash" titl
 
                         const captionTc = locationMapTbl.getElementsByTagNameNS(HP_NS, 'tc')[1];
                         const captionT = captionTc.getElementsByTagNameNS(HP_NS, 't')[0];
-                        if (captionT) captionT.textContent = `${HWPX_FIG_MARK}${getFloorLabel(floorCode)} 상태조사 위치도`;
+                        if (captionT) captionT.textContent = `${HWPX_FIG_MARK}${hwpxMapCaptionFloor(getFloorLabel(floorCode))} 상태조사 위치도`;
                         return true;
                     }
                     if (!(opts && opts.silent)) {
@@ -64624,7 +64644,7 @@ ${roundMobile ? '' : `<button type="button" class="icon-btn icon-btn-trash" titl
         }
     });
 
-// @@app-part 14-extras.js sha=47e236380cc4 — 원본은 app/14-extras.js (여기 말고 거기서 고칠 것)
+// @@app-part 14-extras.js sha=0246c3891ed9 — 원본은 app/14-extras.js (여기 말고 거기서 고칠 것)
     // ==========================================================================
     // 🛠️ 6대 추천 개선 및 신규 기능 모듈 (100% 한글 주석 & 독립 보조엔진)
     // ==========================================================================
@@ -65890,9 +65910,28 @@ ${roundMobile ? '' : `<button type="button" class="icon-btn icon-btn-trash" titl
         const out = { found: false, pos: '', component: orig.trim() };
         if (!orig.trim()) return out;
         let work = orig;
+        // 2026-11-27 성가롤로병원: 여러 위치를 한데 쓴 것(「개구부 상·하부」「개구부 상부·하부」「창 상부/하부」「창 상하부」)은
+        // 글을 그대로 둔다 — 한 낱말씩 지우면 「하부 벽체 개구부 상부 벽체」·「상·하부 벽체 개구부 주위」로 깨졌다.
+        // 개구부 결함으로 보고, 아는 위치는 칩(「개구부 상부, 개구부 하부」)으로. 조사내용은 부재 + 결함 내용 원문 순서(formatOpeningAwareDefectType)
+        const kept = [];
         // 2026-11-10 개구부 상부·개구부 하부도 위치로 — 「개구부」만 지우면 「상부 벽체」가 남는다
-        work = work.replace(/(개구부|창|문)[\s\u3000]*(상부|하부|측면)/g, (m, a, b, off, all) => {
-            const name = `${a} ${b}`;
+        work = work.replace(/(개구부|창|문)[\s\u3000]*(?:상부|하부|측면|상(?=[\s\u3000]*[·ㆍ\/]?[\s\u3000]*하부))(?:(?:[\s\u3000]*[·ㆍ\/][\s\u3000]*(?:(?:개구부|창|문)[\s\u3000]*)?)?(?:상부|하부|측면))*/g, (m, a, off, all) => {
+            const parts = [];
+            let kind = a;
+            m.replace(/(개구부|창|문)?[\s\u3000]*(상부|하부|측면|상)/g, (t, k, p) => {
+                if (k) kind = k;
+                const name = `${kind} ${p === '상' ? '상부' : p}`;
+                if (parts.indexOf(name) < 0) parts.push(name);
+                return t;
+            });
+            if (parts.length > 1) {
+                out.found = true;
+                const known = parts.filter((name) => OPENING_POS_NAMES.indexOf(name) >= 0);
+                if (!out.pos && known.length) out.pos = known.join(', ');
+                kept.push(m);
+                return `\uE000${kept.length - 1}\uE001`;
+            }
+            const name = parts[0];
             if (OPENING_POS_NAMES.indexOf(name) < 0) return m;
             out.found = true;
             if (!out.pos) out.pos = name;
@@ -65913,7 +65952,7 @@ ${roundMobile ? '' : `<button type="button" class="icon-btn icon-btn-trash" titl
         const closes = () => (work.match(/[)）\]]/g) || []).length;
         while (/[)）\]]$/.test(work) && closes() > opens()) work = work.slice(0, -1).replace(new RegExp(JUNK + '+$'), '');
         while (/^[(（\[]/.test(work) && opens() > closes()) work = work.slice(1).replace(new RegExp('^' + JUNK + '+'), '');
-        out.component = work.trim();
+        out.component = work.replace(/\uE000(\d+)\uE001/g, (t, i) => kept[+i]).trim();
         return out;
     }
 

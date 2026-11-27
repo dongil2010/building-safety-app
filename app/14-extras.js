@@ -1264,9 +1264,28 @@
         const out = { found: false, pos: '', component: orig.trim() };
         if (!orig.trim()) return out;
         let work = orig;
+        // 2026-11-27 성가롤로병원: 여러 위치를 한데 쓴 것(「개구부 상·하부」「개구부 상부·하부」「창 상부/하부」「창 상하부」)은
+        // 글을 그대로 둔다 — 한 낱말씩 지우면 「하부 벽체 개구부 상부 벽체」·「상·하부 벽체 개구부 주위」로 깨졌다.
+        // 개구부 결함으로 보고, 아는 위치는 칩(「개구부 상부, 개구부 하부」)으로. 조사내용은 부재 + 결함 내용 원문 순서(formatOpeningAwareDefectType)
+        const kept = [];
         // 2026-11-10 개구부 상부·개구부 하부도 위치로 — 「개구부」만 지우면 「상부 벽체」가 남는다
-        work = work.replace(/(개구부|창|문)[\s\u3000]*(상부|하부|측면)/g, (m, a, b, off, all) => {
-            const name = `${a} ${b}`;
+        work = work.replace(/(개구부|창|문)[\s\u3000]*(?:상부|하부|측면|상(?=[\s\u3000]*[·ㆍ\/]?[\s\u3000]*하부))(?:(?:[\s\u3000]*[·ㆍ\/][\s\u3000]*(?:(?:개구부|창|문)[\s\u3000]*)?)?(?:상부|하부|측면))*/g, (m, a, off, all) => {
+            const parts = [];
+            let kind = a;
+            m.replace(/(개구부|창|문)?[\s\u3000]*(상부|하부|측면|상)/g, (t, k, p) => {
+                if (k) kind = k;
+                const name = `${kind} ${p === '상' ? '상부' : p}`;
+                if (parts.indexOf(name) < 0) parts.push(name);
+                return t;
+            });
+            if (parts.length > 1) {
+                out.found = true;
+                const known = parts.filter((name) => OPENING_POS_NAMES.indexOf(name) >= 0);
+                if (!out.pos && known.length) out.pos = known.join(', ');
+                kept.push(m);
+                return `\uE000${kept.length - 1}\uE001`;
+            }
+            const name = parts[0];
             if (OPENING_POS_NAMES.indexOf(name) < 0) return m;
             out.found = true;
             if (!out.pos) out.pos = name;
@@ -1287,7 +1306,7 @@
         const closes = () => (work.match(/[)）\]]/g) || []).length;
         while (/[)）\]]$/.test(work) && closes() > opens()) work = work.slice(0, -1).replace(new RegExp(JUNK + '+$'), '');
         while (/^[(（\[]/.test(work) && opens() > closes()) work = work.slice(1).replace(new RegExp('^' + JUNK + '+'), '');
-        out.component = work.trim();
+        out.component = work.replace(/\uE000(\d+)\uE001/g, (t, i) => kept[+i]).trim();
         return out;
     }
 
