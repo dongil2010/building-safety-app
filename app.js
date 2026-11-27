@@ -6029,7 +6029,7 @@ document.addEventListener('DOMContentLoaded', () => {
         }
     }
 
-// @@app-part 02-buildings.js sha=0603af2e9f90 — 원본은 app/02-buildings.js (여기 말고 거기서 고칠 것)
+// @@app-part 02-buildings.js sha=2ad1e669890b — 원본은 app/02-buildings.js (여기 말고 거기서 고칠 것)
     // --- 5. TAB MANAGER (진입 로직은 js/tabs/*.js) ---
     // ---- 마지막 작업 위치 기억·복원 (js/core/last-location.js, 2026-10-28) ----
     // 로그인 직후 복원 시도가 끝나기 전에는 기록·삭제를 하지 않는다(부팅 중 switchTab('tab-home')이 기록을 지우지 않게).
@@ -7642,8 +7642,9 @@ ${roundMobile ? '' : `<button type="button" class="icon-btn icon-btn-trash" titl
         });
     }
 
-    window.getBuildingAvailableFloors = function(bldg) {
+    window.getBuildingAvailableFloors = function(bldg, opts) {
         if (!bldg) return [];
+        const includeHiddenDrawingless = !!(opts && opts.includeHiddenDrawingless);
         const extras = [];
         const addExtra = (code, label) => {
             if (!code) return;
@@ -7689,7 +7690,17 @@ ${roundMobile ? '' : `<button type="button" class="icon-btn icon-btn-trash" titl
             list = Object.entries(floorMap).map(([code, label]) => ({ floorCode: code, floorLabel: label }));
         }
 
-        return list.filter((f) => f && f.floorCode && !isDeletedDrawingFloor(bldg, f.floorCode));
+        return list.filter((f) => {
+            if (!f || !f.floorCode || isDeletedDrawingFloor(bldg, f.floorCode)) return false;
+            // 이 기기에서 자동으로 뺀 도면 없는 층은 서버 목록에서 다시 들어와도 거른다 — 도면이 생기면 다시 보인다
+            if (!includeHiddenDrawingless && bldg.id
+                && isDrawinglessFloorHiddenOnThisDevice(bldg.id, f.floorCode)
+                && !floorHasDrawingData(bldg, f.floorCode)) {
+                const mk = countFloorMarkings(bldg.id, f.floorCode);
+                if (!mk.defects && !mk.ndt) return false;
+            }
+            return true;
+        });
     };
 
     /** 도면 저장/메모리 해제 전에 층 코드를 meta에 고정 — 점검층 드롭다운이 비지 않게 */
@@ -10112,6 +10123,34 @@ ${roundMobile ? '' : `<button type="button" class="icon-btn icon-btn-trash" titl
      * 예전엔 여기서 묘비를 남겨 동기화로 퍼졌고, 도면을 넣은 기기까지 그 층을 지워 「저장했는데 다 사라짐」이 됐다.
      * 도면이 나중에 올라오면 서버 층 목록과 합쳐져 다시 보인다. 진짜로 지우는 건 사용자가 누르는 「빈 층 정리」뿐.
      */
+    /** 2026-11-27 이 기기에서 자동으로 뺀 도면 없는 층 기억(localStorage). 「bldgId_floorCode」 집합 */
+    function loadDrawinglessHiddenFloors() {
+        if (window._bsaDrawinglessHidden) return window._bsaDrawinglessHidden;
+        const set = new Set();
+        try {
+            const arr = JSON.parse(localStorage.getItem('bsa_drawingless_floors_hidden_v1') || '[]');
+            if (Array.isArray(arr)) arr.forEach((k) => { if (typeof k === 'string') set.add(k); });
+        } catch (_e) { /* 저장소 못 쓰면 이번 실행 동안만 기억 */ }
+        window._bsaDrawinglessHidden = set;
+        return set;
+    }
+
+    function isDrawinglessFloorHiddenOnThisDevice(bldgId, floorCode) {
+        return loadDrawinglessHiddenFloors().has(`${bldgId}_${floorCode}`);
+    }
+
+    function setDrawinglessFloorsHiddenOnThisDevice(bldgId, floorCodes, hidden) {
+        const set = loadDrawinglessHiddenFloors();
+        let changed = false;
+        (floorCodes || []).forEach((fc) => {
+            const k = `${bldgId}_${fc}`;
+            if (hidden && !set.has(k)) { set.add(k); changed = true; }
+            if (!hidden && set.delete(k)) changed = true;
+        });
+        if (!changed) return;
+        try { localStorage.setItem('bsa_drawingless_floors_hidden_v1', JSON.stringify(Array.from(set).slice(-2000))); } catch (_e) { /* ignore */ }
+    }
+
     function hideDrawinglessFloorOnThisDevice(bldg, floorCode) {
         if (!bldg || !floorCode) return;
         if (bldg.floorsList) bldg.floorsList = bldg.floorsList.filter((f) => f && f.floorCode !== floorCode);
@@ -10190,7 +10229,8 @@ ${roundMobile ? '' : `<button type="button" class="icon-btn icon-btn-trash" titl
         if (!bldg || !bldg.id) return [];
         if (typeof navigator !== 'undefined' && navigator.onLine === false) return [];
         if (!db || !window.state.companyId) return [];
-        const floors = window.getBuildingAvailableFloors(bldg) || [];
+        // 이미 숨긴 층도 다시 본다 — 그사이 다른 기기가 도면을 올렸으면 숨김을 푼다
+        const floors = window.getBuildingAvailableFloors(bldg, { includeHiddenDrawingless: true }) || [];
         if (!floors.length) return [];
         let empty = null;
         try {
@@ -10201,14 +10241,22 @@ ${roundMobile ? '' : `<button type="button" class="icon-btn icon-btn-trash" titl
         } catch (_e) { empty = null; }
         if (!Array.isArray(empty)) return [];
         const removable = empty.filter((e) => !e.defects && !e.ndt);
+        const removableSet = new Set(removable.map((e) => e.floorCode));
+        const nowHasDrawing = floors.map((f) => f.floorCode)
+            .filter((fc) => isDrawinglessFloorHiddenOnThisDevice(bldg.id, fc) && !removableSet.has(fc));
+        if (nowHasDrawing.length) setDrawinglessFloorsHiddenOnThisDevice(bldg.id, nowHasDrawing, false);
         if (!removable.length) return [];
         removable.forEach((e) => hideDrawinglessFloorOnThisDevice(bldg, e.floorCode));
         if (state.currentBuildingId === bldg.id && removable.some((e) => e.floorCode === state.currentFloor)) {
             state.currentFloor = '';
         }
         console.info('[floor] 도면 없는 층 자동 정리:', bldg.id, removable.map((e) => e.floorCode));
-        if (!o.silent && typeof window.showToast === 'function') {
-            window.showToast(`도면 없는 층을 목록에서 뺐습니다: ${removable.map((e) => e.label).join(', ')}`, 'info', 4000);
+        // 2026-11-27 이 기기에서만 빼고 기억은 안 해서, 서버 층 목록과 합쳐질 때마다 점검 층 목록에 다시 들어오고
+        // 수정창을 열 때마다 같은 알림이 떴다 → 뺀 층을 이 기기에 기억해 층 목록에서 계속 거르고, 처음 뺄 때만 알린다
+        const fresh = removable.filter((e) => !isDrawinglessFloorHiddenOnThisDevice(bldg.id, e.floorCode));
+        setDrawinglessFloorsHiddenOnThisDevice(bldg.id, removable.map((e) => e.floorCode), true);
+        if (!o.silent && fresh.length && typeof window.showToast === 'function') {
+            window.showToast(`도면 없는 층을 목록에서 뺐습니다: ${fresh.map((e) => e.label).join(', ')}`, 'info', 4000);
         }
         return removable.map((e) => e.floorCode);
     }

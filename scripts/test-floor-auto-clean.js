@@ -11,9 +11,9 @@ function sliceFn(name) {
     assert.ok(start >= 0, name);
     return app.slice(start, app.indexOf('\n    }\n', start) + 6);
 }
-const src = ['countFloorMarkings', 'hideDrawinglessFloorOnThisDevice', 'removeDrawinglessFloorFromBuilding', 'probeFloorDrawingOnCloud', 'findDrawinglessFloors', 'autoRemoveDrawinglessFloors'].map(sliceFn).join('\n');
+const src = ['countFloorMarkings', 'loadDrawinglessHiddenFloors', 'isDrawinglessFloorHiddenOnThisDevice', 'setDrawinglessFloorsHiddenOnThisDevice', 'hideDrawinglessFloorOnThisDevice', 'removeDrawinglessFloorFromBuilding', 'probeFloorDrawingOnCloud', 'findDrawinglessFloors', 'autoRemoveDrawinglessFloors'].map(sliceFn).join('\n');
 
-function makeEnv({ cloud, idb, online = true, failCloud = false, markings = {} }) {
+function makeEnv({ cloud, idb, online = true, failCloud = false, markings = {}, store = new Map() }) {
     const B = 'goheung';
     const bldg = { id: B, floorsList: ['본관 지하 1층', '2F', '3F', 'ROOF', 'EXT', '1F'].map((c) => ({ floorCode: c, floorLabel: c })) };
     const state = { companyId: 'c', currentBuildingId: B, currentFloor: '본관 지하 1층', defects: {}, ndtData: {} };
@@ -22,12 +22,14 @@ function makeEnv({ cloud, idb, online = true, failCloud = false, markings = {} }
     const synced = { n: 0 };
     const doc = (col, id) => ({ get: async () => { if (failCloud) throw new Error('net'); return { exists: cloud.has(`${col}/${id}`) }; } });
     const db = { collection: () => ({ doc: () => ({ collection: (col) => ({ doc: (id) => doc(col, id) }) }) }) };
+    const toasts = [];
     const win = {
-        state, showToast() {},
+        state, showToast(m) { toasts.push(m); },
         getBuildingAvailableFloors: (b) => b.floorsList.filter((f) => !tomb.has(f.floorCode))
     };
     const deps = {
         window: win, state, db, navigator: { onLine: online },
+        localStorage: { getItem: (k) => (store.has(k) ? store.get(k) : null), setItem: (k, v) => store.set(k, String(v)) },
         getCompanyDocId: () => 'c',
         floorDrawingTierCloudDocId: (b, f, d) => `${b}_${f}_${d}`,
         floorHasDrawingData: () => false,
@@ -40,7 +42,9 @@ function makeEnv({ cloud, idb, online = true, failCloud = false, markings = {} }
     };
     const names = Object.keys(deps);
     const api = new Function(...names, src + '; return { autoRemoveDrawinglessFloors };')(...names.map((k) => deps[k]));
-    return { api, bldg, state, tomb, synced };
+    const api2 = new Function(...names, src + '; return { isDrawinglessFloorHiddenOnThisDevice };')(...names.map((k) => deps[k]));
+    api.isHidden = api2.isDrawinglessFloorHiddenOnThisDevice;
+    return { api, bldg, state, tomb, synced, toasts, store };
 }
 
 (async () => {
@@ -54,6 +58,21 @@ function makeEnv({ cloud, idb, online = true, failCloud = false, markings = {} }
     assert.strictEqual(env.state.currentFloor, '', '지금 층이 빠졌으면 비워서 실제 첫 층을 고르게 한다');
     assert.strictEqual(env.tomb.size, 0, '자동 정리는 묘비를 남기지 않는다(다른 기기가 올리는 중일 수 있음)');
     assert.strictEqual(env.synced.n, 0, '자동 정리는 서버에 올리지 않는다');
+
+    // 2026-11-27 뺀 층을 이 기기에 기억 → 서버 층 목록이 다시 합쳐져도 알림은 처음 한 번만
+    const store = new Map();
+    env = makeEnv({ cloud, idb, store });
+    await env.api.autoRemoveDrawinglessFloors(env.bldg);
+    assert.strictEqual(env.toasts.length, 1, '처음 뺄 때 알림');
+    assert.ok(store.get('bsa_drawingless_floors_hidden_v1').includes('goheung_본관 지하 1층'), '뺀 층을 기억');
+    env = makeEnv({ cloud, idb, store }); // 새로 켜도(동기화로 층이 되살아나도) 다시 안 알린다
+    assert.deepStrictEqual(await env.api.autoRemoveDrawinglessFloors(env.bldg), ['본관 지하 1층']);
+    assert.strictEqual(env.toasts.length, 0, '같은 층은 다시 알리지 않는다');
+    // 그사이 다른 기기가 도면을 올렸으면 숨김을 푼다
+    env = makeEnv({ cloud: new Set([...cloud, 'floorDrawings/goheung_본관 지하 1층']), idb, store });
+    assert.deepStrictEqual(await env.api.autoRemoveDrawinglessFloors(env.bldg), []);
+    assert.strictEqual(env.api.isHidden('goheung', '본관 지하 1층'), false, '도면 생기면 다시 보임');
+    assert.ok(app.includes('isDrawinglessFloorHiddenOnThisDevice(bldg.id, f.floorCode)'), '층 목록에서 숨긴 층을 거른다');
 
     // 마킹이 있으면 안 지운다
     env = makeEnv({ cloud, idb, markings: { '본관 지하 1층': 2 } });
