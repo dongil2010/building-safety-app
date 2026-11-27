@@ -44226,7 +44226,7 @@ ${roundMobile ? '' : `<button type="button" class="icon-btn icon-btn-trash" titl
         });
     }
 
-// @@app-part 10-marking.js sha=aa24d6c77116 — 원본은 app/10-marking.js (여기 말고 거기서 고칠 것)
+// @@app-part 10-marking.js sha=cd4046d236e3 — 원본은 app/10-marking.js (여기 말고 거기서 고칠 것)
     // --- 9. BUTTON CONTROLS & LISTENERS ---
 
     // Main Navigation Tabs Click Listener
@@ -45106,6 +45106,19 @@ ${roundMobile ? '' : `<button type="button" class="icon-btn icon-btn-trash" titl
                 const ln = it.line;
                 const pts = ln.pts;
                 const isSel = !!(sel && sel.lineId === ln.id);
+                // 2026-11-27 다른 구역 안(구역 밖 선이면 모든 구역 안)에서는 선을 숨김 — 고른 선만 숨긴 부분을 옅게 보여 준다
+                const parts = G.visibleLineParts ? G.visibleLineParts(grid, g, ln) : [pts];
+                if (!parts.length && !isSel) return;
+                const clipped = parts.length !== 1 || parts[0] !== pts;
+                if (isSel && clipped) {
+                    ctx.setLineDash([3 / s, 4 / s]);
+                    ctx.lineCap = 'round';
+                    ctx.strokeStyle = 'rgba(249, 115, 22, 0.45)';
+                    ctx.lineWidth = 1 / s;
+                    tracePath(pts);
+                    ctx.stroke();
+                    ctx.setLineDash([]);
+                }
                 if (editing) {
                     const band = G.lineBand(ln, g, gctx);
                     if (band > 0) {
@@ -45114,20 +45127,19 @@ ${roundMobile ? '' : `<button type="button" class="icon-btn icon-btn-trash" titl
                         ctx.lineJoin = 'miter';
                         ctx.strokeStyle = isSel ? 'rgba(249, 115, 22, 0.16)' : 'rgba(14, 116, 144, 0.12)';
                         ctx.lineWidth = band;
-                        tracePath(pts);
-                        ctx.stroke();
+                        parts.forEach((pp) => { tracePath(pp); ctx.stroke(); });
                     }
                 }
                 ctx.setLineDash([10 / s, 4 / s, 2 / s, 4 / s]);
                 ctx.lineCap = 'round';
                 ctx.strokeStyle = isSel ? '#f97316' : (editing ? 'rgba(14, 116, 144, 0.9)' : 'rgba(14, 116, 144, 0.55)');
                 ctx.lineWidth = (isSel ? 2 : 1.2) / s;
-                tracePath(pts);
-                ctx.stroke();
+                parts.forEach((pp) => { tracePath(pp); ctx.stroke(); });
                 ctx.setLineDash([]);
                 if (editing) {
                     const hs = (isSel ? 5 : 3.5) / s;
                     pts.forEach((p, vi) => {
+                        if (!isSel && clipped && !G.vertexVisible(grid, g, ln, vi)) return; // 숨긴 자리의 꼭짓점도 숨김
                         const vSel = isSel && sel.vertexIndex === vi;
                         ctx.fillStyle = vSel ? '#f97316' : '#ffffff';
                         ctx.strokeStyle = isSel ? '#f97316' : 'rgba(14, 116, 144, 0.9)';
@@ -45141,7 +45153,10 @@ ${roundMobile ? '' : `<button type="button" class="icon-btn icon-btn-trash" titl
                 ctx.font = `700 ${fontPx}px "Pretendard", "Malgun Gothic", "맑은 고딕", sans-serif`;
                 const tw = ctx.measureText(it.name).width;
                 const r = Math.max(10 / s, tw / 2 + 4 / s);
-                const ends = [[pts[0], pts[1]], [pts[pts.length - 1], pts[pts.length - 2]]];
+                // 이름 풍선은 보이는 부분의 양 끝(구역 경계에서 잘렸으면 잘린 자리)
+                const fp = parts.length ? parts[0] : pts;
+                const lp = parts.length ? parts[parts.length - 1] : pts;
+                const ends = [[fp[0], fp[1]], [lp[lp.length - 1], lp[lp.length - 2]]];
                 ends.forEach(([endP, nextP]) => {
                     const dx = nextP.x - endP.x;
                     const dy = nextP.y - endP.y;
@@ -45174,10 +45189,12 @@ ${roundMobile ? '' : `<button type="button" class="icon-btn icon-btn-trash" titl
 
     /** 후보 → 화면 방향 기준 { col: [{pts,label}], row: [...] } (화면이 90·270° 돌아 있으면 수직선은 행, 수평선은 열) */
     function gridAutoCandidatesByAxis(ap) {
-        const rot = ((Number(ap.rot) || 0) % 360 + 360) % 360;
+        // 2026-11-27 구역 안에서 찾은 후보는 구역 기준(돌리기 전 사각형) 좌표 — 도면 좌표로 되돌리고, 돌린 각도도 열/행 판단에 넣는다
+        const toW = typeof ap.toWorld === 'function' ? ap.toWorld : (q) => q;
+        const rot = ((Math.round(((Number(ap.rot) || 0) + (Number(ap.zoneAngle) || 0)) / 90) * 90) % 360 + 360) % 360;
         const swap = rot === 90 || rot === 270;
-        const vert = ap.res.cols.map((l) => ({ pts: [{ x: l.x, y: l.y1 }, { x: l.x, y: l.y2 }], label: l.label || '', series: l.series || 0 }));
-        const horz = ap.res.rows.map((l) => ({ pts: [{ x: l.x1, y: l.y }, { x: l.x2, y: l.y }], label: l.label || '', series: l.series || 0 }));
+        const vert = ap.res.cols.map((l) => ({ pts: [toW({ x: l.x, y: l.y1 }), toW({ x: l.x, y: l.y2 })], label: l.label || '', series: l.series || 0 }));
+        const horz = ap.res.rows.map((l) => ({ pts: [toW({ x: l.x1, y: l.y }), toW({ x: l.x2, y: l.y })], label: l.label || '', series: l.series || 0 }));
         const labelled = ap.res.labelled || {};
         const out = swap
             ? { col: horz, row: vert, labelled: { col: !!labelled.rows, row: !!labelled.cols } }
@@ -45257,24 +45274,38 @@ ${roundMobile ? '' : `<button type="button" class="icon-btn icon-btn-trash" titl
             window.showToast?.('이 층은 캐드 PDF 원본이 없어 자동으로 못 잡습니다(그림 도면). 직접 그어 주세요.', 'warning', 4500);
             return;
         }
-        const dims = getGridReliableDims() || { w: data.w, h: data.h };
+        let dims = getGridReliableDims() || { w: data.w, h: data.h };
+        let input = { segments: data.segments, small: data.small, texts: data.texts };
+        // 2026-11-27 「구역 내부에서 자동 잡기」: 구역을 골라 두었으면 그 구역 안의 선·글자만으로 찾는다(구역 기준 좌표)
+        const G = gridLib();
+        const zgrid = getCurrentFloorGrid(false);
+        const zone = (G && zgrid && ge.zoneId) ? G.findZone(zgrid, ge.zoneId) : null;
+        const zin = (zone && typeof G.zoneDetectionInput === 'function') ? G.zoneDetectionInput(zone, input) : null;
+        if (zin) {
+            input = zin.data;
+            dims = zin.dims;
+        }
         const res = D.detect(
-            { segments: data.segments, small: data.small, texts: data.texts },
+            input,
             dims,
             { minSpanFrac: GRID_AUTO_SENS[ge.autoSens || 'normal'] || GRID_AUTO_SENS.normal, outerOnly: ge.autoOuter !== 'all' }
         );
+        const where = zin ? `구역 「${zone.name}」 안에서 ` : '';
         if (!res.cols.length && !res.rows.length) {
             ge.autoPreview = null;
             renderGridPanel();
             drawCanvas();
-            window.showToast?.('번호 풍선·글자를 못 찾았습니다(글자가 그림으로 된 PDF일 수 있음). 민감도를 「짧은 선도」로 바꿔 다시 눌러 보거나 직접 그어 주세요.', 'warning', 5000);
+            window.showToast?.(`${where}번호 풍선·글자를 못 찾았습니다(글자가 그림으로 된 PDF일 수 있음). ${zin ? '구역이 축 번호 풍선까지 감싸는지 보고, ' : ''}민감도를 「짧은 선도」로 바꿔 다시 눌러 보거나 직접 그어 주세요.`, 'warning', 5000);
             return;
         }
-        ge.autoPreview = { key: getGridFloorKey(), res, dims, rot: state.rotationAngle || 0, axes: ge.autoAxes || 'both' };
+        ge.autoPreview = {
+            key: getGridFloorKey(), res, dims, rot: state.rotationAngle || 0, axes: ge.autoAxes || 'both',
+            zoneId: zin ? zone.id : null, zoneAngle: zin ? (zone.angle || 0) : 0, toWorld: zin ? zin.toWorld : null
+        };
         renderGridPanel();
         drawCanvas();
         const shown = gridAutoCandidatesByAxis(ge.autoPreview);
-        window.showToast?.(`열 ${shown.col.length}개 · 행 ${shown.row.length}개 후보를 찾았습니다. 주황 점선이 맞으면 「적용」을 누르세요.`, 'success', 4500);
+        window.showToast?.(`${where}열 ${shown.col.length}개 · 행 ${shown.row.length}개 후보를 찾았습니다. 주황 점선이 맞으면 「적용」을 누르세요.`, 'success', 4500);
     }
 
     async function gridAutoApply() {
@@ -45285,9 +45316,20 @@ ${roundMobile ? '' : `<button type="button" class="icon-btn icon-btn-trash" titl
         const grid = getCurrentFloorGrid(true);
         const gctx = getGridCtx();
         const by = gridAutoCandidatesByAxis(ap);
+        // 2026-11-27 구역 안에서 찾았으면 그 구역의 그룹으로(구역이 그새 지워졌으면 그만둠)
+        const zid = ap.zoneId || null;
+        const zone = zid ? G.findZone(grid, zid) : null;
+        if (zid && !zone) {
+            ge.autoPreview = null;
+            renderGridPanel();
+            drawCanvas();
+            window.showToast?.('후보를 찾은 구역이 없어졌습니다. 다시 「자동 잡기」를 눌러 주세요.', 'warning', 3000);
+            return;
+        }
+        const inZone = (g) => (g.zoneId || null) === zid;
         // 이미 그은 선이 있는 축은 지우지 않고 새 그룹으로 붙인다(겹치면 「그룹 삭제」로 지움)
-        const existing = ['col', 'row'].reduce((n, ax) => n + grid.groups.filter((g) => g.axis === ax && !g.zoneId).reduce((m, g) => m + (g.lines || []).length, 0), 0);
-        if (existing > 0 && !await window.appConfirm(`이 층에 이미 행·열 선 ${existing}개가 있습니다.\n기존 선은 그대로 두고 자동으로 잡은 선을 새 그룹으로 추가할까요?\n(겹치면 그룹을 골라 「그룹 삭제」로 지울 수 있습니다)`)) return;
+        const existing = ['col', 'row'].reduce((n, ax) => n + grid.groups.filter((g) => g.axis === ax && inZone(g)).reduce((m, g) => m + (g.lines || []).length, 0), 0);
+        if (existing > 0 && !await window.appConfirm(`${zone ? `구역 「${zone.name}」에` : '이 층에'} 이미 행·열 선 ${existing}개가 있습니다.\n기존 선은 그대로 두고 자동으로 잡은 선을 새 그룹으로 추가할까요?\n(겹치면 그룹을 골라 「그룹 삭제」로 지울 수 있습니다)`)) return;
         let added = 0;
         ['col', 'row'].forEach((axis) => {
             const items = by[axis];
@@ -45299,12 +45341,12 @@ ${roundMobile ? '' : `<button type="button" class="icon-btn icon-btn-trash" titl
             seriesKeys.forEach((sk) => {
                 const part = labelled ? items.filter((c) => (c.series || 0) === sk) : items;
                 if (!part.length) return;
-                const same = grid.groups.filter((g) => g.axis === axis && !g.zoneId).length;
-                const g = G.createGroup(axis, {
+                const same = grid.groups.filter((g) => g.axis === axis && inZone(g)).length;
+                const g = G.createGroup(axis, Object.assign({
                     // 도면 축 번호를 이름으로 쓰면 머리글 없이(도면 표기 그대로), 아니면 X·Y(둘째 그룹부터 AX·BX…)
                     prefix: labelled ? '' : (same ? `${String.fromCharCode(65 + same)}${base}` : base),
                     band: G.defaultBand(gctx.w, gctx.h)
-                });
+                }, zid ? { zoneId: zid, angle: gridZoneLineAngle(grid, zid) } : {}));
                 part.forEach((c) => {
                     const ln = { id: `gl_${Date.now().toString(36)}${Math.random().toString(36).slice(2, 7)}`, pts: c.pts.map((p) => ({ x: p.x, y: p.y })) };
                     if (labelled && c.label) ln.label = c.label;
@@ -45318,7 +45360,7 @@ ${roundMobile ? '' : `<button type="button" class="icon-btn icon-btn-trash" titl
             });
         });
         ge.autoPreview = null;
-        ge.zoneId = null;
+        ge.zoneId = zid;
         // 2026-11-02 「자동으로 잡고 좀 옮길 수 있게」 — 적용하면 바로 「선택·이동」 도구로 바꿔 선을 끌거나 ◀▶ 버튼으로 옮길 수 있게 한다
         ge.tool = 'select';
         ge.bendArmed = false;
@@ -45445,7 +45487,7 @@ ${roundMobile ? '' : `<button type="button" class="icon-btn icon-btn-trash" titl
                 }
             }
         }
-        const hit = G.hitTest(grid, p, tol);
+        const hit = G.hitTest(grid, p, tol, { visibleOnly: true, keepLineId: ge.sel ? ge.sel.lineId : null }); // 구역 때문에 숨긴 선 부분은 안 잡음
         // 구역: 「선택·이동」·「구역」 도구에서만 모서리(크기)·테두리(옮기기)를 끔. 선 꼭짓점이 먼저
         const zh = (ge.tool === 'select' || ge.tool === 'zone') ? G.hitZone(grid, p, tol) : null;
         if (zh && (zh.corner != null ? !(hit && hit.vertexIndex != null) : !hit)) {
@@ -45653,7 +45695,7 @@ ${roundMobile ? '' : `<button type="button" class="icon-btn icon-btn-trash" titl
                 return;
             }
         }
-        const hit = G.hitTest(grid, p, 8 / (state.view.scale || 1));
+        const hit = G.hitTest(grid, p, 8 / (state.view.scale || 1), { visibleOnly: true, keepLineId: ge.sel ? ge.sel.lineId : null });
         if (!hit) return;
         const f = G.findLine(grid, hit.lineId);
         if (!f) return;
@@ -45777,6 +45819,7 @@ ${roundMobile ? '' : `<button type="button" class="icon-btn icon-btn-trash" titl
         const lineBandDefault = selF ? G.lineBand({}, selF.group, gctx) : 0;
         // 2026-11-02 자동 잡기: 캐드 PDF의 통심선·축 번호를 찾아 후보를 보여 주고, 맞으면 적용
         const autoPrev = (ge.autoPreview && ge.autoPreview.key === getGridFloorKey()) ? ge.autoPreview : null;
+        const autoPrevZone = autoPrev && autoPrev.zoneId ? zones.find((z) => z.id === autoPrev.zoneId) || null : null;
         const autoSens = ge.autoSens || 'normal';
         const autoAxes = ge.autoAxes || 'both';
         const autoSummary = autoPrev ? (() => {
@@ -45935,7 +45978,9 @@ ${roundMobile ? '' : `<button type="button" class="icon-btn icon-btn-trash" titl
                     </div>
                     <div class="grid-panel-row">
                         <label title="구역과 구역 안의 선이 같이 돕니다. 도면의 구역 위 동그란 손잡이를 끌어도 됩니다">각도 <input type="number" data-f="zangle" value="${ez.angle || 0}" min="-180" max="180" step="0.5" style="width:60px">°</label>
-                    </div>` : ''}`;
+                        <button type="button" data-act="autoDetect" title="이 구역 안의 캐드 선·축 번호만으로 행·열을 찾습니다(아래 「자동 잡기」 설정 사용). 적용하면 이 구역 그룹이 됩니다">✨ 이 구역 자동 잡기</button>
+                    </div>` : ''}
+                    ${zones.length ? '<div class="grid-panel-row grid-panel-muted">구역 안에서는 그 구역 선만 보이고, 구역 밖 선·다른 구역 선은 숨겨집니다(마킹 위치도 그 구역 선으로만 계산).</div>' : ''}`;
         const autoBody = `
                     <div class="grid-panel-row">
                         <label>민감도 <select data-f="autoSens" title="짧은 선도 후보에 넣으려면 「짧은 선도」, 벽선이 섞이면 「긴 선만」">
@@ -45956,8 +46001,9 @@ ${roundMobile ? '' : `<button type="button" class="icon-btn icon-btn-trash" titl
                         </select></label>
                         <button type="button" data-act="autoDetect" class="grid-primary">✨ 자동 잡기</button>
                     </div>
+                    ${zones.length ? `<div class="grid-panel-row grid-panel-muted">찾을 범위: ${ez ? `<b>구역 「${gridEsc(ez.name)}」 안</b>` : '도면 전체(구역 밖 선) — 구역을 고르면 그 구역 안에서만 찾습니다'}</div>` : ''}
                     ${autoPrev ? `
-                    <div class="grid-panel-row">${autoSummary}</div>
+                    <div class="grid-panel-row">${autoPrevZone ? `[${gridEsc(autoPrevZone.name)}] ` : ''}${autoSummary}</div>
                     <div class="grid-panel-row">
                         <button type="button" data-act="autoApply" class="active">적용</button>
                         <button type="button" data-act="autoCancel">취소</button>

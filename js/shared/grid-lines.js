@@ -1307,19 +1307,189 @@
         return { dist: Math.hypot(p.x - q.x, p.y - q.y), q, t };
     }
 
-    /** 이미지 좌표 기준 가장 가까운 선/꼭짓점. tol: 이미지 좌표 허용 거리 */
-    function hitTest(rawGrid, pImg, tol) {
+    // ---- 2026-11-27 구역 안에서는 다른 구역(구역 밖 포함)의 선을 숨김 ----
+    // 「행열 구역 설정하면 해당 구역 내부에는 선이 사라지게」: 마킹 위치는 이미 그 자리 구역의 그룹만으로 계산하므로(restrictGridToZone)
+    // 화면에서도 선은 「그 선이 쓰이는 곳」 — 그 자리의 구역(zoneAt)이 선 그룹의 구역과 같은 곳 — 에서만 보이게 한다. 저장된 선은 그대로.
+
+    /** 구역 테두리(도면 좌표 꼭짓점들) */
+    function zoneOutlineWorld(z) {
+        if (!z || !z.rect) return [];
+        if (z.poly && z.poly.length >= 3) return zoneWorldPoly(z);
+        const r = z.rect;
+        return [{ x: r.x1, y: r.y1 }, { x: r.x2, y: r.y1 }, { x: r.x2, y: r.y2 }, { x: r.x1, y: r.y2 }].map((p) => zoneWorldPoint(z, p));
+    }
+
+    /** 이 점에서 이 그룹 선이 보이나(쓰이나) — 그 자리 구역이 그룹 구역과 같을 때 */
+    function groupActiveAt(grid, group, p) {
+        if (!grid || !(grid.zones || []).length) return true;
+        const z = zoneAt(grid, p);
+        return (z ? z.id : null) === ((group && group.zoneId) || null);
+    }
+
+    /** 꼭짓점이 보이나 — 구역 경계 위 끝점(돌린 구역의 계산 오차 포함)은 이웃 쪽으로 조금 들어간 자리도 본다 */
+    function vertexVisible(grid, group, line, vi) {
+        const pts = (line && line.pts) || [];
+        const q = pts[vi];
+        if (!q) return false;
+        if (groupActiveAt(grid, group, q)) return true;
+        return [pts[vi - 1], pts[vi + 1]].some((n) => {
+            if (!n) return false;
+            const L = Math.hypot(n.x - q.x, n.y - q.y);
+            if (!(L > 0)) return false;
+            const e = Math.min(0.5, L / 2) / L;
+            return groupActiveAt(grid, group, { x: q.x + (n.x - q.x) * e, y: q.y + (n.y - q.y) * e });
+        });
+    }
+
+    /**
+     * 선에서 보이는 부분들 → [[점…], …] (각각 이어진 꺾은선). 구역이 없으면 [line.pts] 그대로.
+     * 선분마다 구역 테두리와 만나는 자리에서 자르고, 잘린 토막의 가운데가 그룹 구역에 들면 남긴다.
+     */
+    function visibleLineParts(grid, group, line) {
+        const pts = (line && line.pts) || [];
+        if (pts.length < 2) return [];
+        const zones = (grid && grid.zones) || [];
+        if (!zones.length) return [pts];
+        const outlines = zones.map(zoneOutlineWorld).filter((o) => o.length >= 3);
+        const parts = [];
+        let cur = null;
+        const push = (p) => {
+            const last = cur[cur.length - 1];
+            if (!last || Math.hypot(last.x - p.x, last.y - p.y) > 1e-6) cur.push({ x: p.x, y: p.y });
+        };
+        for (let i = 0; i < pts.length - 1; i++) {
+            const a = pts[i];
+            const b = pts[i + 1];
+            const dx = b.x - a.x;
+            const dy = b.y - a.y;
+            const ts = [0, 1];
+            outlines.forEach((o) => {
+                o.forEach((c, k) => {
+                    const d = o[(k + 1) % o.length];
+                    const ex = d.x - c.x;
+                    const ey = d.y - c.y;
+                    const den = dx * ey - dy * ex;
+                    if (Math.abs(den) < 1e-12) return;
+                    const t = ((c.x - a.x) * ey - (c.y - a.y) * ex) / den;
+                    const u = ((c.x - a.x) * dy - (c.y - a.y) * dx) / den;
+                    if (t > 0 && t < 1 && u >= -1e-9 && u <= 1 + 1e-9) ts.push(t);
+                });
+            });
+            ts.sort((x, y) => x - y);
+            for (let k = 0; k < ts.length - 1; k++) {
+                const t0 = ts[k];
+                const t1 = ts[k + 1];
+                if (t1 - t0 < 1e-9) continue;
+                const tm = (t0 + t1) / 2;
+                const on = groupActiveAt(grid, group, { x: a.x + dx * tm, y: a.y + dy * tm });
+                if (!on) {
+                    if (cur && cur.length >= 2) parts.push(cur);
+                    cur = null;
+                    continue;
+                }
+                if (!cur) cur = [];
+                push({ x: a.x + dx * t0, y: a.y + dy * t0 });
+                push({ x: a.x + dx * t1, y: a.y + dy * t1 });
+            }
+        }
+        if (cur && cur.length >= 2) parts.push(cur);
+        return parts;
+    }
+
+    // ---- 2026-11-27 구역 안에서 자동 잡기 ----
+    /** 선분 [x1,y1,x2,y2]를 사각형 r 안으로 자름(Liang–Barsky) → 잘린 선분 또는 null */
+    function clipSegToRect(s, r) {
+        let t0 = 0;
+        let t1 = 1;
+        const x1 = s[0], y1 = s[1];
+        const dx = s[2] - x1;
+        const dy = s[3] - y1;
+        const sides = [[-dx, x1 - r.x1], [dx, r.x2 - x1], [-dy, y1 - r.y1], [dy, r.y2 - y1]];
+        for (let i = 0; i < 4; i++) {
+            const pv = sides[i][0];
+            const qv = sides[i][1];
+            if (Math.abs(pv) < 1e-12) {
+                if (qv < 0) return null;
+                continue;
+            }
+            const t = qv / pv;
+            if (pv < 0) { if (t > t1) return null; if (t > t0) t0 = t; }
+            else { if (t < t0) return null; if (t < t1) t1 = t; }
+        }
+        if (t1 - t0 < 1e-9) return null;
+        return [x1 + dx * t0, y1 + dy * t0, x1 + dx * t1, y1 + dy * t1];
+    }
+
+    /**
+     * 자동 잡기 입력(도면 전체의 선분·작은 선분·글자, 이미지 좌표)을 구역 하나로 잘라 구역 기준 좌표로 옮긴다.
+     * 돌린 구역은 돌리기 전 사각형 기준(구역과 같이 돈 건물이 똑바로 선 좌표)으로, 원점은 사각형 왼위.
+     * 반환: { data, dims, toWorld(p) } — 찾은 결과 점은 toWorld로 도면 좌표로 되돌린다. 구역이 이상하면 null.
+     */
+    function zoneDetectionInput(zone, data) {
+        if (!zone || !zone.rect) return null;
+        const r = zone.rect;
+        const w = r.x2 - r.x1;
+        const h = r.y2 - r.y1;
+        if (!(w > 1 && h > 1)) return null;
+        const poly = zone.poly && zone.poly.length >= 3 ? zone.poly : null;
+        const inside = (lp) => rectContains(r, lp) && (!poly || pointInPoly(lp, poly));
+        const toLocal = (x, y) => zoneLocalPoint(zone, { x, y });
+        const segIn = (list) => {
+            const out = [];
+            (list || []).forEach((s) => {
+                if (!s || s.length < 4) return;
+                const a = toLocal(num(s[0], NaN), num(s[1], NaN));
+                const b = toLocal(num(s[2], NaN), num(s[3], NaN));
+                if (![a.x, a.y, b.x, b.y].every(Number.isFinite)) return;
+                const c = clipSegToRect([a.x, a.y, b.x, b.y], r);
+                if (!c) return;
+                if (poly && !inside({ x: (c[0] + c[2]) / 2, y: (c[1] + c[3]) / 2 })) return; // 다각형: 가운데가 안쪽인 선분만
+                out.push([c[0] - r.x1, c[1] - r.y1, c[2] - r.x1, c[3] - r.y1]);
+            });
+            return out;
+        };
+        const ang = num(zone.angle, 0);
+        const texts = [];
+        (data && data.texts || []).forEach((t) => {
+            if (!t) return;
+            const lp = toLocal(num(t.x, NaN), num(t.y, NaN));
+            if (!Number.isFinite(lp.x) || !Number.isFinite(lp.y) || !inside(lp)) return;
+            const o = Object.assign({}, t, { x: lp.x - r.x1, y: lp.y - r.y1 });
+            if (ang && Number.isFinite(t.dx) && Number.isFinite(t.dy)) {
+                const v = rotatePointDeg({ x: t.dx, y: t.dy }, { x: 0, y: 0 }, -ang);
+                o.dx = v.x;
+                o.dy = v.y;
+            }
+            texts.push(o);
+        });
+        return {
+            data: { segments: segIn(data && data.segments), small: segIn(data && data.small), texts },
+            dims: { w, h },
+            toWorld: (p) => zoneWorldPoint(zone, { x: p.x + r.x1, y: p.y + r.y1 })
+        };
+    }
+
+    /**
+     * 이미지 좌표 기준 가장 가까운 선/꼭짓점. tol: 이미지 좌표 허용 거리.
+     * opts.visibleOnly: 구역 때문에 숨긴 부분(visibleLineParts 밖)은 안 잡음 — opts.keepLineId 선은 숨긴 부분도 잡음(고른 선)
+     */
+    function hitTest(rawGrid, pImg, tol, opts) {
         const grid = rawGrid && rawGrid.groups ? rawGrid : normalizeGrid(rawGrid);
+        const o = opts || {};
+        const filter = !!(o.visibleOnly && (grid.zones || []).length);
         let bestV = null;
         let bestL = null;
         (grid.groups || []).forEach((g) => {
             (g.lines || []).forEach((ln) => {
+                const check = filter && ln.id !== o.keepLineId;
                 (ln.pts || []).forEach((q, vi) => {
                     const d = Math.hypot(pImg.x - q.x, pImg.y - q.y);
+                    if (check && !vertexVisible(grid, g, ln, vi)) return;
                     if (d <= tol * 1.3 && (!bestV || d < bestV.dist)) bestV = { groupId: g.id, lineId: ln.id, vertexIndex: vi, dist: d };
                 });
                 for (let i = 0; i < ln.pts.length - 1; i++) {
                     const r = distToSegment(pImg, ln.pts[i], ln.pts[i + 1]);
+                    if (check && r.dist <= tol && !groupActiveAt(grid, g, r.q)) continue;
                     if (r.dist <= tol && (!bestL || r.dist < bestL.dist)) {
                         bestL = { groupId: g.id, lineId: ln.id, vertexIndex: null, segIndex: i, dist: r.dist, point: r.q };
                     }
@@ -1576,6 +1746,10 @@
         lineAngle,
         setLineAngle,
         hitTest,
+        visibleLineParts,
+        groupActiveAt,
+        vertexVisible,
+        zoneDetectionInput,
         insertVertex,
         removeVertex,
         findLine,
