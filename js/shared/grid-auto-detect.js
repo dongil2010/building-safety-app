@@ -445,8 +445,9 @@
                 const along = rx * ux + ry * uy;
                 const perp = Math.abs(-rx * uy + ry * ux);
                 const qw = q.tw > 0 ? q.tw : (q.th || t.th) * 0.6 * String(q.str).trim().length;
-                if (along <= 0 || along > tw / 2 + qw / 2 + t.th * 0.6) return;
-                if (perp > t.th * 0.6) return;
+                // 2026-11-27 「X9」처럼 숫자가 앞 글자에 겹치게 붙거나(가운데 어림이 어긋나 along ≤ 0) 조금 비켜 쓴 도면도 잇는다
+                if (along <= -t.th * 0.5 || along > tw / 2 + qw / 2 + t.th * 0.8) return;
+                if (perp > Math.max(t.th, q.th || 0) * 0.8) return;
                 if (!best || along < best.along) best = { j, q, along, qw };
             });
             if (!best) { out.push(t); return; }
@@ -467,11 +468,53 @@
         return out;
     }
 
+    /**
+     * 2026-11-27 「X9」가 「9」로 잡히던 문제: joinSplitLabels가 읽는 방향·가운데 어림으로 못 이은 「X」와 「9」가
+     * 아주 가까이(글자 높이 1.6배 안) 따로 남아 있으면 방향과 상관없이 「X9」로 묶는다. 가장 가까운 짝부터.
+     */
+    function pairLeftoverLabels(texts) {
+        const list = (texts || []).filter(Boolean);
+        const LET = /^[A-Za-z]{1,2}['’′ʼ´`]?$/;
+        const DIG = /^\d{1,3}$/;
+        const pairs = [];
+        list.forEach((t, i) => {
+            if (!LET.test(String(t.str).trim()) || !(t.th > 0)) return;
+            list.forEach((q, j) => {
+                if (!DIG.test(String(q.str).trim())) return;
+                const d = Math.hypot(q.x - t.x, q.y - t.y);
+                if (d <= Math.max(t.th, q.th || 0) * 1.6) pairs.push({ i, j, d });
+            });
+        });
+        if (!pairs.length) return list;
+        pairs.sort((a, b) => a.d - b.d);
+        const used = new Set();
+        const merged = new Map();
+        pairs.forEach((p) => {
+            if (used.has(p.i) || used.has(p.j)) return;
+            used.add(p.i);
+            used.add(p.j);
+            const t = list[p.i];
+            const q = list[p.j];
+            merged.set(p.i, Object.assign({}, t, {
+                str: String(t.str).trim() + String(q.str).trim(),
+                x: (t.x + q.x) / 2,
+                y: (t.y + q.y) / 2,
+                th: Math.max(t.th, q.th || 0)
+            }));
+        });
+        const out = [];
+        list.forEach((t, i) => {
+            if (merged.has(i)) out.push(merged.get(i));
+            else if (!used.has(i)) out.push(t);
+        });
+        return out;
+    }
+
     /** 표시 후보: 풍선(안 글자 포함) + 풍선 밖의 도면 글자 */
     function findMarkers(data, dims, o) {
         const bubbles = findBubbles(data.small, dims, o);
         const markers = bubbles.map((b) => ({ x: b.x, y: b.y, r: b.r, bubble: true, label: textInside(data.texts, b), tipX: b.tipX, tipY: b.tipY }));
-        joinSplitLabels(data.texts).forEach((t) => {
+        pairLeftoverLabels(joinSplitLabels(data.texts)).forEach((t) => {
             if (!t || !isLabelText(t.str)) return;
             if (bubbles.some((b) => Math.hypot(t.x - b.x, t.y - b.y) <= b.r * 1.3)) return; // 이미 풍선 안
             markers.push({ x: t.x, y: t.y, r: 0, bubble: false, label: String(t.str).trim(), dx: t.dx, dy: t.dy, tw: t.tw, th: t.th });
@@ -568,6 +611,17 @@
                 const last = uniq[uniq.length - 1];
                 if (last && along(m) - along(last) < minGap) {
                     if (m.bubble && !last.bubble) uniq[uniq.length - 1] = m;
+                    else if (!m.bubble && !last.bubble) {
+                        // 2026-11-27 「X」와 「9」가 따로 남은 표시(못 이은 축 번호): 글자+숫자로 합친다(「9」만 남지 않게)
+                        const ls = String(last.label || '');
+                        const ms = String(m.label || '');
+                        const letter = /^[A-Za-z]{1,2}['’′ʼ´`]?$/;
+                        const digits = /^\d{1,3}$/;
+                        let lab = '';
+                        if (letter.test(ls) && digits.test(ms)) lab = ls + ms;
+                        else if (letter.test(ms) && digits.test(ls)) lab = ms + ls;
+                        if (lab) uniq[uniq.length - 1] = Object.assign({}, last, { label: lab, x: (last.x + m.x) / 2, y: (last.y + m.y) / 2 });
+                    }
                     return;
                 }
                 uniq.push(m);

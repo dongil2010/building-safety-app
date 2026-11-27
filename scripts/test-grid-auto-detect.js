@@ -592,3 +592,27 @@ console.log('test-grid-auto-detect: 13 cases ok');
     assert.ok(rp.cols.every((c, i) => Math.abs(c.x - (100 + i * 180)) < 1), '긴 기둥선 위치: ' + rp.cols.map((c) => c.x));
 }
 console.log('test-grid-auto-detect: 14 cases ok');
+
+// 15) ★ 2026-11-27 세로로 돌아간 축 번호 「X9」: 「9」가 「X」에 겹쳐 붙어 「9」만 잡히던 문제
+{
+    // 읽는 방향 위쪽(dy=-1), 숫자 가운데 어림이 X 가운데보다 살짝 뒤(겹침) — 이어 붙여야 함
+    const j = D.joinSplitLabels([
+        { str: 'X', x: 290, y: 720, dx: 0, dy: -1, tw: 30, th: 40 },
+        { str: '9', x: 296, y: 724, dx: 0, dy: -1, tw: 22, th: 40 }
+    ]).map((t) => t.str);
+    assert.deepStrictEqual(j, ['X9'], '겹친 X9 잇기: ' + j);
+
+    // 읽는 방향이 어긋나 못 이은 채 남아도 바로 옆 「X」+「9」는 합쳐서 X9
+    const segs = [];
+    const texts = [];
+    [9, 10, 11].forEach((n, i) => {
+        const py = 700 - i * 270;
+        texts.push({ str: 'X', x: 290, y: py + 20, dx: 0, dy: -1, tw: 30, th: 40 });
+        texts.push({ str: String(n), x: 300, y: py - 10, dx: 1, dy: 0, tw: 22 * String(n).length, th: 40 }); // 읽는 방향이 다르게 들어온 숫자
+    });
+    for (let i = 0; i < 40; i++) { segs.push([500 + i * 30, 50, 500 + i * 30, 900]); segs.push([500, 50 + i * 20, 1700, 50 + i * 20]); }
+    const rp = D.detect({ segments: segs, small: [], texts }, { w: 1800, h: 1000 }, { outerOnly: false });
+    const labs = rp.rows.map((r) => r.label).sort();
+    assert.deepStrictEqual(labs, ['X10', 'X11', 'X9'], '행 이름: ' + JSON.stringify(rp.rows));
+}
+console.log('test-grid-auto-detect: 15 cases ok');
