@@ -51,7 +51,7 @@
     // 도면 글자로 인정하는 축 번호 모양: 1, 12, A, AB, X1, Y3, A-1, 1-1, ①, ⓐ, 가, A'
     // 2026-11-02 프라임(Y'1 · Y′2 · A')도 축 번호: ' ’ ′ ʼ ´ `
     const PR = "['\u2019\u2032\u02BC\u00B4`]";
-    const LABEL_RE = new RegExp('^(?:[A-Za-z]{1,2}' + PR + '?[-_]?\\d{1,3}' + PR + '?|\\d{1,3}(?:-\\d{1,2})?' + PR + '?|[A-Za-z]{1,2}' + PR + '?|[가-힣]' + PR + '?|[①-⑳]|[ⓐ-ⓩ]|[Ⓐ-Ⓩ])$');
+    const LABEL_RE = new RegExp('^(?:[A-Za-z]{1,2}' + PR + '?[-_]?\\d{1,3}(?:-\\d{1,2})?' + PR + '?|\\d{1,3}(?:-\\d{1,2})?' + PR + '?|[A-Za-z]{1,2}' + PR + '?|[가-힣]' + PR + '?|[①-⑳]|[ⓐ-ⓩ]|[Ⓐ-Ⓩ])$');
 
     function isLabelText(s) {
         return LABEL_RE.test(String(s == null ? '' : s).trim());
@@ -437,7 +437,7 @@
             let best = null;
             list.forEach((q, j) => {
                 if (j === i || used.has(j)) return;
-                if (!/^\d{1,3}$/.test(String(q.str).trim())) return;
+                if (!/^\d{1,3}(?:-\d{1,2})?$/.test(String(q.str).trim())) return; // 9 · 9-1(가지 번호)
                 const qx = Number.isFinite(q.dx) ? q.dx : 1;
                 const qy = Number.isFinite(q.dy) ? q.dy : 0;
                 if (qx * ux + qy * uy < 0.98) return;           // 같은 읽는 방향
@@ -475,7 +475,7 @@
     function pairLeftoverLabels(texts) {
         const list = (texts || []).filter(Boolean);
         const LET = /^[A-Za-z]{1,2}['’′ʼ´`]?$/;
-        const DIG = /^\d{1,3}$/;
+        const DIG = /^\d{1,3}(?:-\d{1,2})?$/;
         const pairs = [];
         list.forEach((t, i) => {
             if (!LET.test(String(t.str).trim()) || !(t.th > 0)) return;
@@ -526,6 +526,9 @@
     function labelOrder(str) {
         const t = String(str == null ? '' : str).trim().replace(/['\u2019\u2032\u02BC\u00B4`]+/g, '');
         if (!t) return null;
+        // 2026-11-27 가지 번호(X9-1 · 1-1)는 X9와 X10 사이로 — 9.01
+        const br = t.match(/(\d+)-(\d{1,2})$/);
+        if (br) return parseInt(br[1], 10) + parseInt(br[2], 10) / 100;
         let m = t.match(/(\d+)(?!.*\d)/);
         if (m) return parseInt(m[1], 10);
         if (/^[A-Za-z]{1,2}$/.test(t)) return t.toUpperCase().split('').reduce((a, c) => a * 26 + (c.charCodeAt(0) - 64), 0);
@@ -547,7 +550,7 @@
         if (/^[A-Za-z]{1,2}'?$/.test(t)) return t.indexOf("'") >= 0 ? "L'" : 'L';
         if (/^[가-힣]'?$/.test(t)) return 'K';
         if (/^[①-⑳]$/.test(t)) return 'C';
-        return t.replace(/\d+/g, '#').toUpperCase();
+        return t.replace(/\d+(?:-\d{1,2}$)?/g, '#').toUpperCase(); // X9-1도 X9와 같은 계열
     }
 
     /** 위치순 번호 줄을 계열별로 나눈 번호 → 계열 번호 목록(0부터). 글자 없는 표시는 앞 계열을 따른다 */
@@ -616,7 +619,7 @@
                         const ls = String(last.label || '');
                         const ms = String(m.label || '');
                         const letter = /^[A-Za-z]{1,2}['’′ʼ´`]?$/;
-                        const digits = /^\d{1,3}$/;
+                        const digits = /^\d{1,3}(?:-\d{1,2})?$/;
                         let lab = '';
                         if (letter.test(ls) && digits.test(ms)) lab = ls + ms;
                         else if (letter.test(ms) && digits.test(ls)) lab = ms + ls;

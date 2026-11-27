@@ -616,3 +616,26 @@ console.log('test-grid-auto-detect: 14 cases ok');
     assert.deepStrictEqual(labs, ['X10', 'X11', 'X9'], '행 이름: ' + JSON.stringify(rp.rows));
 }
 console.log('test-grid-auto-detect: 15 cases ok');
+
+// 16) ★ 2026-11-27 가지 번호 축 「X」+「9-1」(X9와 X10 사이): 이어 붙여 X9-1, 같은 계열·순서로
+{
+    assert.ok(D.isLabelText('X9-1') && D.isLabelText('Y12-2'), 'X9-1 모양 인정');
+    assert.strictEqual(D.labelClass('X9-1'), D.labelClass('X9'));
+    assert.ok(D.labelOrder('X9') < D.labelOrder('X9-1') && D.labelOrder('X9-1') < D.labelOrder('X10'));
+    const j = D.joinSplitLabels([
+        { str: 'X', x: 285, y: 200, dx: 1, dy: 0, tw: 50, th: 70 },
+        { str: '9-1', x: 345, y: 212, dx: 1, dy: 0, tw: 75, th: 50 }
+    ]).map((t) => t.str);
+    assert.deepStrictEqual(j, ['X9-1']);
+    const segs = [];
+    const texts = [];
+    ['8', '9', '9-1', '10'].forEach((n, i) => {
+        const px = 200 + i * 300;
+        texts.push({ str: 'X', x: px, y: 100, dx: 1, dy: 0, tw: 50, th: 70 });
+        texts.push({ str: n, x: px + 30 + 12 * n.length, y: 112, dx: 1, dy: 0, tw: 25 * n.length, th: 50 });
+    });
+    for (let i = 0; i < 40; i++) { segs.push([150 + i * 35, 300, 150 + i * 35, 900]); segs.push([150, 300 + i * 15, 1600, 300 + i * 15]); }
+    const rp = D.detect({ segments: segs, small: [], texts }, { w: 1800, h: 1000 }, { outerOnly: false });
+    assert.deepStrictEqual(rp.cols.map((c) => c.label), ['X8', 'X9', 'X9-1', 'X10'], '열 이름: ' + rp.cols.map((c) => c.label));
+}
+console.log('test-grid-auto-detect: 16 cases ok');
