@@ -63,6 +63,31 @@
   }
 
   /**
+   * 2026-11-27 도면 거리 재기: DXF 로 올린 층이면 도면 그림 1픽셀 = 캐드 몇 단위인지.
+   * imgW·imgH = 화면 도면 그림(기준) 크기. DXF 층이 아니거나 못 읽으면 null.
+   * @returns {Promise<{unitPerPx:number, unit:number, src:string}|null>}
+   */
+  window.getFloorDxfScaleInfo = async function (bldg, floorCode, imgW, imgH) {
+    try {
+      if (!bldg || !floorCode || !(imgW > 0) || !(imgH > 0)) return null;
+      const pdfDataUrl = await window.resolveFloorPdfDataUrlAsync(bldg, floorCode);
+      if (!pdfDataUrl) return null;
+      const meta = await readDxfMeta(pdfDataUrl);
+      if (!meta) return null;
+      const size = await readPdfPageSize(pdfDataUrl);
+      const pw = (size && size.w) || Number(meta.pageW);
+      const ph = (size && size.h) || Number(meta.pageH);
+      if (!(pw > 0) || !(ph > 0)) return null;
+      const unitPerPx = ((pw / imgW + ph / imgH) / 2) / Number(meta.s);
+      if (!(unitPerPx > 0) || !isFinite(unitPerPx)) return null;
+      return { unitPerPx, unit: Number(meta.unit) | 0, src: String(meta.src || '') };
+    } catch (e) {
+      console.warn('[BSA_DXF] 거리 재기 축척 읽기 실패', e);
+      return null;
+    }
+  };
+
+  /**
    * 한 층의 DXF 글자와 정보를 만든다.
    * @returns {Promise<{text:string, system:'cad'|'paper'|'pixel', count:number, floorCode:string}>}
    */

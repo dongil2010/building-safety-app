@@ -11044,7 +11044,7 @@ ${roundMobile ? '' : `<button type="button" class="icon-btn icon-btn-trash" titl
         });
     }
 
-// @@app-part 03-canvas.js sha=d5d9c4a47b30 — 원본은 app/03-canvas.js (여기 말고 거기서 고칠 것)
+// @@app-part 03-canvas.js sha=6eba1e180d08 — 원본은 app/03-canvas.js (여기 말고 거기서 고칠 것)
     // --- 8. DRAWING CANVAS ENGINE (PAN/ZOOM/ROTATE & PINS) ---
 
     function setupCanvas() {
@@ -12765,6 +12765,7 @@ ${roundMobile ? '' : `<button type="button" class="icon-btn icon-btn-trash" titl
                 ctx.restore();
             }
             if (window.drawingAlignState && typeof drawDrawingAlignMarks === 'function') drawDrawingAlignMarks(ctx);
+            if (window.measureState && typeof drawMeasureMarks === 'function') drawMeasureMarks(ctx);
         }
 
         ctx.restore(); // Restore drawing rotation matrix
@@ -13099,6 +13100,7 @@ ${roundMobile ? '' : `<button type="button" class="icon-btn icon-btn-trash" titl
             if (countEl) countEl.textContent = `${n}개 선택`;
         }
         syncNdtTiltRotateButtons();
+        if (typeof window.syncNdtNumberStepUi === 'function') window.syncNdtNumberStepUi();
     }
 
     function syncNdtTiltRotateButtons() {
@@ -18624,7 +18626,7 @@ ${roundMobile ? '' : `<button type="button" class="icon-btn icon-btn-trash" titl
         URL.revokeObjectURL(url);
     };
 
-// @@app-part 05-ndt-strength.js sha=b20a547e259a — 원본은 app/05-ndt-strength.js (여기 말고 거기서 고칠 것)
+// @@app-part 05-ndt-strength.js sha=4252ca719b5e — 원본은 app/05-ndt-strength.js (여기 말고 거기서 고칠 것)
     // --- 콘크리트 강도(반발경도) 추정 엔진 ---
     // 회사에서 쓰던 엑셀(반발경도-고강도포함) 자료를 그대로 옮겼다.
     // 각 행: [R, 0도 보정값, +90도 보정값, +45도 보정값, -45도 보정값, -90도 보정값]
@@ -21560,6 +21562,227 @@ ${roundMobile ? '' : `<button type="button" class="icon-btn icon-btn-trash" titl
             }
         }
     }
+
+    // ── 2026-11-27 비파괴 마킹 번호 1씩 올리기·내리기 ──
+    // 선택한 마킹(또는 열린 수정창)의 번호를 −1/+1. 비파괴 NO.는 건물 전체·종류별로 이어지므로,
+    // 같은 종류에 그 번호가 이미 있으면 그 마킹과 번호를 서로 바꾼다(겹친 번호를 만들지 않음).
+    // 단축키: 비파괴 탭에서 − / + (입력칸 밖). 되돌리기: 비파괴 탭 Ctrl+Z / Ctrl+Y.
+    /** 'NO.07' → 'NO.08'(delta=1). 숫자가 없거나 1보다 작아지면 null */
+    function ndtNumberStepLabel(no, delta) {
+        const m = String(no == null ? '' : no).match(/^(\D*)(\d+)(.*)$/);
+        if (!m) return null;
+        const n = parseInt(m[2], 10) + (Number(delta) || 0);
+        if (!Number.isFinite(n) || n < 1) return null;
+        return m[1] + String(n).padStart(2, '0') + m[3];
+    }
+    /** 'NO.07'·'07'·'NO.7' 을 같은 번호로 본다 */
+    function ndtNumberSameKey(no) {
+        const m = String(no == null ? '' : no).match(/^\D*(\d+)(.*)$/);
+        return m ? `${parseInt(m[1], 10)}|${m[2].trim()}` : String(no == null ? '' : no).trim();
+    }
+    /**
+     * pool: [{ rec, key }] — 같은 종류(건물 전체). 반환 { ok, reason } 또는
+     * { ok:true, from, to, changes:[{key,id,from,to}], swapped }
+     */
+    function planNdtNumberStep(pool, targetId, delta, field) {
+        const f = field || 'no';
+        const target = (pool || []).find((p) => p && p.rec && p.rec.id === targetId);
+        if (!target) return { ok: false, reason: '번호를 바꿀 마킹을 찾지 못했습니다.' };
+        const from = String(target.rec[f] || '');
+        const to = ndtNumberStepLabel(from, delta);
+        if (!to) {
+            return { ok: false, reason: /\d/.test(from) ? '번호를 1보다 작게 할 수 없습니다.' : `번호(${from || '없음'})에 숫자가 없어 바꿀 수 없습니다.` };
+        }
+        const toKey = ndtNumberSameKey(to);
+        const partners = pool.filter((p) => p && p !== target && p.rec && ndtNumberSameKey(p.rec[f]) === toKey);
+        const changes = [{ key: target.key, id: target.rec.id, from, to }]
+            .concat(partners.map((p) => ({ key: p.key, id: p.rec.id, from: String(p.rec[f] || ''), to: from })));
+        return { ok: true, from, to, changes, swapped: partners.length };
+    }
+
+    const _ndtNumberHistory = { undo: [], redo: [] };
+
+    /** 지금 번호를 바꿀 대상: 열린 수정창의 항목 > 하나만 고른 마킹·구역 */
+    function resolveNdtNumberStepTarget() {
+        if (isNdtModalOpen()) {
+            const pinId = document.getElementById('ndtPinId')?.value;
+            if (pinId) return { kind: 'item', id: pinId };
+            return { kind: 'form' };
+        }
+        const sel = (typeof selectedNdtIds !== 'undefined' && selectedNdtIds) ? [...selectedNdtIds] : [];
+        if (sel.length !== 1) return null;
+        const sid = String(sel[0]);
+        if (sid.startsWith('disp_')) return { kind: 'group', id: sid.slice(5) };
+        return { kind: 'item', id: sid };
+    }
+
+    function ndtNumberPoolFor(kind, rec) {
+        const bId = state.currentBuildingId;
+        if (!bId || !rec) return [];
+        const codes = listNdtFloorCodesForBuilding(bId).slice();
+        if (state.currentFloor && codes.indexOf(state.currentFloor) < 0) codes.push(state.currentFloor);
+        const seen = new Set();
+        const out = [];
+        codes.forEach((fc) => {
+            const key = `${bId}_${fc}`;
+            if (seen.has(key)) return;
+            seen.add(key);
+            if (kind === 'group') {
+                const memberDisp = rec.category === '부재변위';
+                ((state.ndtDisplacementGroups && state.ndtDisplacementGroups[key]) || []).forEach((g) => {
+                    if (!g || !g.id) return;
+                    const same = memberDisp ? g.category === '부재변위' : (!g.category || g.category === '변위');
+                    if (same) out.push({ rec: g, key });
+                });
+            } else {
+                ((state.ndtData && state.ndtData[key]) || []).forEach((it) => {
+                    if (it && it.id && it.category === rec.category) out.push({ rec: it, key });
+                });
+            }
+        });
+        return out;
+    }
+
+    function findNdtNumberRecord(kind, key, id) {
+        const map = kind === 'group' ? state.ndtDisplacementGroups : state.ndtData;
+        return ((map && map[key]) || []).find((r) => r && r.id === id) || null;
+    }
+
+    /** changes를 적용(useFrom=true면 되돌리기). 시각·기록·층 표시까지 — 다른 층(바꾼 상대)도 그 층으로 */
+    function applyNdtNumberChanges(kind, changes, useFrom) {
+        const field = kind === 'group' ? 'groupNo' : 'no';
+        let n = 0;
+        (changes || []).forEach((c) => {
+            const rec = findNdtNumberRecord(kind, c.key, c.id);
+            if (!rec) return;
+            rec[field] = useFrom ? c.from : c.to;
+            rec.updatedAt = nextRecordStamp(rec);
+            if (typeof journalRecord === 'function') journalRecord('ndt', rec.id, c.key);
+            if (typeof markFloorKeyDirty === 'function') markFloorKeyDirty(c.key);
+            n++;
+        });
+        // 열린 수정창 번호 칸도 맞춘다(자동 저장이 옛 번호를 되써넣지 않게)
+        if (kind === 'item' && isNdtModalOpen()) {
+            const pinId = document.getElementById('ndtPinId')?.value;
+            const hit = (changes || []).find((c) => c.id === pinId);
+            const noEl = document.getElementById('ndtNo');
+            if (hit && noEl) noEl.value = useFrom ? hit.from : hit.to;
+        }
+        return n;
+    }
+
+    function refreshAfterNdtNumberChange() {
+        saveStateToLocalStorage();
+        if (typeof renderNdtSummaryTable === 'function') renderNdtSummaryTable();
+        if (typeof drawNdtCanvas === 'function') drawNdtCanvas();
+        if (typeof updateNdtSelectionBar === 'function') updateNdtSelectionBar();
+        syncNdtNumberStepUi();
+    }
+
+    function stepNdtNumber(delta) {
+        if (!state.currentBuildingId) return false;
+        const t = resolveNdtNumberStepTarget();
+        if (!t) {
+            window.showToast?.('번호를 바꿀 비파괴 마킹을 하나만 선택하세요.', 'info', 2200);
+            return false;
+        }
+        if (t.kind === 'form') {
+            // 아직 저장 전인 새 항목 — 번호 칸만 바꾼다(저장될 때 그 번호로 들어감)
+            const noEl = document.getElementById('ndtNo');
+            const next = noEl ? ndtNumberStepLabel(noEl.value, delta) : null;
+            if (!next) return false;
+            noEl.value = next;
+            noEl.dispatchEvent(new Event('input', { bubbles: true }));
+            return true;
+        }
+        if (t.kind === 'item') flushNdtAutoApply();
+        const key = `${state.currentBuildingId}_${state.currentFloor}`;
+        const rec = findNdtNumberRecord(t.kind, key, t.id);
+        if (!rec) return false;
+        const field = t.kind === 'group' ? 'groupNo' : 'no';
+        const plan = planNdtNumberStep(ndtNumberPoolFor(t.kind, rec), t.id, delta, field);
+        if (!plan.ok) {
+            window.showToast?.(plan.reason, 'warning', 2600);
+            return false;
+        }
+        applyNdtNumberChanges(t.kind, plan.changes, false);
+        _ndtNumberHistory.undo.push({ kind: t.kind, changes: plan.changes });
+        if (_ndtNumberHistory.undo.length > 30) _ndtNumberHistory.undo.shift();
+        _ndtNumberHistory.redo = [];
+        refreshAfterNdtNumberChange();
+        const swapMsg = plan.swapped ? ` · 원래 ${plan.to}는 ${plan.from}(으)로 서로 바꿈` : '';
+        window.showToast?.(`번호 ${plan.from} → ${plan.to}${swapMsg}`, 'success', plan.swapped ? 3600 : 1600);
+        return true;
+    }
+    window.stepNdtNumber = stepNdtNumber;
+
+    function undoNdtNumberChange(redo) {
+        const from = redo ? _ndtNumberHistory.redo : _ndtNumberHistory.undo;
+        const to = redo ? _ndtNumberHistory.undo : _ndtNumberHistory.redo;
+        const entry = from.pop();
+        if (!entry) return false;
+        flushNdtAutoApply();
+        applyNdtNumberChanges(entry.kind, entry.changes, !redo);
+        to.push(entry);
+        refreshAfterNdtNumberChange();
+        window.showToast?.(redo ? '번호 바꾸기 다시 실행' : '번호 바꾸기 되돌림', 'info', 1500);
+        return true;
+    }
+    window.undoNdtNumberChange = undoNdtNumberChange;
+
+    /** 선택 막대의 −/+ 와 번호 표시 — 하나만 골랐을 때만 */
+    function syncNdtNumberStepUi() {
+        const wrap = document.getElementById('ndtSelNoStep');
+        if (!wrap) return;
+        const sel = (typeof selectedNdtIds !== 'undefined' && selectedNdtIds) ? [...selectedNdtIds] : [];
+        let label = '';
+        if (sel.length === 1 && state.currentBuildingId) {
+            const key = `${state.currentBuildingId}_${state.currentFloor}`;
+            const sid = String(sel[0]);
+            const isGroup = sid.startsWith('disp_');
+            const rec = findNdtNumberRecord(isGroup ? 'group' : 'item', key, isGroup ? sid.slice(5) : sid);
+            if (rec) label = String((isGroup ? rec.groupNo : rec.no) || '');
+        }
+        wrap.hidden = !label;
+        const lab = document.getElementById('ndtSelNoLabel');
+        if (lab) lab.textContent = label;
+    }
+    window.syncNdtNumberStepUi = syncNdtNumberStepUi;
+
+    (function bindNdtNumberStep() {
+        if (typeof document === 'undefined' || window._ndtNumberStepBound) return;
+        window._ndtNumberStepBound = true;
+        document.addEventListener('click', (e) => {
+            const btn = e.target && e.target.closest ? e.target.closest('[data-ndt-no-step]') : null;
+            if (!btn) return;
+            e.preventDefault();
+            e.stopPropagation();
+            stepNdtNumber(parseInt(btn.getAttribute('data-ndt-no-step'), 10) || 0);
+        });
+        window.addEventListener('keydown', (e) => {
+            if (!document.getElementById('tab-ndt')?.classList.contains('active')) return;
+            const tg = e.target;
+            const tag = (tg && tg.tagName || '').toUpperCase();
+            if (tag === 'INPUT' || tag === 'TEXTAREA' || tag === 'SELECT' || (tg && tg.isContentEditable)) return;
+            const k = (e.key || '').toLowerCase();
+            if (e.ctrlKey || e.metaKey) {
+                if (e.altKey) return;
+                const isUndo = k === 'z' && !e.shiftKey;
+                const isRedo = k === 'y' || (k === 'z' && e.shiftKey);
+                if (isUndo && _ndtNumberHistory.undo.length) { e.preventDefault(); undoNdtNumberChange(false); }
+                else if (isRedo && _ndtNumberHistory.redo.length) { e.preventDefault(); undoNdtNumberChange(true); }
+                return;
+            }
+            if (e.altKey) return;
+            let d = 0;
+            if (e.key === '-' || e.key === '_' || e.code === 'NumpadSubtract') d = -1;
+            else if (e.key === '+' || e.key === '=' || e.code === 'NumpadAdd') d = 1;
+            if (!d) return;
+            if (!resolveNdtNumberStepTarget()) return;
+            e.preventDefault();
+            stepNdtNumber(d);
+        });
+    })();
 
     function bindNdtFormAutoApply() {
         const body = document.querySelector('#ndtModal .defect-drawer-body');
@@ -37289,7 +37512,7 @@ ${roundMobile ? '' : `<button type="button" class="icon-btn icon-btn-trash" titl
         }
     }
 
-// @@app-part 09-settings-input-camera.js sha=7041a014e2c0 — 원본은 app/09-settings-input-camera.js (여기 말고 거기서 고칠 것)
+// @@app-part 09-settings-input-camera.js sha=5afd0db1323d — 원본은 app/09-settings-input-camera.js (여기 말고 거기서 고칠 것)
     // --- 카테고리별 핀/박스 색상 설정 모달 ---
     // 결함 색상은 getDefectColor()가 쓰는 등급·상태 키와 맞춰야 도면에 바로 반영됨
     const STYLE_COLOR_FIELDS = [
@@ -40492,6 +40715,13 @@ ${roundMobile ? '' : `<button type="button" class="icon-btn icon-btn-trash" titl
                 if (typeof drawingAlignPointerDown === 'function') drawingAlignPointerDown(e.clientX, e.clientY, false);
                 return;
             }
+            // 2026-11-27 거리 재기: 끌면 화면 이동, 누르면 점(다른 도면 동작은 막음)
+            if (window.measureState && e.button === 0) {
+                e.preventDefault();
+                e.stopPropagation();
+                if (typeof measurePointerDown === 'function') measurePointerDown(e.clientX, e.clientY, false, e.shiftKey);
+                return;
+            }
             // 행·열(통심) 선 편집 중에는 선 긋기·옮기기만 (마킹 안 함)
             if (window.BSA_gridEdit && window.BSA_gridEdit.active && e.button === 0) {
                 e.preventDefault();
@@ -40585,6 +40815,12 @@ ${roundMobile ? '' : `<button type="button" class="icon-btn icon-btn-trash" titl
                 if (e.cancelable) e.preventDefault();
                 e.stopPropagation();
                 if (typeof drawingAlignPointerDown === 'function') drawingAlignPointerDown(e.touches[0].clientX, e.touches[0].clientY, true);
+                return;
+            }
+            if (window.measureState && e.touches.length === 1) {
+                if (e.cancelable) e.preventDefault();
+                e.stopPropagation();
+                if (typeof measurePointerDown === 'function') measurePointerDown(e.touches[0].clientX, e.touches[0].clientY, true, false);
                 return;
             }
             if (window.cadCalibrationState && e.touches.length === 1) {
@@ -48952,7 +49188,7 @@ ${roundMobile ? '' : `<button type="button" class="icon-btn icon-btn-trash" titl
         });
     }
 
-// @@app-part 11-cad-import.js sha=177b303e0089 — 원본은 app/11-cad-import.js (여기 말고 거기서 고칠 것)
+// @@app-part 11-cad-import.js sha=f4efdba3caed — 원본은 app/11-cad-import.js (여기 말고 거기서 고칠 것)
     // --- 9-1. CAD Defect Pins 2-Point Calibration Engine (v2.0) ---
     window.cadCalibrationState = null;
 
@@ -51177,6 +51413,385 @@ ${roundMobile ? '' : `<button type="button" class="icon-btn icon-btn-trash" titl
         if (e.key === 'Escape' && window.drawingAlignState) {
             e.preventDefault();
             endDrawingAlign();
+        }
+    }, true);
+
+    // ───────────────────────── 도면 거리 재기 (2026-11-27) ─────────────────────────
+    // 두 점을 누르면 그 사이 실제 거리를 보여 준다. 자료로 저장하지 않는 화면 도구(끝내면 사라짐).
+    // 축척: ① 이 기기에서 「축척 맞추기」로 잡은 값 ② DXF로 올린 층이면 캐드 좌표(자동) ③ 없으면 픽셀만.
+    const MEASURE_CALIB_PREFIX = 'bsaMeasureCalib:';
+    // DXF $INSUNITS → mm (0 = 단위 없음: 국내 건축 도면은 거의 mm라 mm로 본다)
+    const MEASURE_INSUNITS_MM = { 0: 1, 1: 25.4, 2: 304.8, 4: 1, 5: 10, 6: 1000, 14: 100 };
+    window.measureState = null;
+
+    function measureFloorKey() { return drawingAlignFloorKey(); }
+
+    function loadMeasureCalib(floorKey) {
+        try {
+            const v = Number(localStorage.getItem(MEASURE_CALIB_PREFIX + floorKey));
+            return v > 0 && isFinite(v) ? v : null;
+        } catch (_e) { return null; }
+    }
+    function saveMeasureCalib(floorKey, mmPerPx) {
+        try {
+            if (mmPerPx > 0) localStorage.setItem(MEASURE_CALIB_PREFIX + floorKey, String(mmPerPx));
+            else localStorage.removeItem(MEASURE_CALIB_PREFIX + floorKey);
+        } catch (_e) { /* ignore */ }
+    }
+
+    /** 지금 쓰는 mm/픽셀 — 맞춘 값이 있으면 그것, 아니면 DXF 값. 둘 다 없으면 null */
+    function measureMmPerPx(st) {
+        if (!st) return null;
+        if (st.calibMmPerPx > 0) return st.calibMmPerPx;
+        if (st.dxfMmPerPx > 0) return st.dxfMmPerPx;
+        return null;
+    }
+
+    function formatMeasureMm(mm) {
+        if (!isFinite(mm)) return '-';
+        const abs = Math.abs(mm);
+        const mmTxt = abs >= 100 ? Math.round(mm).toLocaleString('ko-KR') : (Math.round(mm * 10) / 10).toLocaleString('ko-KR');
+        if (abs >= 1000) return `${mmTxt} mm (${(mm / 1000).toFixed(abs >= 100000 ? 1 : 2)} m)`;
+        return `${mmTxt} mm`;
+    }
+
+    function measureLenText(st, pxLen) {
+        const k = measureMmPerPx(st);
+        return k ? formatMeasureMm(pxLen * k) : `${Math.round(pxLen).toLocaleString('ko-KR')} px`;
+    }
+
+    async function startMeasure() {
+        const floorKey = measureFloorKey();
+        if (window.measureState) { endMeasure(); return; }
+        if (!floorKey || !state.bgImage) { window.showToast?.('도면이 열린 층에서 사용하세요.', 'warning'); return; }
+        if (window.cadCalibrationState) cancelCadCalibration();
+        if (window.drawingAlignState) endDrawingAlign();
+        if (typeof setDrawMode === 'function' && state.mode !== 'PAN') setDrawMode('PAN');
+        window.measureState = {
+            floorKey,
+            segs: [], // [{a:{x,y}, b:{x,y}}] 도면 그림 좌표
+            pending: null, // 첫 점을 찍고 두 번째를 기다리는 중
+            hover: null,
+            snapLines: true,
+            calibMmPerPx: loadMeasureCalib(floorKey),
+            dxfMmPerPx: null,
+            dxfUnit: null,
+            dxfLoading: true
+        };
+        renderMeasureBar();
+        syncMeasureButtons();
+        drawCanvas();
+        const st = window.measureState;
+        try {
+            const ref = state.floorPlanRef;
+            const bldg = state.currentBuilding;
+            const fc = state.currentFloor;
+            if (bldg && ref && ref.bldgId === bldg.id && ref.floorCode === fc && typeof window.getFloorDxfScaleInfo === 'function') {
+                const info = await window.getFloorDxfScaleInfo(bldg, fc, ref.w, ref.h);
+                if (info && window.measureState === st) {
+                    const f = MEASURE_INSUNITS_MM[info.unit] || 1;
+                    st.dxfMmPerPx = info.unitPerPx * f;
+                    st.dxfUnit = info.unit;
+                }
+            }
+        } catch (e) {
+            console.warn('[거리 재기] DXF 축척 읽기 실패', e);
+        }
+        if (window.measureState !== st) return;
+        st.dxfLoading = false;
+        renderMeasureBar();
+        drawCanvas();
+    }
+
+    function endMeasure() {
+        window.measureState = null;
+        renderMeasureBar();
+        syncMeasureButtons();
+        if (elements.planCanvas) elements.planCanvas.style.cursor = getMapCanvasCursor();
+        drawCanvas();
+    }
+
+    function syncMeasureButtons() {
+        const on = !!window.measureState;
+        ['btnMeasureDistance', 'mobileBtnMeasureDistance'].forEach((id) => {
+            const b = document.getElementById(id);
+            if (!b) return;
+            b.classList.toggle('active', on);
+            b.setAttribute('aria-pressed', on ? 'true' : 'false');
+        });
+        if (on && elements.planCanvas) elements.planCanvas.style.cursor = 'crosshair';
+    }
+
+    /** 누른 자리 → 도면 좌표(캐드 선 끝점·교차점에 붙이기, Shift면 가로·세로로 고정) */
+    function measurePointAt(clientX, clientY, shiftKey) {
+        const st = window.measureState;
+        let pt = clientToImgCoords(clientX, clientY);
+        let snapped = null;
+        if (st && st.snapLines && window.BSA_PDF_SNAP && state.currentBuilding) {
+            const radius = 14 / Math.max(state.view.scale || 1, 0.01);
+            const hit = window.BSA_PDF_SNAP.snap(state.currentBuilding.id, state.currentFloor, pt.x, pt.y, radius);
+            if (hit) { pt = { x: hit.x, y: hit.y }; snapped = hit.type || 'line'; }
+        }
+        if (shiftKey && st && st.pending) {
+            const a = st.pending;
+            if (Math.abs(pt.x - a.x) >= Math.abs(pt.y - a.y)) pt = { x: pt.x, y: a.y };
+            else pt = { x: a.x, y: pt.y };
+        }
+        return { x: pt.x, y: pt.y, snapped };
+    }
+
+    function handleMeasurePick(clientX, clientY, shiftKey) {
+        const st = window.measureState;
+        if (!st) return;
+        const p = measurePointAt(clientX, clientY, shiftKey);
+        if (!st.pending) {
+            st.pending = { x: p.x, y: p.y };
+        } else {
+            const a = st.pending;
+            if (Math.hypot(p.x - a.x, p.y - a.y) > 0.5) st.segs.push({ a, b: { x: p.x, y: p.y } });
+            st.pending = null;
+        }
+        renderMeasureBar();
+        drawCanvas();
+    }
+
+    function measurePointerDown(clientX, clientY, isTouch, shiftKey) {
+        const sx = clientX, sy = clientY;
+        const ox = state.view.offsetX, oy = state.view.offsetY;
+        let moved = false, aborted = false;
+        const onMove = (ev) => {
+            if (isTouch && ev.touches && ev.touches.length > 1) { aborted = true; return; }
+            const p = isTouch ? (ev.touches && ev.touches[0]) : ev;
+            if (!p || aborted) return;
+            const dx = p.clientX - sx, dy = p.clientY - sy;
+            if (!moved && Math.hypot(dx, dy) < 6) return;
+            moved = true;
+            state.view.offsetX = ox + dx;
+            state.view.offsetY = oy + dy;
+            drawCanvas();
+            if (isTouch && ev.cancelable) ev.preventDefault();
+        };
+        const onUp = (ev) => {
+            window.removeEventListener(isTouch ? 'touchmove' : 'mousemove', onMove, true);
+            window.removeEventListener(isTouch ? 'touchend' : 'mouseup', onUp, true);
+            if (isTouch) window.removeEventListener('touchcancel', onUp, true);
+            if (moved) {
+                if (typeof scheduleViewportHiPatchSync === 'function') scheduleViewportHiPatchSync();
+                return;
+            }
+            if (aborted || (ev && ev.type === 'touchcancel')) return;
+            const p = isTouch ? (ev.changedTouches && ev.changedTouches[0]) : ev;
+            handleMeasurePick(p ? p.clientX : sx, p ? p.clientY : sy, !!(ev && ev.shiftKey) || shiftKey);
+        };
+        window.addEventListener(isTouch ? 'touchmove' : 'mousemove', onMove, { capture: true, passive: false });
+        window.addEventListener(isTouch ? 'touchend' : 'mouseup', onUp, true);
+        if (isTouch) window.addEventListener('touchcancel', onUp, true);
+    }
+
+    let _measureHoverRaf = 0;
+    function measureHoverMove(clientX, clientY, shiftKey) {
+        const st = window.measureState;
+        if (!st) return;
+        st.hover = measurePointAt(clientX, clientY, shiftKey);
+        if (_measureHoverRaf) return;
+        _measureHoverRaf = requestAnimationFrame(() => {
+            _measureHoverRaf = 0;
+            if (window.measureState) drawCanvas();
+        });
+    }
+
+    function measureUndoLast() {
+        const st = window.measureState;
+        if (!st) return;
+        if (st.pending) st.pending = null;
+        else st.segs.pop();
+        renderMeasureBar();
+        drawCanvas();
+    }
+
+    /** 마지막으로 잰 선의 실제 길이를 넣어 축척을 잡는다(일반 PDF·그림 도면용) */
+    async function measureCalibrateFromLast() {
+        const st = window.measureState;
+        if (!st) return;
+        const seg = st.segs[st.segs.length - 1];
+        if (!seg) { window.showToast?.('먼저 길이를 아는 곳(예: 기둥 간격)을 두 점으로 재세요.', 'info', 5000); return; }
+        const px = Math.hypot(seg.b.x - seg.a.x, seg.b.y - seg.a.y);
+        const cur = measureMmPerPx(st);
+        const hint = cur ? String(Math.round(px * cur)) : '';
+        const ans = await window.appPrompt('방금 잰 선의 실제 길이를 mm로 넣으세요 (예: 기둥 간격 8400)', hint, { title: '축척 맞추기', placeholder: '예: 8400' });
+        if (window.measureState !== st) return;
+        if (ans == null) return;
+        const mm = Number(String(ans).replace(/[,\s]/g, '').replace(/mm$/i, ''));
+        if (!(mm > 0) || !isFinite(mm)) { window.showToast?.('숫자(mm)로 넣어 주세요.', 'warning'); return; }
+        st.calibMmPerPx = mm / px;
+        saveMeasureCalib(st.floorKey, st.calibMmPerPx);
+        renderMeasureBar();
+        drawCanvas();
+        window.showToast?.('이 층의 축척을 맞췄습니다(이 기기에 기억).', 'success');
+    }
+
+    function measureClearCalib() {
+        const st = window.measureState;
+        if (!st) return;
+        st.calibMmPerPx = null;
+        saveMeasureCalib(st.floorKey, null);
+        renderMeasureBar();
+        drawCanvas();
+    }
+
+    function measureScaleNote(st) {
+        if (st.calibMmPerPx > 0) return '축척: 직접 맞춘 값';
+        if (st.dxfMmPerPx > 0) {
+            const u = { 1: 'inch', 2: 'ft', 4: 'mm', 5: 'cm', 6: 'm', 14: 'dm' }[st.dxfUnit];
+            return `축척: 캐드(DXF) 좌표${u ? ` · 단위 ${u}` : ' · 단위 없음 → mm로 봄'}`;
+        }
+        if (st.dxfLoading) return '축척 확인 중…';
+        return '축척 없음 — 길이를 아는 곳을 재고 「축척 맞추기」';
+    }
+
+    function renderMeasureBar() {
+        const st = window.measureState;
+        let bar = document.getElementById('measureBar');
+        if (!st) { if (bar) bar.remove(); return; }
+        if (!bar) {
+            bar = document.createElement('div');
+            bar.id = 'measureBar';
+            bar.className = 'drawing-align-bar measure-bar';
+            document.body.appendChild(bar);
+            ['mousedown', 'touchstart', 'pointerdown', 'wheel'].forEach((t) => bar.addEventListener(t, (e) => e.stopPropagation(), { passive: true }));
+            bar.addEventListener('click', (e) => {
+                const btn = e.target.closest('button[data-ms]');
+                if (!btn) return;
+                const act = btn.getAttribute('data-ms');
+                if (act === 'undo') measureUndoLast();
+                else if (act === 'clear') {
+                    const s = window.measureState;
+                    if (s) { s.segs = []; s.pending = null; renderMeasureBar(); drawCanvas(); }
+                } else if (act === 'calib') measureCalibrateFromLast().catch((err) => console.error('[거리 재기] 축척 맞추기 실패', err));
+                else if (act === 'uncalib') measureClearCalib();
+                else if (act === 'end') endMeasure();
+            });
+            bar.addEventListener('change', (e) => {
+                if (e.target && e.target.id === 'msSnap' && window.measureState) window.measureState.snapLines = !!e.target.checked;
+            });
+        }
+        const last = st.segs[st.segs.length - 1];
+        const lastPx = last ? Math.hypot(last.b.x - last.a.x, last.b.y - last.a.y) : 0;
+        const totalPx = st.segs.reduce((s, g) => s + Math.hypot(g.b.x - g.a.x, g.b.y - g.a.y), 0);
+        const step = st.pending ? '<b>두 번째 점</b>을 누르세요' : '<b>첫 점</b>을 누르세요';
+        const result = last
+            ? `<span class="ms-result">${measureLenText(st, lastPx)}</span>${st.segs.length > 1 ? `<span class="dab-note">합계 ${measureLenText(st, totalPx)} (${st.segs.length}개)</span>` : ''}`
+            : '';
+        const snapCtl = window.BSA_PDF_SNAP
+            ? `<label class="dab-chk" title="캐드 선의 끝점·교차점에 붙입니다"><input type="checkbox" id="msSnap"${st.snapLines ? ' checked' : ''}> 선에 붙이기</label>`
+            : '';
+        const uncalib = (st.calibMmPerPx > 0)
+            ? `<button type="button" class="dab-btn dab-sm" data-ms="uncalib" title="직접 맞춘 축척을 지웁니다">${st.dxfMmPerPx > 0 ? '캐드 축척으로' : '축척 지우기'}</button>`
+            : '';
+        bar.innerHTML = '<span class="dab-title">📏 거리 재기</span>'
+            + `<span class="dab-step">${step}</span>${result}`
+            + `<span class="dab-sep"></span><span class="dab-note">${measureScaleNote(st)}</span>`
+            + '<button type="button" class="dab-btn dab-sm" data-ms="calib" title="마지막으로 잰 선의 실제 길이(mm)를 넣어 이 층 축척을 잡습니다">축척 맞추기</button>'
+            + uncalib
+            + snapCtl
+            + '<button type="button" class="dab-btn dab-sm" data-ms="undo" title="마지막 점·선 지우기 (Backspace)">되돌리기</button>'
+            + '<button type="button" class="dab-btn dab-sm" data-ms="clear">모두 지우기</button>'
+            + '<button type="button" class="dab-btn dab-cancel" data-ms="end">끝내기</button>'
+            + '<span class="dab-hint">누르기: 점 찍기 · 끌기: 화면 이동 · Shift: 가로·세로 고정 · Backspace: 되돌리기 · Esc: 끝내기</span>';
+    }
+
+    /** drawCanvas 안(도면 회전·확대가 걸린 상태, 도면 그림 좌표)에서 부른다 */
+    function drawMeasureMarks(ctx) {
+        const st = window.measureState;
+        if (!st) return;
+        if (st.floorKey !== measureFloorKey()) {
+            setTimeout(() => { if (window.measureState === st) endMeasure(); }, 0);
+            return;
+        }
+        const sc = Math.max(state.view.scale || 1, 0.01);
+        const lw = 2 / sc;
+        const tick = 7 / sc;
+        const fontPx = 13 / sc;
+        const drawSeg = (a, b, preview) => {
+            const len = Math.hypot(b.x - a.x, b.y - a.y);
+            ctx.save();
+            ctx.lineWidth = lw;
+            ctx.strokeStyle = preview ? 'rgba(234, 88, 12, 0.85)' : '#ea580c';
+            if (preview) ctx.setLineDash([6 / sc, 4 / sc]);
+            ctx.beginPath(); ctx.moveTo(a.x, a.y); ctx.lineTo(b.x, b.y); ctx.stroke();
+            ctx.setLineDash([]);
+            if (len > 0) {
+                // 양 끝 직각 눈금
+                const nx = -(b.y - a.y) / len * tick, ny = (b.x - a.x) / len * tick;
+                ctx.beginPath();
+                ctx.moveTo(a.x - nx, a.y - ny); ctx.lineTo(a.x + nx, a.y + ny);
+                ctx.moveTo(b.x - nx, b.y - ny); ctx.lineTo(b.x + nx, b.y + ny);
+                ctx.stroke();
+                const label = measureLenText(st, len);
+                ctx.font = `bold ${fontPx}px "Pretendard", "Malgun Gothic", "맑은 고딕", sans-serif`;
+                const tw = ctx.measureText(label).width;
+                const pad = 4 / sc;
+                const mx = (a.x + b.x) / 2, my = (a.y + b.y) / 2;
+                ctx.fillStyle = 'rgba(255, 255, 255, 0.92)';
+                ctx.strokeStyle = '#ea580c';
+                ctx.lineWidth = 1 / sc;
+                ctx.beginPath();
+                ctx.rect(mx - tw / 2 - pad, my - fontPx / 2 - pad, tw + pad * 2, fontPx + pad * 2);
+                ctx.fill(); ctx.stroke();
+                ctx.fillStyle = '#9a3412';
+                ctx.textAlign = 'center';
+                ctx.textBaseline = 'middle';
+                ctx.fillText(label, mx, my);
+            }
+            ctx.restore();
+        };
+        const dot = (p, snapped) => {
+            ctx.save();
+            ctx.fillStyle = snapped ? '#16a34a' : '#ea580c';
+            ctx.strokeStyle = '#fff';
+            ctx.lineWidth = 1.5 / sc;
+            ctx.beginPath(); ctx.arc(p.x, p.y, 4 / sc, 0, Math.PI * 2); ctx.fill(); ctx.stroke();
+            ctx.restore();
+        };
+        st.segs.forEach((s) => { drawSeg(s.a, s.b, false); dot(s.a); dot(s.b); });
+        if (st.pending) {
+            if (st.hover) drawSeg(st.pending, st.hover, true);
+            dot(st.pending);
+        }
+        if (st.hover) dot(st.hover, !!st.hover.snapped);
+    }
+
+    window.startMeasure = startMeasure;
+    window.endMeasure = endMeasure;
+    ['btnMeasureDistance', 'mobileBtnMeasureDistance'].forEach((id) => {
+        const b = document.getElementById(id);
+        if (b) b.addEventListener('click', (e) => {
+            e.preventDefault();
+            startMeasure().catch((err) => console.error('[거리 재기] 시작 실패', err));
+        });
+    });
+    if (elements.planCanvas) {
+        elements.planCanvas.addEventListener('mousemove', (e) => {
+            if (window.measureState) measureHoverMove(e.clientX, e.clientY, e.shiftKey);
+        });
+        elements.planCanvas.addEventListener('mouseleave', () => {
+            const st = window.measureState;
+            if (st && st.hover) { st.hover = null; drawCanvas(); }
+        });
+    }
+    document.addEventListener('keydown', (e) => {
+        if (!window.measureState) return;
+        const t = e.target;
+        if (t && (t.tagName === 'INPUT' || t.tagName === 'TEXTAREA' || t.isContentEditable)) return;
+        if (document.querySelector('.bsa-dialog-overlay.open')) return; // 축척 입력 창이 떠 있을 때
+        if (e.key === 'Escape') {
+            e.preventDefault();
+            e.stopImmediatePropagation();
+            if (window.measureState.pending) { window.measureState.pending = null; renderMeasureBar(); drawCanvas(); } else endMeasure();
+        } else if (e.key === 'Backspace' || e.key === 'Delete') {
+            e.preventDefault();
+            e.stopImmediatePropagation();
+            measureUndoLast();
         }
     }, true);
 // @@app-part 12-survey-table.js sha=300c1f58e5a1 — 원본은 app/12-survey-table.js (여기 말고 거기서 고칠 것)

@@ -1719,6 +1719,7 @@
                 ctx.restore();
             }
             if (window.drawingAlignState && typeof drawDrawingAlignMarks === 'function') drawDrawingAlignMarks(ctx);
+            if (window.measureState && typeof drawMeasureMarks === 'function') drawMeasureMarks(ctx);
         }
 
         ctx.restore(); // Restore drawing rotation matrix
@@ -2053,6 +2054,7 @@
             if (countEl) countEl.textContent = `${n}개 선택`;
         }
         syncNdtTiltRotateButtons();
+        if (typeof window.syncNdtNumberStepUi === 'function') window.syncNdtNumberStepUi();
     }
 
     function syncNdtTiltRotateButtons() {
