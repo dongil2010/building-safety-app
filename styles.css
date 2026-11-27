@@ -19327,3 +19327,63 @@ button#mobileNdtBtnAddSelect#mobileNdtBtnAddSelect.is-select-remove i {
     #defectModal .defect-content-clip-btn span { display: none; }
     #defectModal .defect-content-clip-btn { padding: 0.25rem 0.45rem; }
 }
+
+/* 2026-11-27 비파괴 마킹 번호 −/+ (선택 막대·수정창) */
+.map-selection-nostep {
+    display: inline-flex;
+    align-items: center;
+    gap: 0.25rem;
+}
+.map-selection-nostep[hidden] {
+    display: none !important;
+}
+.map-selection-nostep-btn {
+    width: 1.7rem;
+    height: 1.7rem;
+    border: none;
+    border-radius: 999px;
+    background: #334155;
+    color: #fff;
+    font-size: 1rem;
+    font-weight: 800;
+    line-height: 1;
+    cursor: pointer;
+    padding: 0;
+}
+.map-selection-nostep-btn:hover {
+    background: #475569;
+}
+.map-selection-nostep-label {
+    min-width: 3.2em;
+    text-align: center;
+    font-size: 0.82rem;
+    font-weight: 800;
+    color: #fff;
+    white-space: nowrap;
+}
+.ndt-no-step-row {
+    display: flex;
+    align-items: stretch;
+    gap: 0.3rem;
+}
+.ndt-no-step-row .form-control {
+    flex: 1;
+    min-width: 0;
+}
+.ndt-no-step-btn {
+    flex: 0 0 auto;
+    min-width: 2.4rem;
+    padding: 0 0.5rem;
+    font-size: 1.1rem;
+    font-weight: 800;
+}
+@media (orientation: landscape) and (max-width: 1200px) and (max-height: 900px) {
+    #tab-ndt #ndtSelectionBar .map-selection-nostep-btn {
+        width: 1.45rem;
+        height: 1.45rem;
+        font-size: 0.85rem;
+    }
+    #tab-ndt #ndtSelectionBar .map-selection-nostep-label {
+        font-size: 0.7rem;
+    }
+}

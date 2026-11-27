@@ -2053,6 +2053,7 @@
             if (countEl) countEl.textContent = `${n}개 선택`;
         }
         syncNdtTiltRotateButtons();
+        if (typeof window.syncNdtNumberStepUi === 'function') window.syncNdtNumberStepUi();
     }
 
     function syncNdtTiltRotateButtons() {

@@ -11044,7 +11044,7 @@ ${roundMobile ? '' : `<button type="button" class="icon-btn icon-btn-trash" titl
         });
     }
 
-// @@app-part 03-canvas.js sha=d5d9c4a47b30 — 원본은 app/03-canvas.js (여기 말고 거기서 고칠 것)
+// @@app-part 03-canvas.js sha=7f1ee1203974 — 원본은 app/03-canvas.js (여기 말고 거기서 고칠 것)
     // --- 8. DRAWING CANVAS ENGINE (PAN/ZOOM/ROTATE & PINS) ---
 
     function setupCanvas() {
@@ -13099,6 +13099,7 @@ ${roundMobile ? '' : `<button type="button" class="icon-btn icon-btn-trash" titl
             if (countEl) countEl.textContent = `${n}개 선택`;
         }
         syncNdtTiltRotateButtons();
+        if (typeof window.syncNdtNumberStepUi === 'function') window.syncNdtNumberStepUi();
     }
 
     function syncNdtTiltRotateButtons() {
@@ -18624,7 +18625,7 @@ ${roundMobile ? '' : `<button type="button" class="icon-btn icon-btn-trash" titl
         URL.revokeObjectURL(url);
     };
 
-// @@app-part 05-ndt-strength.js sha=b20a547e259a — 원본은 app/05-ndt-strength.js (여기 말고 거기서 고칠 것)
+// @@app-part 05-ndt-strength.js sha=4252ca719b5e — 원본은 app/05-ndt-strength.js (여기 말고 거기서 고칠 것)
     // --- 콘크리트 강도(반발경도) 추정 엔진 ---
     // 회사에서 쓰던 엑셀(반발경도-고강도포함) 자료를 그대로 옮겼다.
     // 각 행: [R, 0도 보정값, +90도 보정값, +45도 보정값, -45도 보정값, -90도 보정값]
@@ -21560,6 +21561,227 @@ ${roundMobile ? '' : `<button type="button" class="icon-btn icon-btn-trash" titl
             }
         }
     }
+
+    // ── 2026-11-27 비파괴 마킹 번호 1씩 올리기·내리기 ──
+    // 선택한 마킹(또는 열린 수정창)의 번호를 −1/+1. 비파괴 NO.는 건물 전체·종류별로 이어지므로,
+    // 같은 종류에 그 번호가 이미 있으면 그 마킹과 번호를 서로 바꾼다(겹친 번호를 만들지 않음).
+    // 단축키: 비파괴 탭에서 − / + (입력칸 밖). 되돌리기: 비파괴 탭 Ctrl+Z / Ctrl+Y.
+    /** 'NO.07' → 'NO.08'(delta=1). 숫자가 없거나 1보다 작아지면 null */
+    function ndtNumberStepLabel(no, delta) {
+        const m = String(no == null ? '' : no).match(/^(\D*)(\d+)(.*)$/);
+        if (!m) return null;
+        const n = parseInt(m[2], 10) + (Number(delta) || 0);
+        if (!Number.isFinite(n) || n < 1) return null;
+        return m[1] + String(n).padStart(2, '0') + m[3];
+    }
+    /** 'NO.07'·'07'·'NO.7' 을 같은 번호로 본다 */
+    function ndtNumberSameKey(no) {
+        const m = String(no == null ? '' : no).match(/^\D*(\d+)(.*)$/);
+        return m ? `${parseInt(m[1], 10)}|${m[2].trim()}` : String(no == null ? '' : no).trim();
+    }
+    /**
+     * pool: [{ rec, key }] — 같은 종류(건물 전체). 반환 { ok, reason } 또는
+     * { ok:true, from, to, changes:[{key,id,from,to}], swapped }
+     */
+    function planNdtNumberStep(pool, targetId, delta, field) {
+        const f = field || 'no';
+        const target = (pool || []).find((p) => p && p.rec && p.rec.id === targetId);
+        if (!target) return { ok: false, reason: '번호를 바꿀 마킹을 찾지 못했습니다.' };
+        const from = String(target.rec[f] || '');
+        const to = ndtNumberStepLabel(from, delta);
+        if (!to) {
+            return { ok: false, reason: /\d/.test(from) ? '번호를 1보다 작게 할 수 없습니다.' : `번호(${from || '없음'})에 숫자가 없어 바꿀 수 없습니다.` };
+        }
+        const toKey = ndtNumberSameKey(to);
+        const partners = pool.filter((p) => p && p !== target && p.rec && ndtNumberSameKey(p.rec[f]) === toKey);
+        const changes = [{ key: target.key, id: target.rec.id, from, to }]
+            .concat(partners.map((p) => ({ key: p.key, id: p.rec.id, from: String(p.rec[f] || ''), to: from })));
+        return { ok: true, from, to, changes, swapped: partners.length };
+    }
+
+    const _ndtNumberHistory = { undo: [], redo: [] };
+
+    /** 지금 번호를 바꿀 대상: 열린 수정창의 항목 > 하나만 고른 마킹·구역 */
+    function resolveNdtNumberStepTarget() {
+        if (isNdtModalOpen()) {
+            const pinId = document.getElementById('ndtPinId')?.value;
+            if (pinId) return { kind: 'item', id: pinId };
+            return { kind: 'form' };
+        }
+        const sel = (typeof selectedNdtIds !== 'undefined' && selectedNdtIds) ? [...selectedNdtIds] : [];
+        if (sel.length !== 1) return null;
+        const sid = String(sel[0]);
+        if (sid.startsWith('disp_')) return { kind: 'group', id: sid.slice(5) };
+        return { kind: 'item', id: sid };
+    }
+
+    function ndtNumberPoolFor(kind, rec) {
+        const bId = state.currentBuildingId;
+        if (!bId || !rec) return [];
+        const codes = listNdtFloorCodesForBuilding(bId).slice();
+        if (state.currentFloor && codes.indexOf(state.currentFloor) < 0) codes.push(state.currentFloor);
+        const seen = new Set();
+        const out = [];
+        codes.forEach((fc) => {
+            const key = `${bId}_${fc}`;
+            if (seen.has(key)) return;
+            seen.add(key);
+            if (kind === 'group') {
+                const memberDisp = rec.category === '부재변위';
+                ((state.ndtDisplacementGroups && state.ndtDisplacementGroups[key]) || []).forEach((g) => {
+                    if (!g || !g.id) return;
+                    const same = memberDisp ? g.category === '부재변위' : (!g.category || g.category === '변위');
+                    if (same) out.push({ rec: g, key });
+                });
+            } else {
+                ((state.ndtData && state.ndtData[key]) || []).forEach((it) => {
+                    if (it && it.id && it.category === rec.category) out.push({ rec: it, key });
+                });
+            }
+        });
+        return out;
+    }
+
+    function findNdtNumberRecord(kind, key, id) {
+        const map = kind === 'group' ? state.ndtDisplacementGroups : state.ndtData;
+        return ((map && map[key]) || []).find((r) => r && r.id === id) || null;
+    }
+
+    /** changes를 적용(useFrom=true면 되돌리기). 시각·기록·층 표시까지 — 다른 층(바꾼 상대)도 그 층으로 */
+    function applyNdtNumberChanges(kind, changes, useFrom) {
+        const field = kind === 'group' ? 'groupNo' : 'no';
+        let n = 0;
+        (changes || []).forEach((c) => {
+            const rec = findNdtNumberRecord(kind, c.key, c.id);
+            if (!rec) return;
+            rec[field] = useFrom ? c.from : c.to;
+            rec.updatedAt = nextRecordStamp(rec);
+            if (typeof journalRecord === 'function') journalRecord('ndt', rec.id, c.key);
+            if (typeof markFloorKeyDirty === 'function') markFloorKeyDirty(c.key);
+            n++;
+        });
+        // 열린 수정창 번호 칸도 맞춘다(자동 저장이 옛 번호를 되써넣지 않게)
+        if (kind === 'item' && isNdtModalOpen()) {
+            const pinId = document.getElementById('ndtPinId')?.value;
+            const hit = (changes || []).find((c) => c.id === pinId);
+            const noEl = document.getElementById('ndtNo');
+            if (hit && noEl) noEl.value = useFrom ? hit.from : hit.to;
+        }
+        return n;
+    }
+
+    function refreshAfterNdtNumberChange() {
+        saveStateToLocalStorage();
+        if (typeof renderNdtSummaryTable === 'function') renderNdtSummaryTable();
+        if (typeof drawNdtCanvas === 'function') drawNdtCanvas();
+        if (typeof updateNdtSelectionBar === 'function') updateNdtSelectionBar();
+        syncNdtNumberStepUi();
+    }
+
+    function stepNdtNumber(delta) {
+        if (!state.currentBuildingId) return false;
+        const t = resolveNdtNumberStepTarget();
+        if (!t) {
+            window.showToast?.('번호를 바꿀 비파괴 마킹을 하나만 선택하세요.', 'info', 2200);
+            return false;
+        }
+        if (t.kind === 'form') {
+            // 아직 저장 전인 새 항목 — 번호 칸만 바꾼다(저장될 때 그 번호로 들어감)
+            const noEl = document.getElementById('ndtNo');
+            const next = noEl ? ndtNumberStepLabel(noEl.value, delta) : null;
+            if (!next) return false;
+            noEl.value = next;
+            noEl.dispatchEvent(new Event('input', { bubbles: true }));
+            return true;
+        }
+        if (t.kind === 'item') flushNdtAutoApply();
+        const key = `${state.currentBuildingId}_${state.currentFloor}`;
+        const rec = findNdtNumberRecord(t.kind, key, t.id);
+        if (!rec) return false;
+        const field = t.kind === 'group' ? 'groupNo' : 'no';
+        const plan = planNdtNumberStep(ndtNumberPoolFor(t.kind, rec), t.id, delta, field);
+        if (!plan.ok) {
+            window.showToast?.(plan.reason, 'warning', 2600);
+            return false;
+        }
+        applyNdtNumberChanges(t.kind, plan.changes, false);
+        _ndtNumberHistory.undo.push({ kind: t.kind, changes: plan.changes });
+        if (_ndtNumberHistory.undo.length > 30) _ndtNumberHistory.undo.shift();
+        _ndtNumberHistory.redo = [];
+        refreshAfterNdtNumberChange();
+        const swapMsg = plan.swapped ? ` · 원래 ${plan.to}는 ${plan.from}(으)로 서로 바꿈` : '';
+        window.showToast?.(`번호 ${plan.from} → ${plan.to}${swapMsg}`, 'success', plan.swapped ? 3600 : 1600);
+        return true;
+    }
+    window.stepNdtNumber = stepNdtNumber;
+
+    function undoNdtNumberChange(redo) {
+        const from = redo ? _ndtNumberHistory.redo : _ndtNumberHistory.undo;
+        const to = redo ? _ndtNumberHistory.undo : _ndtNumberHistory.redo;
+        const entry = from.pop();
+        if (!entry) return false;
+        flushNdtAutoApply();
+        applyNdtNumberChanges(entry.kind, entry.changes, !redo);
+        to.push(entry);
+        refreshAfterNdtNumberChange();
+        window.showToast?.(redo ? '번호 바꾸기 다시 실행' : '번호 바꾸기 되돌림', 'info', 1500);
+        return true;
+    }
+    window.undoNdtNumberChange = undoNdtNumberChange;
+
+    /** 선택 막대의 −/+ 와 번호 표시 — 하나만 골랐을 때만 */
+    function syncNdtNumberStepUi() {
+        const wrap = document.getElementById('ndtSelNoStep');
+        if (!wrap) return;
+        const sel = (typeof selectedNdtIds !== 'undefined' && selectedNdtIds) ? [...selectedNdtIds] : [];
+        let label = '';
+        if (sel.length === 1 && state.currentBuildingId) {
+            const key = `${state.currentBuildingId}_${state.currentFloor}`;
+            const sid = String(sel[0]);
+            const isGroup = sid.startsWith('disp_');
+            const rec = findNdtNumberRecord(isGroup ? 'group' : 'item', key, isGroup ? sid.slice(5) : sid);
+            if (rec) label = String((isGroup ? rec.groupNo : rec.no) || '');
+        }
+        wrap.hidden = !label;
+        const lab = document.getElementById('ndtSelNoLabel');
+        if (lab) lab.textContent = label;
+    }
+    window.syncNdtNumberStepUi = syncNdtNumberStepUi;
+
+    (function bindNdtNumberStep() {
+        if (typeof document === 'undefined' || window._ndtNumberStepBound) return;
+        window._ndtNumberStepBound = true;
+        document.addEventListener('click', (e) => {
+            const btn = e.target && e.target.closest ? e.target.closest('[data-ndt-no-step]') : null;
+            if (!btn) return;
+            e.preventDefault();
+            e.stopPropagation();
+            stepNdtNumber(parseInt(btn.getAttribute('data-ndt-no-step'), 10) || 0);
+        });
+        window.addEventListener('keydown', (e) => {
+            if (!document.getElementById('tab-ndt')?.classList.contains('active')) return;
+            const tg = e.target;
+            const tag = (tg && tg.tagName || '').toUpperCase();
+            if (tag === 'INPUT' || tag === 'TEXTAREA' || tag === 'SELECT' || (tg && tg.isContentEditable)) return;
+            const k = (e.key || '').toLowerCase();
+            if (e.ctrlKey || e.metaKey) {
+                if (e.altKey) return;
+                const isUndo = k === 'z' && !e.shiftKey;
+                const isRedo = k === 'y' || (k === 'z' && e.shiftKey);
+                if (isUndo && _ndtNumberHistory.undo.length) { e.preventDefault(); undoNdtNumberChange(false); }
+                else if (isRedo && _ndtNumberHistory.redo.length) { e.preventDefault(); undoNdtNumberChange(true); }
+                return;
+            }
+            if (e.altKey) return;
+            let d = 0;
+            if (e.key === '-' || e.key === '_' || e.code === 'NumpadSubtract') d = -1;
+            else if (e.key === '+' || e.key === '=' || e.code === 'NumpadAdd') d = 1;
+            if (!d) return;
+            if (!resolveNdtNumberStepTarget()) return;
+            e.preventDefault();
+            stepNdtNumber(d);
+        });
+    })();
 
     function bindNdtFormAutoApply() {
         const body = document.querySelector('#ndtModal .defect-drawer-body');

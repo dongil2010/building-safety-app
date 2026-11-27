@@ -986,6 +986,11 @@
                 <canvas id="ndtCanvas"></canvas>
                 <div id="ndtSelectionBar" class="map-selection-bar" hidden>
                     <span id="ndtSelectionCount" class="map-selection-count">0개 선택</span>
+                    <span id="ndtSelNoStep" class="map-selection-nostep" hidden title="선택한 마킹 번호 1씩 바꾸기 (단축키 − / +)">
+                        <button type="button" class="map-selection-nostep-btn" data-ndt-no-step="-1" title="번호 1 줄이기 (−)" aria-label="번호 1 줄이기">−</button>
+                        <span id="ndtSelNoLabel" class="map-selection-nostep-label"></span>
+                        <button type="button" class="map-selection-nostep-btn" data-ndt-no-step="1" title="번호 1 늘리기 (+)" aria-label="번호 1 늘리기">+</button>
+                    </span>
                     <button type="button" id="btnRotateSelectedNdtTilt" class="map-selection-rotate ndt-tilt-only-rotate" hidden title="선택한 외벽 기울기 박스를 90도 회전">
                         <i class="fa-solid fa-rotate"></i>
                         <span>박스 회전</span>
@@ -2036,7 +2041,11 @@
                 <div class="form-row" style="display: flex; gap: 0.8rem;">
                     <div class="form-group" style="flex: 1;">
                         <label class="form-label">📌 측정 관리번호 * <span style="font-weight:400; color:#a3a3a3; font-size:0.8em;">(직접 수정 가능)</span></label>
-                        <input type="text" id="ndtNo" class="form-control" value="강도-01" style="font-weight: 800;">
+                        <div class="ndt-no-step-row">
+                            <button type="button" class="btn btn-outline ndt-no-step-btn" data-ndt-no-step="-1" title="번호 1 줄이기 (같은 번호가 있으면 서로 바꿈)" aria-label="번호 1 줄이기">−</button>
+                            <input type="text" id="ndtNo" class="form-control" value="강도-01" style="font-weight: 800;">
+                            <button type="button" class="btn btn-outline ndt-no-step-btn" data-ndt-no-step="1" title="번호 1 늘리기 (같은 번호가 있으면 서로 바꿈)" aria-label="번호 1 늘리기">+</button>
+                        </div>
                     </div>
                     <div class="form-group" style="flex: 1;">
                         <label class="form-label">🔬 비파괴 조사 항목</label>
