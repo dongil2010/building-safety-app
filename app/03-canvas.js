@@ -2167,6 +2167,7 @@
         }
         releaseStrengthPhotosOfItems(state.currentBuildingId, removedRecs, { keepLocal: true, deferCloudFloorKey: key });
         if (typeof markFloorKeyDirty === 'function') markFloorKeyDirty(key);
+        window.pullNdtNumbersAfterDelete?.(removedRecs);
         selectedNdtIds.clear();
         updateNdtSelectionBar();
         saveStateToLocalStorage();

@@ -2522,16 +2522,17 @@
         }
     }
 
-    async function pickHwpxDongBuildings(bldg) {
+    async function pickHwpxDongBuildings(bldg, opts) {
         const siteKey = getBuildingSiteName(bldg);
         const roundKey = getBuildingSurveyRoundKey(bldg);
         if (!isSiteMultiDong(siteKey)) return [bldg];
         const dongs = getSiteBuildingsSorted(siteKey).filter((b) => getBuildingSurveyRoundKey(b) === roundKey);
         if (dongs.length < 2) return [bldg];
+        const o = opts || {};
         const picked = await window.appChooseMany(
-            '한글 한 파일에 넣을 동을 고르세요.\n층 머리글 번호·도면 번호는 아래 순서대로 이어집니다.',
+            o.message || '한글 한 파일에 넣을 동을 고르세요.\n층 머리글 번호·도면 번호는 아래 순서대로 이어집니다.',
             dongs.map((b) => ({ label: formatDongRowLabel(b), detail: b.id === bldg.id ? '지금 연 동' : '' })),
-            { title: '한글로 저장 — 동 선택', okText: '한글로 저장' }
+            { title: o.title || '한글로 저장 — 동 선택', okText: o.okText || '한글로 저장' }
         );
         if (picked == null) return null;
         if (!picked.length) { window.showToast('동을 하나 이상 고르세요.', 'warning'); return null; }
@@ -2683,6 +2684,66 @@
     /** 여러 동 출력용: 동 이름을 붙인 비파괴 자료. 층 코드는 「층@@동순번」으로 바꿔
      * 두 동에 같은 층(지하1층)이 있어도 위치도가 동마다 따로 나오게 한다. */
     const HWPX_DONG_FC_SEP = '@@';
+    /** 2026-11-28 동마다 1부터 다시 세는 번호(외벽기울기). 여러 동이 아니면 그냥 1,2,3… */
+    function hwpxNoRestartPerDong(items) {
+        let prev = null;
+        let n = 0;
+        return (items || []).map((it) => {
+            const s = String((it && it._ndtFloorCode) || '');
+            const at = s.lastIndexOf(HWPX_DONG_FC_SEP);
+            const dong = at < 0 ? '' : s.slice(at);
+            if (dong !== prev) { prev = dong; n = 0; }
+            return ++n;
+        });
+    }
+
+    /**
+     * 2026-11-28 출력 번호표(기록 id → 'NO.xx'): 한글 결과표와 똑같이 센다 — 종류별로 동·층 순 + 조사번호 순,
+     * 동을 넘어 이어 붙임(외벽기울기만 동마다 1부터, 강도는 위치 슬롯마다 한 행). 한글 위치도·DXF 도면의
+     * 번호를 결과표와 맞추는 데 쓴다(window._ndtOutputNoOverride).
+     */
+    function buildNdtOutputNoMap(allItems, allDispGroups) {
+        const map = new Map();
+        const lab = (n) => `NO.${String(n).padStart(2, '0')}`;
+        const items = allItems || [];
+        const byCat = (cat) => sortNdtItemsByNo(items.filter((it) => it && it.category === cat));
+        ['실측', '내화피복', '탄산화'].forEach((cat) => byCat(cat).forEach((it, i) => map.set(it.id, lab(i + 1))));
+        let row = 0;
+        byCat('강도').forEach((it) => {
+            map.set(it.id, lab(row + 1));
+            row += (Array.isArray(it.strengthSlots) && it.strengthSlots.length > 0) ? it.strengthSlots.length : 1;
+        });
+        const tilt = byCat('기울기');
+        const tiltNos = hwpxNoRestartPerDong(tilt);
+        tilt.forEach((it, i) => map.set(it.id, lab(tiltNos[i])));
+        const groups = allDispGroups || [];
+        groups.filter((g) => g && (!g.category || g.category === '변위')).forEach((g, i) => map.set(g.id, lab(i + 1)));
+        groups.filter((g) => g && g.category === '부재변위').forEach((g, i) => map.set(g.id, lab(i + 1)));
+        return map;
+    }
+
+    /** DXF 등: 고른 동들(순서대로)로 출력 번호표를 만든다. 동 하나면 그 동만 */
+    async function buildNdtOutputNoMapForDongs(dongBuildings) {
+        const list = (dongBuildings || []).filter(Boolean);
+        if (!list.length) return null;
+        if (list.length === 1) {
+            const r = buildCombinedNdtDataForReport(list[0].id, list[0]);
+            return buildNdtOutputNoMap(r.allItems, r.allDispGroups);
+        }
+        const parts = [];
+        for (const b of list) {
+            if (!(await ensureBuildingFloorsFreshForReport(b, `DXF 번호(${formatDongRowLabel(b)})`))) return null;
+            parts.push({ bldg: b, bldgId: b.id, dongLabel: getBuildingDongLabel(b) || formatDongRowLabel(b) });
+        }
+        const r = buildHwpxDongNdtData(parts);
+        return buildNdtOutputNoMap(r.allItems, r.allDispGroups);
+    }
+    window.buildNdtOutputNoMapForDongs = buildNdtOutputNoMapForDongs;
+    window.pickNdtOutputDongs = (bldg) => pickHwpxDongBuildings(bldg, {
+        message: 'DXF 번호를 이어 붙일 동을 고르세요.\n한글 결과표처럼 아래 순서대로 번호가 이어집니다(외벽기울기는 동마다 1부터).',
+        title: '비파괴 DXF — 동 선택',
+        okText: 'DXF로 저장'
+    });
     function buildHwpxDongNdtData(parts) {
         const allItems = [];
         const allDispGroups = [];
@@ -4467,8 +4528,11 @@
                 const carbItemsHwpx = sortNdtItemsByNo(allNdtItemsForHwpx.filter(item => item.category === '탄산화'))
                     .map(item => refreshCarbItemResults(item, ndtBldgOf(item)));
                 const tiltItemsHwpx = sortNdtItemsByNo(allNdtItemsForHwpx.filter(item => item.category === '기울기'));
+                const tiltNoByDong = hwpxNoRestartPerDong(tiltItemsHwpx);
                 const settlementGroupsHwpx = allDispGroupsForHwpx.filter(g => !g.category || g.category === '변위');
                 const memberDispGroupsHwpx = allDispGroupsForHwpx.filter(g => g.category === '부재변위');
+                // 위치도 번호를 결과표 번호(동·층 이어 붙임)와 맞춘다 — 아래 finally에서 지움
+                window._ndtOutputNoOverride = buildNdtOutputNoMap(allNdtItemsForHwpx, allDispGroupsForHwpx);
 
                 const findTblById = (tblId, fallbackTextMarkers) => {
                     const all = xmlDoc.getElementsByTagNameNS(HP_NS, 'tbl');
@@ -5148,7 +5212,7 @@
                     // NO. / 위치 / 길이·높이 / 전회(항상 '-') / 금회 / 비율 / 등급. 단위는 전부 mm로 통일.
                     if (tiltItemsHwpx.length > 0) {
                         const tbl = findTblById(TILT_TBL_ID, ['높   이(H)', '전   회']);
-                        if (tbl) fillNdtTable(tbl, TILT_HEADER_ROWS, tiltItemsHwpx.map((item, i) => {
+                        if (tbl) fillNdtTable(tbl, TILT_HEADER_ROWS, tiltItemsHwpx.map((item, i) => { // 외벽기울기 번호는 동마다 1부터 (tiltNoByDong)
                             const hDigits = String(item.height || '').replace(/[^0-9.]/g, '');
                             const hNum = parseFloat(hDigits);
                             const heightText = Number.isFinite(hNum) ? `${hNum.toLocaleString()}mm` : '-';
@@ -5159,7 +5223,7 @@
                             const calc = (Number.isFinite(hNum) && hNum > 0 && delta > 0)
                                 ? calcTiltGrade(hNum, delta)
                                 : { tiltRatio: '', grade: '' };
-                            return [i + 1, item.location || '-', heightText, '-', avgText, item.tiltRatio || calc.tiltRatio || '-', item.grade || calc.grade || '-'];
+                            return [tiltNoByDong[i], item.location || '-', heightText, '-', avgText, item.tiltRatio || calc.tiltRatio || '-', item.grade || calc.grade || '-'];
                         }), true);
                         if (tbl) sortHwpxRowCellsByColAddr(tbl, HP_NS);
                     } else {
@@ -5537,6 +5601,8 @@
             } } catch (ndtErr) {
                 console.error('비파괴조사 섹션 삽입 실패(나머지는 계속 진행):', ndtErr);
                 window.showToast('비파괴조사 섹션 삽입 중 오류가 있어 해당 부분은 제외하고 만듭니다: ' + ndtErr.message, 'warning', 5000);
+            } finally {
+                window._ndtOutputNoOverride = null;
             }
 
             // ---- 표본 템플릿 잔여 내용 정리 ----
@@ -7143,8 +7209,11 @@
                 const carbItemsHwpx = sortNdtItemsByNo(allNdtItemsForHwpx.filter(item => item.category === '탄산화'))
                     .map(item => refreshCarbItemResults(item, ndtBldgOf(item)));
                 const tiltItemsHwpx = sortNdtItemsByNo(allNdtItemsForHwpx.filter(item => item.category === '기울기'));
+                const tiltNoByDong = hwpxNoRestartPerDong(tiltItemsHwpx);
                 const settlementGroupsHwpx = allDispGroupsForHwpx.filter(g => !g.category || g.category === '변위');
                 const memberDispGroupsHwpx = allDispGroupsForHwpx.filter(g => g.category === '부재변위');
+                // 위치도 번호를 결과표 번호(동·층 이어 붙임)와 맞춘다 — 아래 finally에서 지움
+                window._ndtOutputNoOverride = buildNdtOutputNoMap(allNdtItemsForHwpx, allDispGroupsForHwpx);
 
                 const findTblById = (tblId, fallbackTextMarkers) => {
                     const all = xmlDoc.getElementsByTagNameNS(HP_NS, 'tbl');
@@ -7824,7 +7893,7 @@
                     // NO. / 위치 / 길이·높이 / 전회(항상 '-') / 금회 / 비율 / 등급. 단위는 전부 mm로 통일.
                     if (tiltItemsHwpx.length > 0) {
                         const tbl = findTblById(TILT_TBL_ID, ['높   이(H)', '전   회']);
-                        if (tbl) fillNdtTable(tbl, TILT_HEADER_ROWS, tiltItemsHwpx.map((item, i) => {
+                        if (tbl) fillNdtTable(tbl, TILT_HEADER_ROWS, tiltItemsHwpx.map((item, i) => { // 외벽기울기 번호는 동마다 1부터 (tiltNoByDong)
                             const hDigits = String(item.height || '').replace(/[^0-9.]/g, '');
                             const hNum = parseFloat(hDigits);
                             const heightText = Number.isFinite(hNum) ? `${hNum.toLocaleString()}mm` : '-';
@@ -7835,7 +7904,7 @@
                             const calc = (Number.isFinite(hNum) && hNum > 0 && delta > 0)
                                 ? calcTiltGrade(hNum, delta)
                                 : { tiltRatio: '', grade: '' };
-                            return [i + 1, item.location || '-', heightText, '-', avgText, item.tiltRatio || calc.tiltRatio || '-', item.grade || calc.grade || '-'];
+                            return [tiltNoByDong[i], item.location || '-', heightText, '-', avgText, item.tiltRatio || calc.tiltRatio || '-', item.grade || calc.grade || '-'];
                         }), true);
                         if (tbl) sortHwpxRowCellsByColAddr(tbl, HP_NS);
                     } else {
@@ -8202,6 +8271,8 @@
             } } catch (ndtErr) {
                 console.error('비파괴조사 섹션 삽입 실패(나머지는 계속 진행):', ndtErr);
                 window.showToast('비파괴조사 섹션 삽입 중 오류가 있어 해당 부분은 제외하고 만듭니다: ' + ndtErr.message, 'warning', 5000);
+            } finally {
+                window._ndtOutputNoOverride = null;
             }
 
             // ---- 표본 템플릿 잔여 내용 정리 ----

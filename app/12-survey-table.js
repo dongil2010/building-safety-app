@@ -2594,7 +2594,7 @@
         const pinScale = sizes.pin;
         const arrowScale = sizes.arrow;
 
-        let noStr = item.no || 'NO.01';
+        let noStr = ndtOutputNo(item, item.no || 'NO.01');
         if (noStr.startsWith('기울기-') || noStr.startsWith('NDT-') || noStr.startsWith('변위-')) {
             const numPart = noStr.replace(/^[^\d]+/, '');
             noStr = `NO.${numPart.length === 1 ? '0' + numPart : numPart}`;

@@ -4550,6 +4550,12 @@ document.addEventListener('DOMContentLoaded', () => {
             .map(x => x.item);
     }
 
+    /** 2026-11-28 출력 중(한글 위치도·DXF)이면 결과표와 같은 번호(동 이어 붙임), 아니면 저장 번호 */
+    function ndtOutputNo(rec, fallback) {
+        const m = window._ndtOutputNoOverride;
+        return (m && rec && rec.id && m.has(rec.id)) ? m.get(rec.id) : fallback;
+    }
+
     function arrowSurveyNumberApi() {
         return (window.BSA && window.BSA.shared && window.BSA.shared.arrowSurveyNumber) || null;
     }

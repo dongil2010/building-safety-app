@@ -555,8 +555,18 @@
     }
     const bldg = state.currentBuilding;
     const floorCode = state.currentFloor;
+    // 2026-11-28 번호는 한글 결과표와 같게 — 여러 동이면 이어 붙일 동을 고른다(외벽기울기는 동마다 1부터)
+    let dongs = [bldg];
+    if (typeof window.pickNdtOutputDongs === 'function') {
+      dongs = await window.pickNdtOutputDongs(bldg);
+      if (!dongs) return;
+    }
     if (typeof window.showLoading === 'function') window.showLoading('비파괴 DXF 만드는 중...');
     try {
+      if (typeof window.buildNdtOutputNoMapForDongs === 'function') {
+        window._ndtOutputNoOverride = await window.buildNdtOutputNoMapForDongs(dongs);
+        if (!dongs.some((b) => b && b.id === state.currentBuildingId)) toast('지금 연 동을 고르지 않아 이 층은 화면 번호 그대로 나갑니다.', 'info', 4000);
+      }
       // 2026-11-28 항목별로 따로(한글 위치도와 같은 묶음) — 강도+탄산화만 한 도면, 나머지는 각자 도면
       const sheets = [];
       for (const sh of NDT_DXF_SHEETS) {
@@ -579,6 +589,7 @@
       console.error(err);
       toast(`비파괴 DXF 내보내기 실패: ${err.message || err}`, 'error', 6000);
     } finally {
+      window._ndtOutputNoOverride = null;
       if (typeof window.hideLoading === 'function') window.hideLoading();
     }
   };

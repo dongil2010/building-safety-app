@@ -3218,6 +3218,65 @@
         return out;
     }
 
+    // ── 2026-11-28 비파괴 마킹을 지우면 뒤 번호를 앞으로 당긴다 ──
+    // 1~7 중 3을 지우면 4~7 → 3~6 (같은 종류·건물 전체). 새 번호는 「같은 종류 개수+1」로 매기므로
+    // 당기지 않으면 다음에 찍는 마킹이 남은 7번과 겹친다. 지운 번호가 아직 다른 마킹에 있으면(겹친 번호) 당기지 않는다.
+    /** 'NO.07' 의 숫자만 n으로: ('NO.07', 3) → 'NO.03' */
+    function ndtNumberWithMain(no, n) {
+        const m = String(no == null ? '' : no).match(/^(\D*)(\d+)(.*)$/);
+        return m ? m[1] + String(n).padStart(2, '0') + m[3] : null;
+    }
+    function ndtNumberMain(no) {
+        const m = String(no == null ? '' : no).match(/^\D*(\d+)/);
+        return m ? parseInt(m[1], 10) : null;
+    }
+    /** pool(남은 마킹), 지운 번호들 → changes [{key,id,from,to}] */
+    function planNdtPullAfterDelete(pool, removedNos, field) {
+        const f = field || 'no';
+        const left = new Set((pool || []).map((p) => ndtNumberMain(p && p.rec && p.rec[f])).filter((n) => n != null));
+        const gone = Array.from(new Set((removedNos || []).map(ndtNumberMain).filter((n) => n != null && !left.has(n)))).sort((a, b) => a - b);
+        if (!gone.length) return [];
+        const changes = [];
+        (pool || []).forEach((p) => {
+            const from = String((p && p.rec && p.rec[f]) || '');
+            const n = ndtNumberMain(from);
+            if (n == null) return;
+            const shift = gone.filter((d) => d < n).length;
+            if (!shift) return;
+            const to = ndtNumberWithMain(from, n - shift);
+            if (to && to !== from) changes.push({ key: p.key, id: p.rec.id, from, to });
+        });
+        return changes;
+    }
+    /** removed: 이미 상태에서 뺀 비파괴 항목·구역 기록들. 반환: 당긴 개수 */
+    function pullNdtNumbersAfterDelete(removed) {
+        let total = 0;
+        try {
+            const buckets = new Map();
+            (removed || []).forEach((rec) => {
+                if (!rec || !rec.id) return;
+                const kind = Array.isArray(rec.points) ? 'group' : 'item';
+                const cat = kind === 'group' ? (rec.category === '부재변위' ? '부재변위' : '변위') : (rec.category || '');
+                const bk = kind + '|' + cat;
+                if (!buckets.has(bk)) buckets.set(bk, { kind, sample: rec, nos: [] });
+                buckets.get(bk).nos.push(kind === 'group' ? rec.groupNo : rec.no);
+            });
+            buckets.forEach(({ kind, sample, nos }) => {
+                const field = kind === 'group' ? 'groupNo' : 'no';
+                const changes = planNdtPullAfterDelete(ndtNumberPoolFor(kind, sample), nos, field);
+                if (changes.length) total += applyNdtNumberChanges(kind, changes, false);
+            });
+            if (total) {
+                // 지우기 전 번호 기준의 번호 되돌리기 기록은 이제 맞지 않는다
+                _ndtNumberHistory.undo = [];
+                _ndtNumberHistory.redo = [];
+                window.showToast?.(`뒤 번호 ${total}개를 앞으로 당겼습니다.`, 'info', 2400);
+            }
+        } catch (e) { console.warn('[비파괴 번호 당기기] 실패', e); }
+        return total;
+    }
+    window.pullNdtNumbersAfterDelete = pullNdtNumbersAfterDelete;
+
     function findNdtNumberRecord(kind, key, id) {
         const map = kind === 'group' ? state.ndtDisplacementGroups : state.ndtData;
         return ((map && map[key]) || []).find((r) => r && r.id === id) || null;
@@ -4414,6 +4473,7 @@
             // 마지막 지점을 지워 구역까지 사라지는 경우도 묘비가 필요하다
             trackNdtDeletion(key, groupId, group);
             releaseStrengthPhotosOfItems(state.currentBuildingId, [group], { keepLocal: true, deferCloudFloorKey: key });
+            pullNdtNumbersAfterDelete([group]);
             closeNdtDisplacementGroupEditModal();
         } else {
             group.updatedAt = Date.now();
@@ -4437,6 +4497,7 @@
         releaseStrengthPhotosOfItems(state.currentBuildingId, removedGroups, { keepLocal: true, deferCloudFloorKey: key });
         if (window._activeNdtDispGroupId === groupId) setActiveNdtDispGroup(null);
         if (typeof markFloorKeyDirty === 'function') markFloorKeyDirty(key);
+        pullNdtNumbersAfterDelete(removedGroups);
         saveStateToLocalStorage();
         drawNdtCanvas();
         renderNdtSummaryTable();

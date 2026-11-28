@@ -2137,7 +2137,7 @@
         const arrowScale = ndtSize.arrow;
         const useCircleTip = state.tipShape === 'circle';
 
-        let noStr = item.no || 'NO.01';
+        let noStr = ndtOutputNo(item, item.no || 'NO.01');
         if (noStr.startsWith('기울기-') || noStr.startsWith('NDT-') || noStr.startsWith('변위-')) {
             const numPart = noStr.replace(/^[^\d]+/, '');
             noStr = `NO.${numPart.length === 1 ? '0' + numPart : numPart}`;
@@ -2345,7 +2345,7 @@
 
         // 그룹 라벨 박스 (NO.xx) — 구역 식별
         const groupShapeCfg = getStyleShape(groupStyleKey);
-        let groupNoStr = group.groupNo || 'NO.01';
+        let groupNoStr = ndtOutputNo(group, group.groupNo || 'NO.01');
         groupNoStr = formatPinNumberLabel(groupNoStr, groupStyleKey);
         const groupDim = measurePinBoxDimensions(ctx, groupNoStr, pinScale, 1);
         const isActiveZone = window._activeNdtDispGroupId && group.id === window._activeNdtDispGroupId;
@@ -4310,6 +4310,7 @@
         // 측정지 사진 클라우드 사본 정리 — 되돌리기·일괄 복원 대비로 이 기기 사본은 남긴다
         releaseStrengthPhotosOfItems(state.currentBuildingId, removedNdt, { keepLocal: true, deferCloudFloorKey: key });
         if (typeof markFloorKeyDirty === 'function') markFloorKeyDirty(key);
+        window.pullNdtNumbersAfterDelete?.(removedNdt);
         saveStateToLocalStorage();
         drawNdtCanvas();
         renderNdtSummaryTable();

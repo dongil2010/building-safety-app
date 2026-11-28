@@ -20,7 +20,7 @@ assert.ok(hwpxStart > 0 && hwpxEnd > hwpxStart);
 const shared = ['function paginateSurveyDefects(', 'function formatSurveyReportNo(', 'function getReportSurveyRowValues(']
     .map((h) => extractFunction(app, h)).join('\n');
 const FP = {
-    "hwpxExport": "d02daa53e41c9231", // 2026-11-28 비파괴 결과표 전부 조사번호 순 정렬 + 동·층을 넘어 1부터 이어 붙인 번호 — 일부러 바꿈
+    "hwpxExport": "f9b252a3c8125b95", // 2026-11-28 비파괴 결과표 번호순·동 이어 붙임(외벽기울기는 동마다 1부터), 위치도 번호도 결과표와 같게 — 일부러 바꿈
     "sharedRows": "0ce605cc38dd62c3", // 2026-11-11 번호 칸: 직접 준 하위번호(noManual, NO.74-2)는 꼬리 유지 — 일부러 바꿈
     "hwpx-survey-row-fit.js": "3d22dcdf170a4bc4",
     "hwpx-font-8pt.js": "792b4169159c5676",
