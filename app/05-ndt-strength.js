@@ -898,7 +898,7 @@
         const container = document.getElementById('ndtStrengthSlotsContainer');
         if (!container) return;
         container.innerHTML = ndtStrengthSlots.map((slot, idx) => `
-            <div style="border:1px solid var(--border-color); border-radius:10px; padding:0.7rem; display:flex; flex-direction:column; gap:0.6rem;">
+            <div class="ndt-strength-slot-card" data-slot="${idx}" style="border:1px solid var(--border-color); border-radius:10px; padding:0.7rem; display:flex; flex-direction:column; gap:0.6rem;">
                 <div style="display:flex; gap:0.5rem; align-items:flex-end;">
                     <div class="form-group" style="flex:1; min-width:0; margin:0;">
                         <label class="form-label">📍 측정 위치 ${ndtStrengthSlots.length > 1 ? `(${idx + 1})` : ''}${idx === 0 ? ' *' : ''}</label>
@@ -915,8 +915,11 @@
                         <button type="button" class="btn ndt-strength-slot-scan-btn" data-slot="${idx}" data-mode="gallery" style="flex:1; background: linear-gradient(135deg, #2a2a2a, #1f1f1f); color:white; font-size:0.85rem;">
                             <i class="fa-solid fa-image"></i> 갤러리에서
                         </button>
+                        <button type="button" class="btn ndt-strength-slot-scan-btn" data-slot="${idx}" data-mode="paste" style="flex:1; background: linear-gradient(135deg, #2a2a2a, #1f1f1f); color:white; font-size:0.85rem;" title="Win+Shift+S로 캡처한 그림 붙여넣기 (이 창에서 Ctrl+V도 됨)">
+                            <i class="fa-solid fa-paste"></i> 붙여넣기
+                        </button>
                     </div>
-                    <div style="font-size:0.72rem; color:var(--text-muted); margin-top:0.25rem;">찍은 뒤 측정지 부분만 잘라서 인식·저장합니다.</div>
+                    <div style="font-size:0.72rem; color:var(--text-muted); margin-top:0.25rem;">찍은 뒤 측정지 부분만 잘라서 인식·저장합니다. PC는 Win+Shift+S로 캡처 → 「붙여넣기」 또는 Ctrl+V.</div>
                     <div id="rScanStatus-${idx}" style="font-size:0.78rem; color:var(--text-muted); margin-top:0.3rem;"></div>
                     <div id="ndtStrengthPhotoPreview-${idx}" style="margin-top:0.4rem;"></div>
                 </div>
@@ -974,15 +977,21 @@
         container.querySelectorAll('.ndt-strength-slot-scan-btn').forEach(el => {
             el.addEventListener('click', async (e) => {
                 const idx = parseInt(e.currentTarget.dataset.slot, 10);
-                const mode = e.currentTarget.dataset.mode === 'camera' ? 'camera' : 'gallery';
-                const picked = await pickImageFromDevice(mode);
-                if (!picked) return;
-                // 측정지 부분만 잘라서 인식·저장한다(2026-10-04). 취소하면 아무것도 안 바뀐다.
-                const file = (window.BsaPhotoCrop && typeof window.BsaPhotoCrop.open === 'function')
-                    ? await window.BsaPhotoCrop.open(picked)
-                    : picked;
-                if (file) scanRValuesFromImage(file, idx);
+                const mode = e.currentTarget.dataset.mode;
+                ndtStrengthPasteSlot = idx;
+                if (mode === 'paste') {
+                    const files = await readClipboardImageFiles();
+                    if (files && files[0]) cropAndScanStrengthSlot(files[0], idx);
+                    return;
+                }
+                const picked = await pickImageFromDevice(mode === 'camera' ? 'camera' : 'gallery');
+                if (picked) cropAndScanStrengthSlot(picked, idx);
             });
+        });
+        container.querySelectorAll('.ndt-strength-slot-card').forEach((card) => {
+            const mark = () => { ndtStrengthPasteSlot = parseInt(card.dataset.slot, 10) || 0; };
+            card.addEventListener('pointerdown', mark);
+            card.addEventListener('focusin', mark);
         });
         const addBtn = document.getElementById('btnAddStrengthSlot');
         if (addBtn) addBtn.style.display = ndtStrengthSlots.length >= MAX_STRENGTH_SLOTS ? 'none' : '';
@@ -990,6 +999,50 @@
             wireRValueChipEvents(idx);
             renderStrengthSlotPhotoPreview(idx);
         });
+    }
+
+    // Ctrl+V로 붙여 넣을 측정 위치(마지막으로 누른 카드). 2026-11-28
+    let ndtStrengthPasteSlot = 0;
+
+    // 측정지 부분만 잘라서 인식·저장한다(2026-10-04). 취소하면 아무것도 안 바뀐다.
+    async function cropAndScanStrengthSlot(picked, idx) {
+        if (!picked || !ndtStrengthSlots[idx]) return;
+        const file = (window.BsaPhotoCrop && typeof window.BsaPhotoCrop.open === 'function')
+            ? await window.BsaPhotoCrop.open(picked)
+            : picked;
+        if (file) scanRValuesFromImage(file, idx);
+    }
+
+    /**
+     * 클립보드의 그림(Win+Shift+S 캡처 등)을 File 배열로 읽는다. 2026-11-28
+     * 못 읽거나 그림이 없으면 안내 토스트를 띄우고 null.
+     */
+    async function readClipboardImageFiles() {
+        const toast = (m, t) => { if (typeof window.showToast === 'function') window.showToast(m, t || 'info'); };
+        if (!navigator.clipboard || typeof navigator.clipboard.read !== 'function') {
+            toast('그림을 캡처(Win+Shift+S)한 뒤 이 창에서 Ctrl+V를 눌러 붙여 넣어 주세요.', 'info');
+            return null;
+        }
+        try {
+            const items = await navigator.clipboard.read();
+            const files = [];
+            for (const it of items) {
+                const type = (it.types || []).find((t) => /^image\//i.test(t));
+                if (!type) continue;
+                const blob = await it.getType(type);
+                const ext = (type.split('/')[1] || 'png').replace(/[^a-z0-9]/gi, '') || 'png';
+                files.push(new File([blob], `clipboard.${ext}`, { type }));
+            }
+            if (!files.length) {
+                toast('클립보드에 그림이 없습니다. 캡처(Win+Shift+S)한 뒤 다시 눌러 주세요.', 'warning');
+                return null;
+            }
+            return files;
+        } catch (e) {
+            console.warn('클립보드 읽기 실패:', e);
+            toast('클립보드를 읽지 못했습니다. 이 창에서 Ctrl+V로 붙여 넣어 주세요.', 'warning');
+            return null;
+        }
     }
 
     // 측정지 사진 스캔 시 원본 사진을 저장해두고(보고서 '측정 DATA' 표에 그대로 넣기 위함),
@@ -1165,27 +1218,68 @@
         });
     }
 
+    async function addNdtItemPhotoFiles(files) {
+        if (!files || !files.length) return;
+        const floorKey = `${state.currentBuildingId}_${state.currentFloor}`;
+        let pinId = document.getElementById('ndtPinId')?.value;
+        if (!pinId) {
+            // 아직 저장 전인 새 항목이면 먼저 확정해 사진을 붙일 곳을 만든다
+            const created = commitNdtFromForm();
+            if (!created) return;
+            pinId = created.id;
+            const pinIdEl = document.getElementById('ndtPinId');
+            if (pinIdEl) pinIdEl.value = pinId;
+        }
+        await addNdtFieldPhotos(files, floorKey, () => findNdtItemInFloor(floorKey, pinId), (ids) => {
+            // 창이 그 사이 다른 항목으로 바뀌었으면 화면 목록은 건드리지 않는다
+            if (document.getElementById('ndtPinId')?.value !== pinId) return;
+            ndtItemPhotoIds = ids.slice();
+            renderNdtItemPhotoList();
+        });
+    }
+
     function bindNdtItemPhotoInputs() {
         const onFiles = async (input) => {
             const files = Array.from(input.files || []);
             input.value = '';
-            const floorKey = `${state.currentBuildingId}_${state.currentFloor}`;
-            let pinId = document.getElementById('ndtPinId')?.value;
-            if (!pinId) {
-                // 아직 저장 전인 새 항목이면 먼저 확정해 사진을 붙일 곳을 만든다
-                const created = commitNdtFromForm();
-                if (!created) return;
-                pinId = created.id;
-                const pinIdEl = document.getElementById('ndtPinId');
-                if (pinIdEl) pinIdEl.value = pinId;
-            }
-            await addNdtFieldPhotos(files, floorKey, () => findNdtItemInFloor(floorKey, pinId), (ids) => {
-                // 창이 그 사이 다른 항목으로 바뀌었으면 화면 목록은 건드리지 않는다
-                if (document.getElementById('ndtPinId')?.value !== pinId) return;
-                ndtItemPhotoIds = ids.slice();
-                renderNdtItemPhotoList();
-            });
+            await addNdtItemPhotoFiles(files);
         };
+        const pasteBtn = document.getElementById('btnPasteNdtPhoto');
+        if (pasteBtn && pasteBtn.dataset.bound !== '1') {
+            pasteBtn.dataset.bound = '1';
+            pasteBtn.addEventListener('click', async (e) => {
+                e.preventDefault();
+                const files = await readClipboardImageFiles();
+                if (files) await addNdtItemPhotoFiles(files);
+            });
+        }
+        if (!window.__bsaNdtPasteBound) {
+            window.__bsaNdtPasteBound = true;
+            // PC: 비파괴 입력창이 열려 있을 때 Ctrl+V로 캡처 그림 붙여넣기. 2026-11-28
+            // 강도(측정지) 칸이 보이면 마지막으로 누른 측정 위치로, 아니면 현장 사진으로.
+            document.addEventListener('paste', (e) => {
+                if (!isNdtModalOpen()) return;
+                const cd = e.clipboardData;
+                const files = Array.from((cd && cd.items) || [])
+                    .filter((it) => it.kind === 'file')
+                    .map((it) => it.getAsFile())
+                    .filter((f) => f && /^image\//i.test(f.type));
+                if (!files.length) return;
+                const t = e.target;
+                const inField = t && (t.tagName === 'INPUT' || t.tagName === 'TEXTAREA' || t.isContentEditable);
+                // 입력칸에 글자를 붙여 넣는 경우는 건드리지 않는다
+                if (inField && cd && cd.getData && cd.getData('text/plain')) return;
+                e.preventDefault();
+                const box = document.getElementById('ndtStrengthSlotsContainer');
+                const strengthVisible = !!(box && box.offsetParent && ndtStrengthSlots.length);
+                if (strengthVisible) {
+                    const idx = Math.min(Math.max(0, ndtStrengthPasteSlot), ndtStrengthSlots.length - 1);
+                    cropAndScanStrengthSlot(files[0], idx);
+                } else {
+                    addNdtItemPhotoFiles(files);
+                }
+            });
+        }
         [['btnTriggerNdtCamera', 'inputNdtCamera'], ['btnTriggerNdtGallery', 'inputNdtPhoto']].forEach(([btnId, inputId]) => {
             const btn = document.getElementById(btnId);
             const input = document.getElementById(inputId);
