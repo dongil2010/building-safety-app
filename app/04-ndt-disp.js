@@ -2486,14 +2486,14 @@
 
         const calcLv = ndtDispCalcLevels(group);
         // 축 범위(사용자 요청 2026-11-28): 중위값을 정중앙에 두고, 중위값~최대·중위값~최소 차이 중 큰 쪽의
-        // 4배씩 위아래 똑같이. 예) 중위 100·최대 110·최소 92 → 큰 차이 10 → 축 140 ~ 60.
+        // 6배씩 위아래 똑같이. 예) 중위 100·최대 110·최소 92 → 큰 차이 10 → 축 160 ~ 40.
         // 선이 축 가운데쯤만 차지해 덜 요동쳐 보이고, 점은 늘 축 안에 든다.
         const levels = calcLv.map(Number).filter(Number.isFinite);
         const sortedL = levels.slice().sort((a, b) => a - b);
         const n = sortedL.length;
         const medianL = n ? (n % 2 ? sortedL[(n - 1) / 2] : (sortedL[n / 2 - 1] + sortedL[n / 2]) / 2) : 0;
         const farL = n ? Math.max(sortedL[n - 1] - medianL, medianL - sortedL[0]) : 0;
-        const halfSpan = farL > 0 ? farL * 4 : 5; // 값이 전부 같으면 ±5로 납작한 선이 가운데
+        const halfSpan = farL > 0 ? farL * 6 : 5; // 값이 전부 같으면 ±5로 납작한 선이 가운데
         const minL = medianL - halfSpan;
         const maxL = medianL + halfSpan;
 
