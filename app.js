@@ -14726,7 +14726,7 @@ ${roundMobile ? '' : `<button type="button" class="icon-btn icon-btn-trash" titl
         return 'ndtStrength';
     }
 
-// @@app-part 04-ndt-disp.js sha=711597076c3a — 원본은 app/04-ndt-disp.js (여기 말고 거기서 고칠 것)
+// @@app-part 04-ndt-disp.js sha=612b05c35ba4 — 원본은 app/04-ndt-disp.js (여기 말고 거기서 고칠 것)
     // --- 바닥 수직변위: 그룹(NO.박스) + 다중 레벨 포인트 데이터 ---
     const NDT_DISPLACEMENT_COLORS = ['#ef4444', '#525252', '#f97316', '#22c55e', '#a855f7', '#eab308', '#06b6d4', '#ec4899'];
     const NDT_GRADE_BADGES = {
@@ -17213,14 +17213,14 @@ ${roundMobile ? '' : `<button type="button" class="icon-btn icon-btn-trash" titl
         }
 
         const calcLv = ndtDispCalcLevels(group);
-        // 축 범위 = 측정점 중위값을 상하 정중앙에 두고, 위아래로 (최대−최소)만큼씩 — 축 전체 높이가
-        // 최대−최소의 2배(사용자 요청). 중위값에서 최대·최소까지는 늘 (최대−최소) 이하라 모든 점이 축 안에 든다.
+        // 축 범위 = 측정점 중위값을 상하 정중앙에 두고, 중위값에서 최대·최소 중 더 먼 쪽까지의 차이의
+        // 4배씩 위아래 여유(사용자 요청 2026-11-28) — 선이 축 가운데 1/4쯤만 차지해 덜 요동쳐 보이고, 점은 늘 축 안에 든다.
         const levels = calcLv.map(Number).filter(Number.isFinite);
         const sortedL = levels.slice().sort((a, b) => a - b);
         const n = sortedL.length;
         const medianL = n ? (n % 2 ? sortedL[(n - 1) / 2] : (sortedL[n / 2 - 1] + sortedL[n / 2]) / 2) : 0;
-        const spreadL = n ? sortedL[n - 1] - sortedL[0] : 0;
-        const halfSpan = spreadL > 0 ? spreadL : 5; // 값이 전부 같으면 ±5로 납작한 선이 가운데 보이게
+        const farL = n ? Math.max(sortedL[n - 1] - medianL, medianL - sortedL[0]) : 0;
+        const halfSpan = farL > 0 ? farL * 4 : 5; // 값이 전부 같으면 ±5로 납작한 선이 가운데 보이게
         const minL = medianL - halfSpan;
         const maxL = medianL + halfSpan;
 
