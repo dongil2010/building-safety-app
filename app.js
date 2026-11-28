@@ -11096,7 +11096,7 @@ ${roundMobile ? '' : `<button type="button" class="icon-btn icon-btn-trash" titl
         });
     }
 
-// @@app-part 03-canvas.js sha=63e464a479e7 — 원본은 app/03-canvas.js (여기 말고 거기서 고칠 것)
+// @@app-part 03-canvas.js sha=2d39915c5938 — 원본은 app/03-canvas.js (여기 말고 거기서 고칠 것)
     // --- 8. DRAWING CANVAS ENGINE (PAN/ZOOM/ROTATE & PINS) ---
 
     function setupCanvas() {
@@ -13034,6 +13034,11 @@ ${roundMobile ? '' : `<button type="button" class="icon-btn icon-btn-trash" titl
         });
         const fab = document.getElementById('mobileNdtFabBar');
         if (fab) fab.classList.toggle('has-disp-undo', show);
+        const isDispCat = currentNdtCategory === '변위' || currentNdtCategory === '부재변위';
+        document.querySelectorAll('.ndt-disp-new-group-btn').forEach((el) => {
+            el.hidden = !isDispCat;
+            el.disabled = !isDispCat;
+        });
     }
 
     function recordNdtDispMarkUndo(entry) {
@@ -14694,7 +14699,7 @@ ${roundMobile ? '' : `<button type="button" class="icon-btn icon-btn-trash" titl
         return 'ndtStrength';
     }
 
-// @@app-part 04-ndt-disp.js sha=671e60ed44ae — 원본은 app/04-ndt-disp.js (여기 말고 거기서 고칠 것)
+// @@app-part 04-ndt-disp.js sha=11c467048ed0 — 원본은 app/04-ndt-disp.js (여기 말고 거기서 고칠 것)
     // --- 바닥 수직변위: 그룹(NO.박스) + 다중 레벨 포인트 데이터 ---
     const NDT_DISPLACEMENT_COLORS = ['#ef4444', '#525252', '#f97316', '#22c55e', '#a855f7', '#eab308', '#06b6d4', '#ec4899'];
     const NDT_GRADE_BADGES = {
@@ -14776,6 +14781,16 @@ ${roundMobile ? '' : `<button type="button" class="icon-btn icon-btn-trash" titl
         };
         return g;
     }
+
+    /** 상단 「새 측정점 마킹」: 이어 찍던 구역을 끝내고 다음 클릭부터 새 구역 (01) */
+    window.startNewNdtDispGroupMarking = function() {
+        if (currentNdtCategory !== '변위' && currentNdtCategory !== '부재변위') return;
+        setActiveNdtDispGroup(null);
+        if (typeof window.setNdtMode === 'function') window.setNdtMode('MARK');
+        if (typeof drawNdtCanvas === 'function') drawNdtCanvas();
+        const label = currentNdtCategory === '부재변위' ? '부재변위' : '부동침하';
+        window.showToast(`새 ${label} 구역(${nextDisplacementGroupNo(currentNdtCategory)}) — 도면을 누르면 (01) 지점부터 찍힙니다.`, 'info', 2600);
+    };
 
     function refreshNdtDispActiveTemplate() {
         const g = getActiveNdtDispGroup();
@@ -17712,6 +17727,15 @@ ${roundMobile ? '' : `<button type="button" class="icon-btn icon-btn-trash" titl
                 undoLastNdtDisplacementMark();
             });
         }
+        document.querySelectorAll('.ndt-disp-new-group-btn').forEach((btn) => {
+            if (btn.dataset.ndtNewGroupBound) return;
+            btn.dataset.ndtNewGroupBound = '1';
+            btn.addEventListener('click', (e) => {
+                e.preventDefault();
+                e.stopPropagation();
+                window.startNewNdtDispGroupMarking();
+            });
+        });
 
         canvas.addEventListener('touchstart', (e) => {
             ndtTouchStartedOnCanvas = true;
@@ -44563,7 +44587,7 @@ ${roundMobile ? '' : `<button type="button" class="icon-btn icon-btn-trash" titl
         });
     }
 
-// @@app-part 10-marking.js sha=cd4046d236e3 — 원본은 app/10-marking.js (여기 말고 거기서 고칠 것)
+// @@app-part 10-marking.js sha=a0884a3be819 — 원본은 app/10-marking.js (여기 말고 거기서 고칠 것)
     // --- 9. BUTTON CONTROLS & LISTENERS ---
 
     // Main Navigation Tabs Click Listener
@@ -48705,6 +48729,9 @@ ${roundMobile ? '' : `<button type="button" class="icon-btn icon-btn-trash" titl
             if (k === 'd') {
                 e.preventDefault();
                 if (typeof window.setNdtMode === 'function') window.setNdtMode('MARK');
+            } else if (k === 'n' && (currentNdtCategory === '변위' || currentNdtCategory === '부재변위')) {
+                e.preventDefault();
+                window.startNewNdtDispGroupMarking();
             }
             return;
         }

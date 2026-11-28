@@ -1936,6 +1936,11 @@
         });
         const fab = document.getElementById('mobileNdtFabBar');
         if (fab) fab.classList.toggle('has-disp-undo', show);
+        const isDispCat = currentNdtCategory === '변위' || currentNdtCategory === '부재변위';
+        document.querySelectorAll('.ndt-disp-new-group-btn').forEach((el) => {
+            el.hidden = !isDispCat;
+            el.disabled = !isDispCat;
+        });
     }
 
     function recordNdtDispMarkUndo(entry) {

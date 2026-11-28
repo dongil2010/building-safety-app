@@ -81,6 +81,16 @@
         return g;
     }
 
+    /** 상단 「새 측정점 마킹」: 이어 찍던 구역을 끝내고 다음 클릭부터 새 구역 (01) */
+    window.startNewNdtDispGroupMarking = function() {
+        if (currentNdtCategory !== '변위' && currentNdtCategory !== '부재변위') return;
+        setActiveNdtDispGroup(null);
+        if (typeof window.setNdtMode === 'function') window.setNdtMode('MARK');
+        if (typeof drawNdtCanvas === 'function') drawNdtCanvas();
+        const label = currentNdtCategory === '부재변위' ? '부재변위' : '부동침하';
+        window.showToast(`새 ${label} 구역(${nextDisplacementGroupNo(currentNdtCategory)}) — 도면을 누르면 (01) 지점부터 찍힙니다.`, 'info', 2600);
+    };
+
     function refreshNdtDispActiveTemplate() {
         const g = getActiveNdtDispGroup();
         if (g) setActiveNdtDispGroup(g);
@@ -3016,6 +3026,15 @@
                 undoLastNdtDisplacementMark();
             });
         }
+        document.querySelectorAll('.ndt-disp-new-group-btn').forEach((btn) => {
+            if (btn.dataset.ndtNewGroupBound) return;
+            btn.dataset.ndtNewGroupBound = '1';
+            btn.addEventListener('click', (e) => {
+                e.preventDefault();
+                e.stopPropagation();
+                window.startNewNdtDispGroupMarking();
+            });
+        });
 
         canvas.addEventListener('touchstart', (e) => {
             ndtTouchStartedOnCanvas = true;

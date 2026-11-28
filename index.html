@@ -951,6 +951,9 @@
                         <button type="button" id="btnNdtMeasureDistance" class="mode-btn btn-measure-toggle" aria-pressed="false" title="거리 재기 — 도면에서 두 점을 눌러 실제 거리를 잽니다(DXF 도면은 캐드 좌표로 자동, 그 밖의 도면은 「축척 맞추기」)">
                             <i class="fa-solid fa-ruler"></i> 거리
                         </button>
+                        <button type="button" id="btnNdtNewDispGroup" class="mode-btn ndt-disp-new-group-btn" hidden title="새 측정 구역으로 마킹 — 지금 이어 찍던 구역을 끝내고, 다음에 누르는 곳부터 새 구역(NO.)의 (01) 지점으로 찍습니다 (N)">
+                            <i class="fa-solid fa-circle-plus"></i> 새 측정점 마킹 <span class="mode-shortcut">N</span>
+                        </button>
                     </div>
 
                     <div class="toolbar-action-group">
@@ -1072,6 +1075,10 @@
                     </button>
                     </div>
                     <div class="ndt-rail-sep" aria-hidden="true"></div>
+                    <button type="button" class="mobile-rail-btn ndt-disp-new-group-btn" id="mobileNdtBtnNewDispGroup" hidden title="새 측정 구역으로 마킹 — 다음에 누르는 곳부터 새 구역의 (01) 지점">
+                        <i class="fa-solid fa-circle-plus"></i>
+                        <span>새 구역</span>
+                    </button>
                     <button type="button" class="mobile-rail-btn ndt-disp-undo-btn" id="mobileNdtBtnUndoDisp" hidden title="마지막 부동침하/부재변위 마킹 되돌리기">
                         <i class="fa-solid fa-rotate-left"></i>
                         <span>되돌</span>

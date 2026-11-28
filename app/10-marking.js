@@ -4140,6 +4140,9 @@
             if (k === 'd') {
                 e.preventDefault();
                 if (typeof window.setNdtMode === 'function') window.setNdtMode('MARK');
+            } else if (k === 'n' && (currentNdtCategory === '변위' || currentNdtCategory === '부재변위')) {
+                e.preventDefault();
+                window.startNewNdtDispGroupMarking();
             }
             return;
         }
