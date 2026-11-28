@@ -4398,3 +4398,180 @@
         URL.revokeObjectURL(url);
     };
 
+
+    // --- 층별 비파괴 조사 현황 (2026-11-28) ---
+    // 이 건물의 모든 층을 훑어 「몇 층에서 어떤 조사를 몇 건 했는지」를 한 표로 보여 준다.
+    // 행=층, 열=조사 종류, 칸=건수(없으면 비움). 부동침하·부재변위는 측정 구역(NO.) 수.
+    // 행을 누르면 그 층으로 이동한다.
+    const NDT_FLOOR_SURVEY_COLS = [
+        { cat: '실측', label: '📏 실측' },
+        { cat: '강도', label: '🔨 강도' },
+        { cat: '탄산화', label: '🧪 탄산화' },
+        { cat: '기울기', label: '📐 기울기' },
+        { cat: '내화피복', label: '🧯 내화피복' },
+        { cat: '균열모니터', label: '📈 균열' },
+        { cat: '변위', label: '📉 부동침하' },
+        { cat: '부재변위', label: '🏗️ 부재변위' }
+    ];
+
+    function buildNdtFloorSurveySummary(buildingId) {
+        const out = { rows: [], totals: {}, total: 0, otherCats: [] };
+        if (!buildingId) return out;
+        const bldg = (state.buildings || []).find((b) => b && b.id === buildingId) || state.currentBuilding || null;
+        const known = new Set(NDT_FLOOR_SURVEY_COLS.map((c) => c.cat));
+        const otherSeen = new Set();
+        const floorCodes = listNdtFloorCodesForBuilding(buildingId) || [];
+        const seen = new Set();
+        floorCodes.forEach((fc) => {
+            if (!fc || seen.has(fc)) return;
+            seen.add(fc);
+            const key = `${buildingId}_${fc}`;
+            const counts = {};
+            const items = (state.ndtData && Array.isArray(state.ndtData[key])) ? state.ndtData[key] : [];
+            items.forEach((it) => {
+                if (!it) return;
+                const cat = String(it.category || '').trim() || '기타';
+                if (!known.has(cat)) otherSeen.add(cat);
+                counts[cat] = (counts[cat] || 0) + 1;
+            });
+            const groups = (state.ndtDisplacementGroups && Array.isArray(state.ndtDisplacementGroups[key]))
+                ? state.ndtDisplacementGroups[key] : [];
+            groups.forEach((g) => {
+                if (!g) return;
+                const cat = g.category === '부재변위' ? '부재변위' : '변위';
+                counts[cat] = (counts[cat] || 0) + 1;
+            });
+            let label = fc;
+            try {
+                if (typeof window.getFloorLabelFromCode === 'function') {
+                    label = stripFloorCodeSuffix(window.getFloorLabelFromCode(fc, bldg)) || fc;
+                }
+            } catch (_e) { /* 층 이름을 못 구하면 코드 그대로 */ }
+            let total = 0;
+            Object.keys(counts).forEach((c) => {
+                total += counts[c];
+                out.totals[c] = (out.totals[c] || 0) + counts[c];
+            });
+            out.total += total;
+            out.rows.push({ floorCode: fc, label, counts, total });
+        });
+        out.otherCats = Array.from(otherSeen);
+        return out;
+    }
+    window.buildNdtFloorSurveySummary = buildNdtFloorSurveySummary;
+
+    function closeNdtFloorSurveyModal() {
+        const wrap = document.getElementById('ndtFloorSurveyModal');
+        if (wrap) wrap.classList.remove('open');
+    }
+
+    function goToNdtFloorFromSurvey(floorCode) {
+        if (!floorCode) return;
+        closeNdtFloorSurveyModal();
+        if (floorCode === state.currentFloor) return;
+        const sel = document.getElementById('floorSelect');
+        const hasOpt = !!sel && Array.from(sel.options || []).some((o) => o.value === floorCode);
+        if (!hasOpt) {
+            if (typeof window.showToast === 'function') {
+                window.showToast('이 층은 점검층 목록에 없어 바로 이동할 수 없습니다(도면을 지운 층 등).', 'warning');
+            }
+            return;
+        }
+        sel.value = floorCode;
+        sel.dispatchEvent(new Event('change', { bubbles: true }));
+    }
+
+    function ensureNdtFloorSurveyModal() {
+        let wrap = document.getElementById('ndtFloorSurveyModal');
+        if (wrap) return wrap;
+        wrap = document.createElement('div');
+        wrap.id = 'ndtFloorSurveyModal';
+        wrap.className = 'modal-overlay ndt-floor-survey-modal';
+        wrap.innerHTML = `
+            <div class="modal-card ndt-floor-survey-card" role="dialog" aria-modal="true" aria-labelledby="ndtFloorSurveyTitle">
+                <div class="modal-header">
+                    <h3 id="ndtFloorSurveyTitle"><i class="fa-solid fa-layer-group"></i> 층별 비파괴 조사 현황</h3>
+                    <button type="button" class="modal-close" id="btnCloseNdtFloorSurvey" title="닫기">&times;</button>
+                </div>
+                <div class="modal-body">
+                    <p class="ndt-floor-survey-meta" id="ndtFloorSurveyMeta"></p>
+                    <div class="ndt-floor-survey-table-wrap">
+                        <table class="ndt-floor-survey-table" id="ndtFloorSurveyTable"></table>
+                    </div>
+                    <p class="ndt-floor-survey-note">칸의 숫자는 건수입니다(부동침하·부재변위는 측정 구역 수). 행을 누르면 그 층으로 이동합니다.</p>
+                </div>
+            </div>`;
+        document.body.appendChild(wrap);
+        document.getElementById('btnCloseNdtFloorSurvey').addEventListener('click', closeNdtFloorSurveyModal);
+        const rowOf = (el) => (el && el.closest ? el.closest('tr[data-floor-code]') : null);
+        wrap.addEventListener('click', (e) => {
+            if (e.target === wrap) { closeNdtFloorSurveyModal(); return; }
+            const tr = rowOf(e.target);
+            if (tr && wrap.contains(tr)) goToNdtFloorFromSurvey(tr.getAttribute('data-floor-code'));
+        });
+        wrap.addEventListener('keydown', (e) => {
+            if (e.key === 'Escape') { e.stopPropagation(); closeNdtFloorSurveyModal(); return; }
+            if (e.key === 'Enter' || e.key === ' ') {
+                const tr = rowOf(e.target);
+                if (tr) { e.preventDefault(); goToNdtFloorFromSurvey(tr.getAttribute('data-floor-code')); }
+            }
+        });
+        return wrap;
+    }
+
+    function escapeNdtFloorSurveyHtml(s) {
+        const map = { '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', '\'': '&#39;' };
+        return String(s == null ? '' : s).replace(/[&<>"']/g, (ch) => map[ch]);
+    }
+
+    function renderNdtFloorSurveyModal() {
+        const wrap = ensureNdtFloorSurveyModal();
+        const table = document.getElementById('ndtFloorSurveyTable');
+        const meta = document.getElementById('ndtFloorSurveyMeta');
+        const bid = state.currentBuildingId;
+        const bldg = (state.buildings || []).find((b) => b && b.id === bid) || state.currentBuilding || null;
+        const summary = buildNdtFloorSurveySummary(bid);
+        const cols = NDT_FLOOR_SURVEY_COLS.slice();
+        summary.otherCats.forEach((c) => cols.push({ cat: c, label: c }));
+        const esc = escapeNdtFloorSurveyHtml;
+        const bname = bldg ? (bldg.name || bldg.buildingName || '') : '';
+        const surveyed = summary.rows.filter((r) => r.total > 0).length;
+        meta.textContent = bid
+            ? `${bname ? bname + ' · ' : ''}${summary.rows.length}개 층 중 ${surveyed}개 층에서 조사 · 전체 ${summary.total}건`
+            : '건물을 먼저 선택해 주세요.';
+        const cell = (n) => (n ? String(n) : '');
+        let html = '<thead><tr><th class="nfs-floor">층</th>'
+            + cols.map((c) => `<th>${esc(c.label)}</th>`).join('')
+            + '<th class="nfs-total">합계</th></tr></thead><tbody>';
+        if (!summary.rows.length) {
+            html += `<tr><td colspan="${cols.length + 2}" class="nfs-empty">층 정보가 없습니다.</td></tr>`;
+        }
+        summary.rows.forEach((r) => {
+            const cur = r.floorCode === state.currentFloor;
+            const cls = ['nfs-row', cur ? 'is-current' : '', r.total ? '' : 'is-empty'].filter(Boolean).join(' ');
+            html += `<tr class="${cls}" data-floor-code="${esc(r.floorCode)}" tabindex="0" title="${esc(r.label)}(으)로 이동">`
+                + `<td class="nfs-floor">${esc(r.label)}${cur ? ' <span class="nfs-cur-badge">현재</span>' : ''}</td>`
+                + cols.map((c) => `<td>${cell(r.counts[c.cat])}</td>`).join('')
+                + `<td class="nfs-total">${cell(r.total)}</td></tr>`;
+        });
+        html += '</tbody>';
+        if (summary.rows.length > 1) {
+            html += '<tfoot><tr><td class="nfs-floor">합계</td>'
+                + cols.map((c) => `<td>${cell(summary.totals[c.cat])}</td>`).join('')
+                + `<td class="nfs-total">${cell(summary.total)}</td></tr></tfoot>`;
+        }
+        table.innerHTML = html;
+        return wrap;
+    }
+
+    window.openNdtFloorSurveyModal = function() {
+        if (!state.currentBuildingId) {
+            if (typeof window.showToast === 'function') window.showToast('건물을 먼저 선택해 주세요.', 'warning');
+            return;
+        }
+        const wrap = renderNdtFloorSurveyModal();
+        wrap.classList.add('open');
+        const btn = document.getElementById('btnCloseNdtFloorSurvey');
+        if (btn) btn.focus();
+    };
+    window.closeNdtFloorSurveyModal = closeNdtFloorSurveyModal;
