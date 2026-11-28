@@ -53059,7 +53059,7 @@ ${roundMobile ? '' : `<button type="button" class="icon-btn icon-btn-trash" titl
             measureUndoLast();
         }
     }, true);
-// @@app-part 12-survey-table.js sha=2eedda021da9 — 원본은 app/12-survey-table.js (여기 말고 거기서 고칠 것)
+// @@app-part 12-survey-table.js sha=25e8b970bdd5 — 원본은 app/12-survey-table.js (여기 말고 거기서 고칠 것)
     // --- 10. SURVEY TABLE & ALBUM RENDERING ---
 
     // 상태조사표 컬럼 기본 정의 (화면/PDF/엑셀 공통). size와 crackWidth/crackLength는 상호 배타적으로
@@ -57549,7 +57549,12 @@ ${roundMobile ? '' : `<button type="button" class="icon-btn icon-btn-trash" titl
             return { ndtItems, displacementGroups, pinDefects };
     }
 
-    function renderNdtFloorPlanCanvasDataUrl(floorCode, categoryFilter = null) {
+    /**
+     * opts.noScreenCapture — 도면 그림을 못 찾았을 때 비파괴 화면(회색 바탕·화면 배율)을 캡처해 넣지 않고 null.
+     * 2026-11-28 비동기 쪽이 그림을 불러오기 「전」 첫 시도에서 화면 캡처가 나가 버려, 지금 보던 층 위치도가
+     * 회색 띠 안에 작게(돌림 없이) 들어가던 문제 — 캡처는 정말 도면을 못 읽었을 때 마지막 수단으로만.
+     */
+    function renderNdtFloorPlanCanvasDataUrl(floorCode, categoryFilter = null, opts = null) {
         try {
             const bldg = hwpxRenderBuilding();
             const currentBldgId = bldg.id || state.currentBuildingId || 'default';
@@ -57620,6 +57625,13 @@ ${roundMobile ? '' : `<button type="button" class="icon-btn icon-btn-trash" titl
                     return canvas.toDataURL('image/png');
                 };
 
+                // 지금 화면 층이면 이미 다 읽어 둔 비파괴·결함 도면 그림을 그대로 쓴다(새 Image는 바로 안 읽혀 실패하던 것)
+                if (!(loadedImg && loadedImg.complete && loadedImg.naturalWidth > 0) && !customSrc && floorDrawingSrc
+                    && hwpxRenderIsScreenFloor(floorCode)) {
+                    const onScreen = [ndtBgImage, state.bgImage].find((im) => im && im.complete
+                        && im.naturalWidth > 0 && im.src === floorDrawingSrc);
+                    if (onScreen) loadedImg = onScreen;
+                }
                 if (loadedImg && loadedImg.complete && loadedImg.naturalWidth > 0) {
                     return drawImageOnPureWhiteCanvas(loadedImg);
                 } else if (floorDrawingSrc) {
@@ -57632,7 +57644,7 @@ ${roundMobile ? '' : `<button type="button" class="icon-btn icon-btn-trash" titl
             }
 
             const ndtCanvasEl = document.getElementById('ndtCanvas');
-            if (ndtCanvasEl && hwpxRenderIsScreenFloor(floorCode)) {
+            if (ndtCanvasEl && hwpxRenderIsScreenFloor(floorCode) && !(opts && opts.noScreenCapture)) {
                 try {
                     const cssW = window._ndtCanvasCssW || ndtCanvasEl.clientWidth || ndtCanvasEl.width;
                     const cssH = window._ndtCanvasCssH || ndtCanvasEl.clientHeight || ndtCanvasEl.height;
@@ -57898,7 +57910,7 @@ ${roundMobile ? '' : `<button type="button" class="icon-btn icon-btn-trash" titl
                 }
             }
         }
-        const ready = renderNdtFloorPlanCanvasDataUrl(floorCode, categoryFilter);
+        const ready = renderNdtFloorPlanCanvasDataUrl(floorCode, categoryFilter, { noScreenCapture: true });
         if (ready) return ready;
         try {
             const bldg = hwpxRenderBuilding();
