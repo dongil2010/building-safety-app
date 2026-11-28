@@ -2439,7 +2439,7 @@
     }
 
     /**
-     * 2026-11-28 비파괴 결과표(부재실측·강도·탄산화)는 「글자처럼 취급」 표라 한글이 쪽을 넘겨 나누지 못해,
+     * 2026-11-28 비파괴 결과표(부재실측·내화피복·강도·탄산화)는 「글자처럼 취급」 표라 한글이 쪽을 넘겨 나누지 못해,
      * 행이 많으면 한 표가 쪽 아래로 넘쳐 잘렸다. 채운 표를 쪽 높이에 맞춰 여러 표로 끊는다 —
      * 다음 표는 머리 행을 다시 달고 새 쪽에서 시작한다(첫 쪽 제목은 그대로 하나). 나눈 표 개수를 돌려준다.
      */
@@ -2462,9 +2462,28 @@
             const sz = tc.getElementsByTagNameNS(HP, 'cellSz')[0];
             return sz ? (parseInt(sz.getAttribute('height'), 10) || 0) : 0;
         };
-        // 데이터 행에 세로 병합 칸이 있으면(옛 양식) 나누지 않는다
-        if (dataRows.some((tr) => tcsOf(tr).some((tc) => spanOf(tc) > 1))) return 1;
-        const rowH = (tr) => tcsOf(tr).reduce((m, tc) => Math.max(m, heightOf(tc)), 0);
+        // 행 높이 = 세로 병합 안 된 칸 중 가장 높은 칸
+        const rowH = (tr) => tcsOf(tr).reduce((m, tc) => (spanOf(tc) === 1 ? Math.max(m, heightOf(tc)) : m), 0);
+        const heights = dataRows.map(rowH);
+        // 세로 병합으로 묶인 행들(내화피복의 플렌지·웨브 두 행)은 한 덩어리 — 그 사이에서 끊지 않는다
+        const groups = [];
+        for (let i = 0; i < dataRows.length;) {
+            let end = i;
+            for (let r = i; r <= end && r < dataRows.length; r++) {
+                tcsOf(dataRows[r]).forEach((tc) => { end = Math.max(end, r + spanOf(tc) - 1); });
+            }
+            end = Math.min(end, dataRows.length - 1);
+            const rows = [];
+            for (let r = i; r <= end; r++) rows.push(r);
+            groups.push(rows);
+            i = end + 1;
+        }
+        if (groups.length < 2) return 1;
+        const groupH = (g) => {
+            const sum = g.reduce((t, r) => t + heights[r], 0);
+            const merged = tcsOf(dataRows[g[0]]).reduce((m, tc) => (spanOf(tc) > 1 ? Math.max(m, heightOf(tc)) : m), 0);
+            return Math.max(sum, merged);
+        };
         let headerH = 0;
         let spanMax = 0;
         trs.slice(0, headerRowCount).forEach((tr, ri) => {
@@ -2490,12 +2509,12 @@
         const tblSeg = segsOf(para).find((sg) => (parseInt(sg.getAttribute('vertsize'), 10) || 0) > 20000);
         const firstReserve = Math.max(tblSeg ? (parseInt(tblSeg.getAttribute('vertpos'), 10) || 0) : 0, 2640);
         const SAFETY = 1500; // 한글이 줄 높이를 조금 더 잡아도 넘치지 않게
-        const pages = planHwpxTablePages(dataRows.map(rowH),
+        const pages = planHwpxTablePages(groups.map(groupH),
             bodyH - firstReserve - headerH - marginV - SAFETY,
             bodyH - headerH - marginV - SAFETY);
         if (pages.length <= 1) return 1;
 
-        // 테두리: 첫 행(머리 밑 선)·가운데·마지막 행(굵은 아랫선) 모양을 나눈 표마다 다시 맞춘다
+        // 테두리: 첫 묶음(머리 밑 선)·가운데·마지막 묶음(굵은 아랫선) 모양을 나눈 표마다 다시 맞춘다
         const borderMap = (tr) => {
             const map = {};
             tcsOf(tr).forEach((tc) => {
@@ -2504,19 +2523,28 @@
             });
             return map;
         };
+        const groupStyles = (g) => g.map((r) => borderMap(dataRows[r]));
         const styles = {
-            first: borderMap(dataRows[0]),
-            normal: borderMap(dataRows.length > 2 ? dataRows[1] : dataRows[0]),
-            last: borderMap(dataRows[dataRows.length - 1])
+            first: groupStyles(groups[0]),
+            normal: groupStyles(groups.length > 2 ? groups[1] : groups[0]),
+            last: groupStyles(groups[groups.length - 1])
         };
-        const heights = dataRows.map(rowH);
-        const shapeTable = (t, p, rowIdxs, isFirstPage) => {
+        const shapeTable = (t, p, groupIdxs, isFirstPage) => {
             const rows = kids(t, 'tr').slice(headerRowCount);
+            const rowIdxs = [];
+            const styleOfRow = new Map();
+            groupIdxs.forEach((gi, gpos) => {
+                const set = gpos === groupIdxs.length - 1 ? styles.last : (gpos === 0 ? styles.first : styles.normal);
+                groups[gi].forEach((r, k) => {
+                    rowIdxs.push(r);
+                    styleOfRow.set(rows[r], set[Math.min(k, set.length - 1)]);
+                });
+            });
             const keep = new Set(rowIdxs);
             rows.forEach((tr, i) => { if (!keep.has(i)) t.removeChild(tr); });
             const kept = kids(t, 'tr').slice(headerRowCount);
             kept.forEach((tr, j) => {
-                const style = j === kept.length - 1 ? styles.last : (j === 0 ? styles.first : styles.normal);
+                const style = styleOfRow.get(tr) || {};
                 tcsOf(tr).forEach((tc) => {
                     const addr = tc.getElementsByTagNameNS(HP, 'cellAddr')[0];
                     if (!addr) return;
@@ -2526,7 +2554,7 @@
                 });
             });
             t.setAttribute('rowCnt', String(headerRowCount + kept.length));
-            const tH = headerH + rowIdxs.reduce((s, i) => s + heights[i], 0);
+            const tH = headerH + groupIdxs.reduce((sum, gi) => sum + groupH(groups[gi]), 0);
             const sz = kids(t, 'sz')[0];
             if (sz) sz.setAttribute('height', String(tH));
             segsOf(p).forEach((sg) => {
@@ -2540,12 +2568,12 @@
         };
         const template = para.cloneNode(true);
         let anchor = para;
-        pages.slice(1).forEach((rowIdxs, k) => {
+        pages.slice(1).forEach((groupIdxs, k) => {
             const p = template.cloneNode(true);
             p.setAttribute('pageBreak', '1');
             const t = p.getElementsByTagNameNS(HP, 'tbl')[0];
             t.setAttribute('id', String(1800000000 + Math.floor(Math.random() * 100000000) + k));
-            shapeTable(t, p, rowIdxs, false);
+            shapeTable(t, p, groupIdxs, false);
             anchor.parentNode.insertBefore(p, anchor.nextSibling);
             anchor = p;
         });
@@ -5090,6 +5118,7 @@
                     if (fireproofItemsHwpx.length > 0) {
                         const tbl = findTblById(FIREPROOF_TBL_ID, ['부  위', '설계치', '검토결과']);
                         if (tbl) fillFireproofTable(tbl, fireproofItemsHwpx);
+                        if (tbl) splitHwpxNdtTableToPages(tbl, FIREPROOF_HEADER_ROWS);
                     } else {
                         removeNdtTableById(FIREPROOF_TBL_ID);
                     }
@@ -7774,6 +7803,7 @@
                     if (fireproofItemsHwpx.length > 0) {
                         const tbl = findTblById(FIREPROOF_TBL_ID, ['부  위', '설계치', '검토결과']);
                         if (tbl) fillFireproofTable(tbl, fireproofItemsHwpx);
+                        if (tbl) splitHwpxNdtTableToPages(tbl, FIREPROOF_HEADER_ROWS);
                     } else {
                         removeNdtTableById(FIREPROOF_TBL_ID);
                     }

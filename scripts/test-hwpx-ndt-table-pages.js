@@ -1,7 +1,7 @@
 'use strict';
 // 2026-11-28 「반발경도 결과표 위치칸 ~~보 ~~기둥 띄어쓰기」·「부재실측 데이터가 한 표에 몰려 쪽을 넘김 → 끊어서」
 //  1) 위치 칸은 위치와 부재명을 한 칸 띄워 잇는다(지상 5층 보)
-//  2) 채운 결과표를 쪽 높이에 맞게 여러 표로 끊고, 다음 표는 머리 행을 다시 달고 새 쪽에서 시작한다
+//  2) 채운 결과표(부재실측·내화피복·강도·탄산화)를 쪽 높이에 맞게 여러 표로 끊고, 다음 표는 머리 행을 다시 달고 새 쪽에서 시작한다
 const assert = require('assert');
 const fs = require('fs');
 const path = require('path');
@@ -107,6 +107,46 @@ if (!xmldom) {
         assert.strictEqual(total, 25, '행이 빠지거나 겹치지 않음');
         const ids = paras.map((pp) => pp.getElementsByTagNameNS(HP, 'tbl')[0].getAttribute('id'));
         assert.strictEqual(new Set(ids).size, ids.length, '표 id가 겹치지 않음');
-        console.log('test-hwpx-ndt-table-pages: ok (' + n + '쪽)');
+
+        // ---- 4) 내화피복: 플렌지·웨브 두 행(세로 병합) 묶음은 쪽 사이에서 갈라지지 않음 ----
+        let fp = null;
+        for (let i = 0; i < tbls.length; i++) if (tbls[i].getAttribute('id') === '504') fp = tbls[i];
+        assert.ok(fp, '양식에 내화피복 표');
+        const fpRows = kids(fp, 'tr');
+        const pairA = fpRows[1], pairB = fpRows[2];
+        fpRows.slice(1).forEach((tr) => fp.removeChild(tr));
+        const FP_PAIRS = 20;
+        for (let i = 0; i < FP_PAIRS; i++) {
+            [pairA, pairB].forEach((src, k) => {
+                const tr = src.cloneNode(true);
+                kids(tr, 'tc').forEach((tc) => {
+                    tc.getElementsByTagNameNS(HP, 'cellAddr')[0].setAttribute('rowAddr', String(1 + i * 2 + k));
+                    const span = Number(tc.getElementsByTagNameNS(HP, 'cellSpan')[0].getAttribute('rowSpan'));
+                    tc.getElementsByTagNameNS(HP, 'cellSz')[0].setAttribute('height', String(2776 * span));
+                });
+                fp.appendChild(tr);
+            });
+        }
+        let fpPara = fp.parentNode;
+        while (fpPara.localName !== 'p') fpPara = fpPara.parentNode;
+        const fn = ctx.splitHwpxNdtTableToPages(fp, 1);
+        assert.ok(fn >= 2, '내화피복 20개(40행)는 나뉨: ' + fn);
+        let fpTotal = 0;
+        let q = fpPara;
+        for (let i = 0; i < fn; i++) {
+            const t = q.getElementsByTagNameNS(HP, 'tbl')[0];
+            const data = kids(t, 'tr').slice(1);
+            assert.strictEqual(data.length % 2, 0, i + '번째 표: 플렌지·웨브 짝이 갈라지지 않음');
+            data.forEach((tr, j) => {
+                const spans = kids(tr, 'tc').map((tc) => Number(tc.getElementsByTagNameNS(HP, 'cellSpan')[0].getAttribute('rowSpan')));
+                assert.strictEqual(spans.some((v) => v === 2), j % 2 === 0, '짝의 첫 행만 병합 칸');
+            });
+            assert.ok(kids(t, 'tr')[0].textContent.includes('NO.'), '머리 행');
+            assert.ok(Number(kids(t, 'sz')[0].getAttribute('height')) < 66000, '한 쪽 안 높이');
+            fpTotal += data.length;
+            q = q.nextSibling; while (q && q.nodeType !== 1) q = q.nextSibling;
+        }
+        assert.strictEqual(fpTotal, FP_PAIRS * 2);
+        console.log('test-hwpx-ndt-table-pages: ok (부재실측 ' + n + '쪽, 내화피복 ' + fn + '쪽)');
     })().catch((e) => { console.error(e); process.exit(1); });
 }
