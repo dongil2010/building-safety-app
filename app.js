@@ -14726,7 +14726,7 @@ ${roundMobile ? '' : `<button type="button" class="icon-btn icon-btn-trash" titl
         return 'ndtStrength';
     }
 
-// @@app-part 04-ndt-disp.js sha=8f946d2d4349 — 원본은 app/04-ndt-disp.js (여기 말고 거기서 고칠 것)
+// @@app-part 04-ndt-disp.js sha=63ac8d13e329 — 원본은 app/04-ndt-disp.js (여기 말고 거기서 고칠 것)
     // --- 바닥 수직변위: 그룹(NO.박스) + 다중 레벨 포인트 데이터 ---
     const NDT_DISPLACEMENT_COLORS = ['#ef4444', '#525252', '#f97316', '#22c55e', '#a855f7', '#eab308', '#06b6d4', '#ec4899'];
     const NDT_GRADE_BADGES = {
@@ -17213,20 +17213,17 @@ ${roundMobile ? '' : `<button type="button" class="icon-btn icon-btn-trash" titl
         }
 
         const calcLv = ndtDispCalcLevels(group);
-        // 축 범위(사용자 요청 2026-11-28): 위 = 중위값 + (최대−중위값)×4, 아래 = 중위값 − (중위값−최소)×4.
-        // 예) 중위 100·최대 110·최소 92 → 축 140 ~ 68. 선이 축 가운데쯤만 차지해 덜 요동쳐 보이고, 점은 늘 축 안에 든다.
-        // 한쪽 차이가 0이면(최대 또는 최소가 중위값과 같음) 점이 축 끝에 붙지 않게 다른 쪽 차이를 쓴다.
+        // 축 범위(사용자 요청 2026-11-28): 중위값을 정중앙에 두고, 중위값~최대·중위값~최소 차이 중 큰 쪽의
+        // 4배씩 위아래 똑같이. 예) 중위 100·최대 110·최소 92 → 큰 차이 10 → 축 140 ~ 60.
+        // 선이 축 가운데쯤만 차지해 덜 요동쳐 보이고, 점은 늘 축 안에 든다.
         const levels = calcLv.map(Number).filter(Number.isFinite);
         const sortedL = levels.slice().sort((a, b) => a - b);
         const n = sortedL.length;
         const medianL = n ? (n % 2 ? sortedL[(n - 1) / 2] : (sortedL[n / 2 - 1] + sortedL[n / 2]) / 2) : 0;
-        let upL = n ? sortedL[n - 1] - medianL : 0;
-        let downL = n ? medianL - sortedL[0] : 0;
-        if (upL <= 0 && downL <= 0) { upL = 1.25; downL = 1.25; } // 값이 전부 같으면 ±5로 납작한 선이 가운데
-        else if (upL <= 0) upL = downL;
-        else if (downL <= 0) downL = upL;
-        const minL = medianL - downL * 4;
-        const maxL = medianL + upL * 4;
+        const farL = n ? Math.max(sortedL[n - 1] - medianL, medianL - sortedL[0]) : 0;
+        const halfSpan = farL > 0 ? farL * 4 : 5; // 값이 전부 같으면 ±5로 납작한 선이 가운데
+        const minL = medianL - halfSpan;
+        const maxL = medianL + halfSpan;
 
         // 바닥 측정과 보/슬래브(상부) 측정은 침하 방향이 반대로 읽힌다(천장·보 밑면은 레벨 막대를
         // 거꾸로 대고 측정하므로) — 값·등급판정은 그대로 두고, 그래프 선의 위아래 모양만 뒤집는다.
