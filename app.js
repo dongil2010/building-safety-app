@@ -6029,7 +6029,7 @@ document.addEventListener('DOMContentLoaded', () => {
         }
     }
 
-// @@app-part 02-buildings.js sha=7ffdc55cb43c — 원본은 app/02-buildings.js (여기 말고 거기서 고칠 것)
+// @@app-part 02-buildings.js sha=1f360a23e41f — 원본은 app/02-buildings.js (여기 말고 거기서 고칠 것)
     // --- 5. TAB MANAGER (진입 로직은 js/tabs/*.js) ---
     // ---- 마지막 작업 위치 기억·복원 (js/core/last-location.js, 2026-10-28) ----
     // 로그인 직후 복원 시도가 끝나기 전에는 기록·삭제를 하지 않는다(부팅 중 switchTab('tab-home')이 기록을 지우지 않게).
@@ -6137,6 +6137,7 @@ document.addEventListener('DOMContentLoaded', () => {
         // 탭 전환 시 결함/NDT 드로어·관련 모달이 다른 도면 위에 남지 않도록 닫기
         // 2026-11-28 거리 재기도 끝낸다(막대가 다른 탭 위에 남지 않게)
         try {
+            if (typeof window.closePcMapToolbarDropdowns === 'function') window.closePcMapToolbarDropdowns();
             if (window.measureState && typeof window.endMeasure === 'function') window.endMeasure();
         } catch (_e) { /* ignore */ }
         try {
@@ -37637,7 +37638,7 @@ ${roundMobile ? '' : `<button type="button" class="icon-btn icon-btn-trash" titl
         }
     }
 
-// @@app-part 09-settings-input-camera.js sha=1adb6a599b6e — 원본은 app/09-settings-input-camera.js (여기 말고 거기서 고칠 것)
+// @@app-part 09-settings-input-camera.js sha=64b06257d11f — 원본은 app/09-settings-input-camera.js (여기 말고 거기서 고칠 것)
     // --- 카테고리별 핀/박스 색상 설정 모달 ---
     // 결함 색상은 getDefectColor()가 쓰는 등급·상태 키와 맞춰야 도면에 바로 반영됨
     const STYLE_COLOR_FIELDS = [
@@ -40767,7 +40768,7 @@ ${roundMobile ? '' : `<button type="button" class="icon-btn icon-btn-trash" titl
     const MAP_FLOATING_OVERLAY_SELECTOR = [
         '#mapSelectedDefectPopup', '.map-selected-defect-popup', '#markShapeBar', '#areaPolyTouchBar', '#areaPolygonRedrawBanner',
         '#areaToolPanel', '#mapStyleSizeToolbar', '#mapGuideBar', '#mapCountBar', '#mapEvalMemberBar', '#evalUnitBar',
-        '#areaShapePicker', '.canvas-top-toolbar', '.canvas-bottom-toolbar', '#mobileMapSideRail',
+        '#areaShapePicker', '.canvas-top-toolbar', '.toolbar-dropdown-menu', '.canvas-bottom-toolbar', '#mobileMapSideRail',
         '.map-selection-bar', '#mapSelectionBar'
     ].join(', ');
 
@@ -44587,7 +44588,7 @@ ${roundMobile ? '' : `<button type="button" class="icon-btn icon-btn-trash" titl
         });
     }
 
-// @@app-part 10-marking.js sha=a0884a3be819 — 원본은 app/10-marking.js (여기 말고 거기서 고칠 것)
+// @@app-part 10-marking.js sha=62cedac4ff86 — 원본은 app/10-marking.js (여기 말고 거기서 고칠 것)
     // --- 9. BUTTON CONTROLS & LISTENERS ---
 
     // Main Navigation Tabs Click Listener
@@ -48136,6 +48137,95 @@ ${roundMobile ? '' : `<button type="button" class="icon-btn icon-btn-trash" titl
         });
     }
 
+    // PC 결함위치도 상단 툴바 드롭다운(도면·정리·출력) 열기·닫기
+    function closeAllPcMapToolbarDropdowns(opts) {
+        const toolbar = document.querySelector('#tab-map .canvas-top-toolbar');
+        if (!toolbar) return false;
+        let closedAny = false;
+        let focusTrigger = null;
+        toolbar.querySelectorAll('.toolbar-dropdown').forEach((dd) => {
+            const trigger = dd.querySelector('.toolbar-dropdown-trigger');
+            const menu = dd.querySelector('.toolbar-dropdown-menu');
+            const wasOpen = dd.classList.contains('is-open') || (menu && !menu.hidden);
+            if (wasOpen) {
+                closedAny = true;
+                if (opts && opts.restoreFocus && trigger) focusTrigger = trigger;
+            }
+            dd.classList.remove('is-open');
+            if (trigger) trigger.setAttribute('aria-expanded', 'false');
+            if (menu) menu.hidden = true;
+        });
+        toolbar.classList.remove('has-open-dropdown');
+        if (focusTrigger) {
+            try { focusTrigger.focus(); } catch (_e) { /* ignore */ }
+        }
+        return closedAny;
+    }
+    window.closePcMapToolbarDropdowns = closeAllPcMapToolbarDropdowns;
+
+    function initPcMapToolbarDropdowns() {
+        const toolbar = document.querySelector('#tab-map .canvas-top-toolbar');
+        if (!toolbar || toolbar.dataset.dropdownsBound === '1') return;
+        toolbar.dataset.dropdownsBound = '1';
+
+        const dropdowns = Array.from(toolbar.querySelectorAll('.toolbar-dropdown'));
+        const setDropdownOpen = (targetDd, open) => {
+            dropdowns.forEach((dd) => {
+                const isTarget = dd === targetDd;
+                const nextOpen = isTarget ? !!open : false;
+                const trigger = dd.querySelector('.toolbar-dropdown-trigger');
+                const menu = dd.querySelector('.toolbar-dropdown-menu');
+                dd.classList.toggle('is-open', nextOpen);
+                if (trigger) trigger.setAttribute('aria-expanded', nextOpen ? 'true' : 'false');
+                if (menu) menu.hidden = !nextOpen;
+            });
+            toolbar.classList.toggle('has-open-dropdown', dropdowns.some((dd) => dd.classList.contains('is-open')));
+        };
+
+        dropdowns.forEach((dd) => {
+            const trigger = dd.querySelector('.toolbar-dropdown-trigger');
+            const menu = dd.querySelector('.toolbar-dropdown-menu');
+            if (trigger) {
+                trigger.addEventListener('click', (e) => {
+                    e.preventDefault();
+                    e.stopPropagation();
+                    const willOpen = !dd.classList.contains('is-open');
+                    setDropdownOpen(dd, willOpen);
+                });
+            }
+            if (menu) {
+                // 버블 단계에서 닫아야 메뉴 안 버튼 자체의 click 리스너가 먼저 실행된다
+                menu.addEventListener('click', (e) => {
+                    const btn = e.target && e.target.closest ? e.target.closest('button') : null;
+                    if (btn) closeAllPcMapToolbarDropdowns();
+                });
+            }
+        });
+
+        // #canvasContainer의 오버레이 격리 핸들러가 버블을 막더라도 바깥 클릭을 놓치지 않게 capture 단계 사용
+        document.addEventListener('pointerdown', (e) => {
+            if (!toolbar.classList.contains('has-open-dropdown')) return;
+            const el = e.target && e.target.closest ? e.target : (e.target && e.target.parentElement);
+            if (el && el.closest('#tab-map .canvas-top-toolbar .toolbar-dropdown')) return;
+            closeAllPcMapToolbarDropdowns();
+        }, true);
+
+        document.addEventListener('keydown', (e) => {
+            if (e.key !== 'Escape') return;
+            if (!toolbar.classList.contains('has-open-dropdown')) return;
+            if (document.querySelector('.modal-overlay.open, .bsa-dialog-overlay.open')) return;
+            if (closeAllPcMapToolbarDropdowns({ restoreFocus: true })) {
+                e.preventDefault();
+                e.stopImmediatePropagation();
+            }
+        }, true);
+
+        window.addEventListener('blur', () => {
+            if (toolbar.classList.contains('has-open-dropdown')) closeAllPcMapToolbarDropdowns();
+        });
+    }
+    initPcMapToolbarDropdowns();
+
     // ---- 구역(한 도면에 여러 층, 2026-09-28) ----
     // 사각형 구역마다 그룹(zoneId)을 따로 두어 번호가 구역마다 새로 시작한다. 계산은 grid-lines.js(restrictGridToZone).
     function gridHasContent(grid) {
@@ -49316,7 +49406,7 @@ ${roundMobile ? '' : `<button type="button" class="icon-btn icon-btn-trash" titl
         });
     }
 
-// @@app-part 11-cad-import.js sha=49a4f340ebce — 원본은 app/11-cad-import.js (여기 말고 거기서 고칠 것)
+// @@app-part 11-cad-import.js sha=a8997453bea5 — 원본은 app/11-cad-import.js (여기 말고 거기서 고칠 것)
     // --- 9-1. CAD Defect Pins 2-Point Calibration Engine (v2.0) ---
     window.cadCalibrationState = null;
 
@@ -50975,6 +51065,13 @@ ${roundMobile ? '' : `<button type="button" class="icon-btn icon-btn-trash" titl
         const pending = !!key && _drawingAlignPendingKeys.has(key);
         const btn = document.getElementById('btnAlignMarkingsToDrawing');
         if (btn) btn.classList.toggle('drawing-align-pending', pending);
+        const menuBtn = document.getElementById('btnToolbarMenuDrawing');
+        if (menuBtn) menuBtn.classList.toggle('has-align-pending', pending);
+        const quickBtn = document.getElementById('btnAlignMarkingsPendingQuick');
+        if (quickBtn) {
+            quickBtn.hidden = !pending;
+            quickBtn.classList.toggle('drawing-align-pending', pending);
+        }
         if (pending && !_drawingAlignToastShown.has(key) && !window.drawingAlignState) {
             _drawingAlignToastShown.add(key);
             const cnt = countFloorAlignableMarkings(key);
@@ -51535,6 +51632,13 @@ ${roundMobile ? '' : `<button type="button" class="icon-btn icon-btn-trash" titl
     if (btnAlignMarkingsToDrawing) {
         btnAlignMarkingsToDrawing.addEventListener('click', () => {
             startDrawingAlign().catch((e) => { console.error('[마킹 맞추기] 시작 실패', e); window.hideLoading?.(); });
+        });
+    }
+    const btnAlignMarkingsPendingQuick = document.getElementById('btnAlignMarkingsPendingQuick');
+    if (btnAlignMarkingsPendingQuick && !btnAlignMarkingsPendingQuick.dataset.alignQuickBound) {
+        btnAlignMarkingsPendingQuick.dataset.alignQuickBound = '1';
+        btnAlignMarkingsPendingQuick.addEventListener('click', () => {
+            document.getElementById('btnAlignMarkingsToDrawing')?.click();
         });
     }
     document.addEventListener('keydown', (e) => {

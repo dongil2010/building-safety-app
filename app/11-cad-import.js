@@ -1657,6 +1657,13 @@
         const pending = !!key && _drawingAlignPendingKeys.has(key);
         const btn = document.getElementById('btnAlignMarkingsToDrawing');
         if (btn) btn.classList.toggle('drawing-align-pending', pending);
+        const menuBtn = document.getElementById('btnToolbarMenuDrawing');
+        if (menuBtn) menuBtn.classList.toggle('has-align-pending', pending);
+        const quickBtn = document.getElementById('btnAlignMarkingsPendingQuick');
+        if (quickBtn) {
+            quickBtn.hidden = !pending;
+            quickBtn.classList.toggle('drawing-align-pending', pending);
+        }
         if (pending && !_drawingAlignToastShown.has(key) && !window.drawingAlignState) {
             _drawingAlignToastShown.add(key);
             const cnt = countFloorAlignableMarkings(key);
@@ -2217,6 +2224,13 @@
     if (btnAlignMarkingsToDrawing) {
         btnAlignMarkingsToDrawing.addEventListener('click', () => {
             startDrawingAlign().catch((e) => { console.error('[마킹 맞추기] 시작 실패', e); window.hideLoading?.(); });
+        });
+    }
+    const btnAlignMarkingsPendingQuick = document.getElementById('btnAlignMarkingsPendingQuick');
+    if (btnAlignMarkingsPendingQuick && !btnAlignMarkingsPendingQuick.dataset.alignQuickBound) {
+        btnAlignMarkingsPendingQuick.dataset.alignQuickBound = '1';
+        btnAlignMarkingsPendingQuick.addEventListener('click', () => {
+            document.getElementById('btnAlignMarkingsToDrawing')?.click();
         });
     }
     document.addEventListener('keydown', (e) => {

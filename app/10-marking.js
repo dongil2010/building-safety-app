@@ -3547,6 +3547,95 @@
         });
     }
 
+    // PC 결함위치도 상단 툴바 드롭다운(도면·정리·출력) 열기·닫기
+    function closeAllPcMapToolbarDropdowns(opts) {
+        const toolbar = document.querySelector('#tab-map .canvas-top-toolbar');
+        if (!toolbar) return false;
+        let closedAny = false;
+        let focusTrigger = null;
+        toolbar.querySelectorAll('.toolbar-dropdown').forEach((dd) => {
+            const trigger = dd.querySelector('.toolbar-dropdown-trigger');
+            const menu = dd.querySelector('.toolbar-dropdown-menu');
+            const wasOpen = dd.classList.contains('is-open') || (menu && !menu.hidden);
+            if (wasOpen) {
+                closedAny = true;
+                if (opts && opts.restoreFocus && trigger) focusTrigger = trigger;
+            }
+            dd.classList.remove('is-open');
+            if (trigger) trigger.setAttribute('aria-expanded', 'false');
+            if (menu) menu.hidden = true;
+        });
+        toolbar.classList.remove('has-open-dropdown');
+        if (focusTrigger) {
+            try { focusTrigger.focus(); } catch (_e) { /* ignore */ }
+        }
+        return closedAny;
+    }
+    window.closePcMapToolbarDropdowns = closeAllPcMapToolbarDropdowns;
+
+    function initPcMapToolbarDropdowns() {
+        const toolbar = document.querySelector('#tab-map .canvas-top-toolbar');
+        if (!toolbar || toolbar.dataset.dropdownsBound === '1') return;
+        toolbar.dataset.dropdownsBound = '1';
+
+        const dropdowns = Array.from(toolbar.querySelectorAll('.toolbar-dropdown'));
+        const setDropdownOpen = (targetDd, open) => {
+            dropdowns.forEach((dd) => {
+                const isTarget = dd === targetDd;
+                const nextOpen = isTarget ? !!open : false;
+                const trigger = dd.querySelector('.toolbar-dropdown-trigger');
+                const menu = dd.querySelector('.toolbar-dropdown-menu');
+                dd.classList.toggle('is-open', nextOpen);
+                if (trigger) trigger.setAttribute('aria-expanded', nextOpen ? 'true' : 'false');
+                if (menu) menu.hidden = !nextOpen;
+            });
+            toolbar.classList.toggle('has-open-dropdown', dropdowns.some((dd) => dd.classList.contains('is-open')));
+        };
+
+        dropdowns.forEach((dd) => {
+            const trigger = dd.querySelector('.toolbar-dropdown-trigger');
+            const menu = dd.querySelector('.toolbar-dropdown-menu');
+            if (trigger) {
+                trigger.addEventListener('click', (e) => {
+                    e.preventDefault();
+                    e.stopPropagation();
+                    const willOpen = !dd.classList.contains('is-open');
+                    setDropdownOpen(dd, willOpen);
+                });
+            }
+            if (menu) {
+                // 버블 단계에서 닫아야 메뉴 안 버튼 자체의 click 리스너가 먼저 실행된다
+                menu.addEventListener('click', (e) => {
+                    const btn = e.target && e.target.closest ? e.target.closest('button') : null;
+                    if (btn) closeAllPcMapToolbarDropdowns();
+                });
+            }
+        });
+
+        // #canvasContainer의 오버레이 격리 핸들러가 버블을 막더라도 바깥 클릭을 놓치지 않게 capture 단계 사용
+        document.addEventListener('pointerdown', (e) => {
+            if (!toolbar.classList.contains('has-open-dropdown')) return;
+            const el = e.target && e.target.closest ? e.target : (e.target && e.target.parentElement);
+            if (el && el.closest('#tab-map .canvas-top-toolbar .toolbar-dropdown')) return;
+            closeAllPcMapToolbarDropdowns();
+        }, true);
+
+        document.addEventListener('keydown', (e) => {
+            if (e.key !== 'Escape') return;
+            if (!toolbar.classList.contains('has-open-dropdown')) return;
+            if (document.querySelector('.modal-overlay.open, .bsa-dialog-overlay.open')) return;
+            if (closeAllPcMapToolbarDropdowns({ restoreFocus: true })) {
+                e.preventDefault();
+                e.stopImmediatePropagation();
+            }
+        }, true);
+
+        window.addEventListener('blur', () => {
+            if (toolbar.classList.contains('has-open-dropdown')) closeAllPcMapToolbarDropdowns();
+        });
+    }
+    initPcMapToolbarDropdowns();
+
     // ---- 구역(한 도면에 여러 층, 2026-09-28) ----
     // 사각형 구역마다 그룹(zoneId)을 따로 두어 번호가 구역마다 새로 시작한다. 계산은 grid-lines.js(restrictGridToZone).
     function gridHasContent(grid) {

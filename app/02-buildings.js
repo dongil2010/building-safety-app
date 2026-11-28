@@ -106,6 +106,7 @@
         // 탭 전환 시 결함/NDT 드로어·관련 모달이 다른 도면 위에 남지 않도록 닫기
         // 2026-11-28 거리 재기도 끝낸다(막대가 다른 탭 위에 남지 않게)
         try {
+            if (typeof window.closePcMapToolbarDropdowns === 'function') window.closePcMapToolbarDropdowns();
             if (window.measureState && typeof window.endMeasure === 'function') window.endMeasure();
         } catch (_e) { /* ignore */ }
         try {

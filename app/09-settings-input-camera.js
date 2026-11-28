@@ -3128,7 +3128,7 @@
     const MAP_FLOATING_OVERLAY_SELECTOR = [
         '#mapSelectedDefectPopup', '.map-selected-defect-popup', '#markShapeBar', '#areaPolyTouchBar', '#areaPolygonRedrawBanner',
         '#areaToolPanel', '#mapStyleSizeToolbar', '#mapGuideBar', '#mapCountBar', '#mapEvalMemberBar', '#evalUnitBar',
-        '#areaShapePicker', '.canvas-top-toolbar', '.canvas-bottom-toolbar', '#mobileMapSideRail',
+        '#areaShapePicker', '.canvas-top-toolbar', '.toolbar-dropdown-menu', '.canvas-bottom-toolbar', '#mobileMapSideRail',
         '.map-selection-bar', '#mapSelectionBar'
     ].join(', ');
 

@@ -877,30 +877,20 @@ html.layout-desktop #tab-ndt .ndt-top-canvas-tools {
     /* NDT 상단은 .ndt-top-bar 한 줄 — 개별 툴바 여백 규칙 사용 안 함 */
 }
 
-/* 2026-11-17 결함위치도 오른쪽 버튼(목록·크기·회전·CAD 핀…박스 자동 정리) — 아이콘 없이 글자만, 칸 여유 있게 */
-@media (min-width: 769px) {
-    #tab-map .canvas-top-toolbar .toolbar-action-group {
-        gap: 0.75rem;
-    }
-
-    #tab-map .canvas-top-toolbar .toolbar-action-group > .mode-btn,
-    #tab-map .canvas-top-toolbar .toolbar-action-group > .btn-rotate-hero {
-        padding: 0.36rem 0.95rem;
-        letter-spacing: 0.01em;
-    }
-
-    /* 「크기 OFF」도 「목록 ON」처럼 테두리 없이 글자만 */
-    #tab-map .canvas-top-toolbar .toolbar-size-toggle .toolbar-toggle-state {
+/* 2026-11-28 결함위치도 PC 상단 도구줄 보조 상태 글자 */
+@media (min-width: 1025px) {
+    html:not(.layout-tablet) #tab-map .canvas-top-toolbar .toolbar-size-toggle .toolbar-toggle-state,
+    html:not(.layout-tablet) #tab-map .canvas-top-toolbar .toolbar-defect-list-toggle .toolbar-toggle-state {
         border: 0;
         background: transparent;
         padding: 0;
         min-width: 0;
-        margin-left: 0.2rem;
-        font-size: 1em;
-        font-weight: inherit;
+        margin-left: 0.14rem;
+        font-size: 0.92em;
+        font-weight: 800;
         letter-spacing: inherit;
         line-height: inherit;
-        opacity: 1;
+        opacity: 0.85;
     }
 }
 
@@ -19389,5 +19379,532 @@ button#mobileNdtBtnAddSelect#mobileNdtBtnAddSelect.is-select-remove i {
     }
     #tab-ndt #ndtSelectionBar .map-selection-nostep-label {
         font-size: 0.7rem;
+    }
+}
+
+/* ==========================================================================
+   2026-11-28 PC 결함위치도(#tab-map) 상단 툴바 1줄 통합 + 드롭다운 3종(도면·정리·출력)
+   - PC 전용(min-width: 1025px + not .layout-tablet). 모바일·태블릿·NDT 탭에 영향 없음
+   - 드롭다운 메뉴는 position: absolute라 열려도 툴바 높이가 변하지 않음(07-defect-component.js 호환)
+   ========================================================================== */
+@media (min-width: 1025px) {
+    html:not(.layout-tablet) #tab-map .canvas-top-toolbar {
+        justify-content: flex-start !important;
+        align-items: center !important;
+        flex-wrap: wrap !important;
+        gap: 0.34rem !important;
+        padding: 0.28rem 0.45rem !important;
+        overflow: visible !important;
+    }
+
+    html:not(.layout-tablet) #tab-map .canvas-top-toolbar.has-open-dropdown {
+        z-index: 50 !important;
+    }
+
+    html:not(.layout-tablet) #tab-map .canvas-top-toolbar .toolbar-divider {
+        width: 1px;
+        height: 18px;
+        background: #d4d4d8;
+        flex-shrink: 0;
+        margin: 0 0.06rem;
+    }
+
+    /* 1구역: 상시 배타 모드(세그먼트 트레이) */
+    html:not(.layout-tablet) #tab-map .canvas-top-toolbar .toolbar-mode-group {
+        display: inline-flex;
+        align-items: center;
+        flex-wrap: nowrap;
+        gap: 2px;
+        padding: 2px;
+        background: #f4f4f5;
+        border: 1px solid #e4e4e7;
+        border-radius: 8px;
+        flex-shrink: 0;
+    }
+
+    html:not(.layout-tablet) #tab-map .canvas-top-toolbar .toolbar-mode-group > .mode-btn {
+        height: 26px;
+        padding: 0 0.46rem;
+        font-size: 0.74rem;
+        font-weight: 700;
+        border: 1px solid transparent;
+        background: transparent;
+        color: #3f3f46;
+        border-radius: 6px;
+        gap: 0.24rem;
+        white-space: nowrap;
+        box-shadow: none !important;
+    }
+
+    html:not(.layout-tablet) #tab-map .canvas-top-toolbar .toolbar-mode-group > .mode-btn:hover {
+        background: #e4e4e7;
+        border-color: transparent;
+        color: #18181b;
+    }
+
+    html:not(.layout-tablet) #tab-map .canvas-top-toolbar .toolbar-mode-group > .mode-btn.active {
+        background: #171717 !important;
+        border-color: #171717 !important;
+        color: #ffffff !important;
+        box-shadow: 0 1px 2px rgba(0, 0, 0, 0.14) !important;
+    }
+
+    /* 2구역: 독립 ON/OFF 보조 스위치 */
+    html:not(.layout-tablet) #tab-map .canvas-top-toolbar .toolbar-assist-group {
+        display: inline-flex;
+        align-items: center;
+        flex-wrap: nowrap;
+        gap: 0.24rem;
+        flex-shrink: 0;
+    }
+
+    /* 3~5구역: 자주 쓰는 작업 + 드롭다운 + 우측 줌 */
+    html:not(.layout-tablet) #tab-map .canvas-top-toolbar .toolbar-action-group {
+        display: flex;
+        align-items: center;
+        gap: 0.26rem;
+        flex: 1 1 auto;
+        flex-wrap: wrap;
+        min-width: 0;
+    }
+
+    html:not(.layout-tablet) #tab-map .canvas-top-toolbar .toolbar-assist-group > .mode-btn,
+    html:not(.layout-tablet) #tab-map .canvas-top-toolbar .toolbar-action-group > .mode-btn,
+    html:not(.layout-tablet) #tab-map .canvas-top-toolbar .toolbar-dropdown > .toolbar-dropdown-trigger {
+        height: 30px;
+        padding: 0 0.52rem;
+        font-size: 0.74rem;
+        font-weight: 700;
+        border: 1px solid #d4d4d8;
+        background: #ffffff;
+        color: #18181b;
+        border-radius: 7px;
+        gap: 0.26rem;
+        white-space: nowrap;
+        display: inline-flex;
+        align-items: center;
+        justify-content: center;
+        letter-spacing: 0;
+        box-shadow: none;
+    }
+
+    html:not(.layout-tablet) #tab-map .canvas-top-toolbar .toolbar-assist-group > .mode-btn:hover,
+    html:not(.layout-tablet) #tab-map .canvas-top-toolbar .toolbar-action-group > .mode-btn:hover,
+    html:not(.layout-tablet) #tab-map .canvas-top-toolbar .toolbar-dropdown > .toolbar-dropdown-trigger:hover {
+        background: #f4f4f5;
+        border-color: #a1a1aa;
+        color: #18181b;
+    }
+
+    html:not(.layout-tablet) #tab-map .canvas-top-toolbar .toolbar-assist-group > .mode-btn.active,
+    html:not(.layout-tablet) #tab-map .canvas-top-toolbar .toolbar-action-group > .mode-btn.active,
+    html:not(.layout-tablet) #tab-map .canvas-top-toolbar .toolbar-action-group > .mode-btn.is-on,
+    html:not(.layout-tablet) #tab-map .canvas-top-toolbar .toolbar-dropdown.is-open > .toolbar-dropdown-trigger {
+        background: #171717 !important;
+        border-color: #171717 !important;
+        color: #ffffff !important;
+        box-shadow: none !important;
+    }
+
+    html:not(.layout-tablet) #tab-map .canvas-top-toolbar .toolbar-defect-list-toggle[aria-pressed="false"] {
+        opacity: 1;
+    }
+
+    /* 단일 포인트 색: 출력 드롭다운 */
+    html:not(.layout-tablet) #tab-map .canvas-top-toolbar .toolbar-dropdown > .toolbar-export-trigger,
+    html:not(.layout-tablet) #tab-map .canvas-top-toolbar .toolbar-dropdown.is-open > .toolbar-export-trigger {
+        background: #0369a1 !important;
+        border-color: #0369a1 !important;
+        color: #ffffff !important;
+    }
+
+    html:not(.layout-tablet) #tab-map .canvas-top-toolbar .toolbar-dropdown > .toolbar-export-trigger:hover {
+        background: #075985 !important;
+        border-color: #075985 !important;
+        color: #ffffff !important;
+    }
+
+    /* 도면 교체 후 마킹 맞추기 대기 표시 */
+    html:not(.layout-tablet) #tab-map .canvas-top-toolbar #btnToolbarMenuDrawing.has-align-pending {
+        position: relative;
+    }
+
+    html:not(.layout-tablet) #tab-map .canvas-top-toolbar #btnToolbarMenuDrawing.has-align-pending::after {
+        content: "";
+        position: absolute;
+        top: 3px;
+        right: 3px;
+        width: 6px;
+        height: 6px;
+        border-radius: 999px;
+        background: #e11d48;
+        box-shadow: 0 0 0 1.5px #ffffff;
+    }
+
+    html:not(.layout-tablet) #tab-map .canvas-top-toolbar .toolbar-align-pending-quick[hidden] {
+        display: none !important;
+    }
+
+    html:not(.layout-tablet) #tab-map .canvas-top-toolbar .toolbar-align-pending-quick {
+        background: #fff1f2 !important;
+        border-color: #fda4af !important;
+        color: #be123c !important;
+    }
+
+    html:not(.layout-tablet) #tab-map .canvas-top-toolbar .toolbar-align-pending-quick:hover {
+        background: #ffe4e6 !important;
+        border-color: #fb7185 !important;
+        color: #9f1239 !important;
+    }
+
+    html:not(.layout-tablet) #tab-map .canvas-top-toolbar #btnAlignMarkingsPendingQuick.drawing-align-pending {
+        animation: drawingAlignPulse 1.6s ease-in-out infinite;
+    }
+
+    /* 드롭다운 메뉴 (position: absolute -> 툴바 높이 유지) */
+    html:not(.layout-tablet) #tab-map .canvas-top-toolbar .toolbar-dropdown {
+        position: relative;
+        display: inline-flex;
+        flex-shrink: 0;
+    }
+
+    html:not(.layout-tablet) #tab-map .canvas-top-toolbar .toolbar-caret {
+        font-size: 0.62rem;
+        opacity: 0.72;
+        transition: transform 0.15s ease;
+        margin-left: 0.04rem;
+    }
+
+    html:not(.layout-tablet) #tab-map .canvas-top-toolbar .toolbar-dropdown.is-open .toolbar-caret {
+        transform: rotate(180deg);
+        opacity: 1;
+    }
+
+    html:not(.layout-tablet) #tab-map .canvas-top-toolbar .toolbar-dropdown-menu {
+        position: absolute;
+        top: calc(100% + 6px);
+        left: 0;
+        min-width: 212px;
+        padding: 5px;
+        background: #ffffff;
+        border: 1px solid #d4d4d8;
+        border-radius: 10px;
+        box-shadow: 0 12px 30px rgba(15, 23, 42, 0.16);
+        display: flex;
+        flex-direction: column;
+        gap: 2px;
+        z-index: 60;
+    }
+
+    html:not(.layout-tablet) #tab-map .canvas-top-toolbar .toolbar-dropdown-menu[hidden] {
+        display: none !important;
+    }
+
+    html:not(.layout-tablet) #tab-map .canvas-top-toolbar .toolbar-dropdown-menu-right {
+        left: auto;
+        right: 0;
+        min-width: 196px;
+    }
+
+    html:not(.layout-tablet) #tab-map .canvas-top-toolbar .toolbar-dropdown-menu > button {
+        width: 100%;
+        display: flex;
+        align-items: center;
+        justify-content: flex-start;
+        gap: 0.55rem;
+        padding: 0.44rem 0.6rem;
+        border: 0;
+        border-radius: 7px;
+        background: transparent;
+        color: #18181b;
+        font-size: 0.76rem;
+        font-weight: 700;
+        text-align: left;
+        cursor: pointer;
+        white-space: nowrap;
+        box-shadow: none;
+        transition: background 0.12s ease, color 0.12s ease;
+    }
+
+    html:not(.layout-tablet) #tab-map .canvas-top-toolbar .toolbar-dropdown-menu > button:hover {
+        background: #f4f4f5;
+        color: #09090b;
+    }
+
+    html:not(.layout-tablet) #tab-map .canvas-top-toolbar .toolbar-dropdown-menu > button > i {
+        width: 1rem;
+        text-align: center;
+        font-size: 0.85rem;
+        color: #52525b;
+        flex-shrink: 0;
+    }
+
+    html:not(.layout-tablet) #tab-map .canvas-top-toolbar .toolbar-dropdown-menu > button:hover > i {
+        color: #18181b;
+    }
+
+    html:not(.layout-tablet) #tab-map .canvas-top-toolbar .toolbar-menu-text {
+        display: flex;
+        flex-direction: column;
+        min-width: 0;
+        flex: 1;
+    }
+
+    html:not(.layout-tablet) #tab-map .canvas-top-toolbar .toolbar-menu-title {
+        font-size: 0.77rem;
+        font-weight: 700;
+        line-height: 1.25;
+        color: inherit;
+    }
+
+    html:not(.layout-tablet) #tab-map .canvas-top-toolbar .toolbar-menu-sub {
+        font-size: 0.67rem;
+        font-weight: 500;
+        line-height: 1.25;
+        color: #71717a;
+        margin-top: 1px;
+    }
+
+    html:not(.layout-tablet) #tab-map .canvas-top-toolbar .toolbar-menu-sep {
+        height: 1px;
+        background: #e4e4e7;
+        margin: 3px 6px;
+    }
+
+    html:not(.layout-tablet) #tab-map .canvas-top-toolbar .toolbar-dropdown-menu > button.toolbar-menu-danger {
+        color: #dc2626;
+    }
+
+    html:not(.layout-tablet) #tab-map .canvas-top-toolbar .toolbar-dropdown-menu > button.toolbar-menu-danger > i {
+        color: #dc2626;
+    }
+
+    html:not(.layout-tablet) #tab-map .canvas-top-toolbar .toolbar-dropdown-menu > button.toolbar-menu-danger .toolbar-menu-sub {
+        color: #ef4444;
+        opacity: 0.88;
+    }
+
+    html:not(.layout-tablet) #tab-map .canvas-top-toolbar .toolbar-dropdown-menu > button.toolbar-menu-danger:hover {
+        background: #fef2f2;
+        color: #b91c1c;
+    }
+
+    html:not(.layout-tablet) #tab-map .canvas-top-toolbar .toolbar-dropdown-menu > button.toolbar-menu-danger:hover > i {
+        color: #b91c1c;
+    }
+
+    html:not(.layout-tablet) #tab-map .canvas-top-toolbar #btnAlignMarkingsToDrawing.drawing-align-pending {
+        background: #fff1f2;
+        color: #be123c;
+    }
+
+    html:not(.layout-tablet) #tab-map .canvas-top-toolbar #btnAlignMarkingsToDrawing.drawing-align-pending > i {
+        color: #e11d48;
+    }
+
+    html:not(.layout-tablet) #tab-map .canvas-top-toolbar #btnExportFloorDrawing::before,
+    html:not(.layout-tablet) #tab-map .canvas-top-toolbar #btnExportFloorSvg::before {
+        font-family: "Font Awesome 6 Free";
+        font-weight: 900;
+        width: 1rem;
+        text-align: center;
+        font-size: 0.85rem;
+        color: #0369a1;
+        flex-shrink: 0;
+    }
+
+    html:not(.layout-tablet) #tab-map .canvas-top-toolbar #btnExportFloorDrawing::before {
+        content: "\f1c1";
+    }
+
+    html:not(.layout-tablet) #tab-map .canvas-top-toolbar #btnExportFloorSvg::before {
+        content: "\f5cb";
+    }
+
+    html:not(.layout-tablet) #tab-map .canvas-top-toolbar #btnExportFloorDrawing::after,
+    html:not(.layout-tablet) #tab-map .canvas-top-toolbar #btnExportFloorSvg::after {
+        margin-left: auto;
+        padding-left: 0.65rem;
+        font-size: 0.67rem;
+        font-weight: 500;
+        color: #71717a;
+    }
+
+    html:not(.layout-tablet) #tab-map .canvas-top-toolbar #btnExportFloorDrawing::after {
+        content: "벡터 도면";
+    }
+
+    html:not(.layout-tablet) #tab-map .canvas-top-toolbar #btnExportFloorSvg::after {
+        content: "벡터 그림";
+    }
+
+    /* 5구역: 줌 컨트롤 우측 고정 (- 100% + 맞춤) */
+    html:not(.layout-tablet) #tab-map .canvas-top-toolbar .zoom-pill-group {
+        margin-left: auto;
+        height: 30px;
+        display: inline-flex;
+        align-items: center;
+        background: #f4f4f5;
+        border: 1px solid #d4d4d8;
+        border-radius: 7px;
+        padding: 2px;
+        gap: 1px;
+        flex-shrink: 0;
+    }
+
+    html:not(.layout-tablet) #tab-map .canvas-top-toolbar .zoom-pill-btn {
+        height: 24px;
+        padding: 0 0.42rem;
+        font-size: 0.72rem;
+        font-weight: 700;
+        border-radius: 5px;
+        color: #18181b;
+        display: inline-flex;
+        align-items: center;
+        justify-content: center;
+        gap: 0.22rem;
+        white-space: nowrap;
+    }
+
+    html:not(.layout-tablet) #tab-map .canvas-top-toolbar .zoom-pill-btn:hover {
+        background: #e4e4e7;
+    }
+
+    html:not(.layout-tablet) #tab-map .canvas-top-toolbar .zoom-pill-btn.text-btn {
+        color: #0369a1;
+        font-size: 0.72rem;
+        padding: 0 0.46rem;
+    }
+
+    html:not(.layout-tablet) #tab-map .canvas-top-toolbar .zoom-pill-badge {
+        min-width: 2.75rem;
+        text-align: center;
+        font-size: 0.72rem;
+        font-weight: 800;
+        font-variant-numeric: tabular-nums;
+        padding: 0 0.18rem;
+        color: #18181b;
+    }
+
+    /* 조건부 영역 보조줄: 표시될 때만 아래 한 줄로 펼침 */
+    html:not(.layout-tablet) #tab-map .canvas-top-toolbar > .area-tool-panel {
+        flex: 1 0 100%;
+        margin-top: 0.15rem;
+        padding: 0.3rem 0.1rem 0.05rem;
+        border: 0;
+        border-top: 1px solid #e4e4e7;
+        border-radius: 0;
+        background: transparent;
+    }
+
+    /* 터치 전용 PC 화면에서 보조 스위치 3개가 숨겨질 때 구분선도 같이 숨김 */
+    html.bsa-touch-ui:not(.layout-tablet) #tab-map .canvas-top-toolbar .toolbar-assist-group,
+    html.bsa-touch-ui:not(.layout-tablet) #tab-map .canvas-top-toolbar .toolbar-divider-assist {
+        display: none !important;
+    }
+
+    /* 다크 모드 대응 */
+    body.theme-dark html:not(.layout-tablet) #tab-map .canvas-top-toolbar,
+    html:not(.layout-tablet) body.theme-dark #tab-map .canvas-top-toolbar {
+        background: rgba(24, 24, 27, 0.94) !important;
+        border-color: #3f3f46 !important;
+    }
+
+    html:not(.layout-tablet) body.theme-dark #tab-map .canvas-top-toolbar .toolbar-divider {
+        background: #3f3f46;
+    }
+
+    html:not(.layout-tablet) body.theme-dark #tab-map .canvas-top-toolbar .toolbar-mode-group,
+    html:not(.layout-tablet) body.theme-dark #tab-map .canvas-top-toolbar .zoom-pill-group {
+        background: #27272a;
+        border-color: #3f3f46;
+    }
+
+    html:not(.layout-tablet) body.theme-dark #tab-map .canvas-top-toolbar .toolbar-mode-group > .mode-btn {
+        color: #d4d4d8;
+    }
+
+    html:not(.layout-tablet) body.theme-dark #tab-map .canvas-top-toolbar .toolbar-mode-group > .mode-btn:hover {
+        background: #3f3f46;
+        color: #ffffff;
+    }
+
+    html:not(.layout-tablet) body.theme-dark #tab-map .canvas-top-toolbar .toolbar-assist-group > .mode-btn,
+    html:not(.layout-tablet) body.theme-dark #tab-map .canvas-top-toolbar .toolbar-action-group > .mode-btn,
+    html:not(.layout-tablet) body.theme-dark #tab-map .canvas-top-toolbar .toolbar-dropdown > .toolbar-dropdown-trigger {
+        background: #27272a;
+        border-color: #3f3f46;
+        color: #f4f4f5;
+    }
+
+    html:not(.layout-tablet) body.theme-dark #tab-map .canvas-top-toolbar .toolbar-assist-group > .mode-btn:hover,
+    html:not(.layout-tablet) body.theme-dark #tab-map .canvas-top-toolbar .toolbar-action-group > .mode-btn:hover,
+    html:not(.layout-tablet) body.theme-dark #tab-map .canvas-top-toolbar .toolbar-dropdown > .toolbar-dropdown-trigger:hover {
+        background: #3f3f46;
+        border-color: #52525b;
+    }
+
+    html:not(.layout-tablet) body.theme-dark #tab-map .canvas-top-toolbar .mode-btn.active,
+    html:not(.layout-tablet) body.theme-dark #tab-map .canvas-top-toolbar .mode-btn.is-on,
+    html:not(.layout-tablet) body.theme-dark #tab-map .canvas-top-toolbar .toolbar-dropdown.is-open > .toolbar-dropdown-trigger {
+        background: #f4f4f5 !important;
+        border-color: #f4f4f5 !important;
+        color: #18181b !important;
+    }
+
+    html:not(.layout-tablet) body.theme-dark #tab-map .canvas-top-toolbar .toolbar-dropdown-menu {
+        background: #1f1f23;
+        border-color: #3f3f46;
+    }
+
+    html:not(.layout-tablet) body.theme-dark #tab-map .canvas-top-toolbar .toolbar-dropdown-menu > button {
+        color: #f4f4f5;
+    }
+
+    html:not(.layout-tablet) body.theme-dark #tab-map .canvas-top-toolbar .toolbar-dropdown-menu > button:hover {
+        background: #2e2e36;
+    }
+
+    html:not(.layout-tablet) body.theme-dark #tab-map .canvas-top-toolbar .toolbar-dropdown-menu > button > i {
+        color: #a1a1aa;
+    }
+
+    html:not(.layout-tablet) body.theme-dark #tab-map .canvas-top-toolbar .toolbar-menu-sub,
+    html:not(.layout-tablet) body.theme-dark #tab-map .canvas-top-toolbar #btnExportFloorDrawing::after,
+    html:not(.layout-tablet) body.theme-dark #tab-map .canvas-top-toolbar #btnExportFloorSvg::after {
+        color: #a1a1aa;
+    }
+
+    html:not(.layout-tablet) body.theme-dark #tab-map .canvas-top-toolbar .toolbar-menu-sep {
+        background: #3f3f46;
+    }
+
+    html:not(.layout-tablet) body.theme-dark #tab-map .canvas-top-toolbar .toolbar-dropdown-menu > button.toolbar-menu-danger {
+        color: #f87171;
+    }
+
+    html:not(.layout-tablet) body.theme-dark #tab-map .canvas-top-toolbar .toolbar-dropdown-menu > button.toolbar-menu-danger > i {
+        color: #f87171;
+    }
+
+    html:not(.layout-tablet) body.theme-dark #tab-map .canvas-top-toolbar .toolbar-dropdown-menu > button.toolbar-menu-danger:hover {
+        background: rgba(239, 68, 68, 0.16);
+    }
+
+    html:not(.layout-tablet) body.theme-dark #tab-map .canvas-top-toolbar .zoom-pill-btn,
+    html:not(.layout-tablet) body.theme-dark #tab-map .canvas-top-toolbar .zoom-pill-badge {
+        color: #f4f4f5;
+    }
+
+    html:not(.layout-tablet) body.theme-dark #tab-map .canvas-top-toolbar .zoom-pill-btn:hover {
+        background: #3f3f46;
+    }
+
+    html:not(.layout-tablet) body.theme-dark #tab-map .canvas-top-toolbar .zoom-pill-btn.text-btn {
+        color: #38bdf8;
+    }
+
+    html:not(.layout-tablet) body.theme-dark #tab-map .canvas-top-toolbar > .area-tool-panel {
+        border-top-color: #3f3f46;
     }
 }

@@ -93,7 +93,7 @@
     <meta name="apple-mobile-web-app-status-bar-style" content="default">
     <meta name="apple-mobile-web-app-title" content="스마트 안전점검">
     <link rel="stylesheet" href="https://cdn.jsdelivr.net/gh/orioncactus/pretendard@v1.3.9/dist/web/static/pretendard.min.css">
-    <link rel="stylesheet" href="styles.css?v=20261124_204150">
+    <link rel="stylesheet" href="styles.css?v=20261128_142138">
 
     <!-- FontAwesome icons for clean engineering UI -->
     <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
@@ -368,20 +368,26 @@
                     <!-- Canvas Viewport -->
                     <div class="canvas-container" id="canvasContainer">
                         <!-- Unified Top Drawing Controls Toolbar (PC: 도면 안 오버레이) -->
-                        <div class="canvas-top-toolbar">
+                        <div class="canvas-top-toolbar" id="mapCanvasTopToolbar">
                             <div class="toolbar-mode-group">
                                 <button type="button" id="btnModePan" class="mode-btn active" title="선택 모드 (Esc) — 클릭·드래그: 선택 / Ctrl+클릭·드래그: 선택에 더함 / Shift+클릭·드래그: 선택에서 뺌 / 휠클릭: 도면 이동">
                                     <i class="fa-regular fa-hand-pointer"></i> 선택 <span class="mode-shortcut">Esc</span>
                                 </button>
                                 <button type="button" id="btnModeMark" class="mode-btn btn-mark-mode" title="결함 위치 마킹 모드 (D)">
-                                    <i class="fa-solid fa-location-dot"></i> 📍 핀 마킹 <span class="mode-shortcut">D</span>
+                                    <i class="fa-solid fa-location-dot"></i> 핀 <span class="mode-shortcut">D</span>
                                 </button>
                                 <button type="button" id="btnModeArea" class="mode-btn btn-area-mode" title="결함 영역(면적) 마킹 모드 (A)">
-                                    <i class="fa-solid fa-draw-square"></i> 🟧 영역 마킹 <span class="mode-shortcut">A</span>
+                                    <i class="fa-solid fa-vector-square"></i> 영역 <span class="mode-shortcut">A</span>
                                 </button>
                                 <button type="button" id="btnModeMemo" class="mode-btn btn-memo-mode" title="도면 주석 — 도면을 클릭해 주석을 붙입니다(결함 아님, 조사표·번호에 안 들어감)">
-                                    <i class="fa-solid fa-note-sticky"></i> 📝 주석
+                                    <i class="fa-solid fa-note-sticky"></i> 주석
                                 </button>
+                                <button type="button" id="btnMeasureDistance" class="mode-btn btn-measure-toggle" aria-pressed="false" title="거리 재기 — 도면에서 두 점을 눌러 실제 거리를 잽니다(DXF 도면은 캐드 좌표로 자동, 그 밖의 도면은 「축척 맞추기」)">
+                                    <i class="fa-solid fa-ruler"></i> 거리
+                                </button>
+                            </div>
+                            <span class="toolbar-divider" aria-hidden="true"></span>
+                            <div class="toolbar-assist-group">
                                 <button type="button" id="btnSnapToCad" class="mode-btn btn-snap-toggle active" title="CAD 벡터 스냅 — 핀 마킹 시 근처 CAD 선/끝점/교차점에 자동으로 붙습니다 (PDF 벡터 도면에서만 동작)">
                                     <i class="fa-solid fa-magnet"></i> 스냅
                                 </button>
@@ -391,10 +397,112 @@
                                 <button type="button" id="btnGridLines" class="mode-btn btn-grid-lines-toggle" aria-pressed="false" title="행·열(통심) 선 — 도면에 X·Y 선을 긋고, 마킹 위치를 「X1~X2/Y1~Y2」로 자동 입력">
                                     <i class="fa-solid fa-table-cells"></i> 행·열
                                 </button>
-                                <button type="button" id="btnMeasureDistance" class="mode-btn btn-measure-toggle" aria-pressed="false" title="거리 재기 — 도면에서 두 점을 눌러 실제 거리를 잽니다(DXF 도면은 캐드 좌표로 자동, 그 밖의 도면은 「축척 맞추기」)">
-                                    <i class="fa-solid fa-ruler"></i> 거리
-                                </button>
                             </div>
+                            <span class="toolbar-divider toolbar-divider-assist" aria-hidden="true"></span>
+
+                            <div class="toolbar-action-group">
+                                <button type="button" id="btnToggleDefectList" class="mode-btn toolbar-defect-list-toggle" title="좌측 조사항목(결함목록) 창 표시" aria-pressed="true">
+                                    목록 <span class="toolbar-toggle-state">ON</span>
+                                </button>
+                                <button type="button" id="btnToggleMapStyleSize" class="mode-btn toolbar-size-toggle pc-only-chrome" title="핀·화살표·연결선 크기 조절 패널 표시" aria-pressed="false">
+                                    크기 <span class="toolbar-toggle-state">OFF</span>
+                                </button>
+                                <button type="button" id="btnDetailLocPopup" class="mode-btn toolbar-detail-loc-btn" aria-pressed="false" title="상세위치 입력 — 작은 창에 글자를 쓰고 마킹을 고른 뒤(순서 상관없음) 적용하면, 고른 마킹들의 상세위치에 그 글자가 들어갑니다">
+                                    상세위치
+                                </button>
+                                <button type="button" id="btnBoxAutoLayout" class="mode-btn toolbar-action-btn" title="NO. 박스를 마킹 점·다른 박스·지시선과 겹치지 않게 자동 정리(마킹 점은 그대로, 되돌리기 한 번으로 취소)">
+                                    박스 정리
+                                </button>
+
+                                <span class="toolbar-divider" aria-hidden="true"></span>
+
+                                <div class="toolbar-dropdown" id="toolbarMenuDrawing" data-toolbar-dropdown="drawing">
+                                    <button type="button" class="mode-btn toolbar-dropdown-trigger" id="btnToolbarMenuDrawing" aria-haspopup="menu" aria-expanded="false" title="도면 편집 · 90° 회전 · CAD 핀 · 마킹 맞추기">
+                                        도면 <i class="fa-solid fa-chevron-down toolbar-caret" aria-hidden="true"></i>
+                                    </button>
+                                    <div class="toolbar-dropdown-menu" role="menu" hidden>
+                                        <button type="button" id="btnEditFloorDrawing" class="btn-rotate-hero" role="menuitem" title="도면 편집 — 벽체·문·창문·기둥·집기 샘플을 그려 넣고, 기존 선(벽·문 등)은 지우개·영역 지우기로 지웁니다. 저장하면 이 층 점검 도면이 바뀌고 마킹은 그 자리에 남습니다">
+                                            <i class="fa-solid fa-drafting-compass" aria-hidden="true"></i>
+                                            <span class="toolbar-menu-text">
+                                                <span class="toolbar-menu-title">도면 편집</span>
+                                                <span class="toolbar-menu-sub">벽·문·기둥 그리기·지우기</span>
+                                            </span>
+                                        </button>
+                                        <button type="button" id="btnRotateDrawing" class="btn-rotate-hero" role="menuitem" title="세로 도면 가로로 90도 회전">
+                                            <i class="fa-solid fa-rotate-right" aria-hidden="true"></i>
+                                            <span class="toolbar-menu-text">
+                                                <span class="toolbar-menu-title">90° 회전</span>
+                                                <span class="toolbar-menu-sub">도면 방향 90도 전환</span>
+                                            </span>
+                                        </button>
+                                        <div class="toolbar-menu-sep pc-only-chrome" role="separator"></div>
+                                        <button type="button" id="btnImportCadPins" class="btn-rotate-hero pc-only-chrome" role="menuitem" title="AutoCAD(CAD2APP) JSON을 현재 층에 매핑. 전차 미표기(미등록) 마킹이 있으면 그 조사내용을 캐드 위치에 붙입니다">
+                                            <i class="fa-solid fa-file-import" aria-hidden="true"></i>
+                                            <span class="toolbar-menu-text">
+                                                <span class="toolbar-menu-title">CAD 핀</span>
+                                                <span class="toolbar-menu-sub">AutoCAD JSON 좌표 매핑</span>
+                                            </span>
+                                        </button>
+                                        <button type="button" id="btnAlignMarkingsToDrawing" class="btn-rotate-hero pc-only-chrome" role="menuitem" title="도면을 바꿨을 때(예: PDF → DXF) 이 층 마킹 전체를 새 도면에 맞춥니다. 옛 도면과 새 도면에서 같은 점 두 쌍(기둥 모서리 등)만 누르면 이동·배율을 한 번에 맞춥니다">
+                                            <i class="fa-solid fa-bullseye" aria-hidden="true"></i>
+                                            <span class="toolbar-menu-text">
+                                                <span class="toolbar-menu-title">마킹 맞추기</span>
+                                                <span class="toolbar-menu-sub">교체된 도면에 일괄 정렬</span>
+                                            </span>
+                                        </button>
+                                    </div>
+                                </div>
+
+                                <button type="button" id="btnAlignMarkingsPendingQuick" class="mode-btn toolbar-align-pending-quick pc-only-chrome" hidden title="이 층 도면이 바뀌었습니다 — 눌러서 마킹 위치를 새 도면에 맞추세요">
+                                    <i class="fa-solid fa-bullseye" aria-hidden="true"></i> 마킹 맞추기
+                                </button>
+
+                                <div class="toolbar-dropdown pc-only-chrome" id="toolbarMenuCleanup" data-toolbar-dropdown="cleanup">
+                                    <button type="button" class="mode-btn toolbar-dropdown-trigger" id="btnToolbarMenuCleanup" aria-haspopup="menu" aria-expanded="false" title="빈칸 땡기기 · 내용 비우기">
+                                        정리 <i class="fa-solid fa-chevron-down toolbar-caret" aria-hidden="true"></i>
+                                    </button>
+                                    <div class="toolbar-dropdown-menu" role="menu" hidden>
+                                        <button type="button" id="btnCompactMarkingGaps" class="btn-rotate-hero pc-only-chrome" role="menuitem" title="마킹번호의 빈 칸을 뒤에서부터 앞으로 땡깁니다 (예: 14,15,17,18 → 14,15,16,17). 다른 층에도 빈 칸이 있으면 「이 층만 / 전체 층 일괄」을 고릅니다">
+                                            <i class="fa-solid fa-list-ol" aria-hidden="true"></i>
+                                            <span class="toolbar-menu-text">
+                                                <span class="toolbar-menu-title">빈칸 땡기기</span>
+                                                <span class="toolbar-menu-sub">마킹 번호 빈 칸 앞당기기</span>
+                                            </span>
+                                        </button>
+                                        <div class="toolbar-menu-sep" role="separator"></div>
+                                        <button type="button" id="btnClearDefectContents" class="btn-rotate-hero pc-only-chrome toolbar-menu-danger" role="menuitem" title="내용 비우기 (핀 위치 유지) — 이 층(이 동·이번 회차) 마킹의 결함 내용(종류·부재·크기·비고·진행·이번 회차 사진)만 비웁니다. 핀·박스·지시선·번호는 그대로. 되돌리기(Ctrl+Z) 가능">
+                                            <i class="fa-solid fa-eraser" aria-hidden="true"></i>
+                                            <span class="toolbar-menu-text">
+                                                <span class="toolbar-menu-title">내용 비우기</span>
+                                                <span class="toolbar-menu-sub">핀 위치 유지 · 내용만 초기화</span>
+                                            </span>
+                                        </button>
+                                    </div>
+                                </div>
+
+                                <div class="toolbar-dropdown pc-only-chrome" id="toolbarMenuExport" data-toolbar-dropdown="export">
+                                    <button type="button" class="mode-btn toolbar-dropdown-trigger toolbar-export-trigger" id="btnToolbarMenuExport" aria-haspopup="menu" aria-expanded="false" title="결함위치도 벡터 내보내기 (DXF · PDF · SVG)">
+                                        <i class="fa-solid fa-file-export" aria-hidden="true"></i> 출력 <i class="fa-solid fa-chevron-down toolbar-caret" aria-hidden="true"></i>
+                                    </button>
+                                    <div class="toolbar-dropdown-menu toolbar-dropdown-menu-right" role="menu" hidden>
+                                        <button type="button" id="btnExportFloorDrawing" class="btn-rotate-hero pc-only-chrome" role="menuitem" title="도면을 DXF로 올린 층은 마킹 DXF(원래 캐드 좌표, 원본 도면 포함), PDF로 올린 층은 벡터 PDF로 내보냅니다. 현재 층만 / 각 층 전부">
+                                            DXF·PDF 출력
+                                        </button>
+                                        <button type="button" id="btnExportFloorSvg" class="btn-rotate-hero pc-only-chrome" role="menuitem" title="결함위치도를 SVG(벡터 그림)로 내보냅니다. DXF로 올린 층은 도면까지 벡터, PDF·그림 층은 도면을 그림으로 넣고 마킹(박스·지시선·영역·범례)은 벡터. 일러스트레이터·잉크스케이프·브라우저에서 열림. 현재 층만 / 각 층 전부(zip)">
+                                            SVG 출력
+                                        </button>
+                                    </div>
+                                </div>
+
+                                <input type="file" id="inputImportCadPins" accept=".json" style="display:none;">
+                                <div class="zoom-pill-group">
+                                    <button type="button" id="btnZoomOut" class="zoom-pill-btn" title="축소 (-)"><i class="fa-solid fa-minus"></i></button>
+                                    <span id="zoomScaleText" class="zoom-pill-badge">100%</span>
+                                    <button type="button" id="btnZoomIn" class="zoom-pill-btn" title="확대 (+)"><i class="fa-solid fa-plus"></i></button>
+                                    <button type="button" id="btnZoomFit" class="zoom-pill-btn text-btn" title="화면에 맞추기"><i class="fa-solid fa-expand"></i> 맞춤</button>
+                                </div>
+                            </div>
+
                             <div class="area-tool-panel" id="areaToolPanel" hidden>
                                 <span class="area-tool-kicker">영역 모양</span>
                                 <button type="button" class="area-tool-btn active" id="btnAreaCreateRect" data-area-create="rect" title="박스">박스</button>
@@ -408,52 +516,6 @@
                                 <button type="button" class="area-tool-btn" id="btnAreaInkEllipse" data-area-ink="ellipse" title="선택한 영역 안에 타원">타원</button>
                                 <button type="button" class="area-tool-btn" id="btnAreaInkPath" data-area-ink="path" title="선택한 영역 안에 자유선">자유선</button>
                                 <button type="button" class="area-tool-btn area-tool-btn-undo" id="btnAreaInkUndo" title="마지막 내부 그리기 지우기">그리기 취소</button>
-                            </div>
-
-                            <div class="toolbar-action-group">
-                                <button type="button" id="btnToggleDefectList" class="mode-btn toolbar-defect-list-toggle" title="좌측 조사항목(결함목록) 창 표시" aria-pressed="true">
-                                    목록 <span class="toolbar-toggle-state">ON</span>
-                                </button>
-                                <button type="button" id="btnToggleMapStyleSize" class="mode-btn toolbar-size-toggle pc-only-chrome" title="핀·화살표·연결선 크기 조절 패널 표시" aria-pressed="false">
-                                    크기 <span class="toolbar-toggle-state">OFF</span>
-                                </button>
-                                <button type="button" id="btnDetailLocPopup" class="mode-btn toolbar-detail-loc-btn" aria-pressed="false" title="상세위치 입력 — 작은 창에 글자를 쓰고 마킹을 고른 뒤(순서 상관없음) 적용하면, 고른 마킹들의 상세위치에 그 글자가 들어갑니다">
-                                    상세위치 입력
-                                </button>
-                                <button type="button" id="btnRotateDrawing" class="btn-rotate-hero" title="세로 도면 가로로 90도 회전">
-                                    회전
-                                </button>
-                                <button type="button" id="btnEditFloorDrawing" class="btn-rotate-hero" style="background:linear-gradient(135deg, #4f46e5, #4338ca); color:#fff; border-color:#a5b4fc;" title="도면 편집 — 벽체·문·창문·기둥·집기 샘플을 그려 넣고, 기존 선(벽·문 등)은 지우개·영역 지우기로 지웁니다. 저장하면 이 층 점검 도면이 바뀌고 마킹은 그 자리에 남습니다">
-                                    도면 편집
-                                </button>
-                                <button type="button" id="btnImportCadPins" class="btn-rotate-hero pc-only-chrome" style="background:linear-gradient(135deg, #0284c7, #0369a1); color:#fff; border-color:#38bdf8;" title="AutoCAD(CAD2APP) JSON을 현재 층에 매핑. 전차 미표기(미등록) 마킹이 있으면 그 조사내용을 캐드 위치에 붙입니다">
-                                    CAD 핀
-                                </button>
-                                <button type="button" id="btnExportFloorDrawing" class="btn-rotate-hero pc-only-chrome" style="background:linear-gradient(135deg, #0369a1, #075985); color:#fff; border-color:#7dd3fc;" title="도면을 DXF로 올린 층은 마킹 DXF(원래 캐드 좌표, 원본 도면 포함), PDF로 올린 층은 벡터 PDF로 내보냅니다. 현재 층만 / 각 층 전부">
-                                    DXF·PDF 출력
-                                </button>
-                                <button type="button" id="btnExportFloorSvg" class="btn-rotate-hero pc-only-chrome" style="background:linear-gradient(135deg, #0e7490, #155e75); color:#fff; border-color:#67e8f9;" title="결함위치도를 SVG(벡터 그림)로 내보냅니다. DXF로 올린 층은 도면까지 벡터, PDF·그림 층은 도면을 그림으로 넣고 마킹(박스·지시선·영역·범례)은 벡터. 일러스트레이터·잉크스케이프·브라우저에서 열림. 현재 층만 / 각 층 전부(zip)">
-                                    SVG 출력
-                                </button>
-                                <button type="button" id="btnAlignMarkingsToDrawing" class="btn-rotate-hero pc-only-chrome" style="background:linear-gradient(135deg, #be123c, #9f1239); color:#fff; border-color:#fda4af;" title="도면을 바꿨을 때(예: PDF → DXF) 이 층 마킹 전체를 새 도면에 맞춥니다. 옛 도면과 새 도면에서 같은 점 두 쌍(기둥 모서리 등)만 누르면 이동·배율을 한 번에 맞춥니다">
-                                    마킹 맞추기
-                                </button>
-                                <button type="button" id="btnClearDefectContents" class="btn-rotate-hero pc-only-chrome" style="background:linear-gradient(135deg, #b45309, #92400e); color:#fff; border-color:#fbbf24;" title="이 층(이 동·이번 회차) 마킹의 결함 내용(종류·부재·크기·비고·진행·이번 회차 사진)만 비웁니다. 핀·박스·지시선·번호는 그대로. 되돌리기(Ctrl+Z) 가능">
-                                    내용 비우기 (핀 위치 유지)
-                                </button>
-                                <button type="button" id="btnCompactMarkingGaps" class="btn-rotate-hero pc-only-chrome" style="background:linear-gradient(135deg, #7c3aed, #5b21b6); color:#fff; border-color:#a78bfa;" title="마킹번호의 빈 칸을 뒤에서부터 앞으로 땡깁니다 (예: 14,15,17,18 → 14,15,16,17). 다른 층에도 빈 칸이 있으면 「이 층만 / 전체 층 일괄」을 고릅니다">
-                                    빈칸 땡기기
-                                </button>
-                                <button type="button" id="btnBoxAutoLayout" class="btn-rotate-hero" style="background:linear-gradient(135deg, #0f766e, #115e59); color:#fff; border-color:#5eead4;" title="NO. 박스를 마킹 점·다른 박스·지시선과 겹치지 않게 자동 정리(마킹 점은 그대로, 되돌리기 한 번으로 취소)">
-                                    박스 자동 정리
-                                </button>
-                                <input type="file" id="inputImportCadPins" accept=".json" style="display:none;">
-                                <div class="zoom-pill-group">
-                                    <button id="btnZoomIn" class="zoom-pill-btn" title="확대 (+)"><i class="fa-solid fa-plus"></i></button>
-                                    <span id="zoomScaleText" class="zoom-pill-badge">100%</span>
-                                    <button id="btnZoomOut" class="zoom-pill-btn" title="축소 (-)"><i class="fa-solid fa-minus"></i></button>
-                                    <button id="btnZoomFit" class="zoom-pill-btn text-btn" title="화면에 맞추기"><i class="fa-solid fa-expand"></i> 맞춤</button>
-                                </div>
                             </div>
                         </div>
 
@@ -3683,114 +3745,114 @@
 
     <!-- Core → 탭 분류 → 기존 엔진(app.js) -->
     <!-- 오류 기록은 맨 먼저 — 아래 스크립트들이 읽히다 터져도 잡아야 한다 -->
-    <script src="js/core/error-log.js?v=20261124_204150"></script>
-    <script src="js/core/silent-update.js?v=20261124_204150"></script>
-    <script src="js/core/offline-precache.js?v=20261124_204150"></script>
-    <script src="js/core/floor-identity.js?v=20261124_204150"></script>
-    <script src="js/core/floor-rename.js?v=20261124_204150"></script>
-    <script src="js/core/prev-summary.js?v=20261124_204150"></script>
-    <script src="js/core/survey-xlsx.js?v=20261124_204150"></script>
-    <script src="js/core/state.js?v=20261124_204150"></script>
-    <script src="js/core/ndt-disp-transfer.js?v=20261124_204150"></script>
-    <script src="js/core/ndt-grade.js?v=20261124_204150"></script>
-    <script src="js/core/last-location.js?v=20261124_204150"></script>
-    <script src="js/core/home-sites.js?v=20261124_204150"></script>
-    <script src="js/tabs/registry.js?v=20261124_204150"></script>
-    <script src="js/core/dxf-read.js?v=20261124_204150"></script>
-    <script src="js/core/dxf-to-pdf.js?v=20261124_204150"></script>
-    <script src="js/core/dxf-view.js?v=20261124_204150"></script>
-    <script src="js/core/drawing-edit-vector.js?v=20261124_204150"></script>
-    <script src="js/pdf-vector-bridge.js?v=20261124_204150"></script>
-    <script src="js/pdf-vector-snap.js?v=20261124_204150"></script>
-    <script src="js/core/dxf-write.js?v=20261124_204150"></script>
-    <script src="js/core/svg-write.js?v=20261124_204150"></script>
-    <script src="js/core/vector-canvas.js?v=20261124_204150"></script>
-    <script src="js/core/marking-align.js?v=20261124_204150"></script>
-    <script src="js/dxf-marking-export.js?v=20261124_204150"></script>
-    <script src="js/core/layout-mode.js?v=20261124_204150"></script>
-    <script src="js/core/performance.js?v=20261124_204150"></script>
-    <script src="js/shared/app-dialog.js?v=20261124_204150"></script>
-    <script src="js/core/mobile-app-update.js?v=20261124_204150"></script>
-    <script src="js/shared/app-update-button.js?v=20261124_204150"></script>
-    <script src="js/shared/measure-keypad.js?v=20261124_204150"></script>
-    <script src="js/shared/photo-zoom-viewer.js?v=20261124_204150"></script>
-    <script src="js/shared/photo-crop.js?v=20261124_204150"></script>
-    <script src="js/shared/drawing-editor.js?v=20261124_204150"></script>
-    <script src="js/shared/photo-drop.js?v=20261124_204150"></script>
-    <script src="js/shared/hwpx-survey-row-fit.js?v=20261124_204150"></script>
-    <script src="js/shared/hwpx-font-8pt.js?v=20261124_204150"></script>
-    <script src="js/core/mobile-keyboard.js?v=20261124_204150"></script>
-    <script src="js/shared/typing-popup.js?v=20261124_204150"></script>
-    <script src="js/shared/typed-preset-mode.js?v=20261124_204150"></script>
-    <script src="js/shared/finish-member-chooser.js?v=20261124_204150"></script>
-    <script src="js/tabs/home.js?v=20261124_204150"></script>
-    <script src="js/tabs/map.js?v=20261124_204150"></script>
-    <script src="js/tabs/survey.js?v=20261124_204150"></script>
-    <script src="js/core/report-review.js?v=20261124_204150"></script>
-    <script src="js/core/good-type.js?v=20261124_204150"></script>
-    <script src="js/core/r-bar-check.js?v=20261124_204150"></script>
-    <script src="js/tabs/stats.js?v=20261124_204150"></script>
-    <script src="js/tabs/ndt.js?v=20261124_204150"></script>
-    <script src="js/shared/report.js?v=20261124_204150"></script>
-    <script src="js/shared/hwpx-survey-slots.js?v=20261124_204150"></script>
-    <script src="js/shared/hwpx-ndt-maps.js?v=20261124_204150"></script>
-    <script src="js/shared/cad-unmarked-place.js?v=20261124_204150"></script>
-    <script src="js/shared/arrow-survey-number.js?v=20261124_204150"></script>
-    <script src="js/shared/defect-merge.js?v=20261124_204150"></script>
-    <script src="js/shared/defect-sub-no.js?v=20261124_204150"></script>
-    <script src="js/shared/korean-text-wrap.js?v=20261124_204150"></script>
-    <script src="js/shared/hwpx-import.js?v=20261124_204150"></script>
-    <script src="js/shared/hwpx-validate.js?v=20261124_204150"></script>
-    <script src="js/shared/hwpx-crack-monitor.js?v=20261124_204150"></script>
-    <script src="js/shared/auth.js?v=20261124_204150"></script>
-    <script src="js/core/firebase-storage-assets.js?v=20261124_204150"></script>
-    <script src="js/core/drawing-floor-tombstone.js?v=20261124_204150"></script>
-    <script src="js/core/ls-quota.js?v=20261124_204150"></script>
-    <script src="js/core/cad-desktop-import.js?v=20261124_204150"></script>
-    <script src="js/shared/cad-frame-detect.js?v=20261124_204150"></script>
-    <script src="js/core/selected-hit.js?v=20261124_204150"></script>
-    <script src="js/core/ndt-split.js?v=20261124_204150"></script>
-    <script src="js/core/defect-content-clear.js?v=20261124_204150"></script>
-    <script src="js/core/drawing-resize.js?v=20261124_204150"></script>
-    <script src="js/core/data-health.js?v=20261124_204150"></script>
-    <script src="js/core/defect-lint.js?v=20261124_204150"></script>
-    <script src="js/core/round-done.js?v=20261124_204150"></script>
-    <script src="js/core/building-meta-merge.js?v=20261124_204150"></script>
-    <script src="js/core/edit-history.js?v=20261124_204150"></script>
-    <script src="js/core/no-conflict.js?v=20261124_204150"></script>
-    <script src="js/core/company-vocab.js?v=20261124_204150"></script>
-    <script src="js/core/sync-merge.js?v=20261124_204150"></script>
-    <script src="js/core/floor-sync-guard.js?v=20261124_204150"></script>
-    <script src="js/core/gauge-photo-store.js?v=20261124_204150"></script>
-    <script src="js/core/offline-prep.js?v=20261124_204150"></script>
-    <script src="js/core/sync-progress.js?v=20261124_204150"></script>
-    <script src="js/core/sync-retry.js?v=20261124_204150"></script>
-    <script src="js/core/root-doc-shards.js?v=20261124_204150"></script>
-    <script src="js/core/building-docs.js?v=20261124_204150"></script>
-    <script src="js/core/strength-age.js?v=20261124_204150"></script>
-    <script src="js/core/ndt-measure-opts.js?v=20261124_204150"></script>
-    <script src="js/core/company-settings-merge.js?v=20261124_204150"></script>
-    <script src="js/core/cache-purge-guard.js?v=20261124_204150"></script>
-    <script src="js/core/drawing-memo.js?v=20261124_204150"></script>
-    <script src="js/core/sketch-memo.js?v=20261124_204150"></script>
-    <script src="js/core/memo-author-sync.js?v=20261124_204150"></script>
-    <script src="js/core/guide-shapes.js?v=20261124_204150"></script>
-    <script src="js/core/struct-members.js?v=20261124_204150"></script>
-    <script src="js/core/prev-round-photo-match.js?v=20261124_204150"></script>
-    <script src="js/shared/defect-quick-presets.js?v=20261124_204150"></script>
-    <script src="js/shared/grid-lines.js?v=20261124_204150"></script>
-    <script src="js/shared/grid-auto-detect.js?v=20261124_204150"></script>
-    <script src="js/shared/box-auto-layout.js?v=20261124_204150"></script>
-    <script src="js/shared/crack-width-badge.js?v=20261124_204150"></script>
-    <script src="js/shared/print-crop.js?v=20261124_204150"></script>
-    <script src="js/core/legend-layout.js?v=20261124_204150"></script>
-    <script src="js/core/error-log-view.js?v=20261124_204150"></script>
-    <script src="js/core/photo-relay-native.js?v=20261124_204150"></script>
-    <script src="js/core/middle-drag-pan.js?v=20261124_204150"></script>
-    <script src="app.js?v=20261124_204150"></script>
+    <script src="js/core/error-log.js?v=20261128_142138"></script>
+    <script src="js/core/silent-update.js?v=20261128_142138"></script>
+    <script src="js/core/offline-precache.js?v=20261128_142138"></script>
+    <script src="js/core/floor-identity.js?v=20261128_142138"></script>
+    <script src="js/core/floor-rename.js?v=20261128_142138"></script>
+    <script src="js/core/prev-summary.js?v=20261128_142138"></script>
+    <script src="js/core/survey-xlsx.js?v=20261128_142138"></script>
+    <script src="js/core/state.js?v=20261128_142138"></script>
+    <script src="js/core/ndt-disp-transfer.js?v=20261128_142138"></script>
+    <script src="js/core/ndt-grade.js?v=20261128_142138"></script>
+    <script src="js/core/last-location.js?v=20261128_142138"></script>
+    <script src="js/core/home-sites.js?v=20261128_142138"></script>
+    <script src="js/tabs/registry.js?v=20261128_142138"></script>
+    <script src="js/core/dxf-read.js?v=20261128_142138"></script>
+    <script src="js/core/dxf-to-pdf.js?v=20261128_142138"></script>
+    <script src="js/core/dxf-view.js?v=20261128_142138"></script>
+    <script src="js/core/drawing-edit-vector.js?v=20261128_142138"></script>
+    <script src="js/pdf-vector-bridge.js?v=20261128_142138"></script>
+    <script src="js/pdf-vector-snap.js?v=20261128_142138"></script>
+    <script src="js/core/dxf-write.js?v=20261128_142138"></script>
+    <script src="js/core/svg-write.js?v=20261128_142138"></script>
+    <script src="js/core/vector-canvas.js?v=20261128_142138"></script>
+    <script src="js/core/marking-align.js?v=20261128_142138"></script>
+    <script src="js/dxf-marking-export.js?v=20261128_142138"></script>
+    <script src="js/core/layout-mode.js?v=20261128_142138"></script>
+    <script src="js/core/performance.js?v=20261128_142138"></script>
+    <script src="js/shared/app-dialog.js?v=20261128_142138"></script>
+    <script src="js/core/mobile-app-update.js?v=20261128_142138"></script>
+    <script src="js/shared/app-update-button.js?v=20261128_142138"></script>
+    <script src="js/shared/measure-keypad.js?v=20261128_142138"></script>
+    <script src="js/shared/photo-zoom-viewer.js?v=20261128_142138"></script>
+    <script src="js/shared/photo-crop.js?v=20261128_142138"></script>
+    <script src="js/shared/drawing-editor.js?v=20261128_142138"></script>
+    <script src="js/shared/photo-drop.js?v=20261128_142138"></script>
+    <script src="js/shared/hwpx-survey-row-fit.js?v=20261128_142138"></script>
+    <script src="js/shared/hwpx-font-8pt.js?v=20261128_142138"></script>
+    <script src="js/core/mobile-keyboard.js?v=20261128_142138"></script>
+    <script src="js/shared/typing-popup.js?v=20261128_142138"></script>
+    <script src="js/shared/typed-preset-mode.js?v=20261128_142138"></script>
+    <script src="js/shared/finish-member-chooser.js?v=20261128_142138"></script>
+    <script src="js/tabs/home.js?v=20261128_142138"></script>
+    <script src="js/tabs/map.js?v=20261128_142138"></script>
+    <script src="js/tabs/survey.js?v=20261128_142138"></script>
+    <script src="js/core/report-review.js?v=20261128_142138"></script>
+    <script src="js/core/good-type.js?v=20261128_142138"></script>
+    <script src="js/core/r-bar-check.js?v=20261128_142138"></script>
+    <script src="js/tabs/stats.js?v=20261128_142138"></script>
+    <script src="js/tabs/ndt.js?v=20261128_142138"></script>
+    <script src="js/shared/report.js?v=20261128_142138"></script>
+    <script src="js/shared/hwpx-survey-slots.js?v=20261128_142138"></script>
+    <script src="js/shared/hwpx-ndt-maps.js?v=20261128_142138"></script>
+    <script src="js/shared/cad-unmarked-place.js?v=20261128_142138"></script>
+    <script src="js/shared/arrow-survey-number.js?v=20261128_142138"></script>
+    <script src="js/shared/defect-merge.js?v=20261128_142138"></script>
+    <script src="js/shared/defect-sub-no.js?v=20261128_142138"></script>
+    <script src="js/shared/korean-text-wrap.js?v=20261128_142138"></script>
+    <script src="js/shared/hwpx-import.js?v=20261128_142138"></script>
+    <script src="js/shared/hwpx-validate.js?v=20261128_142138"></script>
+    <script src="js/shared/hwpx-crack-monitor.js?v=20261128_142138"></script>
+    <script src="js/shared/auth.js?v=20261128_142138"></script>
+    <script src="js/core/firebase-storage-assets.js?v=20261128_142138"></script>
+    <script src="js/core/drawing-floor-tombstone.js?v=20261128_142138"></script>
+    <script src="js/core/ls-quota.js?v=20261128_142138"></script>
+    <script src="js/core/cad-desktop-import.js?v=20261128_142138"></script>
+    <script src="js/shared/cad-frame-detect.js?v=20261128_142138"></script>
+    <script src="js/core/selected-hit.js?v=20261128_142138"></script>
+    <script src="js/core/ndt-split.js?v=20261128_142138"></script>
+    <script src="js/core/defect-content-clear.js?v=20261128_142138"></script>
+    <script src="js/core/drawing-resize.js?v=20261128_142138"></script>
+    <script src="js/core/data-health.js?v=20261128_142138"></script>
+    <script src="js/core/defect-lint.js?v=20261128_142138"></script>
+    <script src="js/core/round-done.js?v=20261128_142138"></script>
+    <script src="js/core/building-meta-merge.js?v=20261128_142138"></script>
+    <script src="js/core/edit-history.js?v=20261128_142138"></script>
+    <script src="js/core/no-conflict.js?v=20261128_142138"></script>
+    <script src="js/core/company-vocab.js?v=20261128_142138"></script>
+    <script src="js/core/sync-merge.js?v=20261128_142138"></script>
+    <script src="js/core/floor-sync-guard.js?v=20261128_142138"></script>
+    <script src="js/core/gauge-photo-store.js?v=20261128_142138"></script>
+    <script src="js/core/offline-prep.js?v=20261128_142138"></script>
+    <script src="js/core/sync-progress.js?v=20261128_142138"></script>
+    <script src="js/core/sync-retry.js?v=20261128_142138"></script>
+    <script src="js/core/root-doc-shards.js?v=20261128_142138"></script>
+    <script src="js/core/building-docs.js?v=20261128_142138"></script>
+    <script src="js/core/strength-age.js?v=20261128_142138"></script>
+    <script src="js/core/ndt-measure-opts.js?v=20261128_142138"></script>
+    <script src="js/core/company-settings-merge.js?v=20261128_142138"></script>
+    <script src="js/core/cache-purge-guard.js?v=20261128_142138"></script>
+    <script src="js/core/drawing-memo.js?v=20261128_142138"></script>
+    <script src="js/core/sketch-memo.js?v=20261128_142138"></script>
+    <script src="js/core/memo-author-sync.js?v=20261128_142138"></script>
+    <script src="js/core/guide-shapes.js?v=20261128_142138"></script>
+    <script src="js/core/struct-members.js?v=20261128_142138"></script>
+    <script src="js/core/prev-round-photo-match.js?v=20261128_142138"></script>
+    <script src="js/shared/defect-quick-presets.js?v=20261128_142138"></script>
+    <script src="js/shared/grid-lines.js?v=20261128_142138"></script>
+    <script src="js/shared/grid-auto-detect.js?v=20261128_142138"></script>
+    <script src="js/shared/box-auto-layout.js?v=20261128_142138"></script>
+    <script src="js/shared/crack-width-badge.js?v=20261128_142138"></script>
+    <script src="js/shared/print-crop.js?v=20261128_142138"></script>
+    <script src="js/core/legend-layout.js?v=20261128_142138"></script>
+    <script src="js/core/error-log-view.js?v=20261128_142138"></script>
+    <script src="js/core/photo-relay-native.js?v=20261128_142138"></script>
+    <script src="js/core/middle-drag-pan.js?v=20261128_142138"></script>
+    <script src="app.js?v=20261128_142138"></script>
 
     <script>
-        window.BSA_APP_VERSION = '20261124_204150';
+        window.BSA_APP_VERSION = '20261128_142138';
 
         (function () {
             var el = document.getElementById('appVersionText');
@@ -3831,7 +3893,7 @@
                     if (window.caches && caches.keys) caches.keys().then(function(ks) { ks.forEach(function(k) { caches.delete(k); }); }).catch(function() {});
                     return;
                 }
-                navigator.serviceWorker.register('./sw.js?v=20261124_204150')
+                navigator.serviceWorker.register('./sw.js?v=20261128_142138')
 
                     .then(function(registration) {
                         console.log('✅ ServiceWorker Registered Successfully with scope:', registration.scope);

@@ -134,7 +134,7 @@ const m = (s, l, sd = {}, ld = {}, sa = {}, la = {}) => sm.mergeDefectsMaps({ F:
     assert.ok(html.includes('id="btnModeMemo"') && html.includes('id="mobileBtnModeMemo"'), '도면 주석 버튼 유지');
     // 이름: 도면 글 = 「주석」, 손글씨 = 「메모」
     const modeBtn = html.slice(html.indexOf('id="btnModeMemo"'), html.indexOf('</button>', html.indexOf('id="btnModeMemo"')));
-    assert.ok(/📝 주석/.test(modeBtn) && !/메모/.test(modeBtn), 'PC 주석 버튼');
+    assert.ok(/fa-note-sticky/.test(modeBtn) && /주석/.test(modeBtn) && !/메모/.test(modeBtn), 'PC 주석 버튼');
     const rail = html.slice(html.indexOf('id="mobileBtnModeMemo"'), html.indexOf('</button>', html.indexOf('id="mobileBtnModeMemo"')));
     assert.ok(/<span>주석<\/span>/.test(rail), '폰·태블릿 주석 버튼');
     const bar = html.slice(html.indexOf('id="drawingMemoBar"'), html.indexOf('</div>', html.indexOf('id="drawingMemoBar"')));

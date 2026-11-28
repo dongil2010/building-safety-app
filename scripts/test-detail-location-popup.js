@@ -65,7 +65,7 @@ assert(/'pointerdown', 'mousedown', 'touchstart', 'wheel'/.test(ensureBody), '�
 console.log('팝업: ok');
 
 // 4) 연결: 툴바 버튼 · 선택이 바뀌면 「선택된 마킹 N개」 갱신 · 스타일
-assert(/id="btnDetailLocPopup"[^>]*>\s*상세위치 입력\s*<\/button>/.test(html), '툴바 버튼');
+assert(/id="btnDetailLocPopup"[^>]*>\s*상세위치\s*<\/button>/.test(html), '툴바 버튼');
 const toolbar = html.slice(html.indexOf('<div class="toolbar-action-group">'), html.indexOf('id="inputImportCadPins"'));
 assert(toolbar.includes('id="btnDetailLocPopup"'), '결함위치도 툴바 안');
 const selBar = extractFunction(app, 'function updateMapSelectionBar(');
