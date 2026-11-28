@@ -19101,7 +19101,7 @@ ${roundMobile ? '' : `<button type="button" class="icon-btn icon-btn-trash" titl
         URL.revokeObjectURL(url);
     };
 
-// @@app-part 05-ndt-strength.js sha=5e694c7aea21 — 원본은 app/05-ndt-strength.js (여기 말고 거기서 고칠 것)
+// @@app-part 05-ndt-strength.js sha=041d32b2d66f — 원본은 app/05-ndt-strength.js (여기 말고 거기서 고칠 것)
     // --- 콘크리트 강도(반발경도) 추정 엔진 ---
     // 회사에서 쓰던 엑셀(반발경도-고강도포함) 자료를 그대로 옮겼다.
     // 각 행: [R, 0도 보정값, +90도 보정값, +45도 보정값, -45도 보정값, -90도 보정값]
@@ -20202,13 +20202,65 @@ ${roundMobile ? '' : `<button type="button" class="icon-btn icon-btn-trash" titl
             <div style="display:flex; align-items:center; gap:0.5rem;">
                 <div class="ndt-strength-photo-thumb" style="width:48px; height:48px; border-radius:6px; overflow:hidden; background:#eee; flex-shrink:0; display:flex; align-items:center; justify-content:center; font-size:0.65rem; color:#999;">불러오는중</div>
                 <span style="font-size:0.78rem; color:var(--text-muted);">📎 측정지 사진 저장됨</span>
-                <button type="button" class="btn btn-sm btn-outline ndt-strength-slot-photo-remove" data-slot="${slotIdx}" style="border-color:#ef4444; color:#ef4444; margin-left:auto;" title="사진 삭제"><i class="fa-solid fa-trash"></i></button>
+                <button type="button" class="btn btn-sm btn-outline ndt-strength-slot-photo-rescan" data-slot="${slotIdx}" style="border-color:#6b6b6b; color:#6b6b6b; margin-left:auto;" title="저장된(서버에 올라간) 측정지 사진으로 R값을 다시 인식"><i class="fa-solid fa-rotate"></i> 다시 인식</button>
+                <button type="button" class="btn btn-sm btn-outline ndt-strength-slot-photo-remove" data-slot="${slotIdx}" style="border-color:#ef4444; color:#ef4444;" title="사진 삭제"><i class="fa-solid fa-trash"></i></button>
             </div>`;
         const removeBtn = el.querySelector('.ndt-strength-slot-photo-remove');
         if (removeBtn) removeBtn.addEventListener('click', () => removeStrengthSlotPhoto(slotIdx));
+        const rescanBtn = el.querySelector('.ndt-strength-slot-photo-rescan');
+        if (rescanBtn) rescanBtn.addEventListener('click', async () => {
+            if (rescanBtn.disabled) return;
+            rescanBtn.disabled = true;
+            try { await rescanStrengthSlotFromSavedPhoto(slotIdx); } finally { rescanBtn.disabled = false; }
+        });
         const url = await loadStrengthPhotoDataUrl(bldg.id, slot.photoId);
         const thumb = el.querySelector('.ndt-strength-photo-thumb');
         if (url && thumb) thumb.innerHTML = `<img src="${url}" style="width:100%; height:100%; object-fit:cover;">`;
+    }
+
+    /**
+     * 저장된(이 기기 또는 서버) 측정지 사진으로 R값을 다시 인식한다. 2026-11-28
+     * 사진은 그대로 두고 R값만 인식 결과로 바꾼다 — 이미 값이 있으면 먼저 묻는다.
+     */
+    async function rescanStrengthSlotFromSavedPhoto(slotIdx) {
+        const slot = ndtStrengthSlots[slotIdx];
+        const bldg = window.state.currentBuilding;
+        const statusEl = document.getElementById(`rScanStatus-${slotIdx}`);
+        if (!slot || !slot.photoId || !bldg || !bldg.id) return;
+        const hasValues = Array.isArray(slot.readings) && countFoundReadings(slot.readings) > 0;
+        if (hasValues && window.appDialog && typeof window.appDialog.confirm === 'function') {
+            const ok = await window.appDialog.confirm(
+                '저장된 측정지 사진으로 다시 인식하면 지금 입력된 R값이 인식 결과로 바뀝니다. 계속할까요?',
+                { title: '측정지 다시 인식', okText: '다시 인식' }
+            );
+            if (!ok) return;
+        }
+        if (statusEl) statusEl.textContent = '☁️ 저장된 측정지 사진을 불러오는 중입니다...';
+        let url = null;
+        try { url = await loadStrengthPhotoDataUrl(bldg.id, slot.photoId); } catch (e) { console.warn('측정지 사진 불러오기 실패:', e); }
+        if (url && /^https?:\/\//i.test(url) && typeof fetchStorageImageViaProxy === 'function') {
+            try {
+                const proxied = await fetchStorageImageViaProxy(url);
+                if (proxied && String(proxied).indexOf('data:') === 0) url = proxied;
+            } catch (_e) { /* 아래 fetch로 한 번 더 */ }
+        }
+        let file = null;
+        if (url && String(url).indexOf('data:') === 0) {
+            file = dataUrlToJpegFile(url, `strength_${slot.photoId}.jpg`);
+        } else if (url) {
+            try {
+                const res = await fetch(url);
+                const blob = res.ok ? await res.blob() : null;
+                if (blob && blob.size) file = new File([blob], `strength_${slot.photoId}.jpg`, { type: blob.type || 'image/jpeg' });
+            } catch (e) { console.warn('측정지 사진 내려받기 실패:', e); }
+        }
+        // 그 사이 창이 다른 항목으로 바뀌었으면 손대지 않는다
+        if (ndtStrengthSlots[slotIdx] !== slot) return;
+        if (!file) {
+            if (statusEl) statusEl.textContent = '⚠️ 저장된 측정지 사진을 불러오지 못했습니다. 인터넷 연결을 확인한 뒤 다시 눌러 주세요.';
+            return;
+        }
+        await scanRValuesFromImage(file, slotIdx, { keepPhoto: true });
     }
 
     async function removeStrengthSlotPhoto(slotIdx) {
@@ -21268,12 +21320,13 @@ ${roundMobile ? '' : `<button type="button" class="icon-btn icon-btn-trash" titl
         }
     }
 
-    async function scanRValuesFromImage(file, slotIdx = 0) {
+    async function scanRValuesFromImage(file, slotIdx = 0, opts) {
         const statusEl = document.getElementById(`rScanStatus-${slotIdx}`);
         if (!file) return;
 
         // 인식 성공/실패와 무관하게 원본 사진은 저장해둔다(보고서 '측정 DATA' 표에 그대로 삽입).
-        savePhotoForStrengthSlot(slotIdx, file);
+        // 저장된 사진으로 다시 인식할 때(keepPhoto)는 사진을 새로 올리지 않는다.
+        if (!(opts && opts.keepPhoto)) savePhotoForStrengthSlot(slotIdx, file);
 
         // Gemini 직접 호출을 가장 먼저 시도한다 — Cloud Vision보다 인식률이 훨씬 높다(실측: 20개 중
         // 9개 누락 → 거의 다 인식). GEMINI_DIRECT_API_KEY는 배포 시점에만 주입되므로(빌드 산출물
