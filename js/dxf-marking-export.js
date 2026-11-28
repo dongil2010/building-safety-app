@@ -488,13 +488,14 @@
   // ---- 2026-11-19 「비파괴도 dxf 출력」 ----
   // 비파괴 탭 화면 그리기(drawNdtPin·변위 묶음 …)를 벡터 기록 캔버스(js/core/vector-canvas.js)로 돌려 BSA_NDT 레이어에 쓴다.
   // 좌표는 결함 마킹 DXF 와 같은 규칙: DXF 층 = 원래 캐드 좌표(원본 도면 포함) / PDF 층 = 종이 mm / 그림 층·비파괴 전용 도면 = 그림 픽셀.
-  window.buildFloorNdtDxfInfo = async function (bldg, floorCode, buildingId) {
+  // categoryFilter: 한글 위치도와 같은 항목 구분('일반비파괴' = 강도+탄산화, '기울기' …). 없으면 균열게이지 빼고 전부.
+  window.buildFloorNdtDxfInfo = async function (bldg, floorCode, buildingId, categoryFilter) {
     const api = window.BSA && window.BSA.dxfWrite;
     if (!api || typeof api.buildMarkingDxf !== 'function' || typeof window.recordNdtFloorMap !== 'function') {
       throw new Error('DXF 모듈이 없습니다. Ctrl+F5로 새로고침 후 다시 시도하세요.');
     }
     const id = buildingId || bldg.id || '';
-    const rec = await window.recordNdtFloorMap(floorCode, null, 'image');
+    const rec = await window.recordNdtFloorMap(floorCode, categoryFilter || null, 'image');
     if (!rec) return { text: '', count: 0, system: 'pixel', floorCode: String(floorCode) };
     const imgW = rec.imgW;
     const imgH = rec.imgH;
@@ -533,6 +534,17 @@
     return { text, count: rec.count, system, floorCode: String(floorCode), withDrawing: !!drawing };
   };
 
+  // 비파괴 DXF 도면 묶음 — 한글 위치도(부재실측·비파괴장비·내화피복·기울기·부동침하·변위)와 같은 나눔
+  const NDT_DXF_SHEETS = [
+    { filter: '일반비파괴', name: '강도·탄산화' },
+    { filter: '실측', name: '부재실측' },
+    { filter: '내화피복', name: '내화피복' },
+    { filter: '기울기', name: '기울기' },
+    { filter: '변위', name: '부동침하' },
+    { filter: '부재변위', name: '부재변위' },
+    { filter: '균열모니터', name: '균열모니터' }
+  ];
+
   window.exportCurrentFloorNdtDxf = async function () {
     const state = window.state;
     if (!state || !state.currentBuildingId) {
@@ -543,13 +555,32 @@
     const floorCode = state.currentFloor;
     if (typeof window.showLoading === 'function') window.showLoading('비파괴 DXF 만드는 중...');
     try {
-      const info = await window.buildFloorNdtDxfInfo(bldg, floorCode, state.currentBuildingId);
-      if (!info.count) {
+      // 2026-11-28 항목별로 따로(한글 위치도와 같은 묶음) — 강도+탄산화만 한 도면, 나머지는 각자 도면
+      const sheets = [];
+      for (const sh of NDT_DXF_SHEETS) {
+        const info = await window.buildFloorNdtDxfInfo(bldg, floorCode, state.currentBuildingId, sh.filter);
+        if (info.count) sheets.push({ sh, info });
+      }
+      if (!sheets.length) {
         toast('이 층에는 내보낼 비파괴 마킹이 없습니다(또는 도면을 못 읽음).', 'warning', 5000);
         return;
       }
-      window.downloadBlobFile(makeDxfBlob(info.text), `${floorFileName(bldg, floorCode)}_비파괴.dxf`);
-      toast(`비파괴 DXF 내보내기 완료 — 마킹 ${info.count}개 (좌표: ${systemLabel(info.system)}${info.withDrawing ? ', 원본 도면 포함' : ''})`, 'success', 6000);
+      const base = `${floorFileName(bldg, floorCode)}_비파괴`;
+      if (sheets.length === 1) {
+        window.downloadBlobFile(makeDxfBlob(sheets[0].info.text), `${base}_${sheets[0].sh.name}.dxf`);
+      } else if (typeof JSZip !== 'undefined') {
+        const zip = new JSZip();
+        sheets.forEach(({ sh, info }) => zip.file(`${base}_${sh.name}.dxf`, makeDxfBlob(info.text)));
+        window.downloadBlobFile(await zip.generateAsync({ type: 'blob' }), `${base}.zip`);
+      } else {
+        for (const { sh, info } of sheets) {
+          window.downloadBlobFile(makeDxfBlob(info.text), `${base}_${sh.name}.dxf`);
+          await new Promise((r) => setTimeout(r, 400));
+        }
+      }
+      const first = sheets[0].info;
+      const total = sheets.reduce((n, s) => n + s.info.count, 0);
+      toast(`비파괴 DXF 내보내기 완료 — 도면 ${sheets.length}장(${sheets.map((s) => s.sh.name).join(', ')}), 마킹 ${total}개 (좌표: ${systemLabel(first.system)}${first.withDrawing ? ', 원본 도면 포함' : ''})`, 'success', 7000);
     } catch (err) {
       console.error(err);
       toast(`비파괴 DXF 내보내기 실패: ${err.message || err}`, 'error', 6000);
