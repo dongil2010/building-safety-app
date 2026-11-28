@@ -386,3 +386,30 @@ console.log('test-dxf-write: ok');
     assert.ok(wf >= 0.6 && wf < 1, '폭 비율 0.6~1');
     console.log('긴 글자 칸 맞춤: ok');
 })();
+
+// 2026-11-28 여러 장(층·항목)을 한 파일에 나란히 — 첫 장은 제자리, 다음 장은 오른쪽으로, 장마다 제목
+(function () {
+    const sheet = (ox) => ({
+        plans: [{ color: '#ef4444', fontSize: 10, boxX: 10, boxY: 10, boxW: 40, boxH: 14, label: 'NO.01', leaders: [] }],
+        refSegments: [{ x1: 0, y1: 0, x2: 100, y2: 0 }, { x1: 0, y1: 0, x2: 0, y2: 50 }],
+        toWorld: (x, y) => ({ x: x + ox, y: 50 - y + 1000 }),
+        unitPerPx: 1
+    });
+    const t = api.buildSheetsDxf([Object.assign(sheet(500), { title: '지하 1층' }), Object.assign(sheet(-9000), { title: '1층' })]);
+    const L = t.split(String.fromCharCode(13, 10));
+    const ent = L.indexOf('ENTITIES');
+    const xs = [];
+    for (let i = ent + 1; i < L.length - 1; i += 2) if (L[i] === '10' || L[i] === '11') xs.push(Number(L[i + 1]));
+    const real = xs.filter((x) => x !== 0); // POLYLINE 머리의 10 0 은 뺀다
+    assert.strictEqual(Math.min(...real), 490, '첫 장은 원래 좌표 그대로(박스 왼쪽 490)');
+    assert.ok(real.some((x) => x > 600 + 8), '둘째 장은 첫 장 오른쪽(간격 띄움)');
+    assert.ok(!real.some((x) => x < 0), '둘째 장의 원래 좌표(-9000)는 옮겨짐');
+    const enc = (s) => api.encodeText(s);
+    assert.ok(L.includes(enc('지하 1층')) && L.includes(enc('1층')), '장마다 제목');
+    assert.ok(L.includes('BSA_TITLE'), '제목 레이어');
+    assert.strictEqual(L.filter((v) => v === enc('NO.01')).length, 2, '두 장 마킹 다 들어감');
+    // 한 장만이면 buildMarkingDxf 와 같은 엔티티
+    const one = api.buildSheetsDxf([sheet(0)]);
+    assert.strictEqual(one, api.buildMarkingDxf(sheet(0)), '한 장은 그대로');
+    console.log('여러 장 나란히: ok');
+})();

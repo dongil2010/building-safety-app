@@ -16,7 +16,8 @@
         { name: 'BSA_LEGEND', aci: 8 },
         { name: 'BSA_NDT', aci: 5 },
         { name: 'BSA_REF', aci: 8 },
-        { name: 'BSA_DRAWING', aci: 7 }
+        { name: 'BSA_DRAWING', aci: 7 },
+        { name: 'BSA_TITLE', aci: 7 }
     ];
     var FONT_FILE = 'malgun.ttf';
     var TEXT_STYLE = 'BSA_KR';
@@ -197,8 +198,15 @@
 
     /* ---------- 본체 ---------- */
 
-    function buildMarkingDxf(opts) {
+    function newSink() {
+        return { ents: [], ext: { minX: Infinity, minY: Infinity, maxX: -Infinity, maxY: -Infinity } };
+    }
+
+    /** 한 장(층·항목)의 엔티티를 sink 에 쓴다. dx·dy = 그 장 전체를 옮길 거리(여러 장 나란히). 반환: unitPerPx */
+    function emitSheetInto(sink, opts, dx, dy) {
         opts = opts || {};
+        dx = Number(dx) || 0;
+        dy = Number(dy) || 0;
         var plans = Array.isArray(opts.plans) ? opts.plans.filter(Boolean) : [];
         var legendPlan = opts.legendPlan || null;
         var refSegments = Array.isArray(opts.refSegments) ? opts.refSegments : [];
@@ -206,8 +214,8 @@
         var upp = Number(opts.unitPerPx);
         if (!(upp > 0) || !isFinite(upp)) upp = 1;
 
-        var ents = []; // 엔티티 줄(문자열 배열)
-        var ext = { minX: Infinity, minY: Infinity, maxX: -Infinity, maxY: -Infinity };
+        var ents = sink.ents; // 엔티티 줄(문자열 배열)
+        var ext = sink.ext;
 
         function grow(x, y) {
             if (x < ext.minX) ext.minX = x;
@@ -220,7 +228,7 @@
             if (!finite(ix, iy)) return null;
             var w = toWorldFn(Number(ix), Number(iy));
             if (!w || !finite(w.x, w.y)) return null;
-            return { x: Number(w.x), y: Number(w.y) };
+            return { x: Number(w.x) + dx, y: Number(w.y) + dy };
         }
 
         function g(code, value) { ents.push(String(code)); ents.push(String(value)); }
@@ -340,7 +348,11 @@
          * drawing = { model(js/core/dxf-view.js 모델, PDF 점 좌표), toWorld(px, py) → {x,y}, unitPerPt } */
         var drawing = opts.drawing;
         if (drawing && drawing.model && typeof drawing.toWorld === 'function') {
-            var dm = drawing.model, dW = drawing.toWorld;
+            var dm = drawing.model, dW0 = drawing.toWorld;
+            var dW = function (px, py) {
+                var w0 = dW0(px, py);
+                return w0 ? { x: w0.x + dx, y: w0.y + dy } : w0;
+            };
             var upt = Number(drawing.unitPerPt);
             if (!(upt > 0) || !isFinite(upt)) upt = 1;
             var DL = 'BSA_DRAWING';
@@ -579,7 +591,25 @@
             });
         }
 
-        /* ----- 파일 조립 ----- */
+        /* ----- 장 제목(여러 장 나란히일 때) ----- */
+        if (opts.sheetTitle && opts.sheetTitleAt && finite(opts.sheetTitleAt.x, opts.sheetTitleAt.y, opts.sheetTitleH)) {
+            var stS = encodeText(opts.sheetTitle);
+            if (stS && opts.sheetTitleH > 0) {
+                head('TEXT', 'BSA_TITLE', 7);
+                pt(10, { x: opts.sheetTitleAt.x, y: opts.sheetTitleAt.y });
+                g(40, num(opts.sheetTitleH));
+                g(1, stS);
+                g(7, TEXT_STYLE);
+            }
+        }
+        return upp;
+    }
+
+    /** 엔티티를 DXF 파일 글자로 조립 */
+    function assembleDxf(sink, upp) {
+        var ents = sink.ents;
+        var ext = sink.ext;
+        if (!(upp > 0) || !isFinite(upp)) upp = 1;
         var hasGeom = isFinite(ext.minX);
         var eMin = hasGeom ? { x: ext.minX, y: ext.minY } : { x: 0, y: 0 };
         var eMax = hasGeom ? { x: ext.maxX, y: ext.maxY } : { x: 1, y: 1 };
@@ -635,8 +665,77 @@
         return text;
     }
 
+    function buildMarkingDxf(opts) {
+        var sink = newSink();
+        var upp = emitSheetInto(sink, opts, 0, 0);
+        return assembleDxf(sink, upp);
+    }
+
+    /**
+     * 여러 장(층·항목)을 한 DXF 에 왼쪽부터 나란히(2026-11-28).
+     * sheets = [buildMarkingDxf 와 같은 opts + title] — 첫 장은 제자리, 나머지는 그 오른쪽으로 아래를 맞춰 옮기고, 장 사이는 가장 넓은 장 폭의 gapRatio(기본 0.08).
+     * 제목은 각 장 위 왼쪽에 BSA_TITLE 레이어 글자로. 반환: DXF 글자(내용 없는 장은 건너뜀)
+     */
+    function buildSheetsDxf(sheets, layout) {
+        layout = layout || {};
+        var list = (Array.isArray(sheets) ? sheets : []).filter(Boolean);
+        // 1차: 각 장 범위만 잰다
+        var boxes = list.map(function (s) {
+            var tmp = newSink();
+            emitSheetInto(tmp, s, 0, 0);
+            if (!isFinite(tmp.ext.minX)) return null;
+            // 도면 틀(그림 크기 frameW×frameH) — 바탕 선이 없는 장도 도면 크기로 자리를 잡는다(마킹만으로 재면 장마다 어긋남)
+            var fw = Number(s.frameW), fh = Number(s.frameH);
+            if (fw > 0 && fh > 0 && typeof s.toWorld === 'function') {
+                [[0, 0], [fw, 0], [0, fh], [fw, fh]].forEach(function (c) {
+                    var w = s.toWorld(c[0], c[1]);
+                    if (!w || !finite(w.x, w.y)) return;
+                    var e = tmp.ext;
+                    if (w.x < e.minX) e.minX = w.x;
+                    if (w.x > e.maxX) e.maxX = w.x;
+                    if (w.y < e.minY) e.minY = w.y;
+                    if (w.y > e.maxY) e.maxY = w.y;
+                });
+            }
+            return tmp.ext;
+        });
+        var maxW = 0, maxH = 0;
+        boxes.forEach(function (b) {
+            if (!b) return;
+            maxW = Math.max(maxW, b.maxX - b.minX);
+            maxH = Math.max(maxH, b.maxY - b.minY);
+        });
+        var gapRatio = Number(layout.gapRatio);
+        if (!(gapRatio >= 0)) gapRatio = 0.08;
+        var gap = Math.max(maxW, 1e-6) * gapRatio;
+        var titleH = Math.max(maxH, 1e-6) * 0.025;
+        var sink = newSink();
+        var upp0 = 0;
+        // 첫 장은 제자리(원래 캐드 좌표 그대로), 다음 장들은 그 오른쪽에 아래를 맞춰
+        var base = boxes.filter(Boolean)[0] || { minX: 0, minY: 0 };
+        var cursor = base.minX;
+        list.forEach(function (s, i) {
+            var b = boxes[i];
+            if (!b) return;
+            var ddx = cursor - b.minX;
+            var ddy = base.minY - b.minY;
+            var opts = {};
+            Object.keys(s).forEach(function (k) { opts[k] = s[k]; });
+            if (s.title) {
+                opts.sheetTitle = String(s.title);
+                opts.sheetTitleAt = { x: cursor, y: base.minY + (b.maxY - b.minY) + titleH * 0.8 };
+                opts.sheetTitleH = titleH;
+            }
+            var u = emitSheetInto(sink, opts, ddx, ddy);
+            if (!upp0) upp0 = u;
+            cursor += (b.maxX - b.minX) + gap;
+        });
+        return assembleDxf(sink, upp0 || 1);
+    }
+
     var api = {
         buildMarkingDxf: buildMarkingDxf,
+        buildSheetsDxf: buildSheetsDxf,
         hexToAci: hexToAci,
         encodeText: encodeText,
         areaOutlinePoints: areaOutlinePoints,

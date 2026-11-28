@@ -35,7 +35,7 @@ function loadModule(extra) {
     ]);
     assert.deepStrictEqual(split, { dxf: ['1F'], pdf: ['B1', '3F'], none: ['2F', '4F'] }, '층 순서 유지, 모르는 값은 none');
     assert.strictEqual(E.planAllFloorsDrawingExport(split), 'mixed-zip');
-    assert.strictEqual(E.planAllFloorsDrawingExport({ dxf: ['1F'], pdf: [], none: ['2F'] }), 'dxf-zip');
+    assert.strictEqual(E.planAllFloorsDrawingExport({ dxf: ['1F'], pdf: [], none: ['2F'] }), 'dxf');
     assert.strictEqual(E.planAllFloorsDrawingExport({ dxf: [], pdf: ['1F'], none: [] }), 'pdf');
     assert.strictEqual(E.planAllFloorsDrawingExport({ dxf: [], pdf: [], none: ['1F'] }), 'nothing');
     assert.strictEqual(E.pickCurrentFloorExport('dxf'), 'dxf');
@@ -74,7 +74,7 @@ async function runScope(pick, hasChoose, floors) {
     return calls.join(',');
 }
 
-// 4) 전층: PDF 층은 한 PDF, DXF 층은 층마다 DXF, 섞이면 zip 하나
+// 4) 전층: PDF 층은 한 PDF, DXF 층은 DXF 한 파일(층 나란히), 섞이면 zip 하나
 async function runAll(kinds) {
     const downloads = [];
     const toasts = [];
@@ -90,7 +90,10 @@ async function runAll(kinds) {
         showToast: (m, t) => toasts.push(t + ':' + m),
         downloadBlobFile: (blob, name) => downloads.push(name),
         resolveFloorPdfDataUrlAsync: async (b, fc) => (kinds[fc] === 'none' ? null : 'pdf:' + fc),
-        BSA: { dxfToPdf: { readMetaFromPdfDataUrl: async (u) => (kinds[u.slice(4)] === 'dxf' ? { s: 1, ox: 0, oy: 0 } : null) } }
+        BSA: {
+            dxfToPdf: { readMetaFromPdfDataUrl: async (u) => (kinds[u.slice(4)] === 'dxf' ? { s: 1, ox: 0, oy: 0 } : null) },
+            dxfWrite: { buildSheetsDxf: (sheets) => 'DXF:' + sheets.map((x) => x.title).join(',') }
+        }
     });
     w.state = { currentBuildingId: 'b1', currentBuilding: { id: 'b1', name: '본관', floorsList: [] }, currentFloor: '1F' };
     w.listFloorsForVectorPdfExport = () => Object.keys(kinds);
@@ -123,13 +126,13 @@ async function runAll(kinds) {
     assert(/^결함위치도_벡터_전층_본관_\d+\.pdf$/.test(r.downloads[0]), r.downloads[0]);
     assert(r.toasts.some((t) => /^success:/.test(t) && /제외 1층/.test(t)));
 
-    // DXF 층만 → 층마다 DXF zip
+    // DXF 층만 → DXF 한 파일(층 순서대로 나란히), zip 없음
     r = await runAll({ '1F': 'dxf', '2F': 'dxf' });
     assert.deepStrictEqual(r.pdfAsked, []);
     assert.deepStrictEqual(r.dxfAsked, ['1F', '2F']);
-    assert.strictEqual(r.zipFiles.length, 2);
-    assert(r.zipFiles.every((n) => /\.dxf$/.test(n)));
-    assert(/^결함위치도_전층_본관_\d+\.zip$/.test(r.downloads[0]));
+    assert.strictEqual(r.zipFiles.length, 0);
+    assert.strictEqual(r.downloads.length, 1);
+    assert(/^결함위치도_마킹_본관_\d+\.dxf$/.test(r.downloads[0]), r.downloads[0]);
 
     // 섞임 → zip 하나 안에 DXF 들 + PDF 한 파일
     r = await runAll({ B1: 'pdf', '1F': 'dxf', '2F': 'pdf', '3F': 'none' });
