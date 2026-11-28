@@ -4460,13 +4460,13 @@
                 // 렌더해서 7.1.8부터 캡션을 붙여 넣는다(미작성 항목 제목/표는 제거).
                 const { allItems: allNdtItemsForHwpx, allDispGroups: allDispGroupsForHwpx } = (dongParts ? buildHwpxDongNdtData(dongParts) : buildCombinedNdtDataForReport(ndtBldgId));
 
-                const measureItemsHwpx = allNdtItemsForHwpx.filter(item => item.category === '실측');
-                const fireproofItemsHwpx = allNdtItemsForHwpx.filter(item => item.category === '내화피복');
+                const measureItemsHwpx = sortNdtItemsByNo(allNdtItemsForHwpx.filter(item => item.category === '실측'));
+                const fireproofItemsHwpx = sortNdtItemsByNo(allNdtItemsForHwpx.filter(item => item.category === '내화피복'));
                 const strengthItemsHwpx = sortNdtItemsByNo(allNdtItemsForHwpx.filter(item => item.category === '강도'))
                     .map(item => refreshStrengthItemResults(item, ndtBldgOf(item)));
-                const carbItemsHwpx = allNdtItemsForHwpx.filter(item => item.category === '탄산화')
+                const carbItemsHwpx = sortNdtItemsByNo(allNdtItemsForHwpx.filter(item => item.category === '탄산화'))
                     .map(item => refreshCarbItemResults(item, ndtBldgOf(item)));
-                const tiltItemsHwpx = allNdtItemsForHwpx.filter(item => item.category === '기울기');
+                const tiltItemsHwpx = sortNdtItemsByNo(allNdtItemsForHwpx.filter(item => item.category === '기울기'));
                 const settlementGroupsHwpx = allDispGroupsForHwpx.filter(g => !g.category || g.category === '변위');
                 const memberDispGroupsHwpx = allDispGroupsForHwpx.filter(g => g.category === '부재변위');
 
@@ -4785,7 +4785,7 @@
                         const avgText = (memberAvg == null || !Number.isFinite(Number(memberAvg))) ? '-' : Number(Number(memberAvg).toFixed(2));
 
                         const heightA = fillRowCells(newA, [
-                            [0, item.no || String(idx + 1)],
+                            [0, String(idx + 1)], // 동·층을 넘어 1부터 이어 붙인 번호
                             [1, item.location || '-'],
                             [2, '플렌지'],
                             [3, item.fireproofDesign || '-'],
@@ -4864,7 +4864,7 @@
                             const measuredText = formatNdtMeasureDimForOutput(item, 'measured', '×');
                             const ratioText = (item.sectionRatio !== undefined && item.sectionRatio !== null) ? item.sectionRatio.toFixed(1) + '%' : '-';
                             return [
-                                item.no || (i + 1),
+                                i + 1, // 동·층을 넘어 1부터 이어 붙인 번호
                                 `${item.location || '위치미지정'}\n(${memberNameOut(item.component) || ''})`,
                                 designText,
                                 measuredText,
@@ -5129,7 +5129,7 @@
                     if (carbItemsHwpx.length > 0) {
                         const tbl = findTblById(CARB_TBL_ID);
                         if (tbl) fillNdtTable(tbl, CARB_HEADER_ROWS, carbItemsHwpx.map((item, i) => [
-                            item.no || (i + 1),
+                            i + 1, // 동·층을 넘어 1부터 이어 붙인 번호
                             `${item.location || ''}${memberNameOut(item.component) || ''}`,
                             item.carbDepth != null ? item.carbDepth : '-',
                             item.carbCover != null ? item.carbCover : '-',
@@ -5159,7 +5159,7 @@
                             const calc = (Number.isFinite(hNum) && hNum > 0 && delta > 0)
                                 ? calcTiltGrade(hNum, delta)
                                 : { tiltRatio: '', grade: '' };
-                            return [item.no || (i + 1), item.location || '-', heightText, '-', avgText, item.tiltRatio || calc.tiltRatio || '-', item.grade || calc.grade || '-'];
+                            return [i + 1, item.location || '-', heightText, '-', avgText, item.tiltRatio || calc.tiltRatio || '-', item.grade || calc.grade || '-'];
                         }), true);
                         if (tbl) sortHwpxRowCellsByColAddr(tbl, HP_NS);
                     } else {
@@ -7136,13 +7136,13 @@
                 // 렌더해서 7.1.8부터 캡션을 붙여 넣는다(미작성 항목 제목/표는 제거).
                 const { allItems: allNdtItemsForHwpx, allDispGroups: allDispGroupsForHwpx } = (dongParts ? buildHwpxDongNdtData(dongParts) : buildCombinedNdtDataForReport(ndtBldgId));
 
-                const measureItemsHwpx = allNdtItemsForHwpx.filter(item => item.category === '실측');
-                const fireproofItemsHwpx = allNdtItemsForHwpx.filter(item => item.category === '내화피복');
+                const measureItemsHwpx = sortNdtItemsByNo(allNdtItemsForHwpx.filter(item => item.category === '실측'));
+                const fireproofItemsHwpx = sortNdtItemsByNo(allNdtItemsForHwpx.filter(item => item.category === '내화피복'));
                 const strengthItemsHwpx = sortNdtItemsByNo(allNdtItemsForHwpx.filter(item => item.category === '강도'))
                     .map(item => refreshStrengthItemResults(item, ndtBldgOf(item)));
-                const carbItemsHwpx = allNdtItemsForHwpx.filter(item => item.category === '탄산화')
+                const carbItemsHwpx = sortNdtItemsByNo(allNdtItemsForHwpx.filter(item => item.category === '탄산화'))
                     .map(item => refreshCarbItemResults(item, ndtBldgOf(item)));
-                const tiltItemsHwpx = allNdtItemsForHwpx.filter(item => item.category === '기울기');
+                const tiltItemsHwpx = sortNdtItemsByNo(allNdtItemsForHwpx.filter(item => item.category === '기울기'));
                 const settlementGroupsHwpx = allDispGroupsForHwpx.filter(g => !g.category || g.category === '변위');
                 const memberDispGroupsHwpx = allDispGroupsForHwpx.filter(g => g.category === '부재변위');
 
@@ -7461,7 +7461,7 @@
                         const avgText = (memberAvg == null || !Number.isFinite(Number(memberAvg))) ? '-' : Number(Number(memberAvg).toFixed(2));
 
                         const heightA = fillRowCells(newA, [
-                            [0, item.no || String(idx + 1)],
+                            [0, String(idx + 1)], // 동·층을 넘어 1부터 이어 붙인 번호
                             [1, item.location || '-'],
                             [2, '플렌지'],
                             [3, item.fireproofDesign || '-'],
@@ -7540,7 +7540,7 @@
                             const measuredText = formatNdtMeasureDimForOutput(item, 'measured', '×');
                             const ratioText = (item.sectionRatio !== undefined && item.sectionRatio !== null) ? item.sectionRatio.toFixed(1) + '%' : '-';
                             return [
-                                item.no || (i + 1),
+                                i + 1, // 동·층을 넘어 1부터 이어 붙인 번호
                                 `${item.location || '위치미지정'}\n(${memberNameOut(item.component) || ''})`,
                                 designText,
                                 measuredText,
@@ -7805,7 +7805,7 @@
                     if (carbItemsHwpx.length > 0) {
                         const tbl = findTblById(CARB_TBL_ID);
                         if (tbl) fillNdtTable(tbl, CARB_HEADER_ROWS, carbItemsHwpx.map((item, i) => [
-                            item.no || (i + 1),
+                            i + 1, // 동·층을 넘어 1부터 이어 붙인 번호
                             `${item.location || ''}${memberNameOut(item.component) || ''}`,
                             item.carbDepth != null ? item.carbDepth : '-',
                             item.carbCover != null ? item.carbCover : '-',
@@ -7835,7 +7835,7 @@
                             const calc = (Number.isFinite(hNum) && hNum > 0 && delta > 0)
                                 ? calcTiltGrade(hNum, delta)
                                 : { tiltRatio: '', grade: '' };
-                            return [item.no || (i + 1), item.location || '-', heightText, '-', avgText, item.tiltRatio || calc.tiltRatio || '-', item.grade || calc.grade || '-'];
+                            return [i + 1, item.location || '-', heightText, '-', avgText, item.tiltRatio || calc.tiltRatio || '-', item.grade || calc.grade || '-'];
                         }), true);
                         if (tbl) sortHwpxRowCellsByColAddr(tbl, HP_NS);
                     } else {
