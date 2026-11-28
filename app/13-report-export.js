@@ -2409,6 +2409,150 @@
         return plan;
     }
 
+    /** 결과표 위치 칸: 위치와 부재명을 한 칸 띄워 잇는다(「지상 5층보」 → 「지상 5층 보」, 2026-11-28) */
+    function hwpxNdtLocMember(location, member) {
+        return [location, member].map((s) => String(s == null ? '' : s).trim()).filter(Boolean).join(' ');
+    }
+
+    /**
+     * 데이터 행 높이들 → 쪽마다 들어갈 행 번호 묶음. 첫 쪽은 firstAvail, 다음 쪽부터는 nextAvail까지 채운다.
+     * 한 행이 쪽보다 커도 그 행 하나는 그 쪽에 둔다(빈 쪽이 끝없이 생기지 않게).
+     */
+    function planHwpxTablePages(rowHeights, firstAvail, nextAvail) {
+        const pages = [];
+        let cur = [];
+        let used = 0;
+        let avail = firstAvail;
+        (rowHeights || []).forEach((h, i) => {
+            const rh = Math.max(0, Number(h) || 0);
+            if (cur.length > 0 && used + rh > avail) {
+                pages.push(cur);
+                cur = [];
+                used = 0;
+                avail = nextAvail;
+            }
+            cur.push(i);
+            used += rh;
+        });
+        if (cur.length) pages.push(cur);
+        return pages;
+    }
+
+    /**
+     * 2026-11-28 비파괴 결과표(부재실측·강도·탄산화)는 「글자처럼 취급」 표라 한글이 쪽을 넘겨 나누지 못해,
+     * 행이 많으면 한 표가 쪽 아래로 넘쳐 잘렸다. 채운 표를 쪽 높이에 맞춰 여러 표로 끊는다 —
+     * 다음 표는 머리 행을 다시 달고 새 쪽에서 시작한다(첫 쪽 제목은 그대로 하나). 나눈 표 개수를 돌려준다.
+     */
+    function splitHwpxNdtTableToPages(tbl, headerRowCount) {
+        const HP = HWPX_HP_NS;
+        if (!tbl) return 1;
+        const kids = (el, name) => Array.from(el.children).filter((c) => c.localName === name);
+        let para = tbl.parentNode;
+        while (para && para.localName !== 'p') para = para.parentNode;
+        if (!para || !para.parentNode) return 1;
+        const trs = kids(tbl, 'tr');
+        const dataRows = trs.slice(headerRowCount);
+        if (dataRows.length < 2) return 1;
+        const tcsOf = (tr) => kids(tr, 'tc');
+        const spanOf = (tc) => {
+            const span = tc.getElementsByTagNameNS(HP, 'cellSpan')[0];
+            return span ? (parseInt(span.getAttribute('rowSpan'), 10) || 1) : 1;
+        };
+        const heightOf = (tc) => {
+            const sz = tc.getElementsByTagNameNS(HP, 'cellSz')[0];
+            return sz ? (parseInt(sz.getAttribute('height'), 10) || 0) : 0;
+        };
+        // 데이터 행에 세로 병합 칸이 있으면(옛 양식) 나누지 않는다
+        if (dataRows.some((tr) => tcsOf(tr).some((tc) => spanOf(tc) > 1))) return 1;
+        const rowH = (tr) => tcsOf(tr).reduce((m, tc) => Math.max(m, heightOf(tc)), 0);
+        let headerH = 0;
+        let spanMax = 0;
+        trs.slice(0, headerRowCount).forEach((tr, ri) => {
+            let m = 0;
+            tcsOf(tr).forEach((tc) => {
+                const rs = spanOf(tc);
+                if (rs === 1) m = Math.max(m, heightOf(tc));
+                else if (ri === 0 && rs >= headerRowCount) spanMax = Math.max(spanMax, heightOf(tc));
+            });
+            headerH += m;
+        });
+        headerH = Math.max(headerH, spanMax);
+        const outM = kids(tbl, 'outMargin')[0];
+        const marginV = outM ? (parseInt(outM.getAttribute('top'), 10) || 0) + (parseInt(outM.getAttribute('bottom'), 10) || 0) : 280;
+        const doc = tbl.ownerDocument;
+        const pagePrEl = doc.getElementsByTagNameNS(HP, 'pagePr')[0];
+        const marginEl = pagePrEl ? kids(pagePrEl, 'margin')[0] : null;
+        const num = (el, k, d) => { const v = el ? parseInt(el.getAttribute(k), 10) : NaN; return Number.isFinite(v) ? v : d; };
+        const bodyH = num(pagePrEl, 'height', 84188) - num(marginEl, 'top', 5669) - num(marginEl, 'bottom', 4252)
+            - num(marginEl, 'header', 4251) - num(marginEl, 'footer', 4251);
+        // 표 줄이 쪽 위에서 얼마나 내려와 있나(양식의 줄 배치 = 제목 높이). 모르면 제목 한 줄 높이만큼.
+        const segsOf = (p) => { const arr = kids(p, 'linesegarray')[0]; return arr ? kids(arr, 'lineseg') : []; };
+        const tblSeg = segsOf(para).find((sg) => (parseInt(sg.getAttribute('vertsize'), 10) || 0) > 20000);
+        const firstReserve = Math.max(tblSeg ? (parseInt(tblSeg.getAttribute('vertpos'), 10) || 0) : 0, 2640);
+        const SAFETY = 1500; // 한글이 줄 높이를 조금 더 잡아도 넘치지 않게
+        const pages = planHwpxTablePages(dataRows.map(rowH),
+            bodyH - firstReserve - headerH - marginV - SAFETY,
+            bodyH - headerH - marginV - SAFETY);
+        if (pages.length <= 1) return 1;
+
+        // 테두리: 첫 행(머리 밑 선)·가운데·마지막 행(굵은 아랫선) 모양을 나눈 표마다 다시 맞춘다
+        const borderMap = (tr) => {
+            const map = {};
+            tcsOf(tr).forEach((tc) => {
+                const addr = tc.getElementsByTagNameNS(HP, 'cellAddr')[0];
+                if (addr) map[addr.getAttribute('colAddr')] = tc.getAttribute('borderFillIDRef');
+            });
+            return map;
+        };
+        const styles = {
+            first: borderMap(dataRows[0]),
+            normal: borderMap(dataRows.length > 2 ? dataRows[1] : dataRows[0]),
+            last: borderMap(dataRows[dataRows.length - 1])
+        };
+        const heights = dataRows.map(rowH);
+        const shapeTable = (t, p, rowIdxs, isFirstPage) => {
+            const rows = kids(t, 'tr').slice(headerRowCount);
+            const keep = new Set(rowIdxs);
+            rows.forEach((tr, i) => { if (!keep.has(i)) t.removeChild(tr); });
+            const kept = kids(t, 'tr').slice(headerRowCount);
+            kept.forEach((tr, j) => {
+                const style = j === kept.length - 1 ? styles.last : (j === 0 ? styles.first : styles.normal);
+                tcsOf(tr).forEach((tc) => {
+                    const addr = tc.getElementsByTagNameNS(HP, 'cellAddr')[0];
+                    if (!addr) return;
+                    addr.setAttribute('rowAddr', String(headerRowCount + j));
+                    const bf = style[addr.getAttribute('colAddr')];
+                    if (bf !== undefined && bf !== null) tc.setAttribute('borderFillIDRef', bf);
+                });
+            });
+            t.setAttribute('rowCnt', String(headerRowCount + kept.length));
+            const tH = headerH + rowIdxs.reduce((s, i) => s + heights[i], 0);
+            const sz = kids(t, 'sz')[0];
+            if (sz) sz.setAttribute('height', String(tH));
+            segsOf(p).forEach((sg) => {
+                if ((parseInt(sg.getAttribute('vertsize'), 10) || 0) <= 20000) return;
+                const lineH = tH + marginV;
+                sg.setAttribute('vertsize', String(lineH));
+                sg.setAttribute('textheight', String(lineH));
+                sg.setAttribute('baseline', String(Math.round(lineH * 0.85)));
+                if (!isFirstPage) { sg.setAttribute('vertpos', '0'); sg.setAttribute('textpos', '0'); }
+            });
+        };
+        const template = para.cloneNode(true);
+        let anchor = para;
+        pages.slice(1).forEach((rowIdxs, k) => {
+            const p = template.cloneNode(true);
+            p.setAttribute('pageBreak', '1');
+            const t = p.getElementsByTagNameNS(HP, 'tbl')[0];
+            t.setAttribute('id', String(1800000000 + Math.floor(Math.random() * 100000000) + k));
+            shapeTable(t, p, rowIdxs, false);
+            anchor.parentNode.insertBefore(p, anchor.nextSibling);
+            anchor = p;
+        });
+        shapeTable(tbl, para, pages[0], true);
+        return pages.length;
+    }
+
     // 2026-10-20 「손글씨 메모 했던거 한글 출력할때 전경사진 뒤에 오게」 — 건물의 손글씨 메모(층마다 여러 장)를
     // 흰 바탕 그림으로 그려 전경사진 뒤에 한 장씩 넣는다(전경사진과 같은 틀, 쪽 폭에 맞추고 가로세로 비율 유지). 메모 없으면 안 넣음.
     const HWPX_SKETCH_TBL_PARA_XML = '<hp:p id="0" paraPrIDRef="13" styleIDRef="0" pageBreak="1" columnBreak="0" merged="0"><hp:run charPrIDRef="53"><hp:tbl id="TBL_ID" zOrder="11" numberingType="TABLE" textWrap="TOP_AND_BOTTOM" textFlow="BOTH_SIDES" lock="0" dropcapstyle="None" pageBreak="NONE" repeatHeader="1" rowCnt="2" colCnt="1" cellSpacing="0" borderFillIDRef="5" noAdjust="0"><hp:sz width="41821" widthRelTo="ABSOLUTE" height="64087" heightRelTo="ABSOLUTE" protect="0"/><hp:pos treatAsChar="1" affectLSpacing="0" flowWithText="1" allowOverlap="0" holdAnchorAndSO="0" vertRelTo="PARA" horzRelTo="COLUMN" vertAlign="TOP" horzAlign="LEFT" vertOffset="0" horzOffset="0"/><hp:outMargin left="140" right="140" top="140" bottom="140"/><hp:inMargin left="140" right="140" top="140" bottom="140"/><hp:tr><hp:tc name="" header="0" hasMargin="0" protect="0" editable="0" dirty="0" borderFillIDRef="15"><hp:subList id="" textDirection="HORIZONTAL" lineWrap="BREAK" vertAlign="CENTER" linkListIDRef="0" linkListNextIDRef="0" textWidth="0" textHeight="0" hasTextRef="0" hasNumRef="0"><hp:p id="2147483648" paraPrIDRef="4" styleIDRef="0" pageBreak="0" columnBreak="0" merged="0"><hp:run charPrIDRef="6"><hp:pic id="PIC_ID" zOrder="36" numberingType="PICTURE" textWrap="TOP_AND_BOTTOM" textFlow="BOTH_SIDES" lock="0" dropcapstyle="None" thumbnailBinIDRef="" href="" groupLevel="0" instid="PIC_INSTID" reverse="0"><hp:offset x="0" y="0"/><hp:orgSz width="768540" height="969540"/><hp:curSz width="41541" height="52405"/><hp:flip horizontal="0" vertical="0"/><hp:rotationInfo angle="0" centerX="20770" centerY="26202" rotateimage="1"/><hp:renderingInfo><hc:transMatrix e1="1" e2="0" e3="0" e4="0" e5="1" e6="0"/><hc:scaMatrix e1="0.054052" e2="0" e3="0" e4="0" e5="0.054051" e6="0"/><hc:rotMatrix e1="1" e2="0" e3="0" e4="0" e5="1" e6="0"/></hp:renderingInfo><hc:img binaryItemIDRef="" bright="0" contrast="0" effect="REAL_PIC" alpha="0"/><hp:imgRect><hc:pt0 x="0" y="0"/><hc:pt1 x="768540" y="0"/><hc:pt2 x="768540" y="969540"/><hc:pt3 x="0" y="969540"/></hp:imgRect><hp:imgClip left="0" right="648540" top="0" bottom="818100"/><hp:inMargin left="0" right="0" top="0" bottom="0"/><hp:imgDim dimwidth="648540" dimheight="818100"/><hp:effects/><hp:sz width="41541" widthRelTo="ABSOLUTE" height="52405" heightRelTo="ABSOLUTE" protect="0"/><hp:pos treatAsChar="0" affectLSpacing="0" flowWithText="1" allowOverlap="0" holdAnchorAndSO="0" vertRelTo="PARA" horzRelTo="COLUMN" vertAlign="TOP" horzAlign="LEFT" vertOffset="0" horzOffset="0"/><hp:outMargin left="0" right="0" top="0" bottom="0"/></hp:pic><hp:t/></hp:run><hp:linesegarray><hp:lineseg textpos="0" vertpos="0" vertsize="1100" textheight="1100" baseline="935" spacing="1320" horzpos="0" horzsize="0" flags="393216"/></hp:linesegarray></hp:p></hp:subList><hp:cellAddr colAddr="0" rowAddr="0"/><hp:cellSpan colSpan="1" rowSpan="1"/><hp:cellSz width="41821" height="60813"/><hp:cellMargin left="141" right="141" top="141" bottom="141"/></hp:tc></hp:tr><hp:tr><hp:tc name="" header="0" hasMargin="0" protect="0" editable="0" dirty="0" borderFillIDRef="16"><hp:subList id="" textDirection="HORIZONTAL" lineWrap="BREAK" vertAlign="CENTER" linkListIDRef="0" linkListNextIDRef="0" textWidth="0" textHeight="0" hasTextRef="0" hasNumRef="0"><hp:p id="2147483648" paraPrIDRef="1" styleIDRef="16" pageBreak="0" columnBreak="0" merged="0"><hp:run charPrIDRef="43"><hp:t>CAPTION</hp:t></hp:run><hp:linesegarray><hp:lineseg textpos="0" vertpos="0" vertsize="1000" textheight="1000" baseline="850" spacing="600" horzpos="0" horzsize="41540" flags="393216"/></hp:linesegarray></hp:p></hp:subList><hp:cellAddr colAddr="0" rowAddr="1"/><hp:cellSpan colSpan="1" rowSpan="1"/><hp:cellSz width="41821" height="3274"/><hp:cellMargin left="141" right="141" top="141" bottom="141"/></hp:tc></hp:tr></hp:tbl><hp:t/></hp:run><hp:linesegarray><hp:lineseg textpos="0" vertpos="0" vertsize="64367" textheight="64367" baseline="54712" spacing="960" horzpos="0" horzsize="42520" flags="393216"/></hp:linesegarray></hp:p>';
@@ -4929,7 +5073,7 @@
                             const ratioText = (item.sectionRatio !== undefined && item.sectionRatio !== null) ? item.sectionRatio.toFixed(1) + '%' : '-';
                             return [
                                 i + 1, // 동·층을 넘어 1부터 이어 붙인 번호
-                                `${item.location || '위치미지정'}\n(${memberNameOut(item.component) || ''})`,
+                                memberNameOut(item.component) ? `${item.location || '위치미지정'}\n(${memberNameOut(item.component)})` : (item.location || '위치미지정'),
                                 designText,
                                 measuredText,
                                 item.finishState || '-',
@@ -4937,6 +5081,7 @@
                                 item.sectionGrade || '-'
                             ];
                         }), true);
+                        if (tbl) splitHwpxNdtTableToPages(tbl, MEASURE_HEADER_ROWS);
                     } else {
                         removeNdtTableById(MEASURE_TBL_ID);
                     }
@@ -4971,7 +5116,7 @@
                                 const grade = slot.grade != null ? slot.grade : item.strengthGrade;
                                 strengthRows.push([
                                     strengthRows.length + 1,
-                                    `${slot.location || item.location || ''}${memberNameOut(item.component) || ''}`,
+                                    hwpxNdtLocMember(slot.location || item.location, memberNameOut(item.component)),
                                     item.designStrength != null ? item.designStrength : '-',
                                     typeof finalStrength === 'number' ? finalStrength.toFixed(1) : (finalStrength || '-'),
                                     ratio != null ? `${Math.round(ratio)}%` : '-',
@@ -4983,6 +5128,7 @@
                         // 2026-08-24: 템플릿에 남아있던 다른 병원 이름표 칸(NO. 왼쪽의 빈 병합 칸)을
                         // 제거해서 이제 NO.가 표의 실제 0번 칸이 됨 — includeCol0=true로 채운다.
                         if (tbl) fillNdtTable(tbl, STRENGTH_HEADER_ROWS, strengthRows, true);
+                        if (tbl) splitHwpxNdtTableToPages(tbl, STRENGTH_HEADER_ROWS);
                     } else {
                         removeNdtTableById(STRENGTH_TBL_ID);
                     }
@@ -5194,7 +5340,7 @@
                         const tbl = findTblById(CARB_TBL_ID);
                         if (tbl) fillNdtTable(tbl, CARB_HEADER_ROWS, carbItemsHwpx.map((item, i) => [
                             i + 1, // 동·층을 넘어 1부터 이어 붙인 번호
-                            `${item.location || ''}${memberNameOut(item.component) || ''}`,
+                            hwpxNdtLocMember(item.location, memberNameOut(item.component)),
                             item.carbDepth != null ? item.carbDepth : '-',
                             item.carbCover != null ? item.carbCover : '-',
                             typeof item.carbRemainMm === 'number' ? item.carbRemainMm.toFixed(2) : '-',
@@ -5204,6 +5350,7 @@
                             item.carbAgeDays != null ? `약 ${Math.round(item.carbAgeDays / 365)}년` : '-',
                             '-'
                         ]), true);
+                        if (tbl) splitHwpxNdtTableToPages(tbl, CARB_HEADER_ROWS);
                     } else {
                         removeNdtTableById(CARB_TBL_ID);
                     }
@@ -7610,7 +7757,7 @@
                             const ratioText = (item.sectionRatio !== undefined && item.sectionRatio !== null) ? item.sectionRatio.toFixed(1) + '%' : '-';
                             return [
                                 i + 1, // 동·층을 넘어 1부터 이어 붙인 번호
-                                `${item.location || '위치미지정'}\n(${memberNameOut(item.component) || ''})`,
+                                memberNameOut(item.component) ? `${item.location || '위치미지정'}\n(${memberNameOut(item.component)})` : (item.location || '위치미지정'),
                                 designText,
                                 measuredText,
                                 item.finishState || '-',
@@ -7618,6 +7765,7 @@
                                 item.sectionGrade || '-'
                             ];
                         }), true);
+                        if (tbl) splitHwpxNdtTableToPages(tbl, MEASURE_HEADER_ROWS);
                     } else {
                         removeNdtTableById(MEASURE_TBL_ID);
                     }
@@ -7652,7 +7800,7 @@
                                 const grade = slot.grade != null ? slot.grade : item.strengthGrade;
                                 strengthRows.push([
                                     strengthRows.length + 1,
-                                    `${slot.location || item.location || ''}${memberNameOut(item.component) || ''}`,
+                                    hwpxNdtLocMember(slot.location || item.location, memberNameOut(item.component)),
                                     item.designStrength != null ? item.designStrength : '-',
                                     typeof finalStrength === 'number' ? finalStrength.toFixed(1) : (finalStrength || '-'),
                                     ratio != null ? `${Math.round(ratio)}%` : '-',
@@ -7664,6 +7812,7 @@
                         // 2026-08-24: 템플릿에 남아있던 다른 병원 이름표 칸(NO. 왼쪽의 빈 병합 칸)을
                         // 제거해서 이제 NO.가 표의 실제 0번 칸이 됨 — includeCol0=true로 채운다.
                         if (tbl) fillNdtTable(tbl, STRENGTH_HEADER_ROWS, strengthRows, true);
+                        if (tbl) splitHwpxNdtTableToPages(tbl, STRENGTH_HEADER_ROWS);
                     } else {
                         removeNdtTableById(STRENGTH_TBL_ID);
                     }
@@ -7875,7 +8024,7 @@
                         const tbl = findTblById(CARB_TBL_ID);
                         if (tbl) fillNdtTable(tbl, CARB_HEADER_ROWS, carbItemsHwpx.map((item, i) => [
                             i + 1, // 동·층을 넘어 1부터 이어 붙인 번호
-                            `${item.location || ''}${memberNameOut(item.component) || ''}`,
+                            hwpxNdtLocMember(item.location, memberNameOut(item.component)),
                             item.carbDepth != null ? item.carbDepth : '-',
                             item.carbCover != null ? item.carbCover : '-',
                             typeof item.carbRemainMm === 'number' ? item.carbRemainMm.toFixed(2) : '-',
@@ -7885,6 +8034,7 @@
                             item.carbAgeDays != null ? `약 ${Math.round(item.carbAgeDays / 365)}년` : '-',
                             '-'
                         ]), true);
+                        if (tbl) splitHwpxNdtTableToPages(tbl, CARB_HEADER_ROWS);
                     } else {
                         removeNdtTableById(CARB_TBL_ID);
                     }
