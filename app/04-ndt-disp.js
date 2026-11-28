@@ -2476,11 +2476,16 @@
         }
 
         const calcLv = ndtDispCalcLevels(group);
-        // 축 범위 = 측정점 평균 ± 20 (사용자 요청). 평균을 정중앙에 두므로 선이 그래프 가운데에 온다.
-        const levels = calcLv.map(Number);
-        const meanL = levels.reduce((a, b) => a + b, 0) / levels.length;
-        const minL = meanL - 20;
-        const maxL = meanL + 20;
+        // 축 범위 = 측정점 중위값을 상하 정중앙에 두고, 위아래로 (최대−최소)만큼씩 — 축 전체 높이가
+        // 최대−최소의 2배(사용자 요청). 중위값에서 최대·최소까지는 늘 (최대−최소) 이하라 모든 점이 축 안에 든다.
+        const levels = calcLv.map(Number).filter(Number.isFinite);
+        const sortedL = levels.slice().sort((a, b) => a - b);
+        const n = sortedL.length;
+        const medianL = n ? (n % 2 ? sortedL[(n - 1) / 2] : (sortedL[n / 2 - 1] + sortedL[n / 2]) / 2) : 0;
+        const spreadL = n ? sortedL[n - 1] - sortedL[0] : 0;
+        const halfSpan = spreadL > 0 ? spreadL : 5; // 값이 전부 같으면 ±5로 납작한 선이 가운데 보이게
+        const minL = medianL - halfSpan;
+        const maxL = medianL + halfSpan;
 
         // 바닥 측정과 보/슬래브(상부) 측정은 침하 방향이 반대로 읽힌다(천장·보 밑면은 레벨 막대를
         // 거꾸로 대고 측정하므로) — 값·등급판정은 그대로 두고, 그래프 선의 위아래 모양만 뒤집는다.
