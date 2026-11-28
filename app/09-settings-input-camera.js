@@ -3202,7 +3202,7 @@
                 return;
             }
             // 2026-11-27 거리 재기: 끌면 화면 이동, 누르면 점(다른 도면 동작은 막음)
-            if (window.measureState && e.button === 0) {
+            if (window.measureState && window.measureState.target === 'map' && e.button === 0) {
                 e.preventDefault();
                 e.stopPropagation();
                 if (typeof measurePointerDown === 'function') measurePointerDown(e.clientX, e.clientY, false, e.shiftKey);
@@ -3303,7 +3303,7 @@
                 if (typeof drawingAlignPointerDown === 'function') drawingAlignPointerDown(e.touches[0].clientX, e.touches[0].clientY, true);
                 return;
             }
-            if (window.measureState && e.touches.length === 1) {
+            if (window.measureState && window.measureState.target === 'map' && e.touches.length === 1) {
                 if (e.cancelable) e.preventDefault();
                 e.stopPropagation();
                 if (typeof measurePointerDown === 'function') measurePointerDown(e.touches[0].clientX, e.touches[0].clientY, true, false);

@@ -1309,6 +1309,7 @@
             ctx.strokeRect(x1, y1, x2 - x1, y2 - y1);
             ctx.restore();
         }
+        if (window.measureState && typeof drawMeasureMarks === 'function') drawMeasureMarks(ctx, 'ndt');
 
         ctx.restore();
         ctx.restore();
@@ -2504,6 +2505,13 @@
         canvas.addEventListener('mousedown', (e) => {
             // 터치 직후 합성 마우스 → 빈 곳 마퀴/오선택 방지
             if (ndtActivePointerIsTouch || Date.now() < ndtSuppressMouseUntil) return;
+            // 2026-11-28 거리 재기: 끌면 화면 이동, 누르면 점(마킹·선택은 막음)
+            if (window.measureState && window.measureState.target === 'ndt' && e.button === 0) {
+                e.preventDefault();
+                e.stopPropagation();
+                if (typeof measurePointerDown === 'function') measurePointerDown(e.clientX, e.clientY, false, e.shiftKey);
+                return;
+            }
             if (e.button === 1) {
                 e.preventDefault();
                 ndtStartMouseX = e.clientX;
@@ -3011,6 +3019,13 @@
 
         canvas.addEventListener('touchstart', (e) => {
             ndtTouchStartedOnCanvas = true;
+            if (window.measureState && window.measureState.target === 'ndt' && e.touches.length === 1 && !isNdtPinching) {
+                ndtSuppressMouseUntil = Date.now() + 700;
+                if (e.cancelable) e.preventDefault();
+                e.stopPropagation();
+                if (typeof measurePointerDown === 'function') measurePointerDown(e.touches[0].clientX, e.touches[0].clientY, true, false);
+                return;
+            }
             if (e.touches.length === 1 && !isNdtPinching) {
                 const touch = e.touches[0];
                 const pt = ndtClientToImg(touch.clientX, touch.clientY);

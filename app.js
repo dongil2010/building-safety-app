@@ -6029,7 +6029,7 @@ document.addEventListener('DOMContentLoaded', () => {
         }
     }
 
-// @@app-part 02-buildings.js sha=2ad1e669890b — 원본은 app/02-buildings.js (여기 말고 거기서 고칠 것)
+// @@app-part 02-buildings.js sha=7ffdc55cb43c — 원본은 app/02-buildings.js (여기 말고 거기서 고칠 것)
     // --- 5. TAB MANAGER (진입 로직은 js/tabs/*.js) ---
     // ---- 마지막 작업 위치 기억·복원 (js/core/last-location.js, 2026-10-28) ----
     // 로그인 직후 복원 시도가 끝나기 전에는 기록·삭제를 하지 않는다(부팅 중 switchTab('tab-home')이 기록을 지우지 않게).
@@ -6135,6 +6135,10 @@ document.addEventListener('DOMContentLoaded', () => {
 
     window.switchTab = function(targetTabId = 'tab-home') {
         // 탭 전환 시 결함/NDT 드로어·관련 모달이 다른 도면 위에 남지 않도록 닫기
+        // 2026-11-28 거리 재기도 끝낸다(막대가 다른 탭 위에 남지 않게)
+        try {
+            if (window.measureState && typeof window.endMeasure === 'function') window.endMeasure();
+        } catch (_e) { /* ignore */ }
         try {
             if (typeof isDefectModalOpen === 'function' && isDefectModalOpen() && typeof closeDefectModal === 'function') {
                 closeDefectModal();
@@ -11092,7 +11096,7 @@ ${roundMobile ? '' : `<button type="button" class="icon-btn icon-btn-trash" titl
         });
     }
 
-// @@app-part 03-canvas.js sha=6eba1e180d08 — 원본은 app/03-canvas.js (여기 말고 거기서 고칠 것)
+// @@app-part 03-canvas.js sha=63e464a479e7 — 원본은 app/03-canvas.js (여기 말고 거기서 고칠 것)
     // --- 8. DRAWING CANVAS ENGINE (PAN/ZOOM/ROTATE & PINS) ---
 
     function setupCanvas() {
@@ -12813,7 +12817,7 @@ ${roundMobile ? '' : `<button type="button" class="icon-btn icon-btn-trash" titl
                 ctx.restore();
             }
             if (window.drawingAlignState && typeof drawDrawingAlignMarks === 'function') drawDrawingAlignMarks(ctx);
-            if (window.measureState && typeof drawMeasureMarks === 'function') drawMeasureMarks(ctx);
+            if (window.measureState && typeof drawMeasureMarks === 'function') drawMeasureMarks(ctx, 'map');
         }
 
         ctx.restore(); // Restore drawing rotation matrix
@@ -14690,7 +14694,7 @@ ${roundMobile ? '' : `<button type="button" class="icon-btn icon-btn-trash" titl
         return 'ndtStrength';
     }
 
-// @@app-part 04-ndt-disp.js sha=60de16766b8f — 원본은 app/04-ndt-disp.js (여기 말고 거기서 고칠 것)
+// @@app-part 04-ndt-disp.js sha=671e60ed44ae — 원본은 app/04-ndt-disp.js (여기 말고 거기서 고칠 것)
     // --- 바닥 수직변위: 그룹(NO.박스) + 다중 레벨 포인트 데이터 ---
     const NDT_DISPLACEMENT_COLORS = ['#ef4444', '#525252', '#f97316', '#22c55e', '#a855f7', '#eab308', '#06b6d4', '#ec4899'];
     const NDT_GRADE_BADGES = {
@@ -16001,6 +16005,7 @@ ${roundMobile ? '' : `<button type="button" class="icon-btn icon-btn-trash" titl
             ctx.strokeRect(x1, y1, x2 - x1, y2 - y1);
             ctx.restore();
         }
+        if (window.measureState && typeof drawMeasureMarks === 'function') drawMeasureMarks(ctx, 'ndt');
 
         ctx.restore();
         ctx.restore();
@@ -17196,6 +17201,13 @@ ${roundMobile ? '' : `<button type="button" class="icon-btn icon-btn-trash" titl
         canvas.addEventListener('mousedown', (e) => {
             // 터치 직후 합성 마우스 → 빈 곳 마퀴/오선택 방지
             if (ndtActivePointerIsTouch || Date.now() < ndtSuppressMouseUntil) return;
+            // 2026-11-28 거리 재기: 끌면 화면 이동, 누르면 점(마킹·선택은 막음)
+            if (window.measureState && window.measureState.target === 'ndt' && e.button === 0) {
+                e.preventDefault();
+                e.stopPropagation();
+                if (typeof measurePointerDown === 'function') measurePointerDown(e.clientX, e.clientY, false, e.shiftKey);
+                return;
+            }
             if (e.button === 1) {
                 e.preventDefault();
                 ndtStartMouseX = e.clientX;
@@ -17703,6 +17715,13 @@ ${roundMobile ? '' : `<button type="button" class="icon-btn icon-btn-trash" titl
 
         canvas.addEventListener('touchstart', (e) => {
             ndtTouchStartedOnCanvas = true;
+            if (window.measureState && window.measureState.target === 'ndt' && e.touches.length === 1 && !isNdtPinching) {
+                ndtSuppressMouseUntil = Date.now() + 700;
+                if (e.cancelable) e.preventDefault();
+                e.stopPropagation();
+                if (typeof measurePointerDown === 'function') measurePointerDown(e.touches[0].clientX, e.touches[0].clientY, true, false);
+                return;
+            }
             if (e.touches.length === 1 && !isNdtPinching) {
                 const touch = e.touches[0];
                 const pt = ndtClientToImg(touch.clientX, touch.clientY);
@@ -37560,7 +37579,7 @@ ${roundMobile ? '' : `<button type="button" class="icon-btn icon-btn-trash" titl
         }
     }
 
-// @@app-part 09-settings-input-camera.js sha=5afd0db1323d — 원본은 app/09-settings-input-camera.js (여기 말고 거기서 고칠 것)
+// @@app-part 09-settings-input-camera.js sha=1adb6a599b6e — 원본은 app/09-settings-input-camera.js (여기 말고 거기서 고칠 것)
     // --- 카테고리별 핀/박스 색상 설정 모달 ---
     // 결함 색상은 getDefectColor()가 쓰는 등급·상태 키와 맞춰야 도면에 바로 반영됨
     const STYLE_COLOR_FIELDS = [
@@ -40764,7 +40783,7 @@ ${roundMobile ? '' : `<button type="button" class="icon-btn icon-btn-trash" titl
                 return;
             }
             // 2026-11-27 거리 재기: 끌면 화면 이동, 누르면 점(다른 도면 동작은 막음)
-            if (window.measureState && e.button === 0) {
+            if (window.measureState && window.measureState.target === 'map' && e.button === 0) {
                 e.preventDefault();
                 e.stopPropagation();
                 if (typeof measurePointerDown === 'function') measurePointerDown(e.clientX, e.clientY, false, e.shiftKey);
@@ -40865,7 +40884,7 @@ ${roundMobile ? '' : `<button type="button" class="icon-btn icon-btn-trash" titl
                 if (typeof drawingAlignPointerDown === 'function') drawingAlignPointerDown(e.touches[0].clientX, e.touches[0].clientY, true);
                 return;
             }
-            if (window.measureState && e.touches.length === 1) {
+            if (window.measureState && window.measureState.target === 'map' && e.touches.length === 1) {
                 if (e.cancelable) e.preventDefault();
                 e.stopPropagation();
                 if (typeof measurePointerDown === 'function') measurePointerDown(e.touches[0].clientX, e.touches[0].clientY, true, false);
@@ -49236,7 +49255,7 @@ ${roundMobile ? '' : `<button type="button" class="icon-btn icon-btn-trash" titl
         });
     }
 
-// @@app-part 11-cad-import.js sha=f4efdba3caed — 원본은 app/11-cad-import.js (여기 말고 거기서 고칠 것)
+// @@app-part 11-cad-import.js sha=8e8d325adbcc — 원본은 app/11-cad-import.js (여기 말고 거기서 고칠 것)
     // --- 9-1. CAD Defect Pins 2-Point Calibration Engine (v2.0) ---
     window.cadCalibrationState = null;
 
@@ -51474,6 +51493,19 @@ ${roundMobile ? '' : `<button type="button" class="icon-btn icon-btn-trash" titl
 
     function measureFloorKey() { return drawingAlignFloorKey(); }
 
+    // 2026-11-28 비파괴 탭 도면에서도 — target 'map'(결함위치도) | 'ndt'(비파괴 도면). 좌표·화면·다시 그리기가 다르다
+    function measureIsNdt(st) { return !!(st && st.target === 'ndt'); }
+    function measureView(st) { return measureIsNdt(st) ? ndtView : state.view; }
+    function measureRedraw() {
+        const st = window.measureState;
+        if (measureIsNdt(st)) { if (typeof drawNdtCanvas === 'function') drawNdtCanvas(); } else drawCanvas();
+    }
+    function measureClientToImg(st, clientX, clientY) {
+        return measureIsNdt(st) ? ndtClientToImg(clientX, clientY) : clientToImgCoords(clientX, clientY);
+    }
+    /** 비파괴 전용 도면(층 도면과 다른 그림)이면 캐드 좌표·선 붙이기를 못 쓰고, 축척도 따로 기억한다 */
+    function measureCalibKey(st) { return st.floorKey + (st.ownDrawing ? ':ndt' : ''); }
+
     function loadMeasureCalib(floorKey) {
         try {
             const v = Number(localStorage.getItem(MEASURE_CALIB_PREFIX + floorKey));
@@ -51508,33 +51540,48 @@ ${roundMobile ? '' : `<button type="button" class="icon-btn icon-btn-trash" titl
         return k ? formatMeasureMm(pxLen * k) : `${Math.round(pxLen).toLocaleString('ko-KR')} px`;
     }
 
-    async function startMeasure() {
+    async function startMeasure(target) {
+        target = target === 'ndt' ? 'ndt' : 'map';
         const floorKey = measureFloorKey();
-        if (window.measureState) { endMeasure(); return; }
-        if (!floorKey || !state.bgImage) { window.showToast?.('도면이 열린 층에서 사용하세요.', 'warning'); return; }
-        if (window.cadCalibrationState) cancelCadCalibration();
-        if (window.drawingAlignState) endDrawingAlign();
-        if (typeof setDrawMode === 'function' && state.mode !== 'PAN') setDrawMode('PAN');
+        if (window.measureState) {
+            const same = window.measureState.target === target;
+            endMeasure();
+            if (same) return;
+        }
+        const hasDrawing = target === 'ndt' ? !!ndtBgImage : !!state.bgImage;
+        if (!floorKey || !hasDrawing) { window.showToast?.('도면이 열린 층에서 사용하세요.', 'warning'); return; }
+        const ownDrawing = target === 'ndt' && !!currentNdtCustomDrawingSrc(floorKey);
+        if (target === 'map') {
+            if (window.cadCalibrationState) cancelCadCalibration();
+            if (window.drawingAlignState) endDrawingAlign();
+            if (typeof setDrawMode === 'function' && state.mode !== 'PAN') setDrawMode('PAN');
+        } else if (typeof window.setNdtMode === 'function') {
+            window.setNdtMode('PAN');
+        }
         window.measureState = {
+            target,
+            ownDrawing,
             floorKey,
             segs: [], // [{a:{x,y}, b:{x,y}}] 도면 그림 좌표
             pending: null, // 첫 점을 찍고 두 번째를 기다리는 중
             hover: null,
             snapLines: true,
-            calibMmPerPx: loadMeasureCalib(floorKey),
+            calibMmPerPx: loadMeasureCalib(floorKey + (ownDrawing ? ':ndt' : '')),
             dxfMmPerPx: null,
             dxfUnit: null,
-            dxfLoading: true
+            dxfLoading: !ownDrawing
         };
         renderMeasureBar();
         syncMeasureButtons();
-        drawCanvas();
+        measureRedraw();
         const st = window.measureState;
+        if (ownDrawing) return;
         try {
-            const ref = state.floorPlanRef;
             const bldg = state.currentBuilding;
             const fc = state.currentFloor;
-            if (bldg && ref && ref.bldgId === bldg.id && ref.floorCode === fc && typeof window.getFloorDxfScaleInfo === 'function') {
+            let ref = state.floorPlanRef;
+            if (!(ref && bldg && ref.bldgId === bldg.id && ref.floorCode === fc)) ref = (bldg && fc) ? getFloorPlanDisplayDims() : null;
+            if (bldg && ref && ref.w > 0 && ref.h > 0 && typeof window.getFloorDxfScaleInfo === 'function') {
                 const info = await window.getFloorDxfScaleInfo(bldg, fc, ref.w, ref.h);
                 if (info && window.measureState === st) {
                     const f = MEASURE_INSUNITS_MM[info.unit] || 1;
@@ -51548,35 +51595,44 @@ ${roundMobile ? '' : `<button type="button" class="icon-btn icon-btn-trash" titl
         if (window.measureState !== st) return;
         st.dxfLoading = false;
         renderMeasureBar();
-        drawCanvas();
+        measureRedraw();
     }
 
     function endMeasure() {
+        const st = window.measureState;
         window.measureState = null;
         renderMeasureBar();
         syncMeasureButtons();
         if (elements.planCanvas) elements.planCanvas.style.cursor = getMapCanvasCursor();
-        drawCanvas();
+        const ndtCv = document.getElementById('ndtCanvas');
+        if (ndtCv) ndtCv.style.cursor = '';
+        if (measureIsNdt(st)) { if (typeof drawNdtCanvas === 'function') drawNdtCanvas(); } else drawCanvas();
     }
 
+    const MEASURE_BUTTONS = { map: ['btnMeasureDistance', 'mobileBtnMeasureDistance'], ndt: ['btnNdtMeasureDistance', 'mobileNdtBtnMeasureDistance'] };
     function syncMeasureButtons() {
-        const on = !!window.measureState;
-        ['btnMeasureDistance', 'mobileBtnMeasureDistance'].forEach((id) => {
-            const b = document.getElementById(id);
-            if (!b) return;
-            b.classList.toggle('active', on);
-            b.setAttribute('aria-pressed', on ? 'true' : 'false');
+        const st = window.measureState;
+        Object.keys(MEASURE_BUTTONS).forEach((target) => {
+            const on = !!st && st.target === target;
+            MEASURE_BUTTONS[target].forEach((id) => {
+                const b = document.getElementById(id);
+                if (!b) return;
+                b.classList.toggle('active', on);
+                b.setAttribute('aria-pressed', on ? 'true' : 'false');
+            });
         });
-        if (on && elements.planCanvas) elements.planCanvas.style.cursor = 'crosshair';
+        if (!st) return;
+        const cv = measureIsNdt(st) ? document.getElementById('ndtCanvas') : elements.planCanvas;
+        if (cv) cv.style.cursor = 'crosshair';
     }
 
     /** 누른 자리 → 도면 좌표(캐드 선 끝점·교차점에 붙이기, Shift면 가로·세로로 고정) */
     function measurePointAt(clientX, clientY, shiftKey) {
         const st = window.measureState;
-        let pt = clientToImgCoords(clientX, clientY);
+        let pt = measureClientToImg(st, clientX, clientY);
         let snapped = null;
-        if (st && st.snapLines && window.BSA_PDF_SNAP && state.currentBuilding) {
-            const radius = 14 / Math.max(state.view.scale || 1, 0.01);
+        if (st && st.snapLines && !st.ownDrawing && window.BSA_PDF_SNAP && state.currentBuilding) {
+            const radius = 14 / Math.max(measureView(st).scale || 1, 0.01);
             const hit = window.BSA_PDF_SNAP.snap(state.currentBuilding.id, state.currentFloor, pt.x, pt.y, radius);
             if (hit) { pt = { x: hit.x, y: hit.y }; snapped = hit.type || 'line'; }
         }
@@ -51600,12 +51656,13 @@ ${roundMobile ? '' : `<button type="button" class="icon-btn icon-btn-trash" titl
             st.pending = null;
         }
         renderMeasureBar();
-        drawCanvas();
+        measureRedraw();
     }
 
     function measurePointerDown(clientX, clientY, isTouch, shiftKey) {
         const sx = clientX, sy = clientY;
-        const ox = state.view.offsetX, oy = state.view.offsetY;
+        const view = measureView(window.measureState);
+        const ox = view.offsetX, oy = view.offsetY;
         let moved = false, aborted = false;
         const onMove = (ev) => {
             if (isTouch && ev.touches && ev.touches.length > 1) { aborted = true; return; }
@@ -51614,9 +51671,9 @@ ${roundMobile ? '' : `<button type="button" class="icon-btn icon-btn-trash" titl
             const dx = p.clientX - sx, dy = p.clientY - sy;
             if (!moved && Math.hypot(dx, dy) < 6) return;
             moved = true;
-            state.view.offsetX = ox + dx;
-            state.view.offsetY = oy + dy;
-            drawCanvas();
+            view.offsetX = ox + dx;
+            view.offsetY = oy + dy;
+            measureRedraw();
             if (isTouch && ev.cancelable) ev.preventDefault();
         };
         const onUp = (ev) => {
@@ -51624,7 +51681,7 @@ ${roundMobile ? '' : `<button type="button" class="icon-btn icon-btn-trash" titl
             window.removeEventListener(isTouch ? 'touchend' : 'mouseup', onUp, true);
             if (isTouch) window.removeEventListener('touchcancel', onUp, true);
             if (moved) {
-                if (typeof scheduleViewportHiPatchSync === 'function') scheduleViewportHiPatchSync();
+                if (!measureIsNdt(window.measureState) && typeof scheduleViewportHiPatchSync === 'function') scheduleViewportHiPatchSync();
                 return;
             }
             if (aborted || (ev && ev.type === 'touchcancel')) return;
@@ -51644,7 +51701,7 @@ ${roundMobile ? '' : `<button type="button" class="icon-btn icon-btn-trash" titl
         if (_measureHoverRaf) return;
         _measureHoverRaf = requestAnimationFrame(() => {
             _measureHoverRaf = 0;
-            if (window.measureState) drawCanvas();
+            if (window.measureState) measureRedraw();
         });
     }
 
@@ -51654,7 +51711,7 @@ ${roundMobile ? '' : `<button type="button" class="icon-btn icon-btn-trash" titl
         if (st.pending) st.pending = null;
         else st.segs.pop();
         renderMeasureBar();
-        drawCanvas();
+        measureRedraw();
     }
 
     /** 마지막으로 잰 선의 실제 길이를 넣어 축척을 잡는다(일반 PDF·그림 도면용) */
@@ -51672,9 +51729,9 @@ ${roundMobile ? '' : `<button type="button" class="icon-btn icon-btn-trash" titl
         const mm = Number(String(ans).replace(/[,\s]/g, '').replace(/mm$/i, ''));
         if (!(mm > 0) || !isFinite(mm)) { window.showToast?.('숫자(mm)로 넣어 주세요.', 'warning'); return; }
         st.calibMmPerPx = mm / px;
-        saveMeasureCalib(st.floorKey, st.calibMmPerPx);
+        saveMeasureCalib(measureCalibKey(st), st.calibMmPerPx);
         renderMeasureBar();
-        drawCanvas();
+        measureRedraw();
         window.showToast?.('이 층의 축척을 맞췄습니다(이 기기에 기억).', 'success');
     }
 
@@ -51682,9 +51739,9 @@ ${roundMobile ? '' : `<button type="button" class="icon-btn icon-btn-trash" titl
         const st = window.measureState;
         if (!st) return;
         st.calibMmPerPx = null;
-        saveMeasureCalib(st.floorKey, null);
+        saveMeasureCalib(measureCalibKey(st), null);
         renderMeasureBar();
-        drawCanvas();
+        measureRedraw();
     }
 
     function measureScaleNote(st) {
@@ -51694,6 +51751,7 @@ ${roundMobile ? '' : `<button type="button" class="icon-btn icon-btn-trash" titl
             return `축척: 캐드(DXF) 좌표${u ? ` · 단위 ${u}` : ' · 단위 없음 → mm로 봄'}`;
         }
         if (st.dxfLoading) return '축척 확인 중…';
+        if (st.ownDrawing) return '비파괴 전용 도면 — 길이를 아는 곳을 재고 「축척 맞추기」';
         return '축척 없음 — 길이를 아는 곳을 재고 「축척 맞추기」';
     }
 
@@ -51714,7 +51772,7 @@ ${roundMobile ? '' : `<button type="button" class="icon-btn icon-btn-trash" titl
                 if (act === 'undo') measureUndoLast();
                 else if (act === 'clear') {
                     const s = window.measureState;
-                    if (s) { s.segs = []; s.pending = null; renderMeasureBar(); drawCanvas(); }
+                    if (s) { s.segs = []; s.pending = null; renderMeasureBar(); measureRedraw(); }
                 } else if (act === 'calib') measureCalibrateFromLast().catch((err) => console.error('[거리 재기] 축척 맞추기 실패', err));
                 else if (act === 'uncalib') measureClearCalib();
                 else if (act === 'end') endMeasure();
@@ -51730,7 +51788,7 @@ ${roundMobile ? '' : `<button type="button" class="icon-btn icon-btn-trash" titl
         const result = last
             ? `<span class="ms-result">${measureLenText(st, lastPx)}</span>${st.segs.length > 1 ? `<span class="dab-note">합계 ${measureLenText(st, totalPx)} (${st.segs.length}개)</span>` : ''}`
             : '';
-        const snapCtl = window.BSA_PDF_SNAP
+        const snapCtl = (window.BSA_PDF_SNAP && !st.ownDrawing)
             ? `<label class="dab-chk" title="캐드 선의 끝점·교차점에 붙입니다"><input type="checkbox" id="msSnap"${st.snapLines ? ' checked' : ''}> 선에 붙이기</label>`
             : '';
         const uncalib = (st.calibMmPerPx > 0)
@@ -51749,14 +51807,16 @@ ${roundMobile ? '' : `<button type="button" class="icon-btn icon-btn-trash" titl
     }
 
     /** drawCanvas 안(도면 회전·확대가 걸린 상태, 도면 그림 좌표)에서 부른다 */
-    function drawMeasureMarks(ctx) {
+    function drawMeasureMarks(ctx, target) {
         const st = window.measureState;
         if (!st) return;
-        if (st.floorKey !== measureFloorKey()) {
+        // 층이나 탭을 바꿨으면 끝낸다(어느 도면이 그려지든 — 막대가 남지 않게)
+        if (st.floorKey !== measureFloorKey() || state.currentTab !== (measureIsNdt(st) ? 'tab-ndt' : 'tab-map')) {
             setTimeout(() => { if (window.measureState === st) endMeasure(); }, 0);
             return;
         }
-        const sc = Math.max(state.view.scale || 1, 0.01);
+        if (st.target !== (target === 'ndt' ? 'ndt' : 'map')) return;
+        const sc = Math.max(measureView(st).scale || 1, 0.01);
         const lw = 2 / sc;
         const tick = 7 / sc;
         const fontPx = 13 / sc;
@@ -51811,22 +51871,24 @@ ${roundMobile ? '' : `<button type="button" class="icon-btn icon-btn-trash" titl
 
     window.startMeasure = startMeasure;
     window.endMeasure = endMeasure;
-    ['btnMeasureDistance', 'mobileBtnMeasureDistance'].forEach((id) => {
+    Object.keys(MEASURE_BUTTONS).forEach((target) => MEASURE_BUTTONS[target].forEach((id) => {
         const b = document.getElementById(id);
         if (b) b.addEventListener('click', (e) => {
             e.preventDefault();
-            startMeasure().catch((err) => console.error('[거리 재기] 시작 실패', err));
+            startMeasure(target).catch((err) => console.error('[거리 재기] 시작 실패', err));
+        });
+    }));
+    [['map', elements.planCanvas], ['ndt', document.getElementById('ndtCanvas')]].forEach(([target, cv]) => {
+        if (!cv) return;
+        cv.addEventListener('mousemove', (e) => {
+            const st = window.measureState;
+            if (st && st.target === target) measureHoverMove(e.clientX, e.clientY, e.shiftKey);
+        });
+        cv.addEventListener('mouseleave', () => {
+            const st = window.measureState;
+            if (st && st.target === target && st.hover) { st.hover = null; measureRedraw(); }
         });
     });
-    if (elements.planCanvas) {
-        elements.planCanvas.addEventListener('mousemove', (e) => {
-            if (window.measureState) measureHoverMove(e.clientX, e.clientY, e.shiftKey);
-        });
-        elements.planCanvas.addEventListener('mouseleave', () => {
-            const st = window.measureState;
-            if (st && st.hover) { st.hover = null; drawCanvas(); }
-        });
-    }
     document.addEventListener('keydown', (e) => {
         if (!window.measureState) return;
         const t = e.target;
@@ -51835,7 +51897,7 @@ ${roundMobile ? '' : `<button type="button" class="icon-btn icon-btn-trash" titl
         if (e.key === 'Escape') {
             e.preventDefault();
             e.stopImmediatePropagation();
-            if (window.measureState.pending) { window.measureState.pending = null; renderMeasureBar(); drawCanvas(); } else endMeasure();
+            if (window.measureState.pending) { window.measureState.pending = null; renderMeasureBar(); measureRedraw(); } else endMeasure();
         } else if (e.key === 'Backspace' || e.key === 'Delete') {
             e.preventDefault();
             e.stopImmediatePropagation();

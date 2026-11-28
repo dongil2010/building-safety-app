@@ -1719,7 +1719,7 @@
                 ctx.restore();
             }
             if (window.drawingAlignState && typeof drawDrawingAlignMarks === 'function') drawDrawingAlignMarks(ctx);
-            if (window.measureState && typeof drawMeasureMarks === 'function') drawMeasureMarks(ctx);
+            if (window.measureState && typeof drawMeasureMarks === 'function') drawMeasureMarks(ctx, 'map');
         }
 
         ctx.restore(); // Restore drawing rotation matrix
