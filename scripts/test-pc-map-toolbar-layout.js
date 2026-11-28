@@ -29,7 +29,7 @@ const pcToolbar = html.slice(mapStart, mapEnd);
 // 1) 기존 버튼 ID 모두 유지 + 인라인 linear-gradient 제거
 const requiredIds = [
     'btnModePan', 'btnModeMark', 'btnModeArea', 'btnModeMemo', 'btnMeasureDistance',
-    'btnSnapToCad', 'btnToggleCrosshair', 'btnGridLines',
+    'btnSnapToCad', 'btnGridLines',
     'btnToggleDefectList', 'btnToggleMapStyleSize', 'btnDetailLocPopup', 'btnBoxAutoLayout',
     'btnEditFloorDrawing', 'btnRotateDrawing', 'btnImportCadPins', 'btnAlignMarkingsToDrawing',
     'btnAlignMarkingsPendingQuick',

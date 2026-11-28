@@ -148,7 +148,6 @@ function mouse(target, clientX, clientY, type) {
 // ---------- 1) 마우스 호버 ----------
 api.setupDrawingCrosshairToggleButtons();
 assert.strictEqual(api.isEnabled(), true, 'default ON');
-assert.strictEqual(ids.btnToggleCrosshair.attrs['aria-pressed'], 'true');
 mouse(ids.planCanvas, 410, 350);
 assert.ok(visible('canvasContainer'), 'hover shows');
 let o = overlay('canvasContainer');
@@ -307,21 +306,12 @@ flush();
 assert.ok(!visible('ndtCanvasContainer'), 'ndt release hides');
 env.window.state.currentTab = 'tab-map';
 
-// ---------- 4) 켜기/끄기 ----------
+// ---------- 4) 늘 켬 (끄는 버튼 없음) ----------
 mouse(ids.planCanvas, 410, 350);
 assert.ok(visible('canvasContainer'));
-ids.mobileBtnCrosshair._ls.click();
+api.setDrawingCrosshairEnabled(false);
 flush();
-assert.strictEqual(api.isEnabled(), false);
-assert.strictEqual(store.bsa_drawing_crosshair_v1, '0');
-assert.ok(!visible('canvasContainer'), 'off hides');
-assert.ok(!ids.btnToggleCrosshair.classList.contains('active'));
-assert.strictEqual(ids.btnToggleCrosshairNdt.attrs['aria-pressed'], 'false');
-mouse(ids.planCanvas, 420, 360);
-assert.ok(!visible('canvasContainer'), 'stays hidden when off');
-api.setDrawingCrosshairEnabled(true);
-flush();
-assert.strictEqual(store.bsa_drawing_crosshair_v1, '1');
+assert.strictEqual(api.isEnabled(), true, 'cannot be turned off');
 assert.ok(visible('canvasContainer'));
 
 // ---------- 6) 출력물·마크업 ----------
@@ -329,7 +319,7 @@ assert.ok(!/getContext|ctx\.|drawImage|toDataURL/.test(region), 'crosshair never
 assert.ok(/pointer-events:\s*none/.test(css.slice(css.indexOf('.drawing-crosshair {'))), 'css pointer-events none');
 assert.ok(/@media print[\s\S]*?\.drawing-crosshair/.test(css), 'hidden in print');
 ['btnToggleCrosshair', 'mobileBtnCrosshair', 'btnToggleCrosshairNdt', 'mobileNdtBtnCrosshair'].forEach((id) => {
-    assert.ok(html.includes('id="' + id + '"'), 'button ' + id);
+    assert.ok(!html.includes('id="' + id + '"'), 'crosshair toggle removed: ' + id);
 });
 assert.ok(/function drawCanvas\(opts\) \{\s*opts = opts \|\| \{\};\s*requestDrawingCrosshairUpdate\(\);/.test(src), 'drawCanvas hook');
 assert.ok(/function drawNdtCanvas\(\) \{\s*requestDrawingCrosshairUpdate\(\);/.test(src), 'drawNdtCanvas hook');

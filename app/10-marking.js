@@ -4225,6 +4225,7 @@
                 if (dispModal && dispModal.classList.contains('open')) closeNdtDisplacementModal();
                 const dispEditModal = document.getElementById('ndtDisplacementGroupEditModal');
                 if (dispEditModal && dispEditModal.classList.contains('open')) closeNdtDisplacementGroupEditModal();
+                if (ndtGuideDrawMode || ndtGuideDraft) resetNdtGuideDrawMode();
                 if (window._activeNdtDispGroupId) {
                     setActiveNdtDispGroup(null);
                     if (typeof drawNdtCanvas === 'function') drawNdtCanvas();
@@ -4266,6 +4267,9 @@
             } else if (k === 'n' && (currentNdtCategory === '변위' || currentNdtCategory === '부재변위')) {
                 e.preventDefault();
                 window.startNewNdtDispGroupMarking();
+            } else if (k === 'g' && (currentNdtCategory === '변위' || currentNdtCategory === '부재변위')) {
+                e.preventDefault();
+                window.toggleNdtGuideDrawMode();
             }
             return;
         }

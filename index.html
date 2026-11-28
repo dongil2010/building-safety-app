@@ -391,9 +391,6 @@
                                 <button type="button" id="btnSnapToCad" class="mode-btn btn-snap-toggle active" title="CAD 벡터 스냅 — 핀 마킹 시 근처 CAD 선/끝점/교차점에 자동으로 붙습니다 (PDF 벡터 도면에서만 동작)">
                                     <i class="fa-solid fa-magnet"></i> 스냅
                                 </button>
-                                <button type="button" id="btnToggleCrosshair" class="mode-btn btn-crosshair-toggle active" aria-pressed="true" title="CAD 커서식 십자선 — PC는 마우스를 도면 위에 올리면, 폰·태블릿은 마킹을 끌어 옮길 때 가로·세로 선 표시">
-                                    <i class="fa-solid fa-crosshairs"></i> 십자선
-                                </button>
                                 <button type="button" id="btnGridLines" class="mode-btn btn-grid-lines-toggle" aria-pressed="false" title="행·열(통심) 선 — 도면에 X·Y 선을 긋고, 마킹 위치를 「X1~X2/Y1~Y2」로 자동 입력">
                                     <i class="fa-solid fa-table-cells"></i> 행·열
                                 </button>
@@ -612,10 +609,6 @@
                             <button type="button" class="mobile-rail-btn active" id="mobileBtnSnapToCad" title="CAD 벡터 스냅 — 핀 마킹 시 근처 CAD 선/끝점/교차점에 자동으로 붙습니다 (PDF 벡터 도면에서만 동작)">
                                 <i class="fa-solid fa-magnet"></i>
                                 <span>스냅</span>
-                            </button>
-                            <button type="button" class="mobile-rail-btn active" id="mobileBtnCrosshair" aria-pressed="true" title="CAD 커서식 십자선 — PC는 마우스를 도면 위에 올리면, 폰·태블릿은 마킹을 끌어 옮길 때 가로·세로 선 표시">
-                                <i class="fa-solid fa-crosshairs"></i>
-                                <span>십자선</span>
                             </button>
                             <button type="button" class="mobile-rail-btn" id="mobileBtnGridLines" aria-pressed="false" title="행·열(통심) 선 — 도면에 X·Y 선을 긋고, 마킹 위치를 「X1~X2/Y1~Y2」로 자동 입력">
                                 <i class="fa-solid fa-table-cells"></i>
@@ -1007,14 +1000,20 @@
                         <button type="button" id="btnNdtModeMark" class="mode-btn btn-mark-mode" onclick="window.setNdtMode('MARK')" title="NDT 위치 마킹 (D)">
                             <i class="fa-solid fa-location-dot"></i> 📍 [NDT 위치 마킹] <span class="mode-shortcut">D</span>
                         </button>
-                        <button type="button" id="btnToggleCrosshairNdt" class="mode-btn btn-crosshair-toggle active" aria-pressed="true" title="CAD 커서식 십자선 — PC는 마우스를 도면 위에 올리면, 폰·태블릿은 마킹을 끌어 옮길 때 가로·세로 선 표시">
-                            <i class="fa-solid fa-crosshairs"></i> 십자선
-                        </button>
                         <button type="button" id="btnNdtMeasureDistance" class="mode-btn btn-measure-toggle" aria-pressed="false" title="거리 재기 — 도면에서 두 점을 눌러 실제 거리를 잽니다(DXF 도면은 캐드 좌표로 자동, 그 밖의 도면은 「축척 맞추기」)">
                             <i class="fa-solid fa-ruler"></i> 거리
                         </button>
                         <button type="button" id="btnNdtNewDispGroup" class="mode-btn ndt-disp-new-group-btn" hidden title="새 측정 구역으로 마킹 — 지금 이어 찍던 구역을 끝내고, 다음에 누르는 곳부터 새 구역(NO.)의 (01) 지점으로 찍습니다 (N)">
                             <i class="fa-solid fa-circle-plus"></i> 새 측정점 마킹 <span class="mode-shortcut">N</span>
+                        </button>
+                        <button type="button" id="btnNdtGuideDraw" class="mode-btn ndt-guide-draw-btn" hidden aria-pressed="false" title="가이드선 — 도면을 누른 채 끌어 가상의 직선을 긋습니다(가로·세로 자동 맞춤, Shift=15°). 선을 한 번 누르면 지웁니다. 다시 누르면 마킹으로 돌아가고, 찍는 지점이 선 위로 붙습니다 (G)">
+                            <i class="fa-solid fa-grip-lines"></i> 가이드선 <span class="mode-shortcut">G</span>
+                        </button>
+                        <button type="button" id="btnNdtGuideSnap" class="mode-btn ndt-guide-snap-btn active" hidden aria-pressed="true" title="선에 붙이기 — 켜면 찍거나 끄는 지점이 가까운 가이드선(교차점·끝점 우선) 위로 붙습니다. Alt를 누른 채 찍으면 이번만 안 붙음">
+                            <i class="fa-solid fa-magnet"></i> 붙이기 <span class="toolbar-toggle-state">ON</span>
+                        </button>
+                        <button type="button" id="btnNdtGuideClear" class="mode-btn ndt-guide-clear-btn" hidden title="이 층의 가이드선 모두 지우기 (찍은 지점은 그대로)">
+                            <i class="fa-solid fa-eraser"></i> 가이드 지우기
                         </button>
                     </div>
 
@@ -1127,10 +1126,6 @@
                         <i class="fa-solid fa-object-ungroup"></i>
                         <span>추가</span>
                     </button>
-                    <button type="button" class="mobile-rail-btn active" id="mobileNdtBtnCrosshair" aria-pressed="true" title="CAD 커서식 십자선 — PC는 마우스를 도면 위에 올리면, 폰·태블릿은 마킹을 끌어 옮길 때 가로·세로 선 표시">
-                        <i class="fa-solid fa-crosshairs"></i>
-                        <span>십자선</span>
-                    </button>
                     <button type="button" class="mobile-rail-btn" id="mobileNdtBtnMeasureDistance" aria-pressed="false" title="거리 재기 — 도면에서 두 점을 눌러 실제 거리를 잽니다">
                         <i class="fa-solid fa-ruler"></i>
                         <span>거리</span>
@@ -1140,6 +1135,14 @@
                     <button type="button" class="mobile-rail-btn ndt-disp-new-group-btn" id="mobileNdtBtnNewDispGroup" hidden title="새 측정 구역으로 마킹 — 다음에 누르는 곳부터 새 구역의 (01) 지점">
                         <i class="fa-solid fa-circle-plus"></i>
                         <span>새 구역</span>
+                    </button>
+                    <button type="button" class="mobile-rail-btn ndt-guide-draw-btn" id="mobileNdtBtnGuideDraw" hidden aria-pressed="false" title="가이드선 — 누른 채 끌어 직선 긋기(선을 한 번 누르면 지움). 다시 누르면 마킹: 지점이 선 위로 붙음">
+                        <i class="fa-solid fa-grip-lines"></i>
+                        <span>가이드</span>
+                    </button>
+                    <button type="button" class="mobile-rail-btn ndt-guide-clear-btn" id="mobileNdtBtnGuideClear" hidden title="이 층의 가이드선 모두 지우기">
+                        <i class="fa-solid fa-eraser"></i>
+                        <span>선지움</span>
                     </button>
                     <button type="button" class="mobile-rail-btn ndt-disp-undo-btn" id="mobileNdtBtnUndoDisp" hidden title="마지막 부동침하/부재변위 마킹 되돌리기">
                         <i class="fa-solid fa-rotate-left"></i>

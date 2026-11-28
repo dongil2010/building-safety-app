@@ -63,7 +63,7 @@ assert.deepStrictEqual(run({ width: 1920, height: 1080, touch: 10, pcLike: true,
 const at = css.indexOf('html.bsa-touch-ui button#btnSnapToCad#btnSnapToCad');
 assert.ok(at >= 0, '터치 숨김 규칙');
 const block = css.slice(at, css.indexOf('}', at));
-['btnSnapToCad', 'mobileBtnSnapToCad', 'btnToggleCrosshair', 'mobileBtnCrosshair', 'btnToggleCrosshairNdt', 'mobileNdtBtnCrosshair', 'btnGridLines', 'mobileBtnGridLines']
+['btnSnapToCad', 'mobileBtnSnapToCad', 'btnGridLines', 'mobileBtnGridLines']
     .forEach((id) => {
         assert.ok(block.indexOf('button#' + id + '#' + id) >= 0, id);
         assert.ok(html.indexOf('<button type="button"') >= 0 && new RegExp('<button[^>]*id="' + id + '"').test(html), id + ' 은 button');
@@ -79,8 +79,8 @@ assert.ok(/display:\s*none !important/.test(css.slice(at, at + 1200)));
     assert.ok(seg.indexOf('<span>박스</span>') < 0);
 });
 // app.js: 십자선 늘 켬·스냅 기본·행·열 PC 전용
-assert.ok(/function readDrawingCrosshairPref\(\) \{\s*if \(isTouchToolbarUi\(\)\) return true;/.test(app));
-assert.ok(/function setDrawingCrosshairEnabled\(on\) \{\s*if \(isTouchToolbarUi\(\)\) on = true;/.test(app));
+assert.ok(/let drawingCrosshairEnabled = true;/.test(app), '십자선 늘 켬');
+assert.ok(/function setDrawingCrosshairEnabled\(_on\) \{\s*drawingCrosshairEnabled = true;/.test(app));
 assert.ok(app.indexOf('if (isTouchToolbarUi()) state.snapToCad = true;') >= 0);
 assert.ok(app.indexOf('if (state.snapToCad === false && !isTouchToolbarUi()) return { x, y, snapped: false };') >= 0);
 assert.ok(app.indexOf('if (on && isTouchToolbarUi()) return;') >= 0);

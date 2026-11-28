@@ -1941,6 +1941,7 @@
             el.hidden = !isDispCat;
             el.disabled = !isDispCat;
         });
+        if (typeof syncNdtGuideButtons === 'function') syncNdtGuideButtons();
     }
 
     function recordNdtDispMarkUndo(entry) {

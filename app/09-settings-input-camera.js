@@ -2810,11 +2810,8 @@
             return !!(root && root.classList && root.classList.contains('bsa-touch-ui'));
         } catch (_e) { return false; }
     }
-    // 터치 기기는 십자선 늘 켬(끄는 버튼 없음). PC는 저장한 켜기/끄기 그대로.
-    let drawingCrosshairEnabled = (function readDrawingCrosshairPref() {
-        if (isTouchToolbarUi()) return true;
-        try { return localStorage.getItem(DRAWING_CROSSHAIR_STORAGE_KEY) !== '0'; } catch (_e) { return true; }
-    })();
+    // 2026-11-28 십자선은 늘 켬 — 켜기/끄기 버튼을 없앴다(PC·터치 모두). 예전에 꺼 둔 저장값도 무시.
+    let drawingCrosshairEnabled = true;
     let drawingCrosshairLastClient = null; // 마지막 포인터 위치(터치 포함) — 크기 조절 손잡이처럼 손가락을 그대로 따라가는 부분용
 
     function isFiniteCrosshairPoint(p) {
@@ -3101,10 +3098,9 @@
         });
     }
 
-    function setDrawingCrosshairEnabled(on) {
-        if (isTouchToolbarUi()) on = true; // 터치 기기: 늘 켬
-        drawingCrosshairEnabled = !!on;
-        try { localStorage.setItem(DRAWING_CROSSHAIR_STORAGE_KEY, drawingCrosshairEnabled ? '1' : '0'); } catch (_e) { /* ignore */ }
+    function setDrawingCrosshairEnabled(_on) {
+        drawingCrosshairEnabled = true; // 늘 켬(끄는 버튼 없음)
+        try { localStorage.removeItem(DRAWING_CROSSHAIR_STORAGE_KEY); } catch (_e) { /* ignore */ }
         syncDrawingCrosshairButtons();
         requestDrawingCrosshairUpdate();
     }

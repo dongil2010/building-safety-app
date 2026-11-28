@@ -11,7 +11,7 @@ const html = fs.readFileSync(path.join(root, 'index.html'), 'utf8');
 const pad = fs.readFileSync(path.join(root, 'js', 'shared', 'measure-keypad.js'), 'utf8');
 
 // 마킹을 찍는 두 경로(마우스·터치) 모두 입력창까지 연다
-assert.strictEqual((app.match(/placeNdtDisplacementMarkAndEdit\(coords\.x, coords\.y\)/g) || []).length, 2);
+assert.strictEqual((app.match(/placeNdtDisplacementMarkAndEdit\(coords\.x, coords\.y(, e)?\)/g) || []).length, 2);
 assert.ok(!/[^.]placeNdtDisplacementMarkAt\(coords\.x, coords\.y\)/.test(app), '입력창 없이 찍는 경로 없음');
 // 터치 한 번 탭에 바로 열림
 assert.ok(/ndtTouchTapAction\(Object\.assign\(\{\}, pendD, \{ wasSelected: true \}\), armedD/.test(app));

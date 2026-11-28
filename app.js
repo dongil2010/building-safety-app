@@ -11097,7 +11097,7 @@ ${roundMobile ? '' : `<button type="button" class="icon-btn icon-btn-trash" titl
         });
     }
 
-// @@app-part 03-canvas.js sha=2d39915c5938 — 원본은 app/03-canvas.js (여기 말고 거기서 고칠 것)
+// @@app-part 03-canvas.js sha=561d786c704a — 원본은 app/03-canvas.js (여기 말고 거기서 고칠 것)
     // --- 8. DRAWING CANVAS ENGINE (PAN/ZOOM/ROTATE & PINS) ---
 
     function setupCanvas() {
@@ -13040,6 +13040,7 @@ ${roundMobile ? '' : `<button type="button" class="icon-btn icon-btn-trash" titl
             el.hidden = !isDispCat;
             el.disabled = !isDispCat;
         });
+        if (typeof syncNdtGuideButtons === 'function') syncNdtGuideButtons();
     }
 
     function recordNdtDispMarkUndo(entry) {
@@ -14700,7 +14701,7 @@ ${roundMobile ? '' : `<button type="button" class="icon-btn icon-btn-trash" titl
         return 'ndtStrength';
     }
 
-// @@app-part 04-ndt-disp.js sha=11c467048ed0 — 원본은 app/04-ndt-disp.js (여기 말고 거기서 고칠 것)
+// @@app-part 04-ndt-disp.js sha=33026ce9b39c — 원본은 app/04-ndt-disp.js (여기 말고 거기서 고칠 것)
     // --- 바닥 수직변위: 그룹(NO.박스) + 다중 레벨 포인트 데이터 ---
     const NDT_DISPLACEMENT_COLORS = ['#ef4444', '#525252', '#f97316', '#22c55e', '#a855f7', '#eab308', '#06b6d4', '#ec4899'];
     const NDT_GRADE_BADGES = {
@@ -15563,9 +15564,326 @@ ${roundMobile ? '' : `<button type="button" class="icon-btn icon-btn-trash" titl
     window.placeNdtDisplacementMarkAt = placeNdtDisplacementMarkAt;
 
     /** 마킹을 찍자마자 그 지점의 레벨 입력창을 연다 */
-    function placeNdtDisplacementMarkAndEdit(imgX, imgY) {
+    function placeNdtDisplacementMarkAndEdit(imgX, imgY, ev) {
+        // 가이드선이 있으면 선 위로 붙여서 찍는다
+        const s = snapNdtDispCoords(imgX, imgY, ev);
+        imgX = s.x;
+        imgY = s.y;
         const placed = placeNdtDisplacementMarkAt(imgX, imgY);
         if (placed) openNdtDisplacementModal(imgX, imgY, placed.group, placed.point);
+    }
+
+    /* --------------------------------------------------------------------------
+     * 2026-11-28 부동침하·부재변위 「가이드선」 — 도면에 가상의 직선을 긋고, 지점을 찍거나 끌면
+     * 가까운 선 위(교차점·끝점 우선)로 붙어서 한 줄로 깔끔하게 찍힌다.
+     * 선은 이 기기에만 남는 작도 보조선이다(보고서·동기화에 안 들어감). 층마다 따로.
+     * -------------------------------------------------------------------------- */
+    const NDT_GUIDE_STORE_KEY = 'bsa_ndt_disp_guides_v1';
+    const NDT_GUIDE_SNAP_PX = 28;      // 화면에서 이 거리 안이면 선에 붙음
+    const NDT_GUIDE_CORNER_PX = 16;    // 교차점·끝점은 이 거리 안이면 그 점으로
+    const NDT_GUIDE_ORTHO_DEG = 4;     // 선 그을 때 가로·세로에서 이만큼 안쪽이면 딱 맞춤
+    let ndtGuideDrawMode = false;      // 「가이드선」 그리기 모드
+    let ndtGuideSnapOn = true;         // 「선에 붙이기」
+    let ndtGuideDraft = null;          // 긋는 중 { x1, y1, x2, y2, sx, sy } (sx·sy = 누른 화면 좌표)
+    let ndtGuideHover = null;          // PC 마킹 모드에서 붙을 자리 미리보기 { x, y }
+    let _ndtGuideCache = null;
+
+    function ndtGuideStoreAll() {
+        if (_ndtGuideCache) return _ndtGuideCache;
+        let all = {};
+        try {
+            const raw = localStorage.getItem(NDT_GUIDE_STORE_KEY);
+            if (raw) all = JSON.parse(raw) || {};
+        } catch (_e) { all = {}; }
+        _ndtGuideCache = (all && typeof all === 'object') ? all : {};
+        return _ndtGuideCache;
+    }
+    function ndtGuideFloorKey() {
+        return `${state.currentBuildingId}_${state.currentFloor}`;
+    }
+    function getNdtGuides() {
+        const list = ndtGuideStoreAll()[ndtGuideFloorKey()];
+        return Array.isArray(list) ? list : [];
+    }
+    function saveNdtGuides(list) {
+        const all = ndtGuideStoreAll();
+        const key = ndtGuideFloorKey();
+        if (list && list.length) all[key] = list;
+        else delete all[key];
+        try { localStorage.setItem(NDT_GUIDE_STORE_KEY, JSON.stringify(all)); } catch (_e) { /* 저장 못 해도 이번 화면에서는 씀 */ }
+        syncNdtGuideButtons();
+    }
+    function isNdtDispCategory() {
+        return currentNdtCategory === '변위' || currentNdtCategory === '부재변위';
+    }
+    function ndtGuidePxToImg(px) {
+        return px / Math.max(ndtView.scale || 1, 0.0001);
+    }
+
+    /** 점 (x,y)에서 선분에 내린 수선의 발(선분 안으로 묶음) */
+    function ndtGuideProject(g, x, y) {
+        const dx = g.x2 - g.x1;
+        const dy = g.y2 - g.y1;
+        const len2 = dx * dx + dy * dy;
+        if (len2 < 1e-9) return { x: g.x1, y: g.y1, d: Math.hypot(x - g.x1, y - g.y1) };
+        let t = ((x - g.x1) * dx + (y - g.y1) * dy) / len2;
+        t = Math.max(0, Math.min(1, t));
+        const px = g.x1 + t * dx;
+        const py = g.y1 + t * dy;
+        return { x: px, y: py, d: Math.hypot(x - px, y - py) };
+    }
+    function ndtGuideIntersect(a, b) {
+        const d1x = a.x2 - a.x1, d1y = a.y2 - a.y1;
+        const d2x = b.x2 - b.x1, d2y = b.y2 - b.y1;
+        const den = d1x * d2y - d1y * d2x;
+        if (Math.abs(den) < 1e-9) return null;
+        const t = ((b.x1 - a.x1) * d2y - (b.y1 - a.y1) * d2x) / den;
+        const u = ((b.x1 - a.x1) * d1y - (b.y1 - a.y1) * d1x) / den;
+        if (t < -1e-6 || t > 1 + 1e-6 || u < -1e-6 || u > 1 + 1e-6) return null;
+        return { x: a.x1 + t * d1x, y: a.y1 + t * d1y };
+    }
+
+    /** 가까운 가이드선 위 자리. 붙을 선이 없으면 null */
+    function findNdtGuideSnap(x, y) {
+        const guides = getNdtGuides();
+        if (!guides.length) return null;
+        const cornerR = ndtGuidePxToImg(NDT_GUIDE_CORNER_PX);
+        const snapR = ndtGuidePxToImg(NDT_GUIDE_SNAP_PX);
+        // 1) 교차점·끝점
+        let best = null;
+        const consider = (p, kind) => {
+            const d = Math.hypot(x - p.x, y - p.y);
+            if (d <= cornerR && (!best || d < best.d)) best = { x: p.x, y: p.y, d, kind };
+        };
+        for (let i = 0; i < guides.length; i++) {
+            consider({ x: guides[i].x1, y: guides[i].y1 }, 'end');
+            consider({ x: guides[i].x2, y: guides[i].y2 }, 'end');
+            for (let j = i + 1; j < guides.length; j++) {
+                const ip = ndtGuideIntersect(guides[i], guides[j]);
+                if (ip) consider(ip, 'cross');
+            }
+        }
+        if (best) return best;
+        // 2) 선 위 수선의 발
+        guides.forEach((g) => {
+            const p = ndtGuideProject(g, x, y);
+            if (p.d <= snapR && (!best || p.d < best.d)) best = { x: p.x, y: p.y, d: p.d, kind: 'line' };
+        });
+        return best;
+    }
+
+    /** 지점 좌표를 가이드선에 붙인다(끄기·Alt·선 없음이면 그대로) */
+    function snapNdtDispCoords(x, y, ev) {
+        if (!ndtGuideSnapOn || !isNdtDispCategory()) return { x, y, snapped: false };
+        if (ev && ev.altKey) return { x, y, snapped: false };
+        const s = findNdtGuideSnap(x, y);
+        return s ? { x: s.x, y: s.y, snapped: true } : { x, y, snapped: false };
+    }
+
+    /** 선 긋는 중: 가로·세로 가까우면 딱 맞추고, 끝을 다른 선의 끝점·교차점에 붙인다 */
+    function updateNdtGuideDraft(x, y, ev) {
+        if (!ndtGuideDraft) return;
+        let ex = x, ey = y;
+        const s = findNdtGuideSnap(ex, ey);
+        const onCorner = !!(s && s.kind !== 'line');
+        if (onCorner) { ex = s.x; ey = s.y; }
+        const dx = ex - ndtGuideDraft.x1;
+        const dy = ey - ndtGuideDraft.y1;
+        const len = Math.hypot(dx, dy);
+        if (len > 0 && !onCorner) {
+            const ang = Math.atan2(dy, dx) * 180 / Math.PI;
+            const step = (ev && ev.shiftKey) ? 15 : 90;
+            const near = Math.round(ang / step) * step;
+            if (step === 15 || Math.abs(ang - near) <= NDT_GUIDE_ORTHO_DEG) {
+                const rad = near * Math.PI / 180;
+                ex = ndtGuideDraft.x1 + Math.cos(rad) * len;
+                ey = ndtGuideDraft.y1 + Math.sin(rad) * len;
+            }
+        }
+        ndtGuideDraft.x2 = ex;
+        ndtGuideDraft.y2 = ey;
+        drawNdtCanvas();
+    }
+
+    function beginNdtGuideDraft(x, y, clientX, clientY) {
+        const s = findNdtGuideSnap(x, y);
+        const sx = s ? s.x : x;
+        const sy = s ? s.y : y;
+        ndtGuideDraft = { x1: sx, y1: sy, x2: sx, y2: sy, sx: clientX, sy: clientY, rawX: x, rawY: y };
+        drawNdtCanvas();
+    }
+
+    function cancelNdtGuideDraft() {
+        if (!ndtGuideDraft) return;
+        ndtGuideDraft = null;
+        drawNdtCanvas();
+    }
+
+    /** 손을 뗐다: 끌었으면 선 추가, 그냥 눌렀으면 그 자리 선 지우기 */
+    function finishNdtGuideDraft(clientX, clientY) {
+        const d = ndtGuideDraft;
+        ndtGuideDraft = null;
+        if (!d) return;
+        const moved = Math.hypot((clientX || 0) - d.sx, (clientY || 0) - d.sy);
+        const lenPx = Math.hypot(d.x2 - d.x1, d.y2 - d.y1) * (ndtView.scale || 1);
+        if (moved < 8 || lenPx < 10) {
+            const guides = getNdtGuides().slice();
+            const r = ndtGuidePxToImg(14);
+            let hitIdx = -1, hitD = Infinity;
+            guides.forEach((g, i) => {
+                const p = ndtGuideProject(g, d.rawX, d.rawY);
+                if (p.d <= r && p.d < hitD) { hitD = p.d; hitIdx = i; }
+            });
+            if (hitIdx >= 0) {
+                guides.splice(hitIdx, 1);
+                saveNdtGuides(guides);
+                window.showToast('가이드선을 지웠습니다.', 'info', 1600);
+            } else {
+                window.showToast('도면을 누른 채 끌어서 가이드선을 그으세요 (선을 한 번 누르면 지워짐)', 'info', 2400);
+            }
+            drawNdtCanvas();
+            return;
+        }
+        const guides = getNdtGuides().slice();
+        guides.push({ x1: d.x1, y1: d.y1, x2: d.x2, y2: d.y2 });
+        saveNdtGuides(guides);
+        drawNdtCanvas();
+        if (guides.length === 1) {
+            window.showToast('가이드선을 그렸습니다. 「가이드선」을 다시 눌러 끄고 마킹하면 지점이 선 위로 붙습니다.', 'success', 3200);
+        }
+    }
+
+    function syncNdtGuideButtons() {
+        const isDisp = isNdtDispCategory();
+        const has = isDisp && getNdtGuides().length > 0;
+        document.querySelectorAll('.ndt-guide-draw-btn').forEach((el) => {
+            el.hidden = !isDisp;
+            el.disabled = !isDisp;
+            el.classList.toggle('active', isDisp && ndtGuideDrawMode);
+            el.setAttribute('aria-pressed', isDisp && ndtGuideDrawMode ? 'true' : 'false');
+        });
+        document.querySelectorAll('.ndt-guide-snap-btn').forEach((el) => {
+            el.hidden = !has;
+            el.disabled = !has;
+            el.classList.toggle('active', ndtGuideSnapOn);
+            el.setAttribute('aria-pressed', ndtGuideSnapOn ? 'true' : 'false');
+            const st = el.querySelector('.toolbar-toggle-state');
+            if (st) st.textContent = ndtGuideSnapOn ? 'ON' : 'OFF';
+        });
+        document.querySelectorAll('.ndt-guide-clear-btn').forEach((el) => {
+            el.hidden = !has;
+            el.disabled = !has;
+        });
+    }
+
+    window.toggleNdtGuideDrawMode = function(force) {
+        if (!isNdtDispCategory()) return;
+        const next = typeof force === 'boolean' ? force : !ndtGuideDrawMode;
+        ndtGuideDrawMode = next;
+        ndtGuideDraft = null;
+        ndtGuideHover = null;
+        if (next) {
+            if (typeof window.setNdtMode === 'function') window.setNdtMode('MARK');
+            window.showToast('가이드선: 도면을 누른 채 끌어 직선을 그으세요 (가로·세로 자동 맞춤, Shift=15°). 선을 한 번 누르면 지웁니다.', 'info', 3600);
+        } else if (getNdtGuides().length) {
+            window.showToast('마킹 모드 — 지점이 가이드선 위로 붙어 찍힙니다 (Alt 누르면 안 붙음)', 'info', 2600);
+        }
+        const canvas = document.getElementById('ndtCanvas');
+        if (canvas) canvas.style.cursor = 'crosshair';
+        syncNdtGuideButtons();
+        drawNdtCanvas();
+    };
+
+    window.toggleNdtGuideSnap = function() {
+        ndtGuideSnapOn = !ndtGuideSnapOn;
+        ndtGuideHover = null;
+        syncNdtGuideButtons();
+        drawNdtCanvas();
+        window.showToast(ndtGuideSnapOn ? '선에 붙이기 켬' : '선에 붙이기 끔 — 누른 자리 그대로 찍힙니다', 'info', 1800);
+    };
+
+    window.clearNdtGuides = async function() {
+        const n = getNdtGuides().length;
+        if (!n) return;
+        if (!await window.confirmDelete(`이 층의 가이드선 ${n}개를 모두 지울까요? (찍은 지점은 그대로)`)) return;
+        saveNdtGuides([]);
+        ndtGuideHover = null;
+        drawNdtCanvas();
+    };
+
+    /** 다른 항목으로 바꿀 때·Esc: 그리기 모드를 끈다 */
+    function resetNdtGuideDrawMode() {
+        ndtGuideDrawMode = false;
+        ndtGuideDraft = null;
+        ndtGuideHover = null;
+        syncNdtGuideButtons();
+    }
+
+    /** 도면 위(그림 좌표계 ctx)에 가이드선 그리기 */
+    function drawNdtGuides(ctx) {
+        if (!isNdtDispCategory()) return;
+        const guides = getNdtGuides();
+        const sc = Math.max(ndtView.scale || 1, 0.0001);
+        const px = (v) => v / sc;
+        let ghost = ndtGuideHover;
+        if (!ghost && isNdtDisplacementMarking && window._ndtDispMarkCoords && !ndtGuideDrawMode) {
+            const s = snapNdtDispCoords(window._ndtDispMarkCoords.x, window._ndtDispMarkCoords.y);
+            if (s.snapped) ghost = s;
+        }
+        if (!guides.length && !ndtGuideDraft && !ghost) return;
+        ctx.save();
+        ctx.lineCap = 'round';
+        const strokeGuide = (g, draft) => {
+            const dx = g.x2 - g.x1, dy = g.y2 - g.y1;
+            const len = Math.hypot(dx, dy) || 1;
+            const ext = px(14);   // 양끝 살짝 연장(보기 좋게)
+            const ux = dx / len, uy = dy / len;
+            const col = draft ? 'rgba(0, 140, 255, 0.95)' : 'rgba(0, 160, 210, 0.85)';
+            ctx.strokeStyle = col;
+            ctx.lineWidth = px(draft ? 2 : 1.5);
+            ctx.setLineDash([px(8), px(5)]);
+            ctx.beginPath();
+            ctx.moveTo(g.x1 - ux * ext, g.y1 - uy * ext);
+            ctx.lineTo(g.x2 + ux * ext, g.y2 + uy * ext);
+            ctx.stroke();
+            ctx.setLineDash([]);
+            ctx.fillStyle = col;
+            [[g.x1, g.y1], [g.x2, g.y2]].forEach(([x, y]) => {
+                ctx.beginPath();
+                ctx.arc(x, y, px(3), 0, Math.PI * 2);
+                ctx.fill();
+            });
+        };
+        guides.forEach(g => strokeGuide(g, false));
+        if (ndtGuideDraft) strokeGuide(ndtGuideDraft, true);
+        if (ghost) {
+            ctx.strokeStyle = 'rgba(0, 140, 255, 1)';
+            ctx.fillStyle = 'rgba(0, 140, 255, 0.18)';
+            ctx.lineWidth = px(2);
+            ctx.beginPath();
+            ctx.arc(ghost.x, ghost.y, px(9), 0, Math.PI * 2);
+            ctx.fill();
+            ctx.stroke();
+            ctx.beginPath();
+            ctx.moveTo(ghost.x - px(4), ghost.y); ctx.lineTo(ghost.x + px(4), ghost.y);
+            ctx.moveTo(ghost.x, ghost.y - px(4)); ctx.lineTo(ghost.x, ghost.y + px(4));
+            ctx.stroke();
+        }
+        ctx.restore();
+    }
+
+    /** PC 마우스 오버: 마킹 모드면 붙을 자리를 미리 보여 준다 */
+    function updateNdtGuideHover(x, y, ev) {
+        let next = null;
+        if (isNdtDispCategory() && ndtMode === 'MARK' && !ndtGuideDrawMode) {
+            const s = snapNdtDispCoords(x, y, ev);
+            if (s.snapped) next = { x: s.x, y: s.y };
+        }
+        const same = (!next && !ndtGuideHover)
+            || (next && ndtGuideHover && Math.abs(next.x - ndtGuideHover.x) < 0.01 && Math.abs(next.y - ndtGuideHover.y) < 0.01);
+        if (same) return;
+        ndtGuideHover = next;
+        drawNdtCanvas();
     }
 
     // 수직변위/부재변위 그룹의 라벨 박스/포인트 원 히트테스트
@@ -15853,6 +16171,7 @@ ${roundMobile ? '' : `<button type="button" class="icon-btn icon-btn-trash" titl
 
     window.setNdtMode = function(mode) {
         ndtMode = mode;
+        if (mode !== 'MARK' && (ndtGuideDrawMode || ndtGuideHover)) resetNdtGuideDrawMode();
         const btnPan = document.getElementById('btnNdtModePan');
         const btnMark = document.getElementById('btnNdtModeMark');
         if (btnPan) btnPan.classList.toggle('active', mode === 'PAN');
@@ -15870,6 +16189,7 @@ ${roundMobile ? '' : `<button type="button" class="icon-btn icon-btn-trash" titl
         }
         currentNdtCategory = cat;
         setActiveNdtDispGroup(null);
+        resetNdtGuideDrawMode();
         selectedNdtIds.clear();
         updateNdtSelectionBar();
         const catMap = { '실측': 'Dim', '강도': 'Strength', '탄산화': 'Carb', '기울기': 'Tilt', '변위': 'Vert', '부재변위': 'MemberDisp', '내화피복': 'Fireproof', '균열모니터': 'CrackMonitor' };
@@ -15995,6 +16315,7 @@ ${roundMobile ? '' : `<button type="button" class="icon-btn icon-btn-trash" titl
             }
         });
         if (currentCat === '변위' || currentCat === '부재변위') {
+            drawNdtGuides(ctx);
             getCurrentFloorDisplacementGroups(currentCat).forEach(g => {
                 drawNdtDisplacementGroup(ctx, g);
                 if (g && g.id && selectedNdtIds.has(ndtDispSelKey(g.id))) {
@@ -17264,6 +17585,11 @@ ${roundMobile ? '' : `<button type="button" class="icon-btn icon-btn-trash" titl
                 beginNdtMarquee(vx, vy, e.clientX, e.clientY, selMode);
                 return;
             }
+            // 2026-11-28 「가이드선」 그리기 모드: 누른 채 끌면 직선, 그냥 누르면 그 자리 선 지우기
+            if (ndtGuideDrawMode && isNdtDispCategory()) {
+                beginNdtGuideDraft(vx, vy, e.clientX, e.clientY);
+                return;
+            }
 
             // 균열모니터: 도면에 찍은 게이지 마킹(아래 일반 핀 처리)이 우선, 없으면 예전 방식의
             // 균열 결함 연결 게이지 핀. 빈 곳은 MARK면 새 게이지 마킹, PAN이면 열린 팝업 닫기.
@@ -17380,6 +17706,16 @@ ${roundMobile ? '' : `<button type="button" class="icon-btn icon-btn-trash" titl
             const vx = pt.x;
             const vy = pt.y;
 
+            if (ndtGuideDraft) {
+                updateNdtGuideDraft(vx, vy, e);
+                return;
+            }
+            if (window.state && window.state.currentTab === 'tab-ndt' && !isNdtDragging) {
+                const onCanvas = mouseX >= 0 && mouseY >= 0 && mouseX <= rect.width && mouseY <= rect.height;
+                if (onCanvas) updateNdtGuideHover(vx, vy, e);
+                else if (ndtGuideHover) { ndtGuideHover = null; drawNdtCanvas(); }
+            }
+
             if (pendingNdtPinHit && !isDraggingNdtPin && !isDraggingNdtPinGroup) {
                 const dx = e.clientX - ndtStartMouseX;
                 const dy = e.clientY - ndtStartMouseY;
@@ -17450,8 +17786,9 @@ ${roundMobile ? '' : `<button type="button" class="icon-btn icon-btn-trash" titl
 
             if (isDraggingNdtDisplacement && activeDragNdtDisplacementGroup) {
                 if (activeDragNdtDisplacementPoint) {
-                    activeDragNdtDisplacementPoint.x = vx - ndtDispDragOffsetX;
-                    activeDragNdtDisplacementPoint.y = vy - ndtDispDragOffsetY;
+                    const sp = snapNdtDispCoords(vx - ndtDispDragOffsetX, vy - ndtDispDragOffsetY, e);
+                    activeDragNdtDisplacementPoint.x = sp.x;
+                    activeDragNdtDisplacementPoint.y = sp.y;
                 } else {
                     activeDragNdtDisplacementGroup.boxX = vx - ndtDispDragOffsetX;
                     activeDragNdtDisplacementGroup.boxY = vy - ndtDispDragOffsetY;
@@ -17548,6 +17885,10 @@ ${roundMobile ? '' : `<button type="button" class="icon-btn icon-btn-trash" titl
 
         window.addEventListener('mouseup', (e) => {
             if (ndtActivePointerIsTouch) return;
+            if (ndtGuideDraft) {
+                finishNdtGuideDraft(e.clientX, e.clientY);
+                return;
+            }
             try {
             if (pendingNdtCrackDefectHit && !isDraggingNdtPin && !isDraggingNdtPinGroup) {
                 const defect = pendingNdtCrackDefectHit.defect;
@@ -17594,7 +17935,7 @@ ${roundMobile ? '' : `<button type="button" class="icon-btn icon-btn-trash" titl
             if (isNdtDisplacementMarking) {
                 isNdtDisplacementMarking = false;
                 const coords = window._ndtDispMarkCoords || { x: 100, y: 100 };
-                placeNdtDisplacementMarkAndEdit(coords.x, coords.y);
+                placeNdtDisplacementMarkAndEdit(coords.x, coords.y, e);
             }
             if (isDraggingNdtPinGroup) {
                 touchMovedNdtItems(null);   // 함께 옮긴 핀·구역의 시각을 올린다
@@ -17728,6 +18069,19 @@ ${roundMobile ? '' : `<button type="button" class="icon-btn icon-btn-trash" titl
                 undoLastNdtDisplacementMark();
             });
         }
+        [['.ndt-guide-draw-btn', () => window.toggleNdtGuideDrawMode()],
+            ['.ndt-guide-snap-btn', () => window.toggleNdtGuideSnap()],
+            ['.ndt-guide-clear-btn', () => window.clearNdtGuides()]].forEach(([sel, fn]) => {
+            document.querySelectorAll(sel).forEach((btn) => {
+                if (btn.dataset.ndtGuideBound) return;
+                btn.dataset.ndtGuideBound = '1';
+                btn.addEventListener('click', (e) => {
+                    e.preventDefault();
+                    e.stopPropagation();
+                    fn();
+                });
+            });
+        });
         document.querySelectorAll('.ndt-disp-new-group-btn').forEach((btn) => {
             if (btn.dataset.ndtNewGroupBound) return;
             btn.dataset.ndtNewGroupBound = '1';
@@ -17762,6 +18116,13 @@ ${roundMobile ? '' : `<button type="button" class="icon-btn icon-btn-trash" titl
                 ndtSuppressMouseUntil = Date.now() + 700;
                 isNdtMarqueeSelecting = false;
                 clearPendingNdtLongPress();
+
+                // 2026-11-28 「가이드선」 그리기 모드
+                if (ndtGuideDrawMode && isNdtDispCategory()) {
+                    if (e.cancelable) e.preventDefault();
+                    beginNdtGuideDraft(vx, vy, touch.clientX, touch.clientY);
+                    return;
+                }
 
                 if (currentNdtCategory === '균열모니터' && !findNdtPinAt(vx, vy)) {
                     const crackHit = findHitPinPart(vx, vy);
@@ -17878,6 +18239,18 @@ ${roundMobile ? '' : `<button type="button" class="icon-btn icon-btn-trash" titl
             // 조사표 등 다른 탭 / 도면 밖에서 시작한 터치 → 스크롤 잠금 금지
             if (window.state && window.state.currentTab !== 'tab-ndt') return;
             if (!ndtTouchStartedOnCanvas) return;
+            if (ndtGuideDraft) {
+                if (e.touches.length >= 2) {
+                    cancelNdtGuideDraft();
+                } else if (e.touches.length === 1) {
+                    if (e.cancelable) e.preventDefault();
+                    const tg = e.touches[0];
+                    const gp = ndtClientToImg(tg.clientX, tg.clientY);
+                    updateNdtGuideDraft(gp.x, gp.y);
+                    refreshNdtLoupe(tg.clientX, tg.clientY);
+                    return;
+                }
+            }
             if (isNdtPinching && e.touches.length >= 2) {
                 if (e.cancelable) e.preventDefault();
                 const canvas = document.getElementById('ndtCanvas');
@@ -18070,8 +18443,9 @@ ${roundMobile ? '' : `<button type="button" class="icon-btn icon-btn-trash" titl
                 const vy = pt.y;
 
                 if (activeDragNdtDisplacementPoint) {
-                    activeDragNdtDisplacementPoint.x = vx - ndtDispDragOffsetX;
-                    activeDragNdtDisplacementPoint.y = vy - ndtDispDragOffsetY;
+                    const sp = snapNdtDispCoords(vx - ndtDispDragOffsetX, vy - ndtDispDragOffsetY);
+                    activeDragNdtDisplacementPoint.x = sp.x;
+                    activeDragNdtDisplacementPoint.y = sp.y;
                 } else if (activeDragNdtDisplacementGroup) {
                     activeDragNdtDisplacementGroup.boxX = vx - ndtDispDragOffsetX;
                     activeDragNdtDisplacementGroup.boxY = vy - ndtDispDragOffsetY;
@@ -18125,6 +18499,15 @@ ${roundMobile ? '' : `<button type="button" class="icon-btn icon-btn-trash" titl
             try {
             if (isNdtPinching && e.touches.length < 2) isNdtPinching = false;
             clearPendingNdtLongPress();
+            if (ndtGuideDraft) {
+                ndtSuppressMouseUntil = Date.now() + 700;
+                hideTouchLoupe(NDT_LOUPE_ID);
+                const tu = e.changedTouches && e.changedTouches[0];
+                if (e.touches.length === 0) ndtTouchStartedOnCanvas = false;
+                ndtActivePointerIsTouch = false;
+                finishNdtGuideDraft(tu ? tu.clientX : 0, tu ? tu.clientY : 0);
+                return;
+            }
             // 합성 mouse(down/up)가 마퀴 선택을 시작하지 않도록 잠시 차단
             ndtSuppressMouseUntil = Date.now() + 700;
             const t = e.changedTouches && e.changedTouches[0];
@@ -37638,7 +38021,7 @@ ${roundMobile ? '' : `<button type="button" class="icon-btn icon-btn-trash" titl
         }
     }
 
-// @@app-part 09-settings-input-camera.js sha=64b06257d11f — 원본은 app/09-settings-input-camera.js (여기 말고 거기서 고칠 것)
+// @@app-part 09-settings-input-camera.js sha=7e8425e98a2a — 원본은 app/09-settings-input-camera.js (여기 말고 거기서 고칠 것)
     // --- 카테고리별 핀/박스 색상 설정 모달 ---
     // 결함 색상은 getDefectColor()가 쓰는 등급·상태 키와 맞춰야 도면에 바로 반영됨
     const STYLE_COLOR_FIELDS = [
@@ -40450,11 +40833,8 @@ ${roundMobile ? '' : `<button type="button" class="icon-btn icon-btn-trash" titl
             return !!(root && root.classList && root.classList.contains('bsa-touch-ui'));
         } catch (_e) { return false; }
     }
-    // 터치 기기는 십자선 늘 켬(끄는 버튼 없음). PC는 저장한 켜기/끄기 그대로.
-    let drawingCrosshairEnabled = (function readDrawingCrosshairPref() {
-        if (isTouchToolbarUi()) return true;
-        try { return localStorage.getItem(DRAWING_CROSSHAIR_STORAGE_KEY) !== '0'; } catch (_e) { return true; }
-    })();
+    // 2026-11-28 십자선은 늘 켬 — 켜기/끄기 버튼을 없앴다(PC·터치 모두). 예전에 꺼 둔 저장값도 무시.
+    let drawingCrosshairEnabled = true;
     let drawingCrosshairLastClient = null; // 마지막 포인터 위치(터치 포함) — 크기 조절 손잡이처럼 손가락을 그대로 따라가는 부분용
 
     function isFiniteCrosshairPoint(p) {
@@ -40741,10 +41121,9 @@ ${roundMobile ? '' : `<button type="button" class="icon-btn icon-btn-trash" titl
         });
     }
 
-    function setDrawingCrosshairEnabled(on) {
-        if (isTouchToolbarUi()) on = true; // 터치 기기: 늘 켬
-        drawingCrosshairEnabled = !!on;
-        try { localStorage.setItem(DRAWING_CROSSHAIR_STORAGE_KEY, drawingCrosshairEnabled ? '1' : '0'); } catch (_e) { /* ignore */ }
+    function setDrawingCrosshairEnabled(_on) {
+        drawingCrosshairEnabled = true; // 늘 켬(끄는 버튼 없음)
+        try { localStorage.removeItem(DRAWING_CROSSHAIR_STORAGE_KEY); } catch (_e) { /* ignore */ }
         syncDrawingCrosshairButtons();
         requestDrawingCrosshairUpdate();
     }
@@ -44588,7 +44967,7 @@ ${roundMobile ? '' : `<button type="button" class="icon-btn icon-btn-trash" titl
         });
     }
 
-// @@app-part 10-marking.js sha=55843a99a026 — 원본은 app/10-marking.js (여기 말고 거기서 고칠 것)
+// @@app-part 10-marking.js sha=f8e63891715d — 원본은 app/10-marking.js (여기 말고 거기서 고칠 것)
     // --- 9. BUTTON CONTROLS & LISTENERS ---
 
     // Main Navigation Tabs Click Listener
@@ -48815,6 +49194,7 @@ ${roundMobile ? '' : `<button type="button" class="icon-btn icon-btn-trash" titl
                 if (dispModal && dispModal.classList.contains('open')) closeNdtDisplacementModal();
                 const dispEditModal = document.getElementById('ndtDisplacementGroupEditModal');
                 if (dispEditModal && dispEditModal.classList.contains('open')) closeNdtDisplacementGroupEditModal();
+                if (ndtGuideDrawMode || ndtGuideDraft) resetNdtGuideDrawMode();
                 if (window._activeNdtDispGroupId) {
                     setActiveNdtDispGroup(null);
                     if (typeof drawNdtCanvas === 'function') drawNdtCanvas();
@@ -48856,6 +49236,9 @@ ${roundMobile ? '' : `<button type="button" class="icon-btn icon-btn-trash" titl
             } else if (k === 'n' && (currentNdtCategory === '변위' || currentNdtCategory === '부재변위')) {
                 e.preventDefault();
                 window.startNewNdtDispGroupMarking();
+            } else if (k === 'g' && (currentNdtCategory === '변위' || currentNdtCategory === '부재변위')) {
+                e.preventDefault();
+                window.toggleNdtGuideDrawMode();
             }
             return;
         }
