@@ -4162,7 +4162,41 @@
                 toggleNdtDispEditRowTransferForm(g, btn.dataset.pointId);
             });
         });
+        bindNdtDispEditLevelTabNav(container);
         ensureNdtDispStationTransferUi(group);
+    }
+
+    /**
+     * 레벨 칸에서 Tab(Shift+Tab)·Enter = 다음(이전) 지점 레벨 칸으로.
+     * 사이의 「이동 보정」·삭제 버튼은 건너뛴다. 끝 칸에서는 브라우저 기본 동작.
+     */
+    function bindNdtDispEditLevelTabNav(container) {
+        if (!container || container.dataset.levelTabNav === '1') return;
+        container.dataset.levelTabNav = '1';
+        container.addEventListener('keydown', (e) => {
+            if (e.isComposing) return;
+            const inp = e.target;
+            if (!inp || !inp.classList || !inp.classList.contains('ndt-disp-edit-level-input')) return;
+            const isTab = e.key === 'Tab';
+            const isEnter = e.key === 'Enter';
+            if (!isTab && !isEnter) return;
+            if (e.ctrlKey || e.altKey || e.metaKey) return;
+            const list = Array.from(container.querySelectorAll('.ndt-disp-edit-level-input'));
+            const i = list.indexOf(inp);
+            if (i < 0) return;
+            const back = isTab && e.shiftKey;
+            const target = list[back ? i - 1 : i + 1];
+            if (!target) {
+                if (isEnter) e.preventDefault();
+                return;
+            }
+            e.preventDefault();
+            target.focus();
+            if (typeof target.select === 'function') {
+                try { target.select(); } catch (_) { /* number 칸은 select 미지원일 수 있음 */ }
+            }
+            target.scrollIntoView({ block: 'nearest' });
+        });
     }
 
     window.deleteNdtDisplacementPoint = async function(groupId, pointId, options) {
