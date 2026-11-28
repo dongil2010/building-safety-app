@@ -96,7 +96,7 @@ assert.ok(zOut > 0 && zOut < zPct && zPct < zIn && zIn < zFit, '줌 순서: - 10
 
 // 5) app.js 연결 + 실제 드롭다운 동작 시험
 assert.ok(/function initPcMapToolbarDropdowns\(\)/.test(app), 'initPcMapToolbarDropdowns 존재');
-assert.ok(/addEventListener\('pointerdown',[\s\S]{0,500}closeAllPcMapToolbarDropdowns[\s\S]{0,60},\s*true\)/.test(app), '바깥 클릭 capture로 닫기');
+assert.ok(/addEventListener\('pointerdown',[\s\S]{0,500}closeAllPcMapToolbarDropdowns[\s\S]{0,600},\s*true\)/.test(app), '바깥 클릭 capture로 닫기');
 assert.ok(/e\.key !== 'Escape'[\s\S]{0,260}closeAllPcMapToolbarDropdowns/.test(app), 'Esc로 닫기');
 assert.ok(/MAP_FLOATING_OVERLAY_SELECTOR[\s\S]{0,400}'\.toolbar-dropdown-menu'/.test(app), '드롭다운 메뉴 터치·클릭 도면 격리');
 assert.ok(/btnToolbarMenuDrawing[\s\S]{0,120}has-align-pending/.test(app), '도면 ▾ 배지 동기화');

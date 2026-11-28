@@ -3612,13 +3612,47 @@
             }
         });
 
+        // 메뉴가 열린 채 도면을 누르면 메뉴만 닫는다 — 그 한 번의 누름이 핀·영역 찍기로 새지 않게
+        // (2026-11-28: 핀 모드에서 메뉴 닫으려고 도면을 눌렀다가 핀이 찍히던 문제)
+        let swallowDrawingPress = false;
+        let swallowReleaseTimer = 0;
+        const isDrawingCanvasTarget = (el) => !!(el && el.tagName === 'CANVAS' && el.closest('#tab-map #canvasContainer'));
+        const releaseSwallowSoon = () => {
+            if (!swallowDrawingPress) return;
+            clearTimeout(swallowReleaseTimer);
+            // 뗀 뒤 따라오는 click(터치는 조금 늦게 옴)까지 막고 푼다
+            swallowReleaseTimer = setTimeout(() => { swallowDrawingPress = false; }, 400);
+        };
+        const swallowIfDrawingPress = (e) => {
+            if (!swallowDrawingPress || !isDrawingCanvasTarget(e.target)) return;
+            // 마우스·터치 이동류는 스크롤 성능 때문에 passive로 듣는다 — 막기(stop)만 하고 preventDefault는 pointerdown·click에서만
+            const t = String(e.type);
+            if (e.cancelable && (t === 'pointerdown' || t === 'click' || t === 'dblclick')) e.preventDefault();
+            e.stopPropagation();
+            e.stopImmediatePropagation();
+        };
+
         // #canvasContainer의 오버레이 격리 핸들러가 버블을 막더라도 바깥 클릭을 놓치지 않게 capture 단계 사용
         document.addEventListener('pointerdown', (e) => {
             if (!toolbar.classList.contains('has-open-dropdown')) return;
             const el = e.target && e.target.closest ? e.target : (e.target && e.target.parentElement);
             if (el && el.closest('#tab-map .canvas-top-toolbar .toolbar-dropdown')) return;
             closeAllPcMapToolbarDropdowns();
+            if (isDrawingCanvasTarget(el)) {
+                swallowDrawingPress = true;
+                clearTimeout(swallowReleaseTimer);
+                swallowReleaseTimer = setTimeout(() => { swallowDrawingPress = false; }, 3000);
+                swallowIfDrawingPress(e);
+            }
         }, true);
+        ['mousedown', 'mousemove', 'touchstart', 'touchmove'].forEach((type) => {
+            document.addEventListener(type, swallowIfDrawingPress, { capture: true, passive: true });
+        });
+        ['pointerup', 'mouseup', 'touchend', 'pointercancel', 'touchcancel'].forEach((type) => {
+            document.addEventListener(type, (e) => { swallowIfDrawingPress(e); releaseSwallowSoon(); }, { capture: true, passive: true });
+        });
+        document.addEventListener('click', swallowIfDrawingPress, true);
+        document.addEventListener('dblclick', swallowIfDrawingPress, true);
 
         document.addEventListener('keydown', (e) => {
             if (e.key !== 'Escape') return;
