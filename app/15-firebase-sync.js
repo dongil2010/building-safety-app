@@ -1814,6 +1814,16 @@
         const btnGal = document.getElementById('btnOverviewGallery');
         if (btnCam) btnCam.addEventListener('click', () => triggerOverviewPhotoPick('camera'));
         if (btnGal) btnGal.addEventListener('click', () => triggerOverviewPhotoPick('gallery'));
+        // 2026-11-28 캡처 그림 붙여넣기 — 버튼 또는 창에서 Ctrl+V
+        const btnPaste = document.getElementById('btnOverviewPaste');
+        if (btnPaste) btnPaste.addEventListener('click', () => triggerOverviewPhotoPick('paste'));
+        if (typeof registerPhotoPasteTarget === 'function') {
+            registerPhotoPasteTarget({
+                priority: 20,
+                isOpen: isOverviewPhotosModalOpen,
+                onFiles: async (files) => { for (const f of files) await addOverviewPhotoFromFile(f); }
+            });
+        }
     })();
 
     // ---------------------------------------------------------------------------

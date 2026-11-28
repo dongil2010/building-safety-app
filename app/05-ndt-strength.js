@@ -1045,6 +1045,48 @@
         }
     }
 
+    /**
+     * 사진 넣는 창마다 Ctrl+V(캡처 그림 붙여넣기) 받을 곳을 등록한다. 2026-11-28
+     * t = { priority, isOpen(): 지금 이 창이 떠 있나, onFiles(files) }. 위에 뜨는 창일수록 priority를 크게.
+     * 입력칸에 글자를 붙여 넣는 Ctrl+V와 전차 종합결론 창(자체 처리)은 건드리지 않는다.
+     */
+    function registerPhotoPasteTarget(t) {
+        if (!t || typeof t.isOpen !== 'function' || typeof t.onFiles !== 'function') return;
+        const list = window.__bsaPhotoPasteTargets || (window.__bsaPhotoPasteTargets = []);
+        list.push(t);
+        list.sort((a, b) => (b.priority || 0) - (a.priority || 0));
+        if (window.__bsaPhotoPasteBound) return;
+        window.__bsaPhotoPasteBound = true;
+        document.addEventListener('paste', (e) => {
+            if (e.defaultPrevented) return;
+            if (window.bsaPrevSummary && typeof window.bsaPrevSummary.isOpen === 'function' && window.bsaPrevSummary.isOpen()) return;
+            const cd = e.clipboardData;
+            const files = Array.from((cd && cd.items) || [])
+                .filter((it) => it.kind === 'file')
+                .map((it) => it.getAsFile())
+                .filter((f) => f && /^image\//i.test(f.type));
+            if (!files.length) return;
+            const tg = e.target;
+            const inField = tg && (tg.tagName === 'INPUT' || tg.tagName === 'TEXTAREA' || tg.isContentEditable);
+            if (inField && cd && cd.getData && cd.getData('text/plain')) return;
+            const target = (window.__bsaPhotoPasteTargets || []).find((x) => {
+                try { return !!x.isOpen(); } catch (_e) { return false; }
+            });
+            if (!target) return;
+            e.preventDefault();
+            try { target.onFiles(files); } catch (err) { console.warn('사진 붙여넣기 실패:', err); }
+        });
+    }
+    window.bsaRegisterPhotoPaste = registerPhotoPasteTarget;
+    window.bsaReadClipboardImages = () => readClipboardImageFiles();
+
+    /** 창(overlay)이 떠 있나 — open/active 클래스 또는 display:flex */
+    function isPhotoPasteOverlayShown(id) {
+        const m = document.getElementById(id);
+        if (!m) return false;
+        return m.classList.contains('open') || m.classList.contains('active') || m.style.display === 'flex';
+    }
+
     // 측정지 사진 스캔 시 원본 사진을 저장해두고(보고서 '측정 DATA' 표에 그대로 넣기 위함),
     // 슬롯 카드 안에 작은 미리보기 + 삭제 버튼을 보여준다.
     async function renderStrengthSlotPhotoPreview(slotIdx) {
@@ -1255,28 +1297,20 @@
         }
         if (!window.__bsaNdtPasteBound) {
             window.__bsaNdtPasteBound = true;
-            // PC: 비파괴 입력창이 열려 있을 때 Ctrl+V로 캡처 그림 붙여넣기. 2026-11-28
+            // PC: 비파괴 입력창에서 Ctrl+V로 캡처 그림 붙여넣기. 2026-11-28
             // 강도(측정지) 칸이 보이면 마지막으로 누른 측정 위치로, 아니면 현장 사진으로.
-            document.addEventListener('paste', (e) => {
-                if (!isNdtModalOpen()) return;
-                const cd = e.clipboardData;
-                const files = Array.from((cd && cd.items) || [])
-                    .filter((it) => it.kind === 'file')
-                    .map((it) => it.getAsFile())
-                    .filter((f) => f && /^image\//i.test(f.type));
-                if (!files.length) return;
-                const t = e.target;
-                const inField = t && (t.tagName === 'INPUT' || t.tagName === 'TEXTAREA' || t.isContentEditable);
-                // 입력칸에 글자를 붙여 넣는 경우는 건드리지 않는다
-                if (inField && cd && cd.getData && cd.getData('text/plain')) return;
-                e.preventDefault();
-                const box = document.getElementById('ndtStrengthSlotsContainer');
-                const strengthVisible = !!(box && box.offsetParent && ndtStrengthSlots.length);
-                if (strengthVisible) {
-                    const idx = Math.min(Math.max(0, ndtStrengthPasteSlot), ndtStrengthSlots.length - 1);
-                    cropAndScanStrengthSlot(files[0], idx);
-                } else {
-                    addNdtItemPhotoFiles(files);
+            registerPhotoPasteTarget({
+                priority: 30,
+                isOpen: isNdtModalOpen,
+                onFiles: (files) => {
+                    const box = document.getElementById('ndtStrengthSlotsContainer');
+                    const strengthVisible = !!(box && box.offsetParent && ndtStrengthSlots.length);
+                    if (strengthVisible) {
+                        const idx = Math.min(Math.max(0, ndtStrengthPasteSlot), ndtStrengthSlots.length - 1);
+                        cropAndScanStrengthSlot(files[0], idx);
+                    } else {
+                        addNdtItemPhotoFiles(files);
+                    }
                 }
             });
         }
@@ -1304,19 +1338,41 @@
         });
     }
 
+    async function addNdtDispGroupPhotoFiles(files) {
+        if (!files || !files.length) return;
+        const groupId = document.getElementById('ndtDispEditGroupId')?.value;
+        if (!groupId) return;
+        const floorKey = `${state.currentBuildingId}_${state.currentFloor}`;
+        await addNdtFieldPhotos(files, floorKey, () => findNdtDispGroupInFloor(floorKey, groupId), () => {
+            if (document.getElementById('ndtDispEditGroupId')?.value !== groupId) return;
+            renderNdtDispGroupPhotoList(groupId);
+            if (typeof renderNdtSummaryTable === 'function') renderNdtSummaryTable();
+        });
+    }
+
     function bindNdtDispGroupPhotoInputs() {
         const onFiles = async (input) => {
             const files = Array.from(input.files || []);
             input.value = '';
-            const groupId = document.getElementById('ndtDispEditGroupId')?.value;
-            if (!groupId) return;
-            const floorKey = `${state.currentBuildingId}_${state.currentFloor}`;
-            await addNdtFieldPhotos(files, floorKey, () => findNdtDispGroupInFloor(floorKey, groupId), () => {
-                if (document.getElementById('ndtDispEditGroupId')?.value !== groupId) return;
-                renderNdtDispGroupPhotoList(groupId);
-                if (typeof renderNdtSummaryTable === 'function') renderNdtSummaryTable();
-            });
+            await addNdtDispGroupPhotoFiles(files);
         };
+        const pasteBtn = document.getElementById('btnNdtDispEditPaste');
+        if (pasteBtn && pasteBtn.dataset.bound !== '1') {
+            pasteBtn.dataset.bound = '1';
+            pasteBtn.addEventListener('click', async (e) => {
+                e.preventDefault();
+                const files = await readClipboardImageFiles();
+                if (files) await addNdtDispGroupPhotoFiles(files);
+            });
+        }
+        if (!window.__bsaNdtDispPasteBound) {
+            window.__bsaNdtDispPasteBound = true;
+            registerPhotoPasteTarget({
+                priority: 40,
+                isOpen: () => isPhotoPasteOverlayShown('ndtDisplacementGroupEditModal'),
+                onFiles: (files) => addNdtDispGroupPhotoFiles(files)
+            });
+        }
         [['btnNdtDispEditCamera', 'inputNdtDispEditCamera'], ['btnNdtDispEditGallery', 'inputNdtDispEditPhoto']].forEach(([btnId, inputId]) => {
             const btn = document.getElementById(btnId);
             const input = document.getElementById(inputId);

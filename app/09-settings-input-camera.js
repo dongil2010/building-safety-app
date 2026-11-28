@@ -4517,6 +4517,7 @@
             bar.className = 'defect-prev-add-bar';
             bar.style.cssText = 'display:flex;gap:.35rem;margin-top:.35rem;';
             bar.innerHTML = '<button type="button" class="btn btn-sm btn-outline" data-prev-pick="gallery" style="flex:1"><i class="fa-solid fa-image"></i> 전회차 사진</button>'
+                + '<button type="button" class="btn btn-sm btn-outline" data-prev-pick="paste" title="Win+Shift+S로 캡처한 그림 붙여넣기 (창에서 Ctrl+V도 됨)"><i class="fa-solid fa-paste"></i></button>'
                 + '<button type="button" class="btn btn-sm btn-outline" data-prev-pick="camera" title="촬영"><i class="fa-solid fa-camera"></i></button>';
             bar.addEventListener('click', (e) => {
                 const b = e.target.closest('[data-prev-pick]');
@@ -4610,6 +4611,7 @@
             bar.className = 'defect-repair-photo-bar';
             bar.style.cssText = 'display:flex;gap:.35rem;margin-top:.35rem;';
             bar.innerHTML = '<button type="button" class="btn btn-sm btn-outline" data-repair-pick="gallery" style="flex:1;border-color:#111;color:#111"><i class="fa-solid fa-screwdriver-wrench"></i> 보수완료 사진 추가</button>'
+                + '<button type="button" class="btn btn-sm btn-outline" data-repair-pick="paste" title="Win+Shift+S로 캡처한 그림 붙여넣기 (창에서 Ctrl+V도 됨)" style="border-color:#111;color:#111"><i class="fa-solid fa-paste"></i></button>'
                 + '<button type="button" class="btn btn-sm btn-outline" data-repair-pick="camera" title="보수완료 사진 촬영" style="border-color:#111;color:#111"><i class="fa-solid fa-camera"></i></button>';
             bar.addEventListener('click', (e) => {
                 const b = e.target.closest('[data-repair-pick]');
@@ -5029,6 +5031,11 @@
     }
 
     async function pickImageFromDevice(mode) {
+        // 2026-11-28 「붙여넣기」: 클립보드 그림(Win+Shift+S 캡처 등) 첫 장
+        if (mode === 'paste') {
+            const files = await readClipboardImageFiles();
+            return (files && files[0]) || null;
+        }
         const wantCamera = mode === 'camera';
         const Camera = window.Capacitor?.Plugins?.Camera;
         // 2026-11-10 앱 전용 촬영 화면(줌·촬영 버튼 자리·확인 버튼). 없거나(옛 APK) 못 열면 아래 순정 카메라로.
@@ -5383,6 +5390,44 @@
             triggerDefectPhotoPick('gallery', 'curr');
         };
     }
+
+    const btnTriggerPaste = document.getElementById('btnTriggerPaste');
+    if (btnTriggerPaste) {
+        btnTriggerPaste.onclick = (e) => {
+            e.preventDefault();
+            e.stopPropagation();
+            triggerDefectPhotoPick('paste', 'curr');
+        };
+    }
+
+    // 2026-11-28 결함 창에서 Ctrl+V(캡처 그림) → 마지막으로 누른 칸(전차·보수완료·현차), 처음엔 현차
+    (function bindDefectPhotoPaste() {
+        let pasteKind = 'curr';
+        const modal = document.getElementById('defectModal');
+        if (modal) {
+            modal.addEventListener('pointerdown', (e) => {
+                const t = e.target;
+                if (!t || !t.closest) return;
+                if (t.closest('#defectRepairPhotoBar')) pasteKind = 'repair';
+                else if (t.closest('.defect-photo-slot-prev')) pasteKind = 'prev';
+                else if (t.closest('.defect-photo-slot-curr')) pasteKind = 'curr';
+            }, true);
+        }
+        if (typeof registerPhotoPasteTarget !== 'function') return;
+        registerPhotoPasteTarget({
+            priority: 10,
+            isOpen: isDefectModalOpen,
+            onFiles: async (files) => {
+                let kind = pasteKind;
+                if (kind === 'prev' && !isPrevPhotoEditableNow()) kind = 'curr';
+                if (kind === 'repair' && !isRepairPhotoEditableNow()) kind = 'curr';
+                const photoTarget = captureDefectPhotoTarget();
+                for (const f of files) {
+                    try { await handleSelectedPhotoFile(f, kind, photoTarget); } catch (_e) { /* 안내는 handleSelectedPhotoFile이 */ }
+                }
+            }
+        });
+    })();
 
     // 2026-10-19 결함 수정창 사진 칸에 끌어다 놓기 — PC 탐색기 그림 파일(여러 장)·앱 안 그림(끌면 data:/blob: 주소).
     // 처리는 「추가」 단추와 같은 handleSelectedPhotoFile(줄이기·IndexedDB·동기화). 놓은 순서대로 한 장씩.

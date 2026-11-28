@@ -2591,10 +2591,13 @@
     }
 
     async function pickCrackMonitorPhoto(kind, slot, mode) {
+        const m = mode === 'camera' ? 'camera' : (mode === 'paste' ? 'paste' : 'gallery');
+        const file = (typeof pickImageFromDevice === 'function') ? await pickImageFromDevice(m) : null;
+        if (file) await applyCrackMonitorPhotoFile(kind, slot, file);
+    }
+
+    async function applyCrackMonitorPhotoFile(kind, slot, file) {
         try {
-            const file = (typeof pickImageFromDevice === 'function')
-                ? await pickImageFromDevice(mode === 'camera' ? 'camera' : 'gallery')
-                : null;
             if (!file) return;
             let dataUrl = null;
             if (typeof window.compressDefectPhoto43 === 'function') {
@@ -2717,6 +2720,25 @@
         }
         if (!window._crackMonitorPhotoUiBound) {
             window._crackMonitorPhotoUiBound = true;
+            // 2026-11-28 Ctrl+V(캡처 그림) → 마지막으로 누른 사진 칸, 처음엔 게이지 현차
+            let cmPasteKey = 'gauge:curr';
+            document.addEventListener('pointerdown', (e) => {
+                const slotEl = e.target && e.target.closest && e.target.closest('#ndtCrackMonitorModal .crack-monitor-photo-slot');
+                const btn = slotEl && slotEl.querySelector('[data-cm-photo-pick]');
+                if (!btn) return;
+                const [k, s] = String(btn.getAttribute('data-cm-photo-pick') || '').split(':');
+                if (k && s) cmPasteKey = `${k}:${s}`;
+            }, true);
+            if (typeof registerPhotoPasteTarget === 'function') {
+                registerPhotoPasteTarget({
+                    priority: 50,
+                    isOpen: isNdtCrackMonitorModalOpen,
+                    onFiles: (files) => {
+                        const [k, s] = cmPasteKey.split(':');
+                        applyCrackMonitorPhotoFile(k, s, files[0]);
+                    }
+                });
+            }
             document.addEventListener('click', (e) => {
                 const pickBtn = e.target && e.target.closest && e.target.closest('[data-cm-photo-pick]');
                 if (pickBtn) {

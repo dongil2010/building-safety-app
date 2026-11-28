@@ -19101,7 +19101,7 @@ ${roundMobile ? '' : `<button type="button" class="icon-btn icon-btn-trash" titl
         URL.revokeObjectURL(url);
     };
 
-// @@app-part 05-ndt-strength.js sha=e0da79db4d39 — 원본은 app/05-ndt-strength.js (여기 말고 거기서 고칠 것)
+// @@app-part 05-ndt-strength.js sha=5e694c7aea21 — 원본은 app/05-ndt-strength.js (여기 말고 거기서 고칠 것)
     // --- 콘크리트 강도(반발경도) 추정 엔진 ---
     // 회사에서 쓰던 엑셀(반발경도-고강도포함) 자료를 그대로 옮겼다.
     // 각 행: [R, 0도 보정값, +90도 보정값, +45도 보정값, -45도 보정값, -90도 보정값]
@@ -20148,6 +20148,48 @@ ${roundMobile ? '' : `<button type="button" class="icon-btn icon-btn-trash" titl
         }
     }
 
+    /**
+     * 사진 넣는 창마다 Ctrl+V(캡처 그림 붙여넣기) 받을 곳을 등록한다. 2026-11-28
+     * t = { priority, isOpen(): 지금 이 창이 떠 있나, onFiles(files) }. 위에 뜨는 창일수록 priority를 크게.
+     * 입력칸에 글자를 붙여 넣는 Ctrl+V와 전차 종합결론 창(자체 처리)은 건드리지 않는다.
+     */
+    function registerPhotoPasteTarget(t) {
+        if (!t || typeof t.isOpen !== 'function' || typeof t.onFiles !== 'function') return;
+        const list = window.__bsaPhotoPasteTargets || (window.__bsaPhotoPasteTargets = []);
+        list.push(t);
+        list.sort((a, b) => (b.priority || 0) - (a.priority || 0));
+        if (window.__bsaPhotoPasteBound) return;
+        window.__bsaPhotoPasteBound = true;
+        document.addEventListener('paste', (e) => {
+            if (e.defaultPrevented) return;
+            if (window.bsaPrevSummary && typeof window.bsaPrevSummary.isOpen === 'function' && window.bsaPrevSummary.isOpen()) return;
+            const cd = e.clipboardData;
+            const files = Array.from((cd && cd.items) || [])
+                .filter((it) => it.kind === 'file')
+                .map((it) => it.getAsFile())
+                .filter((f) => f && /^image\//i.test(f.type));
+            if (!files.length) return;
+            const tg = e.target;
+            const inField = tg && (tg.tagName === 'INPUT' || tg.tagName === 'TEXTAREA' || tg.isContentEditable);
+            if (inField && cd && cd.getData && cd.getData('text/plain')) return;
+            const target = (window.__bsaPhotoPasteTargets || []).find((x) => {
+                try { return !!x.isOpen(); } catch (_e) { return false; }
+            });
+            if (!target) return;
+            e.preventDefault();
+            try { target.onFiles(files); } catch (err) { console.warn('사진 붙여넣기 실패:', err); }
+        });
+    }
+    window.bsaRegisterPhotoPaste = registerPhotoPasteTarget;
+    window.bsaReadClipboardImages = () => readClipboardImageFiles();
+
+    /** 창(overlay)이 떠 있나 — open/active 클래스 또는 display:flex */
+    function isPhotoPasteOverlayShown(id) {
+        const m = document.getElementById(id);
+        if (!m) return false;
+        return m.classList.contains('open') || m.classList.contains('active') || m.style.display === 'flex';
+    }
+
     // 측정지 사진 스캔 시 원본 사진을 저장해두고(보고서 '측정 DATA' 표에 그대로 넣기 위함),
     // 슬롯 카드 안에 작은 미리보기 + 삭제 버튼을 보여준다.
     async function renderStrengthSlotPhotoPreview(slotIdx) {
@@ -20358,28 +20400,20 @@ ${roundMobile ? '' : `<button type="button" class="icon-btn icon-btn-trash" titl
         }
         if (!window.__bsaNdtPasteBound) {
             window.__bsaNdtPasteBound = true;
-            // PC: 비파괴 입력창이 열려 있을 때 Ctrl+V로 캡처 그림 붙여넣기. 2026-11-28
+            // PC: 비파괴 입력창에서 Ctrl+V로 캡처 그림 붙여넣기. 2026-11-28
             // 강도(측정지) 칸이 보이면 마지막으로 누른 측정 위치로, 아니면 현장 사진으로.
-            document.addEventListener('paste', (e) => {
-                if (!isNdtModalOpen()) return;
-                const cd = e.clipboardData;
-                const files = Array.from((cd && cd.items) || [])
-                    .filter((it) => it.kind === 'file')
-                    .map((it) => it.getAsFile())
-                    .filter((f) => f && /^image\//i.test(f.type));
-                if (!files.length) return;
-                const t = e.target;
-                const inField = t && (t.tagName === 'INPUT' || t.tagName === 'TEXTAREA' || t.isContentEditable);
-                // 입력칸에 글자를 붙여 넣는 경우는 건드리지 않는다
-                if (inField && cd && cd.getData && cd.getData('text/plain')) return;
-                e.preventDefault();
-                const box = document.getElementById('ndtStrengthSlotsContainer');
-                const strengthVisible = !!(box && box.offsetParent && ndtStrengthSlots.length);
-                if (strengthVisible) {
-                    const idx = Math.min(Math.max(0, ndtStrengthPasteSlot), ndtStrengthSlots.length - 1);
-                    cropAndScanStrengthSlot(files[0], idx);
-                } else {
-                    addNdtItemPhotoFiles(files);
+            registerPhotoPasteTarget({
+                priority: 30,
+                isOpen: isNdtModalOpen,
+                onFiles: (files) => {
+                    const box = document.getElementById('ndtStrengthSlotsContainer');
+                    const strengthVisible = !!(box && box.offsetParent && ndtStrengthSlots.length);
+                    if (strengthVisible) {
+                        const idx = Math.min(Math.max(0, ndtStrengthPasteSlot), ndtStrengthSlots.length - 1);
+                        cropAndScanStrengthSlot(files[0], idx);
+                    } else {
+                        addNdtItemPhotoFiles(files);
+                    }
                 }
             });
         }
@@ -20407,19 +20441,41 @@ ${roundMobile ? '' : `<button type="button" class="icon-btn icon-btn-trash" titl
         });
     }
 
+    async function addNdtDispGroupPhotoFiles(files) {
+        if (!files || !files.length) return;
+        const groupId = document.getElementById('ndtDispEditGroupId')?.value;
+        if (!groupId) return;
+        const floorKey = `${state.currentBuildingId}_${state.currentFloor}`;
+        await addNdtFieldPhotos(files, floorKey, () => findNdtDispGroupInFloor(floorKey, groupId), () => {
+            if (document.getElementById('ndtDispEditGroupId')?.value !== groupId) return;
+            renderNdtDispGroupPhotoList(groupId);
+            if (typeof renderNdtSummaryTable === 'function') renderNdtSummaryTable();
+        });
+    }
+
     function bindNdtDispGroupPhotoInputs() {
         const onFiles = async (input) => {
             const files = Array.from(input.files || []);
             input.value = '';
-            const groupId = document.getElementById('ndtDispEditGroupId')?.value;
-            if (!groupId) return;
-            const floorKey = `${state.currentBuildingId}_${state.currentFloor}`;
-            await addNdtFieldPhotos(files, floorKey, () => findNdtDispGroupInFloor(floorKey, groupId), () => {
-                if (document.getElementById('ndtDispEditGroupId')?.value !== groupId) return;
-                renderNdtDispGroupPhotoList(groupId);
-                if (typeof renderNdtSummaryTable === 'function') renderNdtSummaryTable();
-            });
+            await addNdtDispGroupPhotoFiles(files);
         };
+        const pasteBtn = document.getElementById('btnNdtDispEditPaste');
+        if (pasteBtn && pasteBtn.dataset.bound !== '1') {
+            pasteBtn.dataset.bound = '1';
+            pasteBtn.addEventListener('click', async (e) => {
+                e.preventDefault();
+                const files = await readClipboardImageFiles();
+                if (files) await addNdtDispGroupPhotoFiles(files);
+            });
+        }
+        if (!window.__bsaNdtDispPasteBound) {
+            window.__bsaNdtDispPasteBound = true;
+            registerPhotoPasteTarget({
+                priority: 40,
+                isOpen: () => isPhotoPasteOverlayShown('ndtDisplacementGroupEditModal'),
+                onFiles: (files) => addNdtDispGroupPhotoFiles(files)
+            });
+        }
         [['btnNdtDispEditCamera', 'inputNdtDispEditCamera'], ['btnNdtDispEditGallery', 'inputNdtDispEditPhoto']].forEach(([btnId, inputId]) => {
             const btn = document.getElementById(btnId);
             const input = document.getElementById(inputId);
@@ -33232,7 +33288,7 @@ ${roundMobile ? '' : `<button type="button" class="icon-btn icon-btn-trash" titl
         refreshDefectQuickPickBar();
     }
 
-// @@app-part 08-defect-presets.js sha=c4d22820ff30 — 원본은 app/08-defect-presets.js (여기 말고 거기서 고칠 것)
+// @@app-part 08-defect-presets.js sha=8d8856e289a8 — 원본은 app/08-defect-presets.js (여기 말고 거기서 고칠 것)
     // --- Dynamic Defect Type Presets & Custom Adding ---
     const STEEL_MEMBER_DEFECTS = [
         '상태양호',
@@ -35825,10 +35881,13 @@ ${roundMobile ? '' : `<button type="button" class="icon-btn icon-btn-trash" titl
     }
 
     async function pickCrackMonitorPhoto(kind, slot, mode) {
+        const m = mode === 'camera' ? 'camera' : (mode === 'paste' ? 'paste' : 'gallery');
+        const file = (typeof pickImageFromDevice === 'function') ? await pickImageFromDevice(m) : null;
+        if (file) await applyCrackMonitorPhotoFile(kind, slot, file);
+    }
+
+    async function applyCrackMonitorPhotoFile(kind, slot, file) {
         try {
-            const file = (typeof pickImageFromDevice === 'function')
-                ? await pickImageFromDevice(mode === 'camera' ? 'camera' : 'gallery')
-                : null;
             if (!file) return;
             let dataUrl = null;
             if (typeof window.compressDefectPhoto43 === 'function') {
@@ -35951,6 +36010,25 @@ ${roundMobile ? '' : `<button type="button" class="icon-btn icon-btn-trash" titl
         }
         if (!window._crackMonitorPhotoUiBound) {
             window._crackMonitorPhotoUiBound = true;
+            // 2026-11-28 Ctrl+V(캡처 그림) → 마지막으로 누른 사진 칸, 처음엔 게이지 현차
+            let cmPasteKey = 'gauge:curr';
+            document.addEventListener('pointerdown', (e) => {
+                const slotEl = e.target && e.target.closest && e.target.closest('#ndtCrackMonitorModal .crack-monitor-photo-slot');
+                const btn = slotEl && slotEl.querySelector('[data-cm-photo-pick]');
+                if (!btn) return;
+                const [k, s] = String(btn.getAttribute('data-cm-photo-pick') || '').split(':');
+                if (k && s) cmPasteKey = `${k}:${s}`;
+            }, true);
+            if (typeof registerPhotoPasteTarget === 'function') {
+                registerPhotoPasteTarget({
+                    priority: 50,
+                    isOpen: isNdtCrackMonitorModalOpen,
+                    onFiles: (files) => {
+                        const [k, s] = cmPasteKey.split(':');
+                        applyCrackMonitorPhotoFile(k, s, files[0]);
+                    }
+                });
+            }
             document.addEventListener('click', (e) => {
                 const pickBtn = e.target && e.target.closest && e.target.closest('[data-cm-photo-pick]');
                 if (pickBtn) {
@@ -38115,7 +38193,7 @@ ${roundMobile ? '' : `<button type="button" class="icon-btn icon-btn-trash" titl
         }
     }
 
-// @@app-part 09-settings-input-camera.js sha=7e8425e98a2a — 원본은 app/09-settings-input-camera.js (여기 말고 거기서 고칠 것)
+// @@app-part 09-settings-input-camera.js sha=12554f762de7 — 원본은 app/09-settings-input-camera.js (여기 말고 거기서 고칠 것)
     // --- 카테고리별 핀/박스 색상 설정 모달 ---
     // 결함 색상은 getDefectColor()가 쓰는 등급·상태 키와 맞춰야 도면에 바로 반영됨
     const STYLE_COLOR_FIELDS = [
@@ -42634,6 +42712,7 @@ ${roundMobile ? '' : `<button type="button" class="icon-btn icon-btn-trash" titl
             bar.className = 'defect-prev-add-bar';
             bar.style.cssText = 'display:flex;gap:.35rem;margin-top:.35rem;';
             bar.innerHTML = '<button type="button" class="btn btn-sm btn-outline" data-prev-pick="gallery" style="flex:1"><i class="fa-solid fa-image"></i> 전회차 사진</button>'
+                + '<button type="button" class="btn btn-sm btn-outline" data-prev-pick="paste" title="Win+Shift+S로 캡처한 그림 붙여넣기 (창에서 Ctrl+V도 됨)"><i class="fa-solid fa-paste"></i></button>'
                 + '<button type="button" class="btn btn-sm btn-outline" data-prev-pick="camera" title="촬영"><i class="fa-solid fa-camera"></i></button>';
             bar.addEventListener('click', (e) => {
                 const b = e.target.closest('[data-prev-pick]');
@@ -42727,6 +42806,7 @@ ${roundMobile ? '' : `<button type="button" class="icon-btn icon-btn-trash" titl
             bar.className = 'defect-repair-photo-bar';
             bar.style.cssText = 'display:flex;gap:.35rem;margin-top:.35rem;';
             bar.innerHTML = '<button type="button" class="btn btn-sm btn-outline" data-repair-pick="gallery" style="flex:1;border-color:#111;color:#111"><i class="fa-solid fa-screwdriver-wrench"></i> 보수완료 사진 추가</button>'
+                + '<button type="button" class="btn btn-sm btn-outline" data-repair-pick="paste" title="Win+Shift+S로 캡처한 그림 붙여넣기 (창에서 Ctrl+V도 됨)" style="border-color:#111;color:#111"><i class="fa-solid fa-paste"></i></button>'
                 + '<button type="button" class="btn btn-sm btn-outline" data-repair-pick="camera" title="보수완료 사진 촬영" style="border-color:#111;color:#111"><i class="fa-solid fa-camera"></i></button>';
             bar.addEventListener('click', (e) => {
                 const b = e.target.closest('[data-repair-pick]');
@@ -43146,6 +43226,11 @@ ${roundMobile ? '' : `<button type="button" class="icon-btn icon-btn-trash" titl
     }
 
     async function pickImageFromDevice(mode) {
+        // 2026-11-28 「붙여넣기」: 클립보드 그림(Win+Shift+S 캡처 등) 첫 장
+        if (mode === 'paste') {
+            const files = await readClipboardImageFiles();
+            return (files && files[0]) || null;
+        }
         const wantCamera = mode === 'camera';
         const Camera = window.Capacitor?.Plugins?.Camera;
         // 2026-11-10 앱 전용 촬영 화면(줌·촬영 버튼 자리·확인 버튼). 없거나(옛 APK) 못 열면 아래 순정 카메라로.
@@ -43500,6 +43585,44 @@ ${roundMobile ? '' : `<button type="button" class="icon-btn icon-btn-trash" titl
             triggerDefectPhotoPick('gallery', 'curr');
         };
     }
+
+    const btnTriggerPaste = document.getElementById('btnTriggerPaste');
+    if (btnTriggerPaste) {
+        btnTriggerPaste.onclick = (e) => {
+            e.preventDefault();
+            e.stopPropagation();
+            triggerDefectPhotoPick('paste', 'curr');
+        };
+    }
+
+    // 2026-11-28 결함 창에서 Ctrl+V(캡처 그림) → 마지막으로 누른 칸(전차·보수완료·현차), 처음엔 현차
+    (function bindDefectPhotoPaste() {
+        let pasteKind = 'curr';
+        const modal = document.getElementById('defectModal');
+        if (modal) {
+            modal.addEventListener('pointerdown', (e) => {
+                const t = e.target;
+                if (!t || !t.closest) return;
+                if (t.closest('#defectRepairPhotoBar')) pasteKind = 'repair';
+                else if (t.closest('.defect-photo-slot-prev')) pasteKind = 'prev';
+                else if (t.closest('.defect-photo-slot-curr')) pasteKind = 'curr';
+            }, true);
+        }
+        if (typeof registerPhotoPasteTarget !== 'function') return;
+        registerPhotoPasteTarget({
+            priority: 10,
+            isOpen: isDefectModalOpen,
+            onFiles: async (files) => {
+                let kind = pasteKind;
+                if (kind === 'prev' && !isPrevPhotoEditableNow()) kind = 'curr';
+                if (kind === 'repair' && !isRepairPhotoEditableNow()) kind = 'curr';
+                const photoTarget = captureDefectPhotoTarget();
+                for (const f of files) {
+                    try { await handleSelectedPhotoFile(f, kind, photoTarget); } catch (_e) { /* 안내는 handleSelectedPhotoFile이 */ }
+                }
+            }
+        });
+    })();
 
     // 2026-10-19 결함 수정창 사진 칸에 끌어다 놓기 — PC 탐색기 그림 파일(여러 장)·앱 안 그림(끌면 data:/blob: 주소).
     // 처리는 「추가」 단추와 같은 handleSelectedPhotoFile(줄이기·IndexedDB·동기화). 놓은 순서대로 한 장씩.
@@ -68210,7 +68333,7 @@ ${roundMobile ? '' : `<button type="button" class="icon-btn icon-btn-trash" titl
         btnDownloadImportTemplate.addEventListener('click', window.downloadImportDefectExcelTemplate);
     }
 
-// @@app-part 15-firebase-sync.js sha=09f8829e0327 — 원본은 app/15-firebase-sync.js (여기 말고 거기서 고칠 것)
+// @@app-part 15-firebase-sync.js sha=361dab169205 — 원본은 app/15-firebase-sync.js (여기 말고 거기서 고칠 것)
     // ==========================================================================
     // 🌐 FIREBASE REALTIME SYNC ENGINE (구글 파이어베이스 실시간 1초 동기화)
     // ==========================================================================
@@ -70026,6 +70149,16 @@ ${roundMobile ? '' : `<button type="button" class="icon-btn icon-btn-trash" titl
         const btnGal = document.getElementById('btnOverviewGallery');
         if (btnCam) btnCam.addEventListener('click', () => triggerOverviewPhotoPick('camera'));
         if (btnGal) btnGal.addEventListener('click', () => triggerOverviewPhotoPick('gallery'));
+        // 2026-11-28 캡처 그림 붙여넣기 — 버튼 또는 창에서 Ctrl+V
+        const btnPaste = document.getElementById('btnOverviewPaste');
+        if (btnPaste) btnPaste.addEventListener('click', () => triggerOverviewPhotoPick('paste'));
+        if (typeof registerPhotoPasteTarget === 'function') {
+            registerPhotoPasteTarget({
+                priority: 20,
+                isOpen: isOverviewPhotosModalOpen,
+                onFiles: async (files) => { for (const f of files) await addOverviewPhotoFromFile(f); }
+            });
+        }
     })();
 
     // ---------------------------------------------------------------------------

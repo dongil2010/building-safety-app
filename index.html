@@ -1301,6 +1301,7 @@
                 <div class="overview-photos-toolbar">
                     <button type="button" class="btn btn-primary btn-sm" id="btnOverviewCamera"><i class="fa-solid fa-camera"></i> 촬영</button>
                     <button type="button" class="btn btn-outline btn-sm" id="btnOverviewGallery"><i class="fa-solid fa-images"></i> 갤러리</button>
+                    <button type="button" class="btn btn-outline btn-sm" id="btnOverviewPaste" title="Win+Shift+S로 캡처한 그림 붙여넣기 (창에서 Ctrl+V도 됨)"><i class="fa-solid fa-paste"></i> 붙여넣기</button>
                 </div>
                 <div id="overviewPhotosList" class="overview-photos-list"></div>
             </div>
@@ -1376,6 +1377,9 @@
                                         </button>
                                         <button type="button" id="btnTriggerGallery" class="defect-photo-slot-btn">
                                             <i class="fa-solid fa-images"></i> 추가
+                                        </button>
+                                        <button type="button" id="btnTriggerPaste" class="defect-photo-slot-btn" title="Win+Shift+S로 캡처한 그림 붙여넣기 (창에서 Ctrl+V도 됨)">
+                                            <i class="fa-solid fa-paste"></i> 붙여넣기
                                         </button>
                                     </div>
                                 </div>
@@ -2503,6 +2507,7 @@
                                     <div class="crack-monitor-photo-actions">
                                         <button type="button" class="btn btn-sm btn-outline" data-cm-photo-pick="gauge:prev:gallery" title="갤러리"><i class="fa-solid fa-image"></i></button>
                                         <button type="button" class="btn btn-sm btn-outline" data-cm-photo-pick="gauge:prev:camera" title="카메라"><i class="fa-solid fa-camera"></i></button>
+                                        <button type="button" class="btn btn-sm btn-outline" data-cm-photo-pick="gauge:prev:paste" title="Win+Shift+S로 캡처한 그림 붙여넣기 (창에서 Ctrl+V도 됨)"><i class="fa-solid fa-paste"></i></button>
                                         <button type="button" class="btn btn-sm btn-outline crack-monitor-photo-rotate" data-cm-photo-rotate="gauge:prev:-1" title="왼쪽으로 90° 회전" disabled><i class="fa-solid fa-rotate-left"></i></button>
                                         <button type="button" class="btn btn-sm btn-outline crack-monitor-photo-rotate" data-cm-photo-rotate="gauge:prev:1" title="오른쪽으로 90° 회전" disabled><i class="fa-solid fa-rotate-right"></i></button>
                                         <button type="button" class="btn btn-sm btn-outline crack-monitor-photo-clear" data-cm-photo-clear="gauge:prev" title="삭제"><i class="fa-solid fa-trash"></i></button>
@@ -2514,6 +2519,7 @@
                                     <div class="crack-monitor-photo-actions">
                                         <button type="button" class="btn btn-sm btn-outline" data-cm-photo-pick="gauge:curr:gallery" title="갤러리"><i class="fa-solid fa-image"></i></button>
                                         <button type="button" class="btn btn-sm btn-outline" data-cm-photo-pick="gauge:curr:camera" title="카메라"><i class="fa-solid fa-camera"></i></button>
+                                        <button type="button" class="btn btn-sm btn-outline" data-cm-photo-pick="gauge:curr:paste" title="Win+Shift+S로 캡처한 그림 붙여넣기 (창에서 Ctrl+V도 됨)"><i class="fa-solid fa-paste"></i></button>
                                         <button type="button" class="btn btn-sm btn-outline crack-monitor-photo-rotate" data-cm-photo-rotate="gauge:curr:-1" title="왼쪽으로 90° 회전" disabled><i class="fa-solid fa-rotate-left"></i></button>
                                         <button type="button" class="btn btn-sm btn-outline crack-monitor-photo-rotate" data-cm-photo-rotate="gauge:curr:1" title="오른쪽으로 90° 회전" disabled><i class="fa-solid fa-rotate-right"></i></button>
                                         <button type="button" class="btn btn-sm btn-outline crack-monitor-photo-clear" data-cm-photo-clear="gauge:curr" title="삭제"><i class="fa-solid fa-trash"></i></button>
@@ -2543,6 +2549,7 @@
                                     <div class="crack-monitor-photo-actions">
                                         <button type="button" class="btn btn-sm btn-outline" data-cm-photo-pick="tip:prev:gallery" title="갤러리"><i class="fa-solid fa-image"></i></button>
                                         <button type="button" class="btn btn-sm btn-outline" data-cm-photo-pick="tip:prev:camera" title="카메라"><i class="fa-solid fa-camera"></i></button>
+                                        <button type="button" class="btn btn-sm btn-outline" data-cm-photo-pick="tip:prev:paste" title="Win+Shift+S로 캡처한 그림 붙여넣기 (창에서 Ctrl+V도 됨)"><i class="fa-solid fa-paste"></i></button>
                                         <button type="button" class="btn btn-sm btn-outline crack-monitor-photo-rotate" data-cm-photo-rotate="tip:prev:-1" title="왼쪽으로 90° 회전" disabled><i class="fa-solid fa-rotate-left"></i></button>
                                         <button type="button" class="btn btn-sm btn-outline crack-monitor-photo-rotate" data-cm-photo-rotate="tip:prev:1" title="오른쪽으로 90° 회전" disabled><i class="fa-solid fa-rotate-right"></i></button>
                                         <button type="button" class="btn btn-sm btn-outline crack-monitor-photo-clear" data-cm-photo-clear="tip:prev" title="삭제"><i class="fa-solid fa-trash"></i></button>
@@ -2554,6 +2561,7 @@
                                     <div class="crack-monitor-photo-actions">
                                         <button type="button" class="btn btn-sm btn-outline" data-cm-photo-pick="tip:curr:gallery" title="갤러리"><i class="fa-solid fa-image"></i></button>
                                         <button type="button" class="btn btn-sm btn-outline" data-cm-photo-pick="tip:curr:camera" title="카메라"><i class="fa-solid fa-camera"></i></button>
+                                        <button type="button" class="btn btn-sm btn-outline" data-cm-photo-pick="tip:curr:paste" title="Win+Shift+S로 캡처한 그림 붙여넣기 (창에서 Ctrl+V도 됨)"><i class="fa-solid fa-paste"></i></button>
                                         <button type="button" class="btn btn-sm btn-outline crack-monitor-photo-rotate" data-cm-photo-rotate="tip:curr:-1" title="왼쪽으로 90° 회전" disabled><i class="fa-solid fa-rotate-left"></i></button>
                                         <button type="button" class="btn btn-sm btn-outline crack-monitor-photo-rotate" data-cm-photo-rotate="tip:curr:1" title="오른쪽으로 90° 회전" disabled><i class="fa-solid fa-rotate-right"></i></button>
                                         <button type="button" class="btn btn-sm btn-outline crack-monitor-photo-clear" data-cm-photo-clear="tip:curr" title="삭제"><i class="fa-solid fa-trash"></i></button>
@@ -2684,6 +2692,9 @@
                         </button>
                         <button type="button" id="btnNdtDispEditGallery" class="btn btn-outline" style="flex: 1; border-color: #6b6b6b; color: #6b6b6b; font-size: 0.85rem;">
                             <i class="fa-solid fa-images"></i> 🖼️ 갤러리 선택
+                        </button>
+                        <button type="button" id="btnNdtDispEditPaste" class="btn btn-outline" style="flex: 1; border-color: #6b6b6b; color: #6b6b6b; font-size: 0.85rem;" title="Win+Shift+S로 캡처한 그림 붙여넣기 (창에서 Ctrl+V도 됨)">
+                            <i class="fa-solid fa-paste"></i> 붙여넣기
                         </button>
                         <input type="file" id="inputNdtDispEditPhoto" accept="image/*" multiple style="display:none;">
                         <input type="file" id="inputNdtDispEditCamera" accept="image/*" capture="environment" style="display:none;">
