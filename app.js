@@ -49255,7 +49255,7 @@ ${roundMobile ? '' : `<button type="button" class="icon-btn icon-btn-trash" titl
         });
     }
 
-// @@app-part 11-cad-import.js sha=8e8d325adbcc — 원본은 app/11-cad-import.js (여기 말고 거기서 고칠 것)
+// @@app-part 11-cad-import.js sha=49a4f340ebce — 원본은 app/11-cad-import.js (여기 말고 거기서 고칠 것)
     // --- 9-1. CAD Defect Pins 2-Point Calibration Engine (v2.0) ---
     window.cadCalibrationState = null;
 
@@ -51839,17 +51839,20 @@ ${roundMobile ? '' : `<button type="button" class="icon-btn icon-btn-trash" titl
                 ctx.font = `bold ${fontPx}px "Pretendard", "Malgun Gothic", "맑은 고딕", sans-serif`;
                 const tw = ctx.measureText(label).width;
                 const pad = 4 / sc;
-                const mx = (a.x + b.x) / 2, my = (a.y + b.y) / 2;
+                // 2026-11-28 길이 글자는 선 가운데가 아니라 끝점(=마우스·마지막으로 누른 자리) 오른쪽 아래에 —
+                // 길게 잴 때 가운데가 화면 밖으로 나가 안 보이던 문제(사용자 요청)
+                const gap = 14 / sc;
+                const bx = b.x + gap, by = b.y + gap;
                 ctx.fillStyle = 'rgba(255, 255, 255, 0.92)';
                 ctx.strokeStyle = '#ea580c';
                 ctx.lineWidth = 1 / sc;
                 ctx.beginPath();
-                ctx.rect(mx - tw / 2 - pad, my - fontPx / 2 - pad, tw + pad * 2, fontPx + pad * 2);
+                ctx.rect(bx, by, tw + pad * 2, fontPx + pad * 2);
                 ctx.fill(); ctx.stroke();
                 ctx.fillStyle = '#9a3412';
-                ctx.textAlign = 'center';
+                ctx.textAlign = 'left';
                 ctx.textBaseline = 'middle';
-                ctx.fillText(label, mx, my);
+                ctx.fillText(label, bx + pad, by + pad + fontPx / 2);
             }
             ctx.restore();
         };
