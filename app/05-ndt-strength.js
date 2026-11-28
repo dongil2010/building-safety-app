@@ -4146,11 +4146,11 @@
                 <div class="ndt-disp-xfer-grid">
                     <div class="form-group" style="margin:0;">
                         <label class="form-label" style="font-size:0.75rem;">이전 측기 (Va)</label>
-                        <input type="number" class="form-control ${cls}-va" step="0.1" inputmode="decimal" value="${va}" placeholder="이전">
+                        <input type="number" class="form-control ${cls}-va" data-no-spin step="0.1" inputmode="decimal" value="${va}" placeholder="이전">
                     </div>
                     <div class="form-group" style="margin:0;">
                         <label class="form-label" style="font-size:0.75rem;">이후 측기 (Vb)</label>
-                        <input type="number" class="form-control ${cls}-vb" step="0.1" inputmode="decimal" value="${vb}" placeholder="이후">
+                        <input type="number" class="form-control ${cls}-vb" data-no-spin step="0.1" inputmode="decimal" value="${vb}" placeholder="이후">
                     </div>
                 </div>
                 <button type="button" class="btn btn-primary ndt-disp-xfer-apply ${cls}-apply"><i class="fa-solid fa-calculator"></i> ${x ? '보정 고치기' : '보정 저장'}</button>
@@ -4191,7 +4191,7 @@
                     ${open ? '닫기' : '이동 보정'}
                 </button>
             </div>
-            ${calcText.includes('→') || calcText.includes('보정') ? `<div class="ndt-disp-xfer-help" style="margin-top:0.3rem;">계산값: ${calcText}</div>` : ''}
+            ${isNdtDispLevelCorrected(group, idx) ? `<div class="ndt-disp-xfer-help" style="margin-top:0.3rem;">계산값: ${calcText}</div>` : ''}
             <div id="ndtDispPointTransferBody" style="display:${open ? 'block' : 'none'};margin-top:0.55rem;">
                 ${ndtDispTransferFormHtml(lab, x, 'ndt-disp-pt-xfer')}
             </div>`;
@@ -4401,12 +4401,12 @@
             const val = isNdtDispLevelFilled(p.level) ? p.level : '';
             const hasX = !!(ndtDispTransferApi() && ndtDispTransferApi().xferOf(p));
             const calcText = formatNdtDispLevelText(group, idx);
-            const calcHint = (calcText.includes('→') || calcText.startsWith('(보정'))
-                ? `<span class="ndt-disp-calc-hint" style="font-size:0.68rem;color:#b45309;white-space:nowrap;">계산 ${calcText.split('→').pop().replace(/[()보정]/g, '').trim()}</span>` : '';
+            const calcHint = isNdtDispLevelCorrected(group, idx)
+                ? `<span class="ndt-disp-calc-hint" style="font-size:0.68rem;color:#b45309;white-space:nowrap;">계산 ${calcText}</span>` : '';
             return `
             <div class="option-manager-item ndt-disp-edit-point-row" data-point-id="${p.id}">
                 <span class="ndt-disp-edit-point-label">${formatNdtDisplacementPointLabel(idx + 1)}${role}</span>
-                <input type="number" class="form-control ndt-disp-edit-level-input" data-point-id="${p.id}"
+                <input type="number" class="form-control ndt-disp-edit-level-input" data-no-spin data-point-id="${p.id}"
                     step="0.1" placeholder="레벨(${ndtDispLevelUnit(group)})" value="${val}" inputmode="decimal" aria-label="${formatNdtDisplacementPointLabel(idx + 1)} 레벨(${ndtDispLevelUnit(group)})">
                 ${calcHint}
                 <button type="button" class="btn ${hasX ? 'btn-primary' : 'btn-outline'} ndt-disp-mark-station-btn" title="이 지점에서 측기 이동 보정(이전값·이후값)"
@@ -4459,6 +4459,24 @@
             }
             target.scrollIntoView({ block: 'nearest' });
         });
+    }
+
+    /**
+     * 부동침하·부재변위 숫자칸([data-no-spin]: 레벨·측정길이·이동 보정 Va/Vb)은 마우스 휠·키보드 ↑↓로
+     * 값이 바뀌지 않게 한다(사용자 요청 — 목록을 휠로 내리다 값이 몰래 바뀌는 일 방지).
+     * 휠: 칸에서 포커스를 빼서 값은 그대로 두고 창 스크롤만 되게 / ↑↓: 기본 동작(값 증감)만 막음.
+     */
+    if (!window.__bsaNdtNoSpinBound) {
+        window.__bsaNdtNoSpinBound = true;
+        document.addEventListener('wheel', (e) => {
+            const t = e.target;
+            if (t && t.hasAttribute && t.hasAttribute('data-no-spin') && document.activeElement === t) t.blur();
+        }, { capture: true, passive: true });
+        document.addEventListener('keydown', (e) => {
+            if (e.key !== 'ArrowUp' && e.key !== 'ArrowDown') return;
+            const t = e.target;
+            if (t && t.hasAttribute && t.hasAttribute('data-no-spin')) e.preventDefault();
+        }, true);
     }
 
     window.deleteNdtDisplacementPoint = async function(groupId, pointId, options) {

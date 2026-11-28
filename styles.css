@@ -19992,3 +19992,8 @@ button#mobileNdtBtnAddSelect#mobileNdtBtnAddSelect.is-select-remove i {
     font-size: 0.75rem;
     color: #737373;
 }
+
+/* 부동침하·부재변위 숫자칸: ▲▼ 스핀 버튼 숨김(휠·↑↓ 증감은 05-ndt-strength.js에서 막음) */
+input[data-no-spin]::-webkit-outer-spin-button,
+input[data-no-spin]::-webkit-inner-spin-button { -webkit-appearance: none; margin: 0; }
+input[data-no-spin][type="number"] { -moz-appearance: textfield; appearance: textfield; }

@@ -2610,7 +2610,7 @@
                     </div>
                     <div class="form-group">
                         <label class="form-label">📏 총 측정길이 (m) *</label>
-                        <input type="number" id="ndtDispMeasureLength" class="form-control" step="0.1" min="0" placeholder="예: 12" inputmode="decimal">
+                        <input type="number" id="ndtDispMeasureLength" class="form-control" data-no-spin step="0.1" min="0" placeholder="예: 12" inputmode="decimal">
                     </div>
                 </div>
 
@@ -2623,7 +2623,7 @@
 
                 <div class="form-group">
                     <label class="form-label" id="lblNdtDispLevel">📊 레벨값 (mm)</label>
-                    <input type="number" id="ndtDispLevel" class="form-control" step="0.1" placeholder="비워 두면 나중에 구역에서 일괄 입력" inputmode="decimal" style="font-weight: 800; color: #4ade80;">
+                    <input type="number" id="ndtDispLevel" class="form-control" data-no-spin step="0.1" placeholder="비워 두면 나중에 구역에서 일괄 입력" inputmode="decimal" style="font-weight: 800; color: #4ade80;">
                 </div>
             </div>
             <div class="modal-footer defect-drawer-footer" style="justify-content: space-between; flex-wrap: wrap; gap: 0.4rem;">
@@ -2664,16 +2664,8 @@
                     </div>
                     <div class="form-group">
                         <label class="form-label">📏 총 측정길이 (m) *</label>
-                        <input type="number" id="ndtDispEditMeasureLength" class="form-control" step="0.1" min="0" inputmode="decimal">
+                        <input type="number" id="ndtDispEditMeasureLength" class="form-control" data-no-spin step="0.1" min="0" inputmode="decimal">
                     </div>
-                </div>
-                <div class="form-group">
-                    <label class="form-label" for="ndtDispEditLevelUnit">📐 레벨 입력 단위</label>
-                    <select id="ndtDispEditLevelUnit" class="form-select">
-                        <option value="mm">mm (밀리미터)</option>
-                        <option value="cm">cm (센티미터)</option>
-                    </select>
-                    <div id="ndtDispEditLevelUnitHint" class="ndt-disp-modal-hint" style="margin-top:0.3rem;"></div>
                 </div>
                 <div class="form-group">
                     <label class="form-label">🎨 구역 색상</label>
@@ -2686,7 +2678,17 @@
                     </label>
                 </div>
                 <div class="form-group">
-                    <label class="form-label">📊 측정 지점 레벨</label>
+                    <div style="display:flex; align-items:center; justify-content:space-between; gap:0.5rem; margin-bottom:0.35rem;">
+                        <label class="form-label" for="ndtDispEditLevelUnit" style="margin:0;">📊 측정 지점 레벨</label>
+                        <div style="display:flex; align-items:center; gap:0.35rem;">
+                            <span style="font-size:0.78rem; color:#64748b;">단위</span>
+                            <select id="ndtDispEditLevelUnit" class="form-select" style="width:auto; padding:0.2rem 1.8rem 0.2rem 0.5rem; font-weight:700;" title="레벨값을 mm로 읽을지 cm로 읽을지">
+                                <option value="mm">mm</option>
+                                <option value="cm">cm</option>
+                            </select>
+                        </div>
+                    </div>
+                    <div id="ndtDispEditLevelUnitHint" class="ndt-disp-modal-hint" style="margin-bottom:0.3rem;"></div>
                     <div id="ndtDispEditPointListHint" class="ndt-disp-modal-hint" style="margin-bottom:0.5rem;">마킹한 지점 레벨을 한 창에서 입력·수정하세요.</div>
                     <div id="ndtDispEditPointList" class="option-manager-list ndt-disp-edit-point-list"></div>
                 </div>

@@ -747,17 +747,26 @@
     function ndtDispCalcLevels(group) {
         return window.BSA.ndtGrade.calcLevels(group);
     }
-    /** 표시: 적은 값이 먼저, 보정으로 달라졌으면 「→ 보정값」 */
+    /**
+     * 표시(그래프·요약칸·측정값 목록): 이동 보정이 들어갔으면 보정 이후 값만 보인다
+     * (2026-11-28 사용자 요청 — 「1583mm → 1654mm」처럼 이전값까지 늘어놓지 않음).
+     */
     function formatNdtDispLevelText(group, idx, unit) {
         const u = unit == null ? ndtDispLevelUnit(group) : unit;
         const p = (group.points || [])[idx];
         const c = ndtDispCalcLevels(group)[idx];
         const raw = p && isNdtDispLevelFilled(p.level) ? Number(p.level) : null;
         const fmt = (v) => `${Math.round(v * 1000) / 1000}`;
-        if (raw == null && c == null) return '-';
-        if (raw == null) return `(보정 ${fmt(c)}${u})`;
-        if (c == null || Math.abs(c - raw) < 1e-9) return `${fmt(raw)}${u}`;
-        return `${fmt(raw)}${u} → ${fmt(c)}${u}`;
+        const v = c != null ? c : raw;
+        return v == null ? '-' : `${fmt(v)}${u}`;
+    }
+    /** 이 지점 계산값이 적은 값과 다른가(이동 보정으로 바뀜) — 입력 목록의 「계산 ○○」 안내용 */
+    function isNdtDispLevelCorrected(group, idx) {
+        const p = (group.points || [])[idx];
+        const c = ndtDispCalcLevels(group)[idx];
+        if (c == null) return false;
+        const raw = p && isNdtDispLevelFilled(p.level) ? Number(p.level) : null;
+        return raw == null || Math.abs(c - raw) >= 1e-9;
     }
     /** 옛 「적용」이 고쳐 둔 값을 원래 적은 값으로 되돌리고 보정 기록(Va/Vb)만 남긴다. 바꾼 구역 수 */
     function migrateNdtDispTransfersForFloor(key) {

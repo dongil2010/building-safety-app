@@ -14726,7 +14726,7 @@ ${roundMobile ? '' : `<button type="button" class="icon-btn icon-btn-trash" titl
         return 'ndtStrength';
     }
 
-// @@app-part 04-ndt-disp.js sha=4d9027e457c9 — 원본은 app/04-ndt-disp.js (여기 말고 거기서 고칠 것)
+// @@app-part 04-ndt-disp.js sha=711597076c3a — 원본은 app/04-ndt-disp.js (여기 말고 거기서 고칠 것)
     // --- 바닥 수직변위: 그룹(NO.박스) + 다중 레벨 포인트 데이터 ---
     const NDT_DISPLACEMENT_COLORS = ['#ef4444', '#525252', '#f97316', '#22c55e', '#a855f7', '#eab308', '#06b6d4', '#ec4899'];
     const NDT_GRADE_BADGES = {
@@ -15475,17 +15475,26 @@ ${roundMobile ? '' : `<button type="button" class="icon-btn icon-btn-trash" titl
     function ndtDispCalcLevels(group) {
         return window.BSA.ndtGrade.calcLevels(group);
     }
-    /** 표시: 적은 값이 먼저, 보정으로 달라졌으면 「→ 보정값」 */
+    /**
+     * 표시(그래프·요약칸·측정값 목록): 이동 보정이 들어갔으면 보정 이후 값만 보인다
+     * (2026-11-28 사용자 요청 — 「1583mm → 1654mm」처럼 이전값까지 늘어놓지 않음).
+     */
     function formatNdtDispLevelText(group, idx, unit) {
         const u = unit == null ? ndtDispLevelUnit(group) : unit;
         const p = (group.points || [])[idx];
         const c = ndtDispCalcLevels(group)[idx];
         const raw = p && isNdtDispLevelFilled(p.level) ? Number(p.level) : null;
         const fmt = (v) => `${Math.round(v * 1000) / 1000}`;
-        if (raw == null && c == null) return '-';
-        if (raw == null) return `(보정 ${fmt(c)}${u})`;
-        if (c == null || Math.abs(c - raw) < 1e-9) return `${fmt(raw)}${u}`;
-        return `${fmt(raw)}${u} → ${fmt(c)}${u}`;
+        const v = c != null ? c : raw;
+        return v == null ? '-' : `${fmt(v)}${u}`;
+    }
+    /** 이 지점 계산값이 적은 값과 다른가(이동 보정으로 바뀜) — 입력 목록의 「계산 ○○」 안내용 */
+    function isNdtDispLevelCorrected(group, idx) {
+        const p = (group.points || [])[idx];
+        const c = ndtDispCalcLevels(group)[idx];
+        if (c == null) return false;
+        const raw = p && isNdtDispLevelFilled(p.level) ? Number(p.level) : null;
+        return raw == null || Math.abs(c - raw) >= 1e-9;
     }
     /** 옛 「적용」이 고쳐 둔 값을 원래 적은 값으로 되돌리고 보정 기록(Va/Vb)만 남긴다. 바꾼 구역 수 */
     function migrateNdtDispTransfersForFloor(key) {
@@ -19309,7 +19318,7 @@ ${roundMobile ? '' : `<button type="button" class="icon-btn icon-btn-trash" titl
         if (btn) btn.focus();
     };
     window.closeNdtFloorSurveyModal = closeNdtFloorSurveyModal;
-// @@app-part 05-ndt-strength.js sha=e62bf611e330 — 원본은 app/05-ndt-strength.js (여기 말고 거기서 고칠 것)
+// @@app-part 05-ndt-strength.js sha=4c97568ed51a — 원본은 app/05-ndt-strength.js (여기 말고 거기서 고칠 것)
     // --- 콘크리트 강도(반발경도) 추정 엔진 ---
     // 회사에서 쓰던 엑셀(반발경도-고강도포함) 자료를 그대로 옮겼다.
     // 각 행: [R, 0도 보정값, +90도 보정값, +45도 보정값, -45도 보정값, -90도 보정값]
@@ -23457,11 +23466,11 @@ ${roundMobile ? '' : `<button type="button" class="icon-btn icon-btn-trash" titl
                 <div class="ndt-disp-xfer-grid">
                     <div class="form-group" style="margin:0;">
                         <label class="form-label" style="font-size:0.75rem;">이전 측기 (Va)</label>
-                        <input type="number" class="form-control ${cls}-va" step="0.1" inputmode="decimal" value="${va}" placeholder="이전">
+                        <input type="number" class="form-control ${cls}-va" data-no-spin step="0.1" inputmode="decimal" value="${va}" placeholder="이전">
                     </div>
                     <div class="form-group" style="margin:0;">
                         <label class="form-label" style="font-size:0.75rem;">이후 측기 (Vb)</label>
-                        <input type="number" class="form-control ${cls}-vb" step="0.1" inputmode="decimal" value="${vb}" placeholder="이후">
+                        <input type="number" class="form-control ${cls}-vb" data-no-spin step="0.1" inputmode="decimal" value="${vb}" placeholder="이후">
                     </div>
                 </div>
                 <button type="button" class="btn btn-primary ndt-disp-xfer-apply ${cls}-apply"><i class="fa-solid fa-calculator"></i> ${x ? '보정 고치기' : '보정 저장'}</button>
@@ -23502,7 +23511,7 @@ ${roundMobile ? '' : `<button type="button" class="icon-btn icon-btn-trash" titl
                     ${open ? '닫기' : '이동 보정'}
                 </button>
             </div>
-            ${calcText.includes('→') || calcText.includes('보정') ? `<div class="ndt-disp-xfer-help" style="margin-top:0.3rem;">계산값: ${calcText}</div>` : ''}
+            ${isNdtDispLevelCorrected(group, idx) ? `<div class="ndt-disp-xfer-help" style="margin-top:0.3rem;">계산값: ${calcText}</div>` : ''}
             <div id="ndtDispPointTransferBody" style="display:${open ? 'block' : 'none'};margin-top:0.55rem;">
                 ${ndtDispTransferFormHtml(lab, x, 'ndt-disp-pt-xfer')}
             </div>`;
@@ -23712,12 +23721,12 @@ ${roundMobile ? '' : `<button type="button" class="icon-btn icon-btn-trash" titl
             const val = isNdtDispLevelFilled(p.level) ? p.level : '';
             const hasX = !!(ndtDispTransferApi() && ndtDispTransferApi().xferOf(p));
             const calcText = formatNdtDispLevelText(group, idx);
-            const calcHint = (calcText.includes('→') || calcText.startsWith('(보정'))
-                ? `<span class="ndt-disp-calc-hint" style="font-size:0.68rem;color:#b45309;white-space:nowrap;">계산 ${calcText.split('→').pop().replace(/[()보정]/g, '').trim()}</span>` : '';
+            const calcHint = isNdtDispLevelCorrected(group, idx)
+                ? `<span class="ndt-disp-calc-hint" style="font-size:0.68rem;color:#b45309;white-space:nowrap;">계산 ${calcText}</span>` : '';
             return `
             <div class="option-manager-item ndt-disp-edit-point-row" data-point-id="${p.id}">
                 <span class="ndt-disp-edit-point-label">${formatNdtDisplacementPointLabel(idx + 1)}${role}</span>
-                <input type="number" class="form-control ndt-disp-edit-level-input" data-point-id="${p.id}"
+                <input type="number" class="form-control ndt-disp-edit-level-input" data-no-spin data-point-id="${p.id}"
                     step="0.1" placeholder="레벨(${ndtDispLevelUnit(group)})" value="${val}" inputmode="decimal" aria-label="${formatNdtDisplacementPointLabel(idx + 1)} 레벨(${ndtDispLevelUnit(group)})">
                 ${calcHint}
                 <button type="button" class="btn ${hasX ? 'btn-primary' : 'btn-outline'} ndt-disp-mark-station-btn" title="이 지점에서 측기 이동 보정(이전값·이후값)"
@@ -23770,6 +23779,24 @@ ${roundMobile ? '' : `<button type="button" class="icon-btn icon-btn-trash" titl
             }
             target.scrollIntoView({ block: 'nearest' });
         });
+    }
+
+    /**
+     * 부동침하·부재변위 숫자칸([data-no-spin]: 레벨·측정길이·이동 보정 Va/Vb)은 마우스 휠·키보드 ↑↓로
+     * 값이 바뀌지 않게 한다(사용자 요청 — 목록을 휠로 내리다 값이 몰래 바뀌는 일 방지).
+     * 휠: 칸에서 포커스를 빼서 값은 그대로 두고 창 스크롤만 되게 / ↑↓: 기본 동작(값 증감)만 막음.
+     */
+    if (!window.__bsaNdtNoSpinBound) {
+        window.__bsaNdtNoSpinBound = true;
+        document.addEventListener('wheel', (e) => {
+            const t = e.target;
+            if (t && t.hasAttribute && t.hasAttribute('data-no-spin') && document.activeElement === t) t.blur();
+        }, { capture: true, passive: true });
+        document.addEventListener('keydown', (e) => {
+            if (e.key !== 'ArrowUp' && e.key !== 'ArrowDown') return;
+            const t = e.target;
+            if (t && t.hasAttribute && t.hasAttribute('data-no-spin')) e.preventDefault();
+        }, true);
     }
 
     window.deleteNdtDisplacementPoint = async function(groupId, pointId, options) {
