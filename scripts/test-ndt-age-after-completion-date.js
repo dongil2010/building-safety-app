@@ -93,7 +93,7 @@ assert.ok(H.refreshCarbItemResults(carb, 3).carbLifeYears > 0);
 assert.ok(/currentCat === '탄산화'\) \{[\s\S]{0,200}items\.map\(\(rawCarb\) => refreshCarbItemResults\(rawCarb\)\)/.test(src), '탄산화 목록');
 assert.strictEqual((src.match(/filter\(item => item\.category === '탄산화'\)\n\s*\.map\(item => refreshCarbItemResults\(item, ndtBldgOf\(item\)\)\)/g) || []).length, 2, '한글 출력 2곳');
 // ndtBldgOf(item): 여러 동 한글 출력이면 그 항목의 동, 아니면 bldg(2026-10-23)
-assert.strictEqual((src.match(/filter\(item => item\.category === '강도'\)\n\s*\.map\(item => refreshStrengthItemResults\(item, ndtBldgOf\(item\)\)\)/g) || []).length, 2, '강도 한글 출력 2곳(기존)');
+assert.strictEqual((src.match(/sortNdtItemsByNo\(allNdtItemsForHwpx\.filter\(item => item\.category === '강도'\)\)\n\s*\.map\(item => refreshStrengthItemResults\(item, ndtBldgOf\(item\)\)\)/g) || []).length, 2, '강도 한글 출력 2곳(기존)');
 
 // 건물 수정 저장 뒤 열린 입력창 다시 계산
 assert.ok(src.includes("if (typeof recalcAllStrengthSlots === 'function') recalcAllStrengthSlots();"));

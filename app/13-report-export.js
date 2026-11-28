@@ -67,7 +67,7 @@
             // 위치도(도면 이미지)는 그대로 층마다(각 층 자기 데이터 기준으로) 계속 낸다.
             const ndtCombinedForReport = buildCombinedNdtDataForReport(currentBldgId);
             const measureNdtItemsCombined = ndtCombinedForReport.allItems.filter(item => item.category === '실측');
-            const strengthNdtItemsCombined = ndtCombinedForReport.allItems.filter(item => item.category === '강도');
+            const strengthNdtItemsCombined = sortNdtItemsByNo(ndtCombinedForReport.allItems.filter(item => item.category === '강도'));
             const carbNdtItemsCombined = ndtCombinedForReport.allItems.filter(item => item.category === '탄산화');
             const tiltNdtItemsCombined = ndtCombinedForReport.allItems.filter(item => item.category === '기울기');
             const settlementGroupsCombined = ndtCombinedForReport.allDispGroups.filter(g => !g.category || g.category === '변위');
@@ -272,7 +272,7 @@
                 const allDispGroups = state.ndtDisplacementGroups ? (state.ndtDisplacementGroups[ndtKey] || []) : [];
 
                 const measureNdtItems = allNdtItems.filter(item => item.category === '실측');
-                const strengthNdtItems = allNdtItems.filter(item => item.category === '강도');
+                const strengthNdtItems = sortNdtItemsByNo(allNdtItems.filter(item => item.category === '강도'));
                 const carbNdtItems = allNdtItems.filter(item => item.category === '탄산화');
                 const tiltNdtItems = allNdtItems.filter(item => item.category === '기울기');
                 const settlementGroups = allDispGroups.filter(g => !g.category || g.category === '변위');
@@ -4462,7 +4462,7 @@
 
                 const measureItemsHwpx = allNdtItemsForHwpx.filter(item => item.category === '실측');
                 const fireproofItemsHwpx = allNdtItemsForHwpx.filter(item => item.category === '내화피복');
-                const strengthItemsHwpx = allNdtItemsForHwpx.filter(item => item.category === '강도')
+                const strengthItemsHwpx = sortNdtItemsByNo(allNdtItemsForHwpx.filter(item => item.category === '강도'))
                     .map(item => refreshStrengthItemResults(item, ndtBldgOf(item)));
                 const carbItemsHwpx = allNdtItemsForHwpx.filter(item => item.category === '탄산화')
                     .map(item => refreshCarbItemResults(item, ndtBldgOf(item)));
@@ -7138,7 +7138,7 @@
 
                 const measureItemsHwpx = allNdtItemsForHwpx.filter(item => item.category === '실측');
                 const fireproofItemsHwpx = allNdtItemsForHwpx.filter(item => item.category === '내화피복');
-                const strengthItemsHwpx = allNdtItemsForHwpx.filter(item => item.category === '강도')
+                const strengthItemsHwpx = sortNdtItemsByNo(allNdtItemsForHwpx.filter(item => item.category === '강도'))
                     .map(item => refreshStrengthItemResults(item, ndtBldgOf(item)));
                 const carbItemsHwpx = allNdtItemsForHwpx.filter(item => item.category === '탄산화')
                     .map(item => refreshCarbItemResults(item, ndtBldgOf(item)));

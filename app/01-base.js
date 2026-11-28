@@ -4532,6 +4532,24 @@ document.addEventListener('DOMContentLoaded', () => {
         return `NO.${String(Math.max(1, Number(n) || 1)).padStart(2, '0')}`;
     }
 
+    // 비파괴 항목을 조사번호(NO.01, NO.02 …) 순으로 다시 세운다 — 찍은 순서가 아니라 번호 순.
+    // 번호를 옮겨 바꿔도 결과표·보고서가 1번부터 나오게 한다. 여러 층을 합친 목록이면
+    // 층 순서(처음 나온 순)는 그대로 두고 층 안에서만 번호 순. 번호 없는 항목은 그 층 맨 뒤.
+    function sortNdtItemsByNo(items) {
+        if (!Array.isArray(items) || items.length < 2) return Array.isArray(items) ? items.slice() : [];
+        const floorRank = new Map();
+        const keyOf = (item) => {
+            const m = String((item && item.no) || '').match(/(\d+)(?:\D+(\d+))?/);
+            return m ? [Number(m[1]), m[2] != null ? Number(m[2]) : -1] : [Infinity, Infinity];
+        };
+        return items.map((item, idx) => {
+            const fc = (item && item._ndtFloorCode) || '';
+            if (!floorRank.has(fc)) floorRank.set(fc, floorRank.size);
+            return { item, idx, fr: floorRank.get(fc), k: keyOf(item) };
+        }).sort((a, b) => (a.fr - b.fr) || (a.k[0] - b.k[0]) || (a.k[1] - b.k[1]) || (a.idx - b.idx))
+            .map(x => x.item);
+    }
+
     function arrowSurveyNumberApi() {
         return (window.BSA && window.BSA.shared && window.BSA.shared.arrowSurveyNumber) || null;
     }

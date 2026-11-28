@@ -4052,7 +4052,7 @@
                 `;
             }
         } else if (currentCat === '강도') {
-            items = items.filter(x => x.category === '강도');
+            items = sortNdtItemsByNo(items.filter(x => x.category === '강도'));
             if (thead) {
                 thead.innerHTML = `
                     <th>조사번호</th>

@@ -1,5 +1,5 @@
 // @@app-parts 자동 생성 파일 — 여기를 고치지 말고 app/ 조각을 고친 뒤 `node scripts/app-parts.js join` (CLAUDE.md 「app.js 조각」)
-// @@app-part 01-base.js sha=e06c5ab5ddf3 — 원본은 app/01-base.js (여기 말고 거기서 고칠 것)
+// @@app-part 01-base.js sha=f9dedea45d3b — 원본은 app/01-base.js (여기 말고 거기서 고칠 것)
 /* ==========================================================================
    스마트 건축물 안전점검 현장점검 시스템 — UI 부트스트랩
    전역 상태·IndexedDB·이미지 헬퍼: js/core/state.js
@@ -4531,6 +4531,24 @@ document.addEventListener('DOMContentLoaded', () => {
 
     function formatDefectNoSeq(n) {
         return `NO.${String(Math.max(1, Number(n) || 1)).padStart(2, '0')}`;
+    }
+
+    // 비파괴 항목을 조사번호(NO.01, NO.02 …) 순으로 다시 세운다 — 찍은 순서가 아니라 번호 순.
+    // 번호를 옮겨 바꿔도 결과표·보고서가 1번부터 나오게 한다. 여러 층을 합친 목록이면
+    // 층 순서(처음 나온 순)는 그대로 두고 층 안에서만 번호 순. 번호 없는 항목은 그 층 맨 뒤.
+    function sortNdtItemsByNo(items) {
+        if (!Array.isArray(items) || items.length < 2) return Array.isArray(items) ? items.slice() : [];
+        const floorRank = new Map();
+        const keyOf = (item) => {
+            const m = String((item && item.no) || '').match(/(\d+)(?:\D+(\d+))?/);
+            return m ? [Number(m[1]), m[2] != null ? Number(m[2]) : -1] : [Infinity, Infinity];
+        };
+        return items.map((item, idx) => {
+            const fc = (item && item._ndtFloorCode) || '';
+            if (!floorRank.has(fc)) floorRank.set(fc, floorRank.size);
+            return { item, idx, fr: floorRank.get(fc), k: keyOf(item) };
+        }).sort((a, b) => (a.fr - b.fr) || (a.k[0] - b.k[0]) || (a.k[1] - b.k[1]) || (a.idx - b.idx))
+            .map(x => x.item);
     }
 
     function arrowSurveyNumberApi() {
@@ -14701,7 +14719,7 @@ ${roundMobile ? '' : `<button type="button" class="icon-btn icon-btn-trash" titl
         return 'ndtStrength';
     }
 
-// @@app-part 04-ndt-disp.js sha=33026ce9b39c — 원본은 app/04-ndt-disp.js (여기 말고 거기서 고칠 것)
+// @@app-part 04-ndt-disp.js sha=d0ae7bb89536 — 원본은 app/04-ndt-disp.js (여기 말고 거기서 고칠 것)
     // --- 바닥 수직변위: 그룹(NO.박스) + 다중 레벨 포인트 데이터 ---
     const NDT_DISPLACEMENT_COLORS = ['#ef4444', '#525252', '#f97316', '#22c55e', '#a855f7', '#eab308', '#06b6d4', '#ec4899'];
     const NDT_GRADE_BADGES = {
@@ -18755,7 +18773,7 @@ ${roundMobile ? '' : `<button type="button" class="icon-btn icon-btn-trash" titl
                 `;
             }
         } else if (currentCat === '강도') {
-            items = items.filter(x => x.category === '강도');
+            items = sortNdtItemsByNo(items.filter(x => x.category === '강도'));
             if (thead) {
                 thead.innerHTML = `
                     <th>조사번호</th>
@@ -57642,7 +57660,7 @@ ${roundMobile ? '' : `<button type="button" class="icon-btn icon-btn-trash" titl
         }
     }
 
-// @@app-part 13-report-export.js sha=dd8fe150f1f8 — 원본은 app/13-report-export.js (여기 말고 거기서 고칠 것)
+// @@app-part 13-report-export.js sha=e1589babf399 — 원본은 app/13-report-export.js (여기 말고 거기서 고칠 것)
     // --- REPORT PREVIEW MODAL (Instant Modal Open & Pure White Paper Theme) ---
     window.openReportPreviewModalFunc = async function(opts) {
         const manageLoading = !(opts && opts.skipLoading);
@@ -57711,7 +57729,7 @@ ${roundMobile ? '' : `<button type="button" class="icon-btn icon-btn-trash" titl
             // 위치도(도면 이미지)는 그대로 층마다(각 층 자기 데이터 기준으로) 계속 낸다.
             const ndtCombinedForReport = buildCombinedNdtDataForReport(currentBldgId);
             const measureNdtItemsCombined = ndtCombinedForReport.allItems.filter(item => item.category === '실측');
-            const strengthNdtItemsCombined = ndtCombinedForReport.allItems.filter(item => item.category === '강도');
+            const strengthNdtItemsCombined = sortNdtItemsByNo(ndtCombinedForReport.allItems.filter(item => item.category === '강도'));
             const carbNdtItemsCombined = ndtCombinedForReport.allItems.filter(item => item.category === '탄산화');
             const tiltNdtItemsCombined = ndtCombinedForReport.allItems.filter(item => item.category === '기울기');
             const settlementGroupsCombined = ndtCombinedForReport.allDispGroups.filter(g => !g.category || g.category === '변위');
@@ -57916,7 +57934,7 @@ ${roundMobile ? '' : `<button type="button" class="icon-btn icon-btn-trash" titl
                 const allDispGroups = state.ndtDisplacementGroups ? (state.ndtDisplacementGroups[ndtKey] || []) : [];
 
                 const measureNdtItems = allNdtItems.filter(item => item.category === '실측');
-                const strengthNdtItems = allNdtItems.filter(item => item.category === '강도');
+                const strengthNdtItems = sortNdtItemsByNo(allNdtItems.filter(item => item.category === '강도'));
                 const carbNdtItems = allNdtItems.filter(item => item.category === '탄산화');
                 const tiltNdtItems = allNdtItems.filter(item => item.category === '기울기');
                 const settlementGroups = allDispGroups.filter(g => !g.category || g.category === '변위');
@@ -62106,7 +62124,7 @@ ${roundMobile ? '' : `<button type="button" class="icon-btn icon-btn-trash" titl
 
                 const measureItemsHwpx = allNdtItemsForHwpx.filter(item => item.category === '실측');
                 const fireproofItemsHwpx = allNdtItemsForHwpx.filter(item => item.category === '내화피복');
-                const strengthItemsHwpx = allNdtItemsForHwpx.filter(item => item.category === '강도')
+                const strengthItemsHwpx = sortNdtItemsByNo(allNdtItemsForHwpx.filter(item => item.category === '강도'))
                     .map(item => refreshStrengthItemResults(item, ndtBldgOf(item)));
                 const carbItemsHwpx = allNdtItemsForHwpx.filter(item => item.category === '탄산화')
                     .map(item => refreshCarbItemResults(item, ndtBldgOf(item)));
@@ -64782,7 +64800,7 @@ ${roundMobile ? '' : `<button type="button" class="icon-btn icon-btn-trash" titl
 
                 const measureItemsHwpx = allNdtItemsForHwpx.filter(item => item.category === '실측');
                 const fireproofItemsHwpx = allNdtItemsForHwpx.filter(item => item.category === '내화피복');
-                const strengthItemsHwpx = allNdtItemsForHwpx.filter(item => item.category === '강도')
+                const strengthItemsHwpx = sortNdtItemsByNo(allNdtItemsForHwpx.filter(item => item.category === '강도'))
                     .map(item => refreshStrengthItemResults(item, ndtBldgOf(item)));
                 const carbItemsHwpx = allNdtItemsForHwpx.filter(item => item.category === '탄산화')
                     .map(item => refreshCarbItemResults(item, ndtBldgOf(item)));
